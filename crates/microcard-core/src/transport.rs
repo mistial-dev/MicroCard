@@ -154,7 +154,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
         }
         if verified.command().ins == 0xf2 {
             let command = verified.command();
-            if verified.level() != 0x13 {
+            if verified.level() & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
                 return s.response_with(&[], 0x6985, self.card.crypto_provider());
             }
             if command.p1 == 0x80 && command.p2 == 0x03 {

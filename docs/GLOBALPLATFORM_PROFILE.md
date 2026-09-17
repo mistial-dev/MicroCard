@@ -21,7 +21,7 @@ Command data starts with the mandatory `4F` AID search qualifier. An empty value
 
 One `E3` registry record is returned per short APDU. `6310` indicates another record and `9000` ends the sequence. Continuation state lives only in the active secure-channel session and is cleared by another command, a new authentication attempt, ISD selection or an error.
 
-GET STATUS requires an authenticated SCP03 session at security level `13`, including command MAC and encryption plus response MAC. The public SELECT response exposes only the fixed ISD identity.
+GET STATUS requires an authenticated SCP03 session carrying a command MAC. The public SELECT response exposes only the fixed ISD identity.
 
 ## Registry mapping
 
@@ -46,7 +46,7 @@ These identifiers are registry handles. They do not change MicroCard's signed as
 
 ## SSD lifecycle
 
-After ISD ownership, SCP03 level `13` accepts INSTALL [for install and make selectable] (`E6`, P1 `0C`) for the fixed MicroCard security-domain executable. The package AID is `A0000001515350`, the module AID is `A000000151535041`, and the requested instance AID becomes the SSD's durable registry AID. The command must request Security Domain privilege `80 00 00`, use the supported default install parameters and carry an explicit empty install-token field. Duplicate AIDs and quota exhaustion fail without creating a domain.
+After ISD ownership, an authenticated SCP03 session accepts INSTALL [for install and make selectable] (`E6`, P1 `0C`) for the fixed MicroCard security-domain executable. The package AID is `A0000001515350`, the module AID is `A000000151535041`, and the requested instance AID becomes the SSD's durable registry AID. The command must request Security Domain privilege `80 00 00`, use the supported default install parameters and carry an explicit empty install-token field. Duplicate AIDs and quota exhaustion fail without creating a domain.
 
 DELETE (`E4`) accepts one `4F` AID TLV and resolves SSDs, installed instances and assemblies through the registry. The ISD cannot be deleted. SSD deletion uses the existing transactional domain deletion path, so its assemblies, instances, storage and handles are revoked in one durable state change.
 

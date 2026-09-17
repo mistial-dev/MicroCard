@@ -2688,7 +2688,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         should_cancel: &mut impl FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         self.abort_transaction();
-        if verified.level != 0x13 {
+        if verified.level & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
             return Err(Error::Unauthorized);
         }
         let command = verified.command;
@@ -3004,7 +3004,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         should_cancel: &mut impl FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         self.abort_transaction();
-        if verified.level != 0x13 {
+        if verified.level & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
             return Err(Error::Unauthorized);
         }
         let c = verified.command;
@@ -6521,10 +6521,18 @@ mod tests {
     #[test]
     fn management_level_and_isd() {
         let mut c = card();
-        let mut cmd = command(0xe0, b"a");
-        cmd.level = 3;
-        assert_eq!(c.manage(cmd), Err(Error::Unauthorized));
-        assert_eq!(c.manage(command(0xe0, b"ISD")), Err(Error::Domain));
+        // Command integrity is the floor. A session without C-MAC carries no proof of
+        // origin, so management is refused whatever else it negotiated.
+        let mut plain = command(0xe0, b"a");
+        plain.level = 0;
+        assert_eq!(c.manage(plain), Err(Error::Unauthorized));
+        // Every level that carries C-MAC is served, so a host may choose how much
+        // confidentiality it wants without losing management access.
+        for level in [0x01, 0x03, 0x11, 0x13] {
+            let mut cmd = command(0xe0, b"ISD");
+            cmd.level = level;
+            assert_eq!(c.manage(cmd), Err(Error::Domain), "level {level:#04x}");
+        }
     }
 
     #[test]

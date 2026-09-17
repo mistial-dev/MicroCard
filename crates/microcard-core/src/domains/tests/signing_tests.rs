@@ -719,11 +719,10 @@ fn inventory_is_bounded_authenticated_and_read_only() {
     ] {
         assert!(c.manage(command(0xe2, &data)).is_err());
     }
-    for level in [0, 1, 3, 0x11] {
-        let mut cmd = command(0xe2, &[0]);
-        cmd.level = level;
-        assert_eq!(c.manage(cmd), Err(Error::Unauthorized));
-    }
+    // Only a session without command integrity is refused outright.
+    let mut plain = command(0xe2, &[0]);
+    plain.level = 0;
+    assert_eq!(c.manage(plain), Err(Error::Unauthorized));
     assert_eq!(snapshot(&c), before);
     let c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(snapshot(&c), before);

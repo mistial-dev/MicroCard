@@ -8,6 +8,16 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+/// Security level bits this implementation honours in EXTERNAL AUTHENTICATE P1:
+/// C-MAC, C-DECRYPTION and R-MAC. The SCP03 `i` parameter advertises R-ENCRYPTION as
+/// unsupported, so a session that asks for it is refused rather than served without the
+/// response encryption it requested.
+pub const SUPPORTED_SECURITY_LEVEL: u8 = 0x13;
+
+/// Management commands require at least command integrity. Package signatures authorize
+/// the code itself, so command encryption stays the caller's choice.
+pub const MANAGEMENT_SECURITY_LEVEL: u8 = 0x01;
+
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Keys {
     pub enc: [u8; 16],
@@ -111,6 +121,9 @@ impl Session {
             let payload_len = self.check_mac_with(c, provider)?;
             if !bool::from(c.data[..payload_len].ct_eq(&self.host)) {
                 return Err(Error::Authentication);
+            }
+            if c.p1 & !SUPPORTED_SECURITY_LEVEL != 0 {
+                return Err(Error::Unsupported);
             }
             self.level = c.p1;
             self.active = true;

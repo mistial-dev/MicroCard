@@ -10,7 +10,7 @@ MicroCard has a working simulator path from annotated C# source to verified exec
 - Permanent ISD ownership and SSD signer binding, transactional activation, rollback protection, and dependency linking.
 - Bounded interpreter execution with typed verification, stack/frame/arena/fuel limits, native work budgets, and transaction safety.
 - Domain stores, opaque keys, PIN/PUK retry floors, SHA-256, HMAC, AES-CMAC/CBC/CCM, Ed25519 verification, and P-256 operations.
-- SCP03 security levels 01, 03, 11, and 13. Management mutations require level 13.
+- SCP03 security levels 01, 03, 11, and 13. Management requires a command MAC, so every one of those levels is served. A session requesting response encryption is refused at EXTERNAL AUTHENTICATE with 6982, because R-ENCRYPTION is advertised as unsupported.
 - Java wallet using GlobalPlatformPro, a persistent simulator, and a cross-compiled nRF52840 image.
 - Personal and Work credential demonstration covering isolation, signing, recovery, rejection cases, and reboot persistence.
 

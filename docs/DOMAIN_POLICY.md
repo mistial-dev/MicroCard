@@ -1,6 +1,6 @@
 # SSD capability and resource policy
 
-The ISD may restrict an empty, unbound SSD through authenticated SCP03 level 13 command E1. Policy configuration cannot grant new native services: every capability must also exist in the firmware allowlist and package preprocessing rules. The policy becomes immutable when the SSD's first package successfully binds its signing key. Deleting and recreating the SSD is the only way to replace a bound policy.
+The ISD may restrict an empty, unbound SSD through authenticated SCP03 command E1. Policy configuration cannot grant new native services: every capability must also exist in the firmware allowlist and package preprocessing rules. The policy becomes immutable when the SSD's first package successfully binds its signing key. Deleting and recreating the SSD is the only way to replace a bound policy.
 
 The policy bounds native capability IDs, assembly identities and their retained version history, installed assembly instances, Int32 records, byte records and their aggregate bytes, persistent framework key slots, and active signed-package bytes. A policy may allow at most eight active assemblies and eight installed instances. Card-wide limits allow eight SSDs and sixteen installed instances, so an SSD policy can only reduce access. Execution arena, stack, frame and instruction limits remain fixed by profile v1.
 

@@ -90,7 +90,7 @@ These rules define the **MicroCard security-domain profile**. Full GlobalPlatfor
 ## A command's path through the system
 
 1. The Java client sends APDUs through a simulator or reader transport. GlobalPlatformPro supplies host SCP03 authentication, command protection and response verification.
-2. Rust authenticates and decrypts the command. Management mutations require level `13`: command encryption, command MAC and response MAC.
+2. Rust authenticates and decrypts the command. Management mutations require an authenticated session carrying a command MAC. Command encryption and response MAC remain the host's choice, because package signatures authorize the code itself.
 3. For a load, Rust stages the complete package, checks its signature and executable structure, verifies dependencies and quotas, then activates it atomically. Partial uploads cannot execute.
 4. For an invocation, Rust establishes trusted domain identity, resolves the selected instance and executes its verified entry point.
 5. Managed code uses bounded framework calls. Rust checks ownership, arguments and work budgets before performing native operations.
