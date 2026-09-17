@@ -57,7 +57,8 @@ def main() -> None:
 
     wrapper_name = "mvnw.cmd" if system == "windows" else "mvnw"
     run([ROOT / "wallet" / wrapper_name, "-f", ROOT / "wallet/pom.xml",
-         f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"], env=env)
+         f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"],
+        env=env, cwd=ROOT / "wallet")
     shutil.copy2(ROOT / "wallet/target/microcard-wallet-0.1.0-wip.jar", stage / "wallet/microcard-wallet.jar")
     for dependency in (ROOT / "wallet/target/lib").glob("*.jar"):
         shutil.copy2(dependency, stage / "wallet/lib" / dependency.name)

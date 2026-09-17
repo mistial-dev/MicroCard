@@ -20,8 +20,9 @@ def environment() -> dict[str, str]:
     return result
 
 
-def run(arguments: list[object], *, env: dict[str, str], capture: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(value) for value in arguments], cwd=ROOT, env=env, check=True,
+def run(arguments: list[object], *, env: dict[str, str], capture: bool = False,
+        cwd: pathlib.Path = ROOT) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([str(value) for value in arguments], cwd=cwd, env=env, check=True,
                           text=True, capture_output=capture)
 
 
@@ -31,7 +32,8 @@ def main() -> None:
     wrapper_name = "mvnw.cmd" if os.name == "nt" else "mvnw"
     run(["cargo", "build", "-p", "microcard-sim"], env=env)
     run([ROOT / "wallet" / wrapper_name, "-f", ROOT / "wallet/pom.xml",
-         f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"], env=env)
+         f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"],
+        env=env, cwd=ROOT / "wallet")
     with tempfile.TemporaryDirectory(prefix="MicroCard acceptance with spaces ") as directory_name:
         directory = pathlib.Path(directory_name)
         assets = directory / "wallet assets"
@@ -50,7 +52,7 @@ def main() -> None:
         for name in ("personal-credential.pem", "work-credential.pem"):
             if not (workspace / "certificates" / name).is_file():
                 raise RuntimeError(f"Wallet did not create {name}")
-    print("PASS: repeatable wallet build and path-safe macOS acceptance")
+    print("PASS: repeatable wallet build and path-safe host acceptance")
 
 
 if __name__ == "__main__":
