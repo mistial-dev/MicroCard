@@ -8,7 +8,7 @@ def check_public_prose():
  files.extend((ROOT/'docs').rglob('*.md'))
  failures=[]
  for path in files:
-  text=path.read_text()
+  text=path.read_text(encoding='utf-8')
   if ';' in text: failures.append(f'{path.relative_to(ROOT)} contains a semicolon')
   if re.search(r',\s+not\b|\bnot\b[^.\n]{0,100}\b(?:but|rather)\b',text,re.IGNORECASE):
    failures.append(f'{path.relative_to(ROOT)} contains contrastive A/not-B phrasing')

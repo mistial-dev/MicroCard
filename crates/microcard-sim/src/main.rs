@@ -16,6 +16,17 @@ mod sim_hal;
 use sim_hal::Hardware;
 const MAX_TEXT_APDU_BYTES: usize = 261;
 
+fn private_open_options() -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+}
+
 fn hex(bytes: &[u8]) -> std::result::Result<String, Box<dyn std::error::Error>> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let length = bytes.len().checked_mul(2).ok_or("hex length")?;
@@ -79,11 +90,8 @@ impl FileFlash {
         if !slot0 && !slot1 && !monotonic {
             self.erase(0)?;
             self.erase(1)?;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = fs::OpenOptions::new()
-                .write(true)
+            let mut file = private_open_options()
                 .create_new(true)
-                .mode(0o600)
                 .open(self.monotonic_path())
                 .map_err(|_| Error::Storage)?;
             Self::write_erased(&mut file, Self::MONOTONIC_BYTES)?;
@@ -185,12 +193,9 @@ impl Flash for FileFlash {
         file.read_exact(output).map_err(|_| Error::Storage)
     }
     fn erase(&mut self, s: usize) -> Result<()> {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = fs::OpenOptions::new()
-            .write(true)
+        let mut f = private_open_options()
             .create(true)
             .truncate(true)
-            .mode(0o600)
             .open(self.path(s))
             .map_err(|_| Error::Storage)?;
         Self::write_erased(&mut f, self.slot_size())?;
@@ -243,7 +248,7 @@ fn main() {
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let a: Vec<_> = env::args().collect();
     match a.get(1).map(String::as_str){
- Some("keygen") if a.len()==3=>{use std::os::unix::fs::OpenOptionsExt;let mut b=[0;32];getrandom::getrandom(&mut b).map_err(|_|"entropy")?;let mut f=fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&a[2])?;f.write_all(&b)?;},
+ Some("keygen") if a.len()==3=>{let mut b=[0;32];getrandom::getrandom(&mut b).map_err(|_|"entropy")?;let mut f=private_open_options().create_new(true).open(&a[2])?;f.write_all(&b)?;},
  Some("pack") if a.len()==10=>{let mut value:serde_json::Value=serde_json::from_slice(&fs::read(&a[3])?)?;value["domain"]=a[4].clone().into();value["incarnation"]=serde_json::to_value(unhex(&a[5])?)?;value["version"]=a[6].parse::<u32>()?.into();value["limits"]=serde_json::json!({"arena":16384,"stack":256,"frames":32,"instructions":100000});let m:Manifest=serde_json::from_value(value)?;let meta=serde_json::to_vec(&m)?;let image=fs::read(&a[2])?;let seed: [u8;32]=fs::read(&a[7])?.try_into().map_err(|_|"seed must be 32 bytes")?;let key=SigningKey::from_bytes(&seed);let mut b=Vec::from(b"MP03" as &[u8]);b.extend(CONTEXT);b.extend((meta.len() as u32).to_le_bytes());b.extend((image.len() as u32).to_le_bytes());b.extend(meta);b.extend(image);b.extend(key.verifying_key().to_bytes());let signature=key.sign(&b).to_bytes();b.extend(signature);Package::verify(&b).map_err(|e|format!("{e:?}"))?;if a[9]!="--explicit-sign"{return Err("signing requires --explicit-sign".into())}fs::write(&a[8],b)?;},
  Some("verify") if a.len()==3=>{let p=Package::verify(&fs::read(&a[2])?).map_err(|e|format!("{e:?}"))?;println!("{} v{} {}",p.manifest.assembly,p.manifest.version,hex(&p.key)?);},
  Some("verify-assembly") if a.len()==3=>{let bytes=fs::read(&a[2])?;let assembly=Assembly::parse(&bytes).map_err(|e|format!("{e:?}"))?;assembly.framework_imports().map_err(|e|format!("{e:?}"))?;let identity=assembly.identity().map_err(|e|format!("{e:?}"))?;println!("MC04 {} {}.{}.{}.{} {} methods",identity.name,identity.version[0],identity.version[1],identity.version[2],identity.version[3],assembly.row_count(6).map_err(|e|format!("{e:?}"))?);},
