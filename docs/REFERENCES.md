@@ -20,6 +20,34 @@ Original MicroCard implementation and corpus. HIVE/.NET Card decompiled code, ve
 - ITU-T X.690 (02/2021) | ISO/IEC 8825-1:2021: §§8.1.2-8.1.3, 8.3, 8.6 and 11 define the identifier, definite-length, INTEGER, OBJECT IDENTIFIER and DER canonical rules used by `MicroCard.Encoding`. The unchanged official ITU PDF is stored in the Reference Library. Only its path, hash and clause map are committed.
 - USB-IF CCID revision 1.1, April 22, 2005: §§3.1.3, 3.2.2, 5.1, 6.1.1-6.1.4, 6.1.13, 6.2.1-6.2.2 and 6.3.1 define the one-slot short-APDU transport framing in `ccid.rs` and [CCID_PROFILE.md](CCID_PROFILE.md). The unchanged official PDF is stored under ignored downloads with its copyright notice retained. Only its local path, hash, edition and clause map are committed.
 
+## Java Card VM source material (planned engine, no code yet)
+
+The [roadmap](ROADMAP.md) reserves a second Rust execution engine for Java Card. No MicroCard code implements or consumes these documents yet, so nothing below is a normative reference map entry and no Java Card compliance is claimed. The list records what was collected, its edition and where it lives, so the version and CAP-subset decision can start from pinned material.
+
+Oracle publishes these specifications under the Oracle Technology Network Developer License. Unchanged copies are stored under ignored `references/downloads/javacard/` with their license annexes and copyright notices retained, and are pinned by URL and hash in `references/downloads.json`. Only paths, hashes, editions and URLs are committed.
+
+- **Java Card Platform Virtual Machine Specification, Classic Edition 3.2**, January 2023 (`JCVM_Classic_3.2_F74158_05.pdf`). The primary target document: chapter 2 language and VM subsets, chapter 3 VM structure, chapter 4 file formats and AID-based naming, chapter 5 the export file format, chapter 6 the CAP file format, chapter 7 the instruction set. This is the candidate edition for the loader, verifier and interpreter work.
+- **Java Card Platform Runtime Environment Specification, Classic Edition 3.2**, January 2023 (`JCRE_Classic_3.2_F74157_03.pdf`). Applet lifetime, logical channels and selection, the transient/temporary memory model, the applet firewall and shareable-interface sharing, and transaction atomicity. These are the semantics the architecture note says cannot be met by renaming the .NET APIs.
+- **Java Card Platform Options List 3.2**, January 2023 (`JC_Options_List_3.2_F80990_02.pdf`). The specification's own optional-feature inventory. It is the natural starting point for MicroCard's API profile decision.
+- **Java Card Specification Release Notes 3.2**, May 2026 revision (`JC_Spec_Release_Notes_3.2.pdf`). Covers version 3.2 with preview features.
+- **Java Card Platform Virtual Machine and Runtime Environment Specifications, Classic Edition 3.1**, February 2021 (`JCVM_Classic_3.1_F12650_05.pdf`, `JCRE_Classic_3.1_F12651_05.pdf`) and **Specification Release Notes 3.1**, March 2021 (`JC_Spec_Release_Notes_3.1.pdf`). Retained for the 3.1-to-3.2 delta and because deployed cards are commonly 3.0.x or 3.1.
+- **Java Card Development Kit Tools and Simulator User Guides v26.0**, May 2026 (`JC_DevKit_Tools_User_Guide_v26.0.pdf`, `JC_DevKit_Simulator_User_Guide_v26.0.pdf`). Describe `converter`, `capgen`, `capdump`, `verifycap`, `verifyexp` and `exp2text`, which define the host conversion and export-file path a MicroCard CAP validator would have to agree with.
+- **The Java Virtual Machine Specification, Java SE 21** (`JVMS_Java_SE_21.pdf`) and **The Java Language Specification, Java SE 21** (`JLS_Java_SE_21.pdf`). Class file format, constant pool and bytecode semantics that the Java Card converter consumes, and the language definition the Java Card subset is carved from. Java SE 21 matches the toolchain the wallet already requires.
+
+The following are already in the Reference Library at their original locations and are not copied into this repository.
+
+| Document | Edition | SHA-256 |
+| --- | --- | --- |
+| `01_Standards/Technical_Specifications/Software/Java_Card/Java_Card_3.0.5_Specifications/.../jcvm_classic/JCVMspecCLASSIC_3-0-5-RR.pdf` | Java Card VM Specification, Classic Edition 3.0.5, June 2015 | `59a834e32e8b0aac8f7d74688b781d7439b50a8467315ee1b05da74e3123d6f7` |
+| `01_Standards/Technical_Specifications/Software/Java_Card/Java_Card_3.0.5_Specifications/.../jcre_classic/JCREspecCLASSIC-3_0_5-RR.pdf` | Java Card RE Specification, Classic Edition 3.0.5, June 2015 | `6ea2bb20071f8abaf5772cbdc632338b30c03d58176de1da6b6e64265300fdf8` |
+| `01_Standards/Protection_Profiles/Java_Card/Java_Card_System_Open_Configuration_Protection_Profile_v3.2.pdf` | Java Card System Open Configuration Protection Profile 3.2 | `b059f0c92ed4d12dd0cf521c2ba9b56d25d94a31a2b14aee36c59266a185de90` |
+| `01_Standards/Protection_Profiles/Java_Card/Java_Card_System_Multi-Assurance_PP_Firewall_ADV_SPM_v3.2M.pdf` | Java Card System Multi-Assurance PP, firewall ADV_SPM 3.2M | `745ac4ea31cf76d680b4cf1340910b1e1896c3d917ec77a0d7e6ebca35734718` |
+| `04_Tools/Java_Card/java_card_devkit_tools-bin-v26.0-b_705-04-MAY-2026.zip` | Java Card Development Kit Tools v26.0 build 705, May 2026 | `86443cb1b64c006456e524d91082ba25d5ebb0ee5506c6e4d7088350ce251d9d` |
+
+The 3.0.5 archive also carries the Classic API specification as HTML. The devkit archive carries `api_classic` jars for 3.0.4, 3.0.5, 3.1.0, 3.2.0 and the 3.2 preview. Oracle publishes no PDF API specification for 3.1 or 3.2. The 3.2 API is HTML at `docs.oracle.com/en/java/javacard/3.2/jcapi/`. Neither the protection profiles nor the devkit are MicroCard inputs today, and no decompiled or proprietary implementation is an input to this code.
+
+CAP loading would ride the management path MicroCard already profiles. GlobalPlatform Card Specification 2.3.1 and SCP03 1.1.2 above stay the authority for INSTALL, LOAD and secure messaging. [GLOBALPLATFORM_PROFILE.md](GLOBALPLATFORM_PROFILE.md) records that the current interop test sends profiled INSTALL and LOAD commands without claiming CAP compatibility.
+
 ## Short explanatory excerpts
 
 ECMA-335 III.3.57, explaining the return-stack verifier: “The evaluation stack for the current method shall be empty except for the value to be returned.” © Ecma International 2012. See the unchanged standard's copyright notice.

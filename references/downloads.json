@@ -28,5 +28,60 @@
     "file": "NIST-CCM-CAVP-test-vectors.zip",
     "url": "https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/ccmtestvectors.zip",
     "sha256": "0e3c96761bd8f1a0b4dfe666146c32f7d367a49968375ff091b8da9ecaa673aa"
+  },
+  {
+    "file": "javacard/JCVM_Classic_3.2_F74158_05.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.2/jc-vm-spec/F74158_05.pdf",
+    "sha256": "84a102ab2703cd5cc9f85a42c0d50e23f9ed9852051ae16978933cc628894336"
+  },
+  {
+    "file": "javacard/JCRE_Classic_3.2_F74157_03.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.2/jc-re-spec/F74157_03.pdf",
+    "sha256": "e357019e5926bd1d71de58da31fadf6a0e0f6ec47db643c723a3206338a709a9"
+  },
+  {
+    "file": "javacard/JC_Options_List_3.2_F80990_02.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.2/jc-ol-spec/F80990_02.pdf",
+    "sha256": "d557956f704e02a23333b4693e436906008eae2e3cffcb4371d13917a6345685"
+  },
+  {
+    "file": "javacard/JC_Spec_Release_Notes_3.2.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.2/specnotes/java-card-specifications-release-notes.pdf",
+    "sha256": "9ca3b10ae8c67b8475172336efd7c5073c1969cdcd9df0cb57717fe01ce6522e"
+  },
+  {
+    "file": "javacard/JCVM_Classic_3.1_F12650_05.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.1/jc-vm-spec/F12650_05.pdf",
+    "sha256": "59dd690d4c22e3ec48ef289880642d7a4969d6a31b908ed603454c37251acc21"
+  },
+  {
+    "file": "javacard/JCRE_Classic_3.1_F12651_05.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.1/jc-re-spec/F12651_05.pdf",
+    "sha256": "fa66ba842ec5d2c903cc9627c4efabf41d06bbdd1ffadb0593d4b8b9a28f9d04"
+  },
+  {
+    "file": "javacard/JC_Spec_Release_Notes_3.1.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.1/specnotes/java-card-platform-specification-release-notes.pdf",
+    "sha256": "59f886ef6ba838ba05380761d5baa24d986fc3beb6486d52d610dd7c7cdffbea"
+  },
+  {
+    "file": "javacard/JC_DevKit_Tools_User_Guide_v26.0.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.2/jctug/java-card-development-kit-tools-user-guide.pdf",
+    "sha256": "813848eb2c8b3fd70159087f0736c9262b9ec4671d335b4a1071a41cf6b461bd"
+  },
+  {
+    "file": "javacard/JC_DevKit_Simulator_User_Guide_v26.0.pdf",
+    "url": "https://docs.oracle.com/en/java/javacard/3.2/jcdksu/java-card-development-kit-simulator-user-guide.pdf",
+    "sha256": "7dc9ac6d65fe41b2eff9b78c2aa34d05908970e13841f89063cb0a92f34dbc48"
+  },
+  {
+    "file": "javacard/JVMS_Java_SE_21.pdf",
+    "url": "https://docs.oracle.com/javase/specs/jvms/se21/jvms21.pdf",
+    "sha256": "c4b99885f2d04cc79fc9ba521f20e4458a7a8b585714f25248b1cf77a40ae161"
+  },
+  {
+    "file": "javacard/JLS_Java_SE_21.pdf",
+    "url": "https://docs.oracle.com/javase/specs/jls/se21/jls21.pdf",
+    "sha256": "3157fbfb495c2c1b2c00bed1300ddfaf92376894a4fc42fb993837430b7d69b8"
   }
 ]
