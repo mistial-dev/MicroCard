@@ -22,7 +22,9 @@ def main():
     if a.seconds <= 0: p.error("seconds must be positive")
     tool = ROOT / "work/fuzz-tools/bin/cargo-fuzz"
     if not tool.exists(): p.error("Install cargo-fuzz with cargo install cargo-fuzz --locked --root work/fuzz-tools")
-    corpus = ROOT / "fuzz/corpus" / a.target
+    output = ROOT / "artifacts/fuzz" / (a.target + "-" + str(time.time_ns()))
+    output.mkdir(parents=True)
+    corpus = output / "input-corpus"
     corpus.mkdir(parents=True, exist_ok=True)
     if a.target == "signed_packages":
         (corpus / "ret").write_bytes(bytes([1,20]))
@@ -49,8 +51,6 @@ def main():
         (corpus / "dependency-replacement").write_bytes(
             bytes([0, 10, 0, 0, 0, 0, 11, 0, 0, 0, 0])
         )
-    output = ROOT / "artifacts/fuzz" / (a.target + "-" + str(time.time_ns()))
-    output.mkdir(parents=True)
     command = [str(tool), "run", "--sanitizer", a.sanitizer, a.target, "--", f"-max_total_time={a.seconds}",
                "-max_len=4096", "-timeout=5", "-rss_limit_mb=1024", "-print_final_stats=1"]
     info = dict(target=a.target, command=command, toolchain=a.toolchain, sanitizer=a.sanitizer,

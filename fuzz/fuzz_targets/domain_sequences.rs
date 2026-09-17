@@ -203,13 +203,29 @@ fn key_operations_package(incarnation: [u8; 16]) -> Vec<u8> {
         ],
         dependencies: Vec::new(),
         capabilities: vec![
-            0, 1, 2, 5, 7, 8, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
+            2, 5, 7, 8, 11, 12, 13, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
         ],
         storage: vec![
-            StorageDeclaration { key: 10, kind: 1, max_bytes: 0 },
-            StorageDeclaration { key: 20, kind: 2, max_bytes: 3 },
-            StorageDeclaration { key: 21, kind: 2, max_bytes: 1 },
-            StorageDeclaration { key: 30, kind: 1, max_bytes: 0 },
+            StorageDeclaration {
+                key: 10,
+                kind: 1,
+                max_bytes: 0,
+            },
+            StorageDeclaration {
+                key: 20,
+                kind: 2,
+                max_bytes: 3,
+            },
+            StorageDeclaration {
+                key: 21,
+                kind: 2,
+                max_bytes: 1,
+            },
+            StorageDeclaration {
+                key: 30,
+                kind: 1,
+                max_bytes: 0,
+            },
         ],
         limits: Limits {
             arena: 16384,
@@ -356,15 +372,15 @@ fn create_domain(card: &mut Card<MemoryFlash, FuzzPlatform>) -> Result<()> {
     Ok(())
 }
 
-fn bootstrap(card: &mut Card<MemoryFlash, FuzzPlatform>) -> Result<()> {
-    let isd = manage(card, 0xe2, vec![0])?;
+fn bootstrap(card: &mut Card<MemoryFlash, FuzzPlatform>) {
+    let isd = manage(card, 0xe2, vec![0]).expect("query ISD");
     let incarnation_offset = 4 + usize::from(isd[3]);
     let isd_incarnation: [u8; 16] = isd[incarnation_offset..incarnation_offset + 16]
         .try_into()
         .unwrap();
-    load(card, &core_package(isd_incarnation))?;
-    load(card, &provider_package(isd_incarnation, 1))?;
-    create_domain(card)
+    load(card, &core_package(isd_incarnation)).expect("load core");
+    load(card, &provider_package(isd_incarnation, 1)).expect("load provider");
+    create_domain(card).expect("create domain")
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -372,9 +388,9 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
     const STORAGE_KEY: [u8; 16] = [0x5a; 16];
-    let mut card = Card::open(MemoryFlash::new(65536), FuzzPlatform(data[0]), STORAGE_KEY).unwrap();
-    bootstrap(&mut card).unwrap();
-    for chunk in data[1..].chunks(5).take(64) {
+    let mut card = Card::open(MemoryFlash::new(65536), FuzzPlatform(0), STORAGE_KEY).unwrap();
+    bootstrap(&mut card);
+    for chunk in data.chunks(5).take(64) {
         let op = chunk[0] % 12;
         let aid = AIDS[usize::from(*chunk.get(1).unwrap_or(&0)) % AIDS.len()];
         let mut args = [
