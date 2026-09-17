@@ -1,0 +1,23 @@
+#ifndef MICROCARD_ZEPHYR_SYS_UTIL_H
+#define MICROCARD_ZEPHYR_SYS_UTIL_H
+
+/* The two pinned Nordic driver files use IS_ENABLED only with these flags. */
+#ifndef PSA_NEED_CC3XX_ECDSA
+#define PSA_NEED_CC3XX_ECDSA 1
+#endif
+#ifndef PSA_NEED_CC3XX_RSA_SIGN
+#define PSA_NEED_CC3XX_RSA_SIGN 0
+#endif
+#ifndef PSA_NEED_CC3XX_PURE_EDDSA_TWISTED_EDWARDS_255
+#define PSA_NEED_CC3XX_PURE_EDDSA_TWISTED_EDWARDS_255 0
+#endif
+#ifndef PSA_NEED_CC3XX_ECDH_MONTGOMERY_255
+#define PSA_NEED_CC3XX_ECDH_MONTGOMERY_255 0
+#endif
+#ifndef PSA_NEED_CC3XX_ECDH_WEIERSTRASS
+#define PSA_NEED_CC3XX_ECDH_WEIERSTRASS 1
+#endif
+
+#define IS_ENABLED(value) (value)
+
+#endif

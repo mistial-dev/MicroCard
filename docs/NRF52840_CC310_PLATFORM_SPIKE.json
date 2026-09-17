@@ -1,0 +1,340 @@
+{
+  "format": 1,
+  "target": "thumbv7em-none-eabihf",
+  "features": [
+    "cc310-sha256",
+    "cc310-entropy",
+    "cc310-cmac",
+    "cc310-hmac",
+    "cc310-aes",
+    "cc310-cbc",
+    "cc310-ccm",
+    "cc310-p256"
+  ],
+  "default_enabled": false,
+  "physical_known_answer_passed": false,
+  "boot_self_tests": [
+    "SHA-256 empty input",
+    "SHA-256 flash-backed abc input",
+    "SHA-256 RAM-backed abc input",
+    "two nonconstant distinct 256-bit entropy samples",
+    "RFC 4493 AES-CMAC examples 1 through 4 with multipart and RAM-backed input",
+    "RFC 4231 HMAC-SHA-256 case 1 with RAM-backed input",
+    "HMAC-SHA-256 empty key and empty input",
+    "FIPS 197 AES-128 block encryption example",
+    "NIST SP 800-38A AES-128-CBC first-block encrypt and decrypt",
+    "NIST CAVP AES-128-CCM encrypt, decrypt and modified-tag rejection",
+    "RFC 6979 P-256 public key, deterministic ECDSA signature and verification",
+    "P-256 ECDSA changed-message rejection",
+    "P-256 ECDH fixed shared secret"
+  ],
+  "baseline": {
+    "text_bytes": 302564,
+    "data_bytes": 0,
+    "bss_bytes": 196636
+  },
+  "variants": {
+    "sha256": {
+      "size": {
+        "text_bytes": 305432,
+        "data_bytes": 128,
+        "bss_bytes": 196668
+      },
+      "delta": {
+        "text_bytes": 2868,
+        "data_bytes": 128,
+        "bss_bytes": 32
+      }
+    },
+    "entropy": {
+      "size": {
+        "text_bytes": 312408,
+        "data_bytes": 144,
+        "bss_bytes": 197564
+      },
+      "delta": {
+        "text_bytes": 9844,
+        "data_bytes": 144,
+        "bss_bytes": 928
+      }
+    },
+    "cmac": {
+      "size": {
+        "text_bytes": 320216,
+        "data_bytes": 144,
+        "bss_bytes": 197564
+      },
+      "delta": {
+        "text_bytes": 17652,
+        "data_bytes": 144,
+        "bss_bytes": 928
+      }
+    },
+    "hmac": {
+      "size": {
+        "text_bytes": 319892,
+        "data_bytes": 144,
+        "bss_bytes": 197564
+      },
+      "delta": {
+        "text_bytes": 17328,
+        "data_bytes": 144,
+        "bss_bytes": 928
+      }
+    },
+    "aes": {
+      "size": {
+        "text_bytes": 319288,
+        "data_bytes": 148,
+        "bss_bytes": 197564
+      },
+      "delta": {
+        "text_bytes": 16724,
+        "data_bytes": 148,
+        "bss_bytes": 928
+      }
+    },
+    "cbc": {
+      "size": {
+        "text_bytes": 318464,
+        "data_bytes": 148,
+        "bss_bytes": 197564
+      },
+      "delta": {
+        "text_bytes": 15900,
+        "data_bytes": 148,
+        "bss_bytes": 928
+      }
+    },
+    "ccm": {
+      "size": {
+        "text_bytes": 327160,
+        "data_bytes": 148,
+        "bss_bytes": 197564
+      },
+      "delta": {
+        "text_bytes": 24596,
+        "data_bytes": 148,
+        "bss_bytes": 928
+      }
+    },
+    "p256": {
+      "size": {
+        "text_bytes": 319908,
+        "data_bytes": 144,
+        "bss_bytes": 197692
+      },
+      "delta": {
+        "text_bytes": 17344,
+        "data_bytes": 144,
+        "bss_bytes": 1056
+      }
+    },
+    "combined": {
+      "size": {
+        "text_bytes": 335836,
+        "data_bytes": 148,
+        "bss_bytes": 197692
+      },
+      "delta": {
+        "text_bytes": 33272,
+        "data_bytes": 148,
+        "bss_bytes": 1056
+      }
+    }
+  },
+  "ceilings": {
+    "text_bytes": 375000,
+    "total_ram_bytes": 200000
+  },
+  "required_symbols": {
+    "sha256": [
+      "nrf_cc3xx_platform_init_no_rng",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash"
+    ],
+    "entropy": [
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash"
+    ],
+    "cmac": [
+      "cc3xx_mac_abort",
+      "cc3xx_mac_sign_finish",
+      "cc3xx_mac_sign_setup",
+      "cc3xx_mac_update",
+      "microcard_cc310_cmac_begin",
+      "microcard_cc310_cmac_finish",
+      "microcard_cc310_mac_update",
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash",
+      "psa_driver_wrapper_mac_abort",
+      "psa_driver_wrapper_mac_sign_finish",
+      "psa_driver_wrapper_mac_sign_setup",
+      "psa_driver_wrapper_mac_update"
+    ],
+    "hmac": [
+      "cc3xx_mac_abort",
+      "cc3xx_mac_sign_finish",
+      "cc3xx_mac_sign_setup",
+      "cc3xx_mac_update",
+      "microcard_cc310_hmac_sha256_begin",
+      "microcard_cc310_hmac_sha256_finish",
+      "microcard_cc310_mac_update",
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash",
+      "psa_driver_wrapper_mac_abort",
+      "psa_driver_wrapper_mac_sign_finish",
+      "psa_driver_wrapper_mac_sign_setup",
+      "psa_driver_wrapper_mac_update"
+    ],
+    "aes": [
+      "cc3xx_cipher_encrypt",
+      "cc3xx_cipher_finish",
+      "cc3xx_cipher_set_iv",
+      "cc3xx_cipher_update",
+      "microcard_cc310_aes128_encrypt_block",
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash",
+      "psa_driver_wrapper_cipher_encrypt"
+    ],
+    "cbc": [
+      "cc3xx_cipher_abort",
+      "cc3xx_cipher_decrypt_setup",
+      "cc3xx_cipher_encrypt",
+      "cc3xx_cipher_encrypt_setup",
+      "cc3xx_cipher_finish",
+      "cc3xx_cipher_set_iv",
+      "cc3xx_cipher_update",
+      "microcard_cc310_aes128_cbc_in_place",
+      "microcard_cc310_aes128_encrypt_block",
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash",
+      "psa_driver_wrapper_cipher_abort",
+      "psa_driver_wrapper_cipher_decrypt_setup",
+      "psa_driver_wrapper_cipher_encrypt",
+      "psa_driver_wrapper_cipher_encrypt_setup",
+      "psa_driver_wrapper_cipher_finish",
+      "psa_driver_wrapper_cipher_set_iv",
+      "psa_driver_wrapper_cipher_update"
+    ],
+    "ccm": [
+      "cc3xx_aead_decrypt",
+      "cc3xx_aead_encrypt",
+      "cc3xx_cipher_encrypt",
+      "cc3xx_cipher_finish",
+      "cc3xx_cipher_set_iv",
+      "cc3xx_cipher_update",
+      "microcard_cc310_aes128_ccm_decrypt",
+      "microcard_cc310_aes128_ccm_encrypt",
+      "microcard_cc310_aes128_encrypt_block",
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash",
+      "psa_driver_wrapper_aead_decrypt",
+      "psa_driver_wrapper_aead_encrypt",
+      "psa_driver_wrapper_cipher_encrypt"
+    ],
+    "p256": [
+      "cc3xx_ecdh_calc_secret_wrst",
+      "cc3xx_internal_ecdsa_sign",
+      "cc3xx_internal_ecdsa_verify",
+      "cc3xx_internal_export_ecc_wrst_public_key",
+      "cc3xx_key_agreement",
+      "cc3xx_sign_hash",
+      "cc3xx_verify_hash",
+      "microcard_cc310_p256_ecdh",
+      "microcard_cc310_p256_public_key",
+      "microcard_cc310_p256_sign_hash",
+      "microcard_cc310_p256_verify_hash",
+      "nrf_cc3xx_platform_entropy_get",
+      "nrf_cc3xx_platform_init",
+      "nrf_cc3xx_platform_set_abort",
+      "nrf_cc3xx_platform_sha256_hash"
+    ]
+  },
+  "cmac_stack": {
+    "multipart_state_bytes": 544,
+    "rust_frame_with_saved_registers_bytes": 592,
+    "maximum_nested_shim_bytes": 64,
+    "bridge_peak_bytes": 656,
+    "vendor_internal_high_water_measured": false
+  },
+  "hmac_stack": {
+    "multipart_state_bytes": 544,
+    "rust_frame_with_saved_registers_bytes": 608,
+    "maximum_nested_shim_bytes": 64,
+    "bridge_peak_bytes": 672,
+    "vendor_internal_high_water_measured": false
+  },
+  "aes_stack": {
+    "local_result_bytes": 16,
+    "rust_frame_with_saved_registers_bytes": 48,
+    "maximum_nested_shim_bytes": 88,
+    "bridge_peak_bytes": 136,
+    "vendor_internal_high_water_measured": false
+  },
+  "cbc_stack": {
+    "rust_frame_with_saved_registers_bytes": 48,
+    "maximum_nested_shim_bytes": 384,
+    "bridge_peak_bytes": 432,
+    "vendor_internal_high_water_measured": false
+  },
+  "ccm_stack": {
+    "aes_ccm_encrypt": {
+      "rust_frame_with_saved_registers_bytes": 56,
+      "maximum_nested_shim_bytes": 112,
+      "bridge_peak_bytes": 168,
+      "vendor_internal_high_water_measured": false
+    },
+    "aes_ccm_decrypt": {
+      "rust_frame_with_saved_registers_bytes": 56,
+      "maximum_nested_shim_bytes": 112,
+      "bridge_peak_bytes": 168,
+      "vendor_internal_high_water_measured": false
+    }
+  },
+  "p256_stack": {
+    "p256_public_key_into": {
+      "rust_frame_with_saved_registers_bytes": 24,
+      "maximum_nested_shim_bytes": 64,
+      "bridge_peak_bytes": 88,
+      "vendor_internal_high_water_measured": false
+    },
+    "p256_ecdh_into": {
+      "rust_frame_with_saved_registers_bytes": 40,
+      "maximum_nested_shim_bytes": 88,
+      "bridge_peak_bytes": 128,
+      "vendor_internal_high_water_measured": false
+    },
+    "p256_ecdsa_sign_into": {
+      "rust_frame_with_saved_registers_bytes": 72,
+      "maximum_nested_shim_bytes": 80,
+      "bridge_peak_bytes": 152,
+      "vendor_internal_high_water_measured": false
+    },
+    "p256_ecdsa_verify": {
+      "rust_frame_with_saved_registers_bytes": 72,
+      "maximum_nested_shim_bytes": 80,
+      "bridge_peak_bytes": 152,
+      "vendor_internal_high_water_measured": false
+    }
+  },
+  "combined_stack_shapes_verified": true,
+  "forbidden_c_allocator_symbols": [
+    "calloc",
+    "free",
+    "malloc",
+    "realloc"
+  ]
+}

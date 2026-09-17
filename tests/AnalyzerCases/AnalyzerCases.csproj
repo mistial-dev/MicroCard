@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MicroCard.AnalyzerCases</RootNamespace>
+    <Nullable>enable</Nullable>
+    <DefineConstants Condition="'$(MicroCardAnalyzerCase)' != ''">$(DefineConstants);$(MicroCardAnalyzerCase)</DefineConstants>
+    <Optimize Condition="'$(MicroCardAnalyzerCase)' == 'CASE_LOCALS'">false</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../managed/MicroCard.Framework/MicroCard.Framework.csproj" />
+    <ProjectReference Condition="'$(MicroCardDisableAnalyzer)' != 'true'"
+                      Include="../../managed/MicroCard.Analyzers/MicroCard.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,68 @@
+[
+  {
+    "name": "2020_ISO_7816-4_Smart_Cards_Command_APDU.pdf",
+    "path": "external-reference-library/2020_ISO_7816-4_Smart_Cards_Command_APDU.pdf",
+    "sha256": "7c31f29df0462f4305519e7239598656c3afe66237002b57692572dd0520c111",
+    "redistributed": false,
+    "edition": "ISO/IEC 7816-4:2020, BSI adoption",
+    "clauses": [
+      "5.1",
+      "5.2"
+    ]
+  },
+  {
+    "name": "2023_GlobalPlatform_Card_Specification_v2.3.1.pdf",
+    "path": "external-reference-library/2023_GlobalPlatform_Card_Specification_v2.3.1.pdf",
+    "sha256": "eac6c8f6c9933645e833b0445efd3dd6093038b44dafb979f03107e5f6b2e266",
+    "redistributed": false,
+    "edition": "GlobalPlatform Card Specification 2.3.1, March 2018",
+    "clauses": [
+      "Security Domains",
+      "Application Life Cycle"
+    ]
+  },
+  {
+    "name": "2023_GlobalPlatform_SCP03_Protocol_v1.1.2.pdf",
+    "path": "external-reference-library/2023_GlobalPlatform_SCP03_Protocol_v1.1.2.pdf",
+    "sha256": "973a10834f7fe8befd98da9af65393622234b80745092bd85248804c57b648dd",
+    "redistributed": false,
+    "edition": "GlobalPlatform SCP03 1.1.2, March 2019",
+    "clauses": [
+      "4.1.4",
+      "4.1.5",
+      "6.2.1-6.2.6",
+      "7.1.1",
+      "7.1.2"
+    ]
+  },
+  {
+    "name": "2021_ITU-T_X.690_ASN.1_BER_CER_DER.pdf",
+    "path": "external-reference-library/2021_ITU-T_X.690_ASN.1_BER_CER_DER.pdf",
+    "sha256": "6ac799a2d1ebed36abe39c9eac3586185bfb7db679f801e737189d6fdb1bbd6c",
+    "redistributed": false,
+    "edition": "ITU-T X.690 (02/2021) | ISO/IEC 8825-1:2021",
+    "clauses": [
+      "8.1.2",
+      "8.1.3",
+      "8.3",
+      "8.6",
+      "11"
+    ]
+  },
+  {
+    "name": "2005_USB_CCID_Rev1.1.pdf",
+    "path": "references/downloads/2005_USB_CCID_Rev1.1.pdf",
+    "sha256": "bdea660bd0fa36c0ea407eab3436796af09387c257d15b24204d0497a9bf9013",
+    "redistributed": false,
+    "edition": "USB-IF CCID revision 1.1, April 22, 2005",
+    "clauses": [
+      "3.1.3",
+      "3.2.2",
+      "5.1",
+      "6.1.1-6.1.4",
+      "6.1.13",
+      "6.2.1-6.2.2",
+      "6.3.1"
+    ]
+  }
+]

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MicroCard.AnalyzerBridge.Test</RootNamespace>
+    <PackageId>MicroCard.AnalyzerBridge.Test</PackageId>
+    <PackageVersion>0.1.0</PackageVersion>
+    <Description>Test-only package proving transitive MicroCard analyzer delivery.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MicroCard.Analyzers" Version="0.1.0" PrivateAssets="" IncludeAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

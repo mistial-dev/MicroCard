@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "MicroCard.Analyzers": {
+        "type": "Direct",
+        "requested": "[0.1.0, )",
+        "resolved": "0.1.0",
+        "contentHash": "/A/6Y6XVN2Zhmx+TYY6wsa0DGNsyNVyx6u3rkHvOHmgKp5HlMXRpf8HamzMsyuxsm9sOryyH5dHfG1VUxvDPGw=="
+      }
+    }
+  }
+}

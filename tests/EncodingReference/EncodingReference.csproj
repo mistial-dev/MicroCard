@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MicroCard.Encoding.Tests</RootNamespace>
+    <AssemblyName>MicroCard.Encoding.Tests</AssemblyName>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../managed/MicroCard.Encoding/MicroCard.Encoding.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,1 @@
+<Project><PropertyGroup><PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression><RepositoryUrl>https://github.com/mistial-dev/MicroCard</RepositoryUrl><Deterministic>true</Deterministic><PathMap>$(MSBuildThisFileDirectory)=/MicroCard/</PathMap><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile></PropertyGroup></Project>

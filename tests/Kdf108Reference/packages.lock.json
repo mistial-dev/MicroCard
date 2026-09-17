@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "kdf108": {
+        "type": "Project",
+        "dependencies": {
+          "MicroCard.Framework": "[1.0.0, )"
+        }
+      },
+      "kdf108consumer": {
+        "type": "Project",
+        "dependencies": {
+          "Kdf108": "[0.1.0, )",
+          "MicroCard.Framework": "[1.0.0, )"
+        }
+      },
+      "microcard.framework": {
+        "type": "Project"
+      }
+    }
+  }
+}

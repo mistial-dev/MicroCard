@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "status": "platform-sha-entropy-and-tf-psa-mac-cipher-aead-p256-linked",
+  "observed_at": "2026-09-16",
+  "source": {
+    "repository": "https://github.com/nrfconnect/sdk-nrfxlib.git",
+    "tag": "v3.4.0",
+    "tag_object": "f5e9596e66a8c5d11cebfc79ff45a9e6c45862e3",
+    "commit": "d4ce5fe1a7d8af29bc01a4e1ddf5540ef65b6a3b",
+    "tree": "e6e181c89f4fb789ecf0d52395c6d7acda9b2cb2"
+  },
+  "ncs_bundle": {
+    "repository": "https://github.com/nrfconnect/sdk-nrf.git",
+    "tag": "v3.4.0",
+    "tag_object": "cc3a680d04d2374de9d8e8997ce3950f25e1179e",
+    "commit": "99553055607b2e9885fbc80ccd11fa9da81c2df0",
+    "manifest": "west.yml",
+    "dependencies": [
+      {
+        "repository": "https://github.com/nrfconnect/sdk-mbedtls.git",
+        "tag": "ncs-v3.4.0",
+        "tag_object": "dbc13a90f49195182bed1da68bbccb72dd6795f5",
+        "commit": "4c0c10c7ff9b5d55550e6ff18df728bcdde14537"
+      },
+      {
+        "repository": "https://github.com/nrfconnect/sdk-oberon-psa-crypto.git",
+        "tag": "ncs-v3.4.0",
+        "tag_object": "b3a901df1ca4ccc55b715f9d54c7226d865c8743",
+        "commit": "be405cf0ee3d346212e88849639d4ead45a28d1f"
+      },
+      {
+        "repository": "https://github.com/nrfconnect/sdk-trusted-firmware-m.git",
+        "tag": "ncs-v3.4.0",
+        "tag_object": "8e8e2f4752aa0400b7c1b5e1936da3dac13c373b",
+        "commit": "c9f73070ad6d9469574fc13a4e297ed33ab7e84a"
+      }
+    ]
+  },
+  "selection": {
+    "processor": "cortex-m4",
+    "float_abi": "hard-float",
+    "interrupt_model": "no-interrupts",
+    "wchar_bytes": 4,
+    "library_version": "0.9.22"
+  },
+  "artifacts": [
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/lib/cortex-m4/hard-float/no-interrupts/libnrf_cc310_core_0.9.22.a",
+      "bytes": 110074,
+      "sha256": "6b2df57eb1defb2e70e55f286328dd5377366fb2c72eaf33dd310dd67619bf62",
+      "license": "LicenseRef-Nordic-5-Clause"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/lib/cortex-m4/hard-float/no-interrupts/libnrf_cc310_psa_crypto_0.9.22.a",
+      "bytes": 127650,
+      "sha256": "8a7e15e9403f1647c861b0569be8886c5038bc84e927f0cf42484599331ab87b",
+      "license": "LicenseRef-Nordic-5-Clause"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/lib/cortex-m4/hard-float/no-interrupts/libnrf_cc310_platform_0.9.22.a",
+      "bytes": 189376,
+      "sha256": "4be9244f2da8c04be08631d04396cf1f2f290ee7884ace6092aad237000e1666",
+      "license": "LicenseRef-Nordic-5-Clause"
+    }
+  ],
+  "license_files": [
+    {
+      "path": "LICENSE",
+      "sha256": "47d92141c69e74a0166c319a41e5005ce2b87f0498e5dbd5a0c5a34f9ef63954"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/license.txt",
+      "sha256": "a515fe8703b28eab9b60a02f62fb4cf74927e4b6dd552b4d70a45e4d3f56e1dd"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/license.txt",
+      "sha256": "3c8ca77445f44b8994ad9cf83f76da85fd97f0c5042c6a21f6b020729d137d8b"
+    }
+  ],
+  "public_headers": [
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/include/cc3xx.h",
+      "sha256": "3527bd9ea3c01fa7ae345e477337c570ee1f00b6c972bb934455c0c320dbcb0a"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/include/cc3xx_psa_hash.h",
+      "sha256": "caf0b0685263ba9635eff1ae63773a717dbf78a0d5b043bea605de09c6bae8b0"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/include/cc3xx_psa_mac.h",
+      "sha256": "c876e91f113cda3e0eff6601c9b586ca6d8ed6886c802badc754bfad62c46a38"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/include/cc3xx_psa_cipher.h",
+      "sha256": "7986bdb0ff88924131270531873cb4a060ff3ab86222c3b32c8fac45dabe8c8a"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/include/cc3xx_psa_aead.h",
+      "sha256": "d54560d24ccdc3f4aabd63bc3a0f5c1b957e8af1e10c027ed64b01d6b0953fab"
+    },
+    {
+      "path": "crypto/nrf_cc310_mbedcrypto/include/cc3xx_psa_asymmetric_signature.h",
+      "sha256": "f1c1a0a56f619c7a0cd9b94f83c4de5025e15946833028081001dd024b7863c6"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/include/nrf_cc3xx_platform.h",
+      "sha256": "27fccdde9aa5361c74d62720e860ca25e0b16719a80fcc93cab98a434c3cfaea"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/include/nrf_cc3xx_platform_abort.h",
+      "sha256": "d9e472ae9f7c7b0e29b3137daadf7e411705c7535a322f847d0d94f8d2677c6a"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/include/nrf_cc3xx_platform_entropy.h",
+      "sha256": "70a86aa6472e6612292ef8303440c19bdc71b2c938c5288835586fd8f3e2a2f1"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/include/nrf_cc3xx_platform_mutex.h",
+      "sha256": "7a5937732c7a046f9e61adcccf917d016f517c8621f9652cb5510dbe3c0e3fb7"
+    },
+    {
+      "path": "crypto/nrf_cc310_platform/include/nrf_cc3xx_platform_sha256.h",
+      "sha256": "8b92cda92ace0f0f4c6f7c2ad5f7952caa7a3d49b07f14426c0579201f2fdb20"
+    }
+  ],
+  "abi": {
+    "format": "ELF32 little-endian ARM relocatable objects in GNU archives",
+    "eabi": 5,
+    "cpu": "ARMv7E-M Thumb-2",
+    "fpu": "VFPv4-D16 single precision",
+    "arguments": "hard-float VFP registers",
+    "stack_alignment_bytes": 8,
+    "enum_abi": "small",
+    "external_runtime_symbols": [
+      "mbedtls_calloc",
+      "mbedtls_free",
+      "memcmp",
+      "memcpy",
+      "memmove",
+      "memset",
+      "psa_driver_wrapper_hash_compute",
+      "psa_driver_wrapper_hash_finish",
+      "psa_driver_wrapper_hash_setup",
+      "psa_driver_wrapper_hash_update"
+    ]
+  },
+  "supported_integration": {
+    "platform_archive_link": true,
+    "mbedcrypto_direct_archive_link": false,
+    "tf_psa_cmac_bridge": true,
+    "tf_psa_hmac_sha256_bridge": true,
+    "tf_psa_aes128_block_bridge": true,
+    "tf_psa_aes128_cbc_bridge": true,
+    "tf_psa_p256_bridge": true,
+    "mbedcrypto_required_frontend": "TF-PSA Crypto driver integration",
+    "upstream_crypto_core": "Oberon PSA Crypto 2.0.0",
+    "notes": "The opt-in board SHA-256 and entropy providers use documented nrf_cc3xx_platform APIs. The opt-in AES-CMAC, HMAC-SHA-256, AES-128 block, CBC, CCM and P-256 providers compile the pinned TF-PSA driver wrapper and required sdk-nrf CC3XX driver sources, then link the PSA/core archives behind that boundary. Other mbedcrypto operations remain inspection-only."
+  }
+}

@@ -1,0 +1,20 @@
+<Project>
+  <ItemGroup Condition="'$(MicroCardDisableAnalyzer)' != 'true'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../managed/MicroCard.Analyzers/MicroCard.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+  <PropertyGroup>
+    <MicroCardOutput Condition="'$(MicroCardOutput)' == ''">$(IntermediateOutputPath)microcard/$(AssemblyName)</MicroCardOutput>
+  </PropertyGroup>
+  <Target Name="MicroCardValidate" Condition="'$(MicroCardEnabled)' == 'true'">
+    <GetFileHash Files="$(MicroCardFramework)" Algorithm="SHA256"><Output TaskParameter="Items" ItemName="_MicroCardFrameworkHash" /></GetFileHash>
+    <Error Condition="'%(_MicroCardFrameworkHash.FileHash)' != '$(MicroCardFrameworkHash)'" Text="Framework hash does not match the approved pin." />
+  </Target>
+  <Target Name="MicroCardPreprocess" DependsOnTargets="MicroCardValidate" AfterTargets="Build" Condition="'$(MicroCardEnabled)' == 'true'"
+          Inputs="$(TargetPath);$(MicroCardTool);$(MicroCardFramework);$(MSBuildProjectFullPath);$(MSBuildThisFileFullPath)"
+          Outputs="$(MicroCardOutput).mca;$(MicroCardOutput).json;$(MicroCardOutput).map.json">
+    <Error Condition="'$(MicroCardFrameworkHash)' == ''" Text="Set MicroCardFrameworkHash to the approved framework SHA-256." />
+    <Error Condition="'$(MicroCardTool)' == ''" Text="Set MicroCardTool to the built preprocessor DLL." />
+    <Exec Command="dotnet &quot;$(MicroCardTool)&quot; &quot;$(TargetPath)&quot; &quot;$(MicroCardOutput)&quot; &quot;$(MicroCardFramework)&quot; $(MicroCardFrameworkHash)" />
+  </Target>
+</Project>

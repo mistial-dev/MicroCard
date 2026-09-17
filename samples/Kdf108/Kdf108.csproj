@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MicroCard.Cryptography</RootNamespace>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <Version>0.1.0</Version>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../managed/MicroCard.Framework/MicroCard.Framework.csproj" /></ItemGroup>
+  <Import Project="../../build/MicroCard.targets" />
+</Project>

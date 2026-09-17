@@ -1,0 +1,39 @@
+# Implementation roadmap
+
+This is the authoritative public work list. Checked items have repeatable repository evidence. Hardware items require a physical target.
+
+## 0.1-wip host release
+
+- [x] Reduced .NET assembly format, preprocessor, interpreter, and simulator.
+- [x] Roslyn analyzer package with Rider-compatible diagnostics.
+- [x] Signed packages, on-runtime executable verification, dependency linking, and rollback checks.
+- [x] ISD ownership, SSD isolation, native cryptography, transactions, and encrypted journal recovery.
+- [x] Java wallet using GlobalPlatformPro SCP03 and a multi-identity credential demonstration.
+- [x] Repeatable macOS build and acceptance path.
+- [ ] Validate Linux x64 and Windows x64 release bundles in CI.
+- [ ] Complete one bounded release fuzz campaign and archive its summary.
+
+## nRF52840 production work
+
+- [x] Bare-metal Rust build, UART transport, flash, entropy, timer, watchdog, GPIO, and development smoke test.
+- [x] Reboot recovery and persistent-key continuity evidence.
+- [ ] Run the complete signed-loading adversarial suite after hardware reboot.
+- [ ] Complete USB CCID enumeration, abort timing, disconnect, and GlobalPlatformPro interoperability on physical hardware.
+- [ ] Capture deterministic GlobalPlatformPro SCP03 regression vectors from the physical reader path.
+- [ ] Validate optional CryptoCell known-answer tests, forced failures, copy counts, latency, energy, and stack use.
+- [ ] Validate power interruption at ownership, activation, storage commit, credential retry, and deletion boundaries.
+- [ ] Measure release flash, RAM, command latency, and endurance on final hardware.
+- [ ] Define production provisioning, verified boot, MPU policy, debug lockout, recovery, and secure disposal.
+
+## Managed platform
+
+- [ ] Expand default `System` and cryptography facades where credential applications need them.
+- [ ] Add schema migration policy before permitting compatible in-place assembly replacement.
+- [ ] Add further original credential samples and interoperability vectors.
+
+## Java Card VM
+
+- [ ] Select a Java Card version, CAP subset, and API profile.
+- [ ] Specify persistent objects, firewall contexts, transactions, lifecycle, and domain mapping.
+- [ ] Implement host CAP validation and a Rust loader, verifier, and bytecode interpreter.
+- [ ] Add independent conformance and cross-engine isolation tests.

@@ -1,0 +1,14 @@
+{
+  "source": "Gp4Net user-authorized independent SCP03 implementation",
+  "source_revision": "add447a082f3ac3d6cd0fc552052f3108912661c",
+  "security_level": "13",
+  "session_enc": "00112233445566778899AABBCCDDEEFF",
+  "session_mac": "0102030405060708090A0B0C0D0E0F10",
+  "session_rmac": "102030405060708090A0B0C0D0E0F000",
+  "initial_chain": "00112233445566778899AABBCCDDEEFF",
+  "plain_command": "80E2000003010203",
+  "secured_command": "84E200001800C73CFCD5514E952566C95AF988B0CBBEF336585A4E7257",
+  "command_chain": "BEF336585A4E725733586252CB5B5366",
+  "plain_response": "A1A2A39000",
+  "secured_response": "A1A2A3784FA15663E7AD489000"
+}

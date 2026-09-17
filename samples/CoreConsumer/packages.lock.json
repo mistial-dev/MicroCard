@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "MicroCard.Core": {
+        "type": "Project",
+        "dependencies": {
+          "MicroCard.Framework": "[1.0.0, )"
+        }
+      },
+      "microcard.framework": {
+        "type": "Project"
+      }
+    }
+  }
+}

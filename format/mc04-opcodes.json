@@ -1,0 +1,1164 @@
+{
+  "schema_major": 1,
+  "schema_minor": 0,
+  "compact_token_bytes": 3,
+  "switch_limit": 256,
+  "opcodes": [
+    {
+      "name": "nop",
+      "value": 0,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldarg.0",
+      "value": 2,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldarg.1",
+      "value": 3,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldarg.2",
+      "value": 4,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldarg.3",
+      "value": 5,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldloc.0",
+      "value": 6,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldloc.1",
+      "value": 7,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldloc.2",
+      "value": 8,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldloc.3",
+      "value": 9,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stloc.0",
+      "value": 10,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stloc.1",
+      "value": 11,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stloc.2",
+      "value": 12,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stloc.3",
+      "value": 13,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldarg.s",
+      "value": 14,
+      "operand": "var_u8",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldloc.s",
+      "value": 17,
+      "operand": "var_u8",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stloc.s",
+      "value": 19,
+      "operand": "var_u8",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldnull",
+      "value": 20,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushref",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.m1",
+      "value": 21,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.0",
+      "value": 22,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.1",
+      "value": 23,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.2",
+      "value": 24,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.3",
+      "value": 25,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.4",
+      "value": 26,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.5",
+      "value": 27,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.6",
+      "value": 28,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.7",
+      "value": 29,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.8",
+      "value": 30,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4.s",
+      "value": 31,
+      "operand": "i8",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldc.i4",
+      "value": 32,
+      "operand": "i32",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "dup",
+      "value": 37,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push1_push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "pop",
+      "value": 38,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "call",
+      "value": 40,
+      "operand": "method_token",
+      "token_tables": [
+        "MethodDef",
+        "MemberRef"
+      ],
+      "pop": "Varpop",
+      "push": "Varpush",
+      "flow": "Call",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ret",
+      "value": 42,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Varpop",
+      "push": "Push0",
+      "flow": "Return",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "br.s",
+      "value": 43,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push0",
+      "flow": "Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "brfalse.s",
+      "value": 44,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Popi",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "brtrue.s",
+      "value": 45,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Popi",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "beq.s",
+      "value": 46,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bge.s",
+      "value": 47,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bgt.s",
+      "value": 48,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ble.s",
+      "value": 49,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "blt.s",
+      "value": 50,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bne.un.s",
+      "value": 51,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bge.un.s",
+      "value": 52,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bgt.un.s",
+      "value": 53,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ble.un.s",
+      "value": 54,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "blt.un.s",
+      "value": 55,
+      "operand": "branch_i8",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "br",
+      "value": 56,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop0",
+      "push": "Push0",
+      "flow": "Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "brfalse",
+      "value": 57,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Popi",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "brtrue",
+      "value": 58,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Popi",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "beq",
+      "value": 59,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bge",
+      "value": 60,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bgt",
+      "value": 61,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ble",
+      "value": 62,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "blt",
+      "value": 63,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bne.un",
+      "value": 64,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bge.un",
+      "value": 65,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "bgt.un",
+      "value": 66,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ble.un",
+      "value": 67,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "blt.un",
+      "value": 68,
+      "operand": "branch_i32",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "switch",
+      "value": 69,
+      "operand": "switch_i32",
+      "token_tables": [],
+      "pop": "Popi",
+      "push": "Push0",
+      "flow": "Cond_Branch",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "add",
+      "value": 88,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "sub",
+      "value": 89,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "mul",
+      "value": 90,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "div",
+      "value": 91,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "div.un",
+      "value": 92,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "rem",
+      "value": 93,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "rem.un",
+      "value": 94,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "and",
+      "value": 95,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "or",
+      "value": 96,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "xor",
+      "value": 97,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "shl",
+      "value": 98,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "shr",
+      "value": 99,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "shr.un",
+      "value": 100,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "neg",
+      "value": 101,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "not",
+      "value": 102,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.i1",
+      "value": 103,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.i2",
+      "value": 104,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.i4",
+      "value": 105,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.u4",
+      "value": 109,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "callvirt",
+      "value": 111,
+      "operand": "method_token",
+      "token_tables": [
+        "MethodDef",
+        "MemberRef"
+      ],
+      "pop": "Varpop",
+      "push": "Varpush",
+      "flow": "Call",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "newobj",
+      "value": 115,
+      "operand": "method_token",
+      "token_tables": [
+        "MethodDef",
+        "MemberRef"
+      ],
+      "pop": "Varpop",
+      "push": "Pushref",
+      "flow": "Call",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldfld",
+      "value": 123,
+      "operand": "field_token",
+      "token_tables": [
+        "Field"
+      ],
+      "pop": "Popref",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stfld",
+      "value": 125,
+      "operand": "field_token",
+      "token_tables": [
+        "Field"
+      ],
+      "pop": "Popref_pop1",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.i1.un",
+      "value": 130,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.i2.un",
+      "value": 131,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.i4.un",
+      "value": 132,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.u1.un",
+      "value": 134,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.u2.un",
+      "value": 135,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.u4.un",
+      "value": 136,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "newarr",
+      "value": 141,
+      "operand": "type_token",
+      "token_tables": [
+        "TypeDef",
+        "TypeRef"
+      ],
+      "pop": "Popi",
+      "push": "Pushref",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldlen",
+      "value": 142,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Popref",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldelem.u1",
+      "value": 145,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Popref_popi",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ldelem.i4",
+      "value": 148,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Popref_popi",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stelem.i1",
+      "value": 156,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Popref_popi_popi",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "stelem.i4",
+      "value": 158,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Popref_popi_popi",
+      "push": "Push0",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.i1",
+      "value": 179,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.u1",
+      "value": 180,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.i2",
+      "value": 181,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.u2",
+      "value": 182,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.i4",
+      "value": 183,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.ovf.u4",
+      "value": 184,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.u2",
+      "value": 209,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "conv.u1",
+      "value": 210,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "add.ovf",
+      "value": 214,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "add.ovf.un",
+      "value": 215,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "mul.ovf",
+      "value": 216,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "mul.ovf.un",
+      "value": 217,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "sub.ovf",
+      "value": 218,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "sub.ovf.un",
+      "value": 219,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Push1",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "ceq",
+      "value": 65025,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "cgt",
+      "value": 65026,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "cgt.un",
+      "value": 65027,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "clt",
+      "value": 65028,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    },
+    {
+      "name": "clt.un",
+      "value": 65029,
+      "operand": "none",
+      "token_tables": [],
+      "pop": "Pop1_pop1",
+      "push": "Pushi",
+      "flow": "Next",
+      "ecma": "ECMA-335 Partition III"
+    }
+  ]
+}

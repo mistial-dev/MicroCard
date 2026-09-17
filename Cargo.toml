@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/microcard-core", "crates/microcard-sim"]
+exclude = ["board/nrf52840"]
+resolver = "2"
+[workspace.package]
+version = "0.1.0-wip"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+[workspace.dependencies]
+base64ct = { version = "1", default-features = false, features = ["alloc"] }
+serde = { version = "1", default-features = false, features = ["derive", "alloc", "rc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "zeroize"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh"] }

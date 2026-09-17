@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "observed_at": "2026-09-16",
+  "source": {
+    "repository": "https://github.com/nrfconnect/sdk-nrf.git",
+    "tag": "v3.4.0",
+    "tag_object": "cc3a680d04d2374de9d8e8997ce3950f25e1179e",
+    "commit": "99553055607b2e9885fbc80ccd11fa9da81c2df0",
+    "tree": "2e0afbc847dd72e76a8f9ebc16610f1882c349db"
+  },
+  "license_files": [
+    {
+      "path": "LICENSE",
+      "bytes": 1981,
+      "sha256": "47d92141c69e74a0166c319a41e5005ce2b87f0498e5dbd5a0c5a34f9ef63954"
+    }
+  ],
+  "integration_files": [
+    {
+      "path": "subsys/nrf_security/src/drivers/nrf_cc3xx/public_cc3xx_psa_asymmetric_signature.c",
+      "bytes": 6595,
+      "sha256": "35c7ead7ecb0d8203bc64f29480e374e7d6f644d67fa67228dfc1d3834e6cba6",
+      "license": "LicenseRef-Nordic-5-Clause"
+    },
+    {
+      "path": "subsys/nrf_security/src/drivers/nrf_cc3xx/public_cc3xx_psa_key_agreement.c",
+      "bytes": 2271,
+      "sha256": "17afeaa4211cab79d6cfbea2b24413735f4d570c098a4428a5cc2e615d55d3e2",
+      "license": "LicenseRef-Nordic-5-Clause"
+    }
+  ]
+}

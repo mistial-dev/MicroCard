@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "microcard.cryptography": {
+        "type": "Project",
+        "dependencies": {
+          "MicroCard.Framework": "[0.1.0-wip, )"
+        }
+      },
+      "microcard.framework": {
+        "type": "Project"
+      },
+      "microcard.security": {
+        "type": "Project",
+        "dependencies": {
+          "MicroCard.Framework": "[0.1.0-wip, )"
+        }
+      }
+    }
+  }
+}

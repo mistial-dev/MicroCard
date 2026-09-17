@@ -1,0 +1,452 @@
+fn main() {
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::copy("memory.x", out.join("memory.x")).unwrap();
+    if std::env::var_os("CARGO_FEATURE_USB_CCID").is_some() {
+        let vendor = usb_id("MICROCARD_USB_VID");
+        let product = usb_id("MICROCARD_USB_PID");
+        std::fs::write(
+            out.join("usb_identity.rs"),
+            format!("pub const USB_VID: u16 = {vendor};\npub const USB_PID: u16 = {product};\n"),
+        )
+        .unwrap();
+    }
+    let cc310_sha256 = std::env::var_os("CARGO_FEATURE_CC310_SHA256").is_some();
+    let cc310_cmac = std::env::var_os("CARGO_FEATURE_CC310_CMAC").is_some();
+    let cc310_hmac = std::env::var_os("CARGO_FEATURE_CC310_HMAC").is_some();
+    let cc310_aes = std::env::var_os("CARGO_FEATURE_CC310_AES").is_some();
+    let cc310_p256 = std::env::var_os("CARGO_FEATURE_CC310_P256").is_some();
+    if cc310_sha256 {
+        let manifest = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let nrfxlib = manifest.join("../../work/nrfxlib-v3.4.0/crypto");
+        let platform_dir =
+            nrfxlib.join("nrf_cc310_platform/lib/cortex-m4/hard-float/no-interrupts");
+        let platform_archive = platform_dir.join("libnrf_cc310_platform_0.9.22.a");
+        assert!(
+            platform_archive.is_file(),
+            "pinned CC310 platform archive is absent; verify the explicit nrfxlib v3.4.0 checkout"
+        );
+        verify_pinned_file(
+            &platform_archive,
+            189_376,
+            "4be9244f2da8c04be08631d04396cf1f2f290ee7884ace6092aad237000e1666",
+            "CC310 platform archive",
+        );
+        println!("cargo:rustc-link-search=native={}", platform_dir.display());
+        if cc310_cmac || cc310_hmac || cc310_aes || cc310_p256 {
+            configure_cc310_psa(&manifest, &out, &nrfxlib);
+        }
+        println!("cargo:rustc-link-lib=static=nrf_cc310_platform_0.9.22");
+        println!("cargo:rerun-if-changed={}", platform_archive.display());
+    }
+    println!("cargo:rustc-link-search={}", out.display());
+    println!("cargo:rerun-if-changed=memory.x");
+    println!("cargo:rerun-if-env-changed=MICROCARD_USB_VID");
+    println!("cargo:rerun-if-env-changed=MICROCARD_USB_PID");
+}
+
+fn verify_pinned_file(
+    path: &std::path::Path,
+    expected_bytes: usize,
+    expected_sha256: &str,
+    name: &str,
+) {
+    use sha2::Digest;
+
+    let contents = std::fs::read(path).unwrap_or_else(|_| panic!("cannot read pinned {name}"));
+    assert_eq!(
+        contents.len(),
+        expected_bytes,
+        "{name} size differs from the project pin"
+    );
+    let digest = sha2::Sha256::digest(&contents);
+    assert_eq!(
+        format!("{digest:x}"),
+        expected_sha256,
+        "{name} digest differs from the project pin"
+    );
+}
+
+fn configure_cc310_psa(
+    manifest: &std::path::Path,
+    out: &std::path::Path,
+    nrfxlib: &std::path::Path,
+) {
+    let oberon = manifest.join("../../work/sdk-oberon-psa-crypto-ncs-v3.4.0");
+    let sdk_nrf = manifest.join("../../work/sdk-nrf-v3.4.0");
+    let wrapper = oberon.join("oberon/platforms/nordic_nrf/library/psa_crypto_driver_wrappers.c");
+    verify_pinned_file(
+        &wrapper,
+        92_666,
+        "bd6aba50d5f4fec03265afed9acb35c4f32744514881708e138b636283079602",
+        "TF-PSA driver wrapper source",
+    );
+
+    let crypto_dir = nrfxlib.join("nrf_cc310_mbedcrypto/lib/cortex-m4/hard-float/no-interrupts");
+    let psa_archive = crypto_dir.join("libnrf_cc310_psa_crypto_0.9.22.a");
+    let core_archive = crypto_dir.join("libnrf_cc310_core_0.9.22.a");
+    verify_pinned_file(
+        &psa_archive,
+        127_650,
+        "8a7e15e9403f1647c861b0569be8886c5038bc84e927f0cf42484599331ab87b",
+        "CC310 PSA archive",
+    );
+    verify_pinned_file(
+        &core_archive,
+        110_074,
+        "6b2df57eb1defb2e70e55f286328dd5377366fb2c72eaf33dd310dd67619bf62",
+        "CC310 core archive",
+    );
+
+    let compiler =
+        std::env::var_os("CC_thumbv7em_none_eabihf").unwrap_or_else(|| "arm-none-eabi-gcc".into());
+    let common = [
+        "-c",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=hard",
+        "-mfpu=fpv4-sp-d16",
+        "-std=c11",
+        "-Os",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-fshort-enums",
+        "-fno-common",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-DTF_PSA_CRYPTO_CONFIG_FILE=\"microcard_psa_config.h\"",
+        "-DMBEDTLS_PSA_CRYPTO_CONFIG_FILE=\"microcard_psa_config.h\"",
+    ];
+    let include_paths = [
+        manifest.join("csrc"),
+        oberon.join("include"),
+        oberon.join("core"),
+        oberon.join("dispatch"),
+        oberon.join("oberon/platforms/nordic_nrf/include"),
+        oberon.join("oberon/platforms/nordic_nrf/drivers"),
+        oberon.join("oberon/drivers"),
+        nrfxlib.join("nrf_cc310_mbedcrypto/include"),
+    ];
+    let compile = |source: &std::path::Path, object: &std::path::Path| {
+        let dependencies = object.with_extension("d");
+        let mut command = std::process::Command::new(&compiler);
+        command.args(common);
+        if source.starts_with(&sdk_nrf)
+            || source.file_name().and_then(|name| name.to_str()) == Some("microcard_cc310_p256.c")
+        {
+            command
+                .arg("-I")
+                .arg(nrfxlib.join("nrf_cc310_mbedcrypto/include"));
+        }
+        for include in &include_paths {
+            command.arg("-I").arg(include);
+        }
+        if std::env::var_os("CARGO_FEATURE_CC310_HMAC").is_some() {
+            command.arg("-DMICROCARD_CC310_HMAC=1");
+        }
+        if std::env::var_os("CARGO_FEATURE_CC310_AES").is_some() {
+            command.arg("-DMICROCARD_CC310_AES=1");
+        }
+        if std::env::var_os("CARGO_FEATURE_CC310_CBC").is_some() {
+            command.arg("-DMICROCARD_CC310_CBC=1");
+        }
+        if std::env::var_os("CARGO_FEATURE_CC310_CCM").is_some() {
+            command.arg("-DMICROCARD_CC310_CCM=1");
+        }
+        if std::env::var_os("CARGO_FEATURE_CC310_P256").is_some() {
+            command.arg("-DMICROCARD_CC310_P256=1");
+        }
+        let status = command
+            .arg("-o")
+            .arg(object)
+            .arg("-MMD")
+            .arg("-MF")
+            .arg(&dependencies)
+            .arg(source)
+            .status()
+            .unwrap_or_else(|_| {
+                panic!("failed to run the ARM C compiler for {}", source.display())
+            });
+        assert!(
+            status.success(),
+            "ARM C compilation failed for {}",
+            source.display()
+        );
+        dependencies
+    };
+
+    let wrapper_object = out.join("psa_crypto_driver_wrappers.o");
+    let mut dependencies = vec![compile(&wrapper, &wrapper_object)];
+    let mut objects = vec![wrapper_object];
+    let mut shims = Vec::new();
+    if std::env::var_os("CARGO_FEATURE_CC310_CMAC").is_some()
+        || std::env::var_os("CARGO_FEATURE_CC310_HMAC").is_some()
+    {
+        let shim = manifest.join("csrc/microcard_cc310_mac.c");
+        let object = out.join("microcard_cc310_mac.o");
+        dependencies.push(compile(&shim, &object));
+        verify_mac_shim_stack(&object.with_extension("su"));
+        shims.push(shim);
+        objects.push(object);
+    }
+    if std::env::var_os("CARGO_FEATURE_CC310_AES").is_some() {
+        let shim = manifest.join("csrc/microcard_cc310_cipher.c");
+        let object = out.join("microcard_cc310_cipher.o");
+        dependencies.push(compile(&shim, &object));
+        verify_stack_use(
+            &object.with_extension("su"),
+            &[
+                ("microcard_cc310_aes128_encrypt_block", 88),
+                ("microcard_cc310_aes128_cbc_in_place", 384),
+                ("microcard_cc310_aes128_ccm", 112),
+                ("microcard_cc310_aes128_ccm_encrypt", 40),
+                ("microcard_cc310_aes128_ccm_decrypt", 40),
+            ],
+        );
+        shims.push(shim);
+        objects.push(object);
+    }
+    if std::env::var_os("CARGO_FEATURE_CC310_P256").is_some() {
+        let signature_driver = sdk_nrf.join(
+            "subsys/nrf_security/src/drivers/nrf_cc3xx/public_cc3xx_psa_asymmetric_signature.c",
+        );
+        let agreement_driver = sdk_nrf
+            .join("subsys/nrf_security/src/drivers/nrf_cc3xx/public_cc3xx_psa_key_agreement.c");
+        verify_pinned_file(
+            &signature_driver,
+            6_595,
+            "35c7ead7ecb0d8203bc64f29480e374e7d6f644d67fa67228dfc1d3834e6cba6",
+            "nRF Security CC3XX signature driver source",
+        );
+        verify_pinned_file(
+            &agreement_driver,
+            2_271,
+            "17afeaa4211cab79d6cfbea2b24413735f4d570c098a4428a5cc2e615d55d3e2",
+            "nRF Security CC3XX key-agreement driver source",
+        );
+        for source in [&signature_driver, &agreement_driver] {
+            let object = out.join(format!(
+                "{}.o",
+                source.file_stem().unwrap().to_string_lossy()
+            ));
+            dependencies.push(compile(source, &object));
+            objects.push(object);
+        }
+        verify_stack_use(
+            &out.join("public_cc3xx_psa_asymmetric_signature.su"),
+            &[
+                ("cc3xx_sign_hash", 48),
+                ("cc3xx_verify_hash", 40),
+                ("cc3xx_sign_message", 200),
+                ("cc3xx_verify_message", 40),
+            ],
+        );
+        verify_stack_use(
+            &out.join("public_cc3xx_psa_key_agreement.su"),
+            &[("cc3xx_key_agreement", 48)],
+        );
+        let shim = manifest.join("csrc/microcard_cc310_p256.c");
+        let object = out.join("microcard_cc310_p256.o");
+        dependencies.push(compile(&shim, &object));
+        verify_stack_use(
+            &object.with_extension("su"),
+            &[
+                ("microcard_p256_attributes", 24),
+                ("microcard_cc310_p256_public_key", 64),
+                ("microcard_cc310_p256_sign_hash", 80),
+                ("microcard_cc310_p256_verify_hash", 80),
+                ("microcard_cc310_p256_ecdh", 88),
+            ],
+        );
+        shims.push(shim);
+        objects.push(object);
+    }
+    verify_cc310_dependencies(&dependencies, manifest, &oberon, &sdk_nrf, nrfxlib);
+
+    let bridge_archive = out.join("libmicrocard_cc310_psa.a");
+    let archiver =
+        std::env::var_os("AR_thumbv7em_none_eabihf").unwrap_or_else(|| "arm-none-eabi-ar".into());
+    let status = std::process::Command::new(archiver)
+        .arg("crs")
+        .arg(&bridge_archive)
+        .args(&objects)
+        .status()
+        .expect("failed to run the ARM archiver for CC310 MAC providers");
+    assert!(status.success(), "failed to archive the CC310 PSA bridge");
+
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=microcard_cc310_psa");
+    println!("cargo:rustc-link-search=native={}", crypto_dir.display());
+    println!("cargo:rustc-link-lib=static=nrf_cc310_psa_crypto_0.9.22");
+    println!("cargo:rustc-link-lib=static=nrf_cc310_core_0.9.22");
+    for shim in shims {
+        println!("cargo:rerun-if-changed={}", shim.display());
+    }
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest.join("csrc/microcard_psa_config.h").display()
+    );
+    println!("cargo:rerun-if-changed={}", wrapper.display());
+    println!("cargo:rerun-if-changed={}", psa_archive.display());
+    println!("cargo:rerun-if-changed={}", core_archive.display());
+}
+
+fn verify_mac_shim_stack(path: &std::path::Path) {
+    verify_stack_use(
+        path,
+        &[
+            ("microcard_cc310_cmac_begin", 64usize),
+            ("microcard_cc310_mac_update", 24usize),
+            ("microcard_cc310_cmac_finish", 32usize),
+            ("microcard_cc310_hmac_sha256_begin", 64usize),
+            ("microcard_cc310_hmac_sha256_finish", 32usize),
+        ],
+    );
+}
+
+fn verify_stack_use(path: &std::path::Path, expected: &[(&str, usize)]) {
+    let report = std::fs::read_to_string(path)
+        .unwrap_or_else(|_| panic!("cannot read C stack report {}", path.display()));
+    for &(function, ceiling) in expected {
+        let line = report
+            .lines()
+            .find(|line| line.contains(function))
+            .unwrap_or_else(|| panic!("C stack report is missing {function}"));
+        let mut fields = line.split('\t');
+        let _location = fields.next();
+        let bytes = fields
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_else(|| panic!("invalid C stack report for {function}"));
+        assert!(
+            bytes <= ceiling,
+            "{function} stack use {bytes} exceeds its {ceiling}-byte ceiling"
+        );
+    }
+}
+
+fn verify_cc310_dependencies(
+    manifests: &[std::path::PathBuf],
+    board: &std::path::Path,
+    oberon: &std::path::Path,
+    sdk_nrf: &std::path::Path,
+    nrfxlib: &std::path::Path,
+) {
+    use sha2::Digest;
+    use std::collections::BTreeMap;
+
+    let p256 = std::env::var_os("CARGO_FEATURE_CC310_P256").is_some();
+    let ccm = std::env::var_os("CARGO_FEATURE_CC310_CCM").is_some();
+    let aes = std::env::var_os("CARGO_FEATURE_CC310_AES").is_some();
+    let (expected_files, expected_sha256) = if p256 && ccm {
+        (
+            50,
+            "d33cfb3faefbf2939cf7ca2ff32b9b4268bd2a94dbc5b8592813736f5a11c77f",
+        )
+    } else if p256 && aes {
+        (
+            49,
+            "05d31d40e6940faf20ec606f710adc1bba38f976b1cfc7c2590070d91ab5c066",
+        )
+    } else if p256 {
+        (
+            48,
+            "106837249874fcc329094405e36164d01349aaa5a82096b4575798811b352a1c",
+        )
+    } else if std::env::var_os("CARGO_FEATURE_CC310_CCM").is_some() {
+        (
+            37,
+            "b6b2f09bfd4445aee9db1bb6529dab2a706cbc4b0d4d566be53a0065200a4e15",
+        )
+    } else if std::env::var_os("CARGO_FEATURE_CC310_AES").is_some() {
+        (
+            36,
+            "5b278aed8a103abb88bfedd29cd2ab423e8ff7a8b99b55d516bea6aef62856c3",
+        )
+    } else {
+        (
+            35,
+            "27072dd7374fd937410ea3b96299dcf3c31fc8ce03aebe71fce31d56a357f9c6",
+        )
+    };
+    let board = board
+        .canonicalize()
+        .expect("cannot resolve board source root");
+    let oberon = oberon
+        .canonicalize()
+        .expect("cannot resolve pinned TF-PSA root");
+    let nrfxlib = nrfxlib
+        .canonicalize()
+        .expect("cannot resolve pinned nrfxlib root");
+    let sdk_nrf = sdk_nrf
+        .canonicalize()
+        .expect("cannot resolve pinned nRF Connect SDK root");
+    let mut dependencies = BTreeMap::new();
+    for manifest in manifests {
+        let encoded = std::fs::read_to_string(manifest)
+            .unwrap_or_else(|_| panic!("cannot read dependency manifest {}", manifest.display()));
+        let flattened = encoded.replace("\\\n", " ");
+        let (_, sources) = flattened
+            .split_once(':')
+            .unwrap_or_else(|| panic!("invalid dependency manifest {}", manifest.display()));
+        for source in sources.split_whitespace() {
+            let path = std::path::Path::new(source)
+                .canonicalize()
+                .unwrap_or_else(|_| panic!("cannot resolve compiled dependency {source}"));
+            if path.starts_with(&board) {
+                continue;
+            }
+            let identity = if let Ok(relative) = path.strip_prefix(&oberon) {
+                format!("oberon/{}", relative.display())
+            } else if let Ok(relative) = path.strip_prefix(&sdk_nrf) {
+                format!("sdk-nrf/{}", relative.display())
+            } else if let Ok(relative) = path.strip_prefix(&nrfxlib) {
+                format!("nrfxlib/{}", relative.display())
+            } else {
+                panic!(
+                    "CC310 build used an unpinned dependency: {}",
+                    path.display()
+                );
+            };
+            dependencies.insert(identity, path);
+        }
+    }
+    let identities: Vec<_> = dependencies.keys().cloned().collect();
+    assert_eq!(
+        dependencies.len(),
+        expected_files,
+        "CC310 compiled dependency set differs from the project pin: {identities:?}"
+    );
+    let mut digest = sha2::Sha256::new();
+    for (identity, path) in dependencies {
+        let contents = std::fs::read(&path)
+            .unwrap_or_else(|_| panic!("cannot read compiled dependency {}", path.display()));
+        digest.update(identity.as_bytes());
+        digest.update([0]);
+        digest.update((contents.len() as u64).to_le_bytes());
+        digest.update(&contents);
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    assert_eq!(
+        format!("{:x}", digest.finalize()),
+        expected_sha256,
+        "CC310 compiled dependency contents differ from the project pin"
+    );
+}
+
+fn usb_id(name: &str) -> u16 {
+    let value = std::env::var(name)
+        .unwrap_or_else(|_| panic!("{name} must be set for the usb-ccid feature"));
+    let parsed = if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        u16::from_str_radix(hex, 16)
+    } else {
+        value.parse()
+    }
+    .unwrap_or_else(|_| panic!("{name} must be a 16-bit hexadecimal or decimal integer"));
+    assert!(parsed != 0, "{name} must be nonzero");
+    parsed
+}

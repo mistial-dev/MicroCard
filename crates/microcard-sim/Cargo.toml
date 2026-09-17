@@ -1,0 +1,10 @@
+[package]
+name = "microcard-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+microcard-core = { path = "../microcard-core", features = ["hal-conformance"] }
+serde_json.workspace = true
+ed25519-dalek.workspace = true
+getrandom = "0.2"

@@ -1,0 +1,112 @@
+using MicroCard.Framework;
+using MicroCard.Security;
+
+[assembly: Dependency("MicroCard.Security", "=0.1.0",
+    Scope = DependencyScope.IssuerSecurityDomain,
+    SignerPublicKeyHex = "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737")]
+
+namespace MicroCard.Samples.SecurityConsumer;
+
+[Assembly("F04D4307C0")]
+public static class SecurityConsumer
+{
+    private const int Slot = 1;
+
+    [Process]
+    public static void Process()
+    {
+        int length = CommandApdu.Length;
+        if (length < 1)
+        {
+            ResponseApdu.SetStatus(0x6700);
+            return;
+        }
+        var command = new byte[length];
+        CommandApdu.CopyTo(command, 0, 0, length);
+        int operation = command[0];
+        var data = Copy(command, 1, length - 1);
+        if (operation == 0)
+        {
+            if (data.Length != 12)
+            {
+                ResponseApdu.SetStatus(0x6700);
+                return;
+            }
+            Pin.Create(Slot, Copy(data, 0, 4), 3, Copy(data, 4, 8), 2);
+            return;
+        }
+        if (operation == 1)
+        {
+            Write(Pin.Verify(Slot, data) ? 1 : 0);
+            return;
+        }
+        if (operation == 2)
+        {
+            Write(Pin.RetriesRemaining(Slot));
+            return;
+        }
+        if (operation == 3)
+        {
+            Pin.Verify(Slot, data);
+            SecurityDomain.Current.Keys.Open(99);
+            return;
+        }
+        if (operation == 4)
+        {
+            if (data.Length != 12)
+            {
+                ResponseApdu.SetStatus(0x6700);
+                return;
+            }
+            Write(Pin.Unblock(Slot, Copy(data, 0, 8), Copy(data, 8, 4)) ? 1 : 0);
+            return;
+        }
+        if (operation == 5)
+        {
+            Write(Pin.PukRetriesRemaining(Slot));
+            return;
+        }
+        if (operation == 6)
+        {
+            if (data.Length != 8 || !Pin.Verify(Slot, Copy(data, 0, 4)))
+            {
+                Write(0);
+                return;
+            }
+            Pin.Change(Slot, Copy(data, 4, 4));
+            Write(Pin.IsVerified(Slot) ? 1 : 0);
+            return;
+        }
+        if (operation == 7)
+        {
+            Write(Pin.IsVerified(Slot) ? 1 : 0);
+            return;
+        }
+        if (operation == 8)
+        {
+            if (data.Length != 12)
+            {
+                ResponseApdu.SetStatus(0x6700);
+                return;
+            }
+            Pin.Unblock(Slot, Copy(data, 0, 8), Copy(data, 8, 4));
+            SecurityDomain.Current.Keys.Open(99);
+            return;
+        }
+        ResponseApdu.SetStatus(0x6D00);
+    }
+
+    private static byte[] Copy(byte[] source, int offset, int length)
+    {
+        var result = new byte[length];
+        for (int index = 0; index < length; index++)
+            result[index] = source[offset + index];
+        return result;
+    }
+
+    private static void Write(int value)
+    {
+        byte[] response = [(byte)value];
+        ResponseApdu.Write(response, 0, 1);
+    }
+}

@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "status": "source-pinned-build-pending",
+  "observed_at": "2026-09-16",
+  "source": {
+    "repository": "https://github.com/nrfconnect/sdk-oberon-psa-crypto.git",
+    "tag": "ncs-v3.4.0",
+    "tag_object": "b3a901df1ca4ccc55b715f9d54c7226d865c8743",
+    "commit": "be405cf0ee3d346212e88849639d4ead45a28d1f",
+    "tree": "cfd43477fe3f2d0e5af5c8b8e9687d6b0a801e68",
+    "upstream_version": "2.0.0 2026-05-07 cc55401"
+  },
+  "role": {
+    "supported_frontend": "TF-PSA Crypto core with Nordic CC3XX driver wrappers",
+    "target": "nRF52840 Cortex-M4F",
+    "matching_nrfxlib_lock": "nrfxlib-3.4.0.lock.json",
+    "enabled": false,
+    "notes": "The source and integration boundary are pinned. The board must keep its Rust provider until a bounded no_std build links, fits the board budgets, and passes the provider known-answer and failure tests."
+  },
+  "license_files": [
+    {
+      "path": "LICENSE",
+      "sha256": "29b547be7d15cdd09271109a919de80fef6fafdef4b371b326fa1a6dff4598a7"
+    },
+    {
+      "path": "LICENSING.md",
+      "sha256": "b1e08250f77f5fafb53eccf8f97f116a807279a9a79d864c496c2d0fec009f72"
+    }
+  ],
+  "integration_files": [
+    {
+      "path": "core/psa_crypto.c",
+      "sha256": "d3fac3b3ec4528204519fab536f3fa490b98f5058b800f58155a8c136cc806ca"
+    },
+    {
+      "path": "core/psa_crypto_slot_management.c",
+      "sha256": "778ce398d06a0f3aac5535271d06d82ddb40c734d67c530af4f23e13c4c5cd77"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/library/psa_crypto_driver_wrappers.c",
+      "sha256": "bd6aba50d5f4fec03265afed9acb35c4f32744514881708e138b636283079602"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/include/psa/crypto_config.h",
+      "sha256": "32b781496fd0855450d605607753ff4276e5507be41b0dbe1ba89f9393c9bbe8"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/include/psa/crypto_driver_config.h",
+      "sha256": "05fb1b7f2e98e3d1978448aada1bed381c73898028113466e7f62227c32871b0"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_hash.h",
+      "sha256": "32f65940ebae0337d78b0804b83ff3c5551e66d3bd85f4354d061e1455cd995b"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_mac.h",
+      "sha256": "68bc3028b573a7ca9281140dee0e32abba50541f8e082665984477c4a2dbfaaf"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_cipher.h",
+      "sha256": "179da94007c9b290f3da061d82a19b38040a0467fea2101c8ef569c61917d2ae"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_aead.h",
+      "sha256": "8a72291b42b21aaa91561d43e220e3f86f0b237eb5050ba8a155c0d694a6b723"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_asymmetric_signature.h",
+      "sha256": "8ccd0ebb405ff67c7d7816a87944445b9fc96673b60871e7d321c87e45b942fc"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_key_agreement.h",
+      "sha256": "8271d52857b1b8773cd08f8ab3f844e9775060a19e0fb651d519afe8c5d404ce"
+    },
+    {
+      "path": "oberon/platforms/nordic_nrf/drivers/cc3xx_psa_entropy.h",
+      "sha256": "4a44d167432e65ffe7a2928b9c2dcd1e340b61131285db2d3aff3738cd77e319"
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Independent host-side SCP03 implementation, GP 1.1.2 §§4.1.5, 6.2.
+Uses Python cryptography/OpenSSL, not the Rust implementation. Development acceptance only.
+"""
+import hashlib, json, os, pathlib, subprocess, tempfile
+from cryptography.hazmat.primitives.cmac import CMAC
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+SIM=ROOT/'target/debug/microcard-sim'
+def cmac(k,b):
+ c=CMAC(algorithms.AES(k)); c.update(b); return c.finalize()
+def kdf(k,c,bits,context): return cmac(k,bytes(11)+bytes([c,0])+bits.to_bytes(2,'big')+b'\x01'+context)
+def aes(k,mode,data):
+ e=Cipher(algorithms.AES(k),mode).encryptor(); return e.update(data)+e.finalize()
+class Client:
+ def __init__(self,keys,state):
+  self.keys=keys.read_bytes();self.p=subprocess.Popen([SIM,'serve',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+ def raw(self,b):
+  self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline();assert line,'simulator terminated';return bytes.fromhex(line)
+ def connect(self,level=0x13):
+  host=os.urandom(8);r=self.raw(bytes.fromhex('8050000008')+host+b'\x00');assert len(r)==31 and r[-2:]==b'\x90\x00';assert r[10:13]==bytes([1,3,0x20]),'SCP03 capabilities mismatch'
+  context=host+r[13:21];self.enc=kdf(self.keys[:16],4,128,context);self.mac=kdf(self.keys[16:],6,128,context);self.rmac=kdf(self.keys[16:],7,128,context)
+  assert r[21:29]==kdf(self.mac,0,64,context)[:8]
+  self.chain=bytes(16);self.counter=0;self.level=level
+  b=bytes([0x84,0x82,level,0,16])+kdf(self.mac,1,64,context)[:8];self.chain=cmac(self.mac,self.chain+b)
+  assert self.raw(b+self.chain[:8])==b'\x90\x00'
+ def encode(self,ins,data=b'',p1=0,p2=0):
+  self.counter+=1
+  if self.level&2 and data:
+   padded=data+b'\x80';padded+=bytes((-len(padded))%16)
+   iv=aes(self.enc,modes.ECB(),self.counter.to_bytes(16,'big'));data=aes(self.enc,modes.CBC(iv),padded)
+  b=bytes([0x84,ins,p1,p2,len(data)+8])+data;self.chain=cmac(self.mac,self.chain+b);return b+self.chain[:8]
+ def command(self,ins,data=b'',status=0x9000,p1=0,p2=0):
+  r=self.raw(self.encode(ins,data,p1,p2));assert r[-2:]==status.to_bytes(2,'big'),(hex(ins),r.hex())
+  if self.level&0x10 and (status==0x9000 or status>>8 in (0x62,0x63)):
+   assert r[-10:-2]==cmac(self.rmac,self.chain+r[:-10]+r[-2:])[:8];return r[:-10]
+  return r[:-2]
+ def close(self): self.p.stdin.close();assert self.p.wait(timeout=5)==0
+
+class BinaryClient(Client):
+ def __init__(self,keys,state):
+  self.keys=keys.read_bytes();self.p=subprocess.Popen([SIM,'serve-binary',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+ def raw(self,b):
+  self.p.stdin.write(len(b).to_bytes(2,'little')+b);self.p.stdin.flush()
+  def read(n):
+   import select
+   result=b''
+   while len(result)<n:
+    if not select.select([self.p.stdout],[],[],10)[0]:raise TimeoutError('binary simulator response')
+    chunk=os.read(self.p.stdout.fileno(),n-len(result));assert chunk,'simulator terminated';result+=chunk
+   return result
+  n=int.from_bytes(read(2),'little');assert 2<=n<=258;return read(n)
+if os.environ.get('MICROCARD_BINARY')=='1':Client=BinaryClient
+
+def domain_policy(identifier,capabilities,max_assemblies=4,max_instances=4,max_int_records=512,max_blob_records=64,max_blob_bytes=8192,max_key_slots=8,max_package_bytes=16384):
+ name=identifier.encode();bits=sum(1<<capability for capability in capabilities)
+ return bytes([1,len(name)])+name+bits.to_bytes(8,'little')+bytes([max_assemblies,max_instances])+max_int_records.to_bytes(2,'little')+bytes([max_blob_records])+max_blob_bytes.to_bytes(2,'little')+bytes([max_key_slots])+max_package_bytes.to_bytes(2,'little')
+
+def ensure_assembly(project, output):
+ image=ROOT/'work'/f'{output}.mca'; metadata=ROOT/'work'/f'{output}.json'
+ inputs=[ROOT/'build/MicroCard.targets']
+ for source_root in (ROOT/project,ROOT/'managed/MicroCard.Tool',ROOT/'managed/MicroCard.Framework'):
+  inputs.extend(path for path in source_root.rglob('*') if path.suffix in ('.cs','.csproj'))
+ if image.exists() and metadata.exists() and max(path.stat().st_mtime_ns for path in inputs)<=min(image.stat().st_mtime_ns,metadata.stat().st_mtime_ns): return image,metadata
+ framework=ROOT/'managed/MicroCard.Framework/bin/Release/net10.0/MicroCard.Framework.dll'
+ tool=ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'
+ for item in ('managed/MicroCard.Framework','managed/MicroCard.Tool',project):
+  subprocess.run(['dotnet','build',item,'-c','Release','--nologo','--verbosity','quiet'],cwd=ROOT,check=True)
+ pin=hashlib.sha256(framework.read_bytes()).hexdigest()
+ assembly_name='MicroCard.Core' if pathlib.Path(project).name=='CoreLib' else pathlib.Path(project).name
+ assembly=ROOT/project/'bin/Release/net10.0'/f'{assembly_name}.dll'
+ subprocess.run(['dotnet',tool,assembly,ROOT/'work'/output,framework,pin],cwd=ROOT,check=True)
+ return image,metadata
+
+def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
+ record=c.command(0xe2,b'\x00');assert record[4:7]==b'ISD'
+ incarnation=record[7:23]
+ if record[23]: return incarnation
+ image_path,metadata_path=ensure_assembly('samples/CoreLib','mscorlib')
+ image=image_path.read_bytes(); generated=json.loads(metadata_path.read_text())
+ manifest=dict(domain='ISD',incarnation=list(incarnation),assembly=generated['assembly'],assembly_version=generated['assembly_version'],version=1,
+               export=generated['export'],entry_points=generated['entry_points'],dependencies=generated['dependencies'],capabilities=generated['capabilities'],storage=generated['storage'],
+               limits=dict(arena=16384,stack=256,frames=32,instructions=100000))
+ meta=json.dumps(manifest,separators=(',',':')).encode();key=Ed25519PrivateKey.from_private_bytes(signing_seed)
+ raw=b'MP03MicroCard signed package v3\0'+len(meta).to_bytes(4,'little')+len(image).to_bytes(4,'little')+meta+image
+ raw+=key.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw);raw+=key.sign(raw)
+ c.command(0xe6)
+ for offset in range(0,len(raw),200):c.command(0xe8,offset.to_bytes(4,'little')+raw[offset:offset+200])
+ c.command(0xea)
+ return incarnation
+
+def main():
+ subprocess.run(['cargo','build','-q'],cwd=ROOT,check=True)
+ ensure_assembly('samples/Counter','counter')
+ ensure_assembly('samples/KeyOperations','keys')
+ with tempfile.TemporaryDirectory(prefix='microcard-') as td:
+  td=pathlib.Path(td);keys=td/'management.key';keys.write_bytes(os.urandom(32));keys.chmod(0o600)
+  c=Client(keys,td/'state')
+  select=bytes.fromhex('00A4040008A000000151000000');fci=c.raw(select)
+  assert fci[:4]==bytes.fromhex('6F368408') and bytes.fromhex('A000000151000000') in fci and bytes.fromhex('2A864886FC6B040320') in fci and fci[-2:]==b'\x90\x00'
+  card_data=c.raw(bytes.fromhex('80CA006600'));assert card_data[:4]==bytes.fromhex('66267324') and card_data[-2:]==b'\x90\x00'
+  assert c.raw(bytes.fromhex('80CA9F7F00'))==b'\x6a\x88'
+  c.connect();bootstrap_isd(c)
+  isd=c.command(0xf2,b'\x4f\x00',p1=0x80,p2=0x02);assert isd[:4]==b'\xe3\x13\x4f\x08' and bytes.fromhex('A000000151000000') in isd
+  inc=c.command(0xe0,b'team');assert len(inc)==16
+  subprocess.run([SIM,'keygen',td/'signing.seed'],check=True)
+  subprocess.run([SIM,'pack',ROOT/'work/counter.mca',ROOT/'work/counter.json','team',inc.hex(),'1',td/'signing.seed',td/'counter.mcp','--explicit-sign'],check=True)
+  package=(td/'counter.mcp').read_bytes();c.command(0xe6)
+  capabilities=json.loads((ROOT/'work/counter.json').read_text())['capabilities'];assert len(capabilities)>1
+  denied=domain_policy('team',capabilities[:-1]);c.command(0xe1,denied);assert c.command(0xe3,b'team')==denied[:1]+denied[6:]
+  for offset in range(0,len(package),200):c.command(0xe8,offset.to_bytes(4,'little')+package[offset:offset+200])
+  c.command(0xea,status=0x6985);inventory=c.command(0xe2,b'\x01');assert inventory[4+inventory[3]+16]==0
+  allowed=domain_policy('team',capabilities);c.command(0xe1,allowed);assert c.command(0xe3,b'team')==allowed[:1]+allowed[6:];c.command(0xe6)
+  for offset in range(0,len(package),200):
+   chunk=offset.to_bytes(4,'little')+package[offset:offset+200];c.command(0xe8,chunk);c.command(0xe8,chunk) # idempotent retry
+  subprocess.run(['dotnet',ROOT/'managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll',ROOT/'work/counter.mca',ROOT/'work/counter.json','team',inc.hex(),'1',td/'signing.seed',td/'dotnet.mcp','--explicit-sign'],check=True)
+  assert (td/'dotnet.mcp').read_bytes()==package,'Rust/.NET signatures differ'
+  c.command(0xea);c.command(0xec,b'["team","F04D430001"]')
+  first=c.command(0xf2,b'\x4f\x00',status=0x6310,p1=0x40,p2=0x02);assert first[0]==0xe3 and b'\xc5\x03\x80\x00\x00' in first
+  second=c.command(0xf2,b'\x4f\x00',p1=0x40,p2=0x03);assert second[0]==0xe3 and bytes.fromhex('F04D430001') in second
+  c.command(0xa4,bytes.fromhex('F04D430001'))
+  assert c.command(0x10)==b'\x01';assert c.command(0x10)==b'\x02'
+  c.command(0xec,b'["team","F04D430002"]');c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
+  c.command(0xec,b'["team","F04D430003"]');c.command(0xa4,bytes.fromhex('F04D430003'));assert c.command(0x10,b'X')==b'X'
+  c.command(0xec,b'["team","F04D430004"]');c.command(0xa4,bytes.fromhex('F04D430004'));assert c.command(0x10)==hashlib.sha256(b'a').digest()[:1]
+  c.close()
+  c=Client(keys,td/'state');c.connect();c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
+  c.command(0xa4,bytes.fromhex('F04D430001'));assert c.command(0x10)==b'\x03'
+  replay=c.encode(0x10);r=c.raw(replay);assert r[-2:]==b'\x90\x00';assert c.raw(replay)==b'\x69\x82';assert c.raw(c.encode(0x10))==b'\x69\x82'
+  for level in [1,3,0x11]:
+   c.connect(level);c.command(0xe0,b'forbidden',0x6985)
+  c.connect();bad=bytearray(c.encode(0xe0,b'bad'));bad[-1]^=1;assert c.raw(bad)==b'\x69\x82'
+  c.connect();c.command(0xe4,b'team');c.command(0x10,status=0x6982);c.close()
+ # A separate state keeps the four-instance quota explicit.
+ with tempfile.TemporaryDirectory(prefix='microcard-keys-') as td:
+  td=pathlib.Path(td);keys=td/'management.key';keys.write_bytes(os.urandom(32));keys.chmod(0o600)
+  c=Client(keys,td/'state');c.connect();bootstrap_isd(c);inc=c.command(0xe0,b'keys')
+  subprocess.run([SIM,'keygen',td/'signing.seed'],check=True)
+  subprocess.run([SIM,'pack',ROOT/'work/keys.mca',ROOT/'work/keys.json','keys',inc.hex(),'1',td/'signing.seed',td/'keys.mcp','--explicit-sign'],check=True)
+  package=(td/'keys.mcp').read_bytes();c.command(0xe6)
+  for offset in range(0,len(package),200):c.command(0xe8,offset.to_bytes(4,'little')+package[offset:offset+200])
+  c.command(0xea);c.command(0xec,b'["keys","F04D430010"]');c.command(0xec,b'["keys","F04D430011"]');c.command(0xec,b'["keys","F04D430012"]')
+  c.command(0xa4,bytes.fromhex('F04D430010'));tag=c.command(0x10,b'\x00');assert len(tag)==32
+  aes_tag=c.command(0x10,b'\x01');assert len(aes_tag)==16
+  assert c.command(0x10,b'\x02')==b'a';assert c.command(0x10,b'\x03')==b'a'
+  # Test oracle reads only this temporary simulator's framework state, never a device or production keys.
+  management_keys=keys.read_bytes()
+  storage_key=cmac(management_keys[:16],b'MicroCard journal AEAD v1\0'+management_keys[16:])
+  snapshots=[]
+  for file in (td/'state').glob('slot*.bin'):
+   raw=file.read_bytes();generation=int.from_bytes(raw[4:12],'little');n=int.from_bytes(raw[12:16],'little')
+   if raw[:4]==b'MJ02' and raw[-1]==0 and 16<=n<=len(raw)-19:
+    nonce=b'MCJNL'+generation.to_bytes(8,'little')
+    try: plaintext=AESCCM(storage_key,tag_length=16).decrypt(nonce,raw[16:16+n],raw[:16])
+    except Exception: continue
+    snapshots.append((generation,json.loads(plaintext)))
+  state=max(snapshots,key=lambda x:x[0])[1]['domains']['keys'];entries=state['keys']['entries']
+  import hmac
+  assert tag==hmac.digest(bytes(entries['0']['key']),b'a','sha256')
+  assert aes_tag==cmac(bytes(entries['1']['key'][:16]),b'a')
+  assert list(state['store'].keys())==['10'],'key material leaked into application store'
+  c.command(0xa4,bytes.fromhex('F04D430011'));assert c.command(0x10)==tag
+  c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x02')==b'\x00';c.command(0x10,b'\x00');assert c.command(0x10,b'\x02')==b'\x01';assert c.command(0x10,b'\x01')==b'blo';c.close()
+  c=Client(keys,td/'state');c.connect();c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x01')==b'blo';c.command(0x10,b'\x03');assert c.command(0x10,b'\x02')==b'\x00'
+  c.command(0x10,b'\x04',status=0x6982) # failed invocation must roll back its byte-record write
+  c.connect();c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x05')==b'\x00'
+  c.command(0xa4,bytes.fromhex('F04D430010'));assert c.command(0x10,b'\x00')==tag
+  c.command(0x10,b'\x04',status=0x6982) # stale handle faults and rolls back delete/generate
+  c.connect();c.command(0xa4,bytes.fromhex('F04D430010'));assert c.command(0x10,b'\x00')==tag
+  c.command(0xe4,b'keys');new=c.command(0xe0,b'keys');assert new!=inc;c.close()
+ print('PASS: persistent keys and byte records, independent HMAC/CMAC oracle, CBC/CCM, sharing, reboot, transaction rollback and deletion')
+ print('PASS: independent SCP03 levels, encrypted signed upload, retry, install, counter, reboot, replay, MAC failure and deletion')
+if __name__=='__main__': main()

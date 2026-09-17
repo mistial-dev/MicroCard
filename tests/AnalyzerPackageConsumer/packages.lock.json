@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "MicroCard.AnalyzerBridge.Test": {
+        "type": "Direct",
+        "requested": "[0.1.0, )",
+        "resolved": "0.1.0",
+        "contentHash": "DBT2L5acwUgd0U9e/u+AGU6kmTJ2wgq4v2NM92aF0iZsU+v+S2biSW0beKmfRuqgzreqbPZuwhc6wE9PkvY8Yg==",
+        "dependencies": {
+          "MicroCard.Analyzers": "0.1.0"
+        }
+      },
+      "MicroCard.Analyzers": {
+        "type": "Transitive",
+        "resolved": "0.1.0",
+        "contentHash": "/A/6Y6XVN2Zhmx+TYY6wsa0DGNsyNVyx6u3rkHvOHmgKp5HlMXRpf8HamzMsyuxsm9sOryyH5dHfG1VUxvDPGw=="
+      }
+    }
+  }
+}

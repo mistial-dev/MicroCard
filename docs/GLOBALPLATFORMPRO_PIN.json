@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "project": "GlobalPlatformPro",
+  "repository": "https://github.com/martinpaljak/GlobalPlatformPro",
+  "release": "v25.10.20",
+  "release_url": "https://github.com/martinpaljak/GlobalPlatformPro/releases/tag/v25.10.20",
+  "published_at": "2025-10-20T13:04:09Z",
+  "prerelease": false,
+  "annotated_tag_object": "96a29ce4c14bef0b3aee33ea6cec61cc4a36fcae",
+  "tag_target_commit": "72f85b982c8eb2f0de34691a8c7e1771412a5349",
+  "github_tag_verification": "verified",
+  "asset": {
+    "name": "gp.jar",
+    "url": "https://github.com/martinpaljak/GlobalPlatformPro/releases/download/v25.10.20/gp.jar",
+    "size": 14840623,
+    "sha256": "c88e0c5093032ec4571571f5397b6174e56bf632667950fa5bb716338534b122"
+  },
+  "jar_manifest": {
+    "last_commit_id": "72f85b982c8eb2f0de34691a8c7e1771412a5349",
+    "last_commit_time": "2025-10-20T13:02:30Z",
+    "reproducible_build": true,
+    "main_class": "pro.javacard.gptool.GPTool"
+  },
+  "license": "LGPL-3.0",
+  "license_url": "https://github.com/martinpaljak/GlobalPlatformPro/blob/v25.10.20/LICENSE"
+}

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+    <MicroCardDisableAnalyzer>true</MicroCardDisableAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../managed/MicroCard.Framework/MicroCard.Framework.csproj" />
+  </ItemGroup>
+  <Import Project="../../build/MicroCard.targets" />
+</Project>

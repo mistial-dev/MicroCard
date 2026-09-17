@@ -1,0 +1,22 @@
+{
+  "format": "MC04",
+  "schema_major": 2,
+  "schema_minor": 0,
+  "sections": [
+    { "id": 1, "name": "Tables", "ecma": "II.24.2" },
+    { "id": 2, "name": "Strings", "ecma": "II.24.2.3" },
+    { "id": 3, "name": "Blob", "ecma": "II.24.2.4" },
+    { "id": 4, "name": "Code", "ecma": "II.25.4.6" }
+  ],
+  "tables": [
+    { "id": 0, "name": "Module", "ecma": "II.22.30", "max_rows": 1, "columns": [["Name", "string"]] },
+    { "id": 1, "name": "TypeRef", "ecma": "II.22.38", "max_rows": 256, "columns": [["ResolutionScope", "coded:ResolutionScope"], ["TypeName", "string"], ["TypeNamespace", "string"]] },
+    { "id": 2, "name": "TypeDef", "ecma": "II.22.37", "max_rows": 253, "columns": [["Flags", "u32"], ["TypeName", "string"], ["TypeNamespace", "string"], ["Extends", "coded:TypeDefOrRef"], ["FieldList", "table:4"], ["MethodList", "table:6"]] },
+    { "id": 4, "name": "Field", "ecma": "II.22.15", "max_rows": 1022, "columns": [["Flags", "u16"], ["Name", "string"], ["Signature", "blob"]] },
+    { "id": 6, "name": "MethodDef", "ecma": "II.22.26", "max_rows": 256, "columns": [["CodeOffset", "u32"], ["ImplFlags", "u16"], ["Flags", "u16"], ["Name", "string"], ["Signature", "blob"]] },
+    { "id": 10, "name": "MemberRef", "ecma": "II.22.25", "max_rows": 256, "columns": [["Class", "coded:MemberRefParent"], ["Name", "string"], ["Signature", "blob"]] },
+    { "id": 12, "name": "CustomAttribute", "ecma": "II.22.10", "max_rows": 256, "columns": [["Parent", "coded:HasCustomAttribute"], ["Type", "coded:CustomAttributeType"], ["Value", "blob"]] },
+    { "id": 32, "name": "Assembly", "ecma": "II.22.2", "max_rows": 1, "columns": [["MajorVersion", "u16"], ["MinorVersion", "u16"], ["BuildNumber", "u16"], ["RevisionNumber", "u16"], ["Flags", "u32"], ["Name", "string"]] },
+    { "id": 35, "name": "AssemblyRef", "ecma": "II.22.5", "max_rows": 17, "columns": [["MajorVersion", "u16"], ["MinorVersion", "u16"], ["BuildNumber", "u16"], ["RevisionNumber", "u16"], ["Flags", "u32"], ["PublicKeyOrToken", "blob"], ["Name", "string"], ["Culture", "string"], ["HashValue", "blob"]] }
+  ]
+}

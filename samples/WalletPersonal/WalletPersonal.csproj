@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MicroCard.Samples.Wallet</RootNamespace>
+    <AssemblyName>WalletPersonal</AssemblyName>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <Version>0.1.0</Version>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Wallet/Credential.cs" Link="Credential.cs" />
+    <ProjectReference Include="../../managed/MicroCard.Framework/MicroCard.Framework.csproj" />
+    <ProjectReference Include="../../managed/MicroCard.Cryptography/MicroCard.Cryptography.csproj" />
+    <ProjectReference Include="../../managed/MicroCard.Security/MicroCard.Security.csproj" />
+  </ItemGroup>
+  <Import Project="../../build/MicroCard.targets" />
+</Project>

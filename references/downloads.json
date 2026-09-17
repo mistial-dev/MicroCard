@@ -1,0 +1,32 @@
+[
+  {
+    "file": "ECMA-335_6th_edition_june_2012.pdf",
+    "url": "https://ecma-international.org/wp-content/uploads/ECMA-335_6th_edition_june_2012.pdf",
+    "sha256": "8c1decf6d482f020776a12dd601537e024d5d5f30df130a3ea3bbf3c51adb1d6"
+  },
+  {
+    "file": "ECMA-334_7th_edition_december_2023.pdf",
+    "url": "https://ecma-international.org/wp-content/uploads/ECMA-334_7th_edition_december_2023.pdf",
+    "sha256": "7797c1d995dd7791683cb4f2dfd758cc1bfd22150b5234487fffe43e9b3e3ab0"
+  },
+  {
+    "file": "NIST.SP.800-108r1-upd1.pdf",
+    "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-108r1-upd1.pdf",
+    "sha256": "7f7603e92a69590acd4330a5c6193b6b3093b87a5387b124a1050f4d25a10e07"
+  },
+  {
+    "file": "GPC_2.3_D_SCP03_v1.1.2_PublicRelease.pdf",
+    "url": "https://globalplatform.org/wp-content/uploads/2014/07/GPC_2.3_D_SCP03_v1.1.2_PublicRelease.pdf",
+    "sha256": "973a10834f7fe8befd98da9af65393622234b80745092bd85248804c57b648dd"
+  },
+  {
+    "file": "NIST.SP.800-38B.pdf",
+    "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-38B.pdf",
+    "sha256": "da9dc0f1e1f08af917caf4a831a7497cf18997b8046353af89570a812f1ec5a2"
+  },
+  {
+    "file": "NIST-CCM-CAVP-test-vectors.zip",
+    "url": "https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/ccmtestvectors.zip",
+    "sha256": "0e3c96761bd8f1a0b4dfe666146c32f7d367a49968375ff091b8da9ecaa673aa"
+  }
+]

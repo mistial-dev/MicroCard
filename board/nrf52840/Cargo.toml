@@ -1,0 +1,32 @@
+[package]
+name = "microcard-nrf52840"
+version = "0.1.0-wip"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+[features]
+default = ["development-debug"]
+development-debug = []
+usb-ccid = ["dep:nrf-usbd", "dep:usb-device"]
+cc310-sha256 = []
+cc310-entropy = ["cc310-sha256"]
+cc310-cmac = ["cc310-entropy"]
+cc310-hmac = ["cc310-entropy"]
+cc310-aes = ["cc310-entropy"]
+cc310-cbc = ["cc310-aes"]
+cc310-ccm = ["cc310-aes"]
+cc310-p256 = ["cc310-entropy"]
+
+[dependencies]
+microcard-core = { path = "../../crates/microcard-core" }
+cortex-m = {version="0.7", features=["critical-section-single-core"]}
+cortex-m-rt = "0.7"
+embedded-alloc = "0.6"
+nrf-usbd = { version = "0.3.0", optional = true }
+usb-device = { version = "0.3.2", optional = true }
+[build-dependencies]
+sha2 = "0.10"
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
