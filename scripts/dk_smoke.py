@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Post-flash UART smoke test. Does not flash, erase, recover or reset a device."""
 import argparse,os,pathlib,select,termios,time,subprocess,tempfile
-from scp03_acceptance import Client,ROOT,SIM
+from scp03_acceptance import Client,ROOT,SIM,bootstrap_isd
 class SerialClient(Client):
  def __init__(self,keys,port):
   self.keys=pathlib.Path(keys).read_bytes()
@@ -30,7 +30,10 @@ def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--port',required=True);parser.add_argument('--management-key',required=True);parser.add_argument('--signing-seed',required=True);parser.add_argument('--domain',required=True,help='new SSD identifier; an existing domain is never deleted');a=parser.parse_args()
  c=SerialClient(a.management_key,a.port)
  try:
-  c.connect();inc=c.command(0xe0,a.domain.encode())
+  c.connect()
+  # A freshly flashed card has no ISD owner, so SSD creation would fail closed.
+  bootstrap_isd(c,pathlib.Path(a.signing_seed).read_bytes())
+  inc=c.command(0xe0,a.domain.encode())
   with tempfile.TemporaryDirectory(prefix='microcard-dk-') as td:
    package=pathlib.Path(td)/'keys.mcp'
    subprocess.run([SIM,'pack',ROOT/'work/keys.mca',ROOT/'work/keys.json',a.domain,inc.hex(),'1',a.signing_seed,package,'--explicit-sign'],check=True)
