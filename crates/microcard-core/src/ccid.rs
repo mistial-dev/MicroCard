@@ -35,6 +35,13 @@ pub const ERROR_BAD_LEVEL_PARAMETER: u8 = 8;
 pub const ERROR_COMMAND_NOT_SUPPORTED: u8 = 0;
 pub const ERROR_COMMAND_ABORTED: u8 = 0xff;
 pub const ERROR_ICC_MUTE: u8 = 0xfe;
+/// `bPowerSelect` of `PC_to_RDR_IccPowerOn`, CCID 1.1 §6.1.1. Offset 7 carries the
+/// requested class rather than a reserved byte. A reader advertising automatic voltage
+/// selection may still be asked for a specific class, and `bVoltageSupport` in the
+/// functional descriptor claims all three, so every defined value is accepted. The card
+/// is virtual, so the selected class has no effect.
+pub const POWER_SELECT_AUTOMATIC: u8 = 0x00;
+pub const POWER_SELECT_1V8: u8 = 0x03;
 pub const ERROR_SLOT_BUSY: u8 = 0xe0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -295,7 +302,11 @@ pub fn decode(input: &[u8]) -> Result<Command<'_>> {
     let parameters = header.parameters;
     let data = &input[HEADER_BYTES..];
     match header.message_type {
-        PC_TO_RDR_ICC_POWER_ON if data.is_empty() && parameters == [0, 0, 0] => {
+        PC_TO_RDR_ICC_POWER_ON
+            if data.is_empty()
+                && parameters[0] <= POWER_SELECT_1V8
+                && parameters[1..] == [0, 0] =>
+        {
             Ok(Command::PowerOn { sequence })
         }
         PC_TO_RDR_ICC_POWER_OFF if data.is_empty() && parameters == [0, 0, 0] => {
@@ -486,13 +497,25 @@ mod tests {
             error_code(parse_header(&wrong_slot).unwrap(), &Error::Missing),
             5
         );
+        // bPowerSelect occupies offset 7 of IccPowerOn, so every class defined by
+        // CCID 1.1 is accepted while the two RFU bytes after it must stay zero.
+        for select in POWER_SELECT_AUTOMATIC..=POWER_SELECT_1V8 {
+            assert_eq!(
+                decode(&message(0x62, 1, [select, 0, 0], &[])),
+                Ok(Command::PowerOn { sequence: 1 })
+            );
+        }
         assert_eq!(
-            decode(&message(0x62, 1, [1, 0, 0], &[])),
+            decode(&message(0x62, 1, [POWER_SELECT_1V8 + 1, 0, 0], &[])),
+            Err(Error::Format)
+        );
+        assert_eq!(
+            decode(&message(0x62, 1, [0, 1, 0], &[])),
             Err(Error::Format)
         );
         assert_eq!(
             error_code(
-                parse_header(&message(0x62, 1, [1, 0, 0], &[])).unwrap(),
+                parse_header(&message(0x62, 1, [0, 0, 1], &[])).unwrap(),
                 &Error::Format
             ),
             7
