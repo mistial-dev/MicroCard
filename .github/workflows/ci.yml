@@ -42,3 +42,6 @@ jobs:
       - name: nRF52840 release link
         run: cargo build --release --locked
         working-directory: board/nrf52840
+      - name: nRF52840 USB CCID link
+        run: cargo build --release --locked --features usb-ccid
+        working-directory: board/nrf52840

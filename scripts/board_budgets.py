@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build both nRF52840 variants with the board linker config and enforce size budgets."""
+"""Build the nRF52840 variants with the board linker config and enforce size budgets."""
 import argparse
 import json
 import pathlib
@@ -39,6 +39,7 @@ def main():
     variants = {
         "production": measure(["--no-default-features"]),
         "development_debug": measure([]),
+        "usb_ccid": measure(["--features", "usb-ccid"]),
     }
     for name, result in variants.items():
         for field, ceiling in CEILINGS.items():
@@ -54,8 +55,9 @@ def main():
     else:
         DESTINATION.write_text(output)
     print(
-        "PASS: nRF52840 production and development-debug flash/RAM budgets "
-        f"({variants['development_debug']['text_bytes']} text bytes development)"
+        "PASS: nRF52840 production, development-debug and USB CCID flash/RAM budgets "
+        f"({variants['development_debug']['text_bytes']} text bytes development, "
+        f"{variants['usb_ccid']['text_bytes']} with USB CCID)"
     )
 
 

@@ -21,6 +21,16 @@
         "data_bytes": 0,
         "bss_bytes": 200000
       }
+    },
+    "usb_ccid": {
+      "text_bytes": 337012,
+      "data_bytes": 0,
+      "bss_bytes": 197224,
+      "ceilings": {
+        "text_bytes": 350000,
+        "data_bytes": 0,
+        "bss_bytes": 200000
+      }
     }
   }
 }
