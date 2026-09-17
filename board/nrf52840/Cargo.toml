@@ -6,7 +6,7 @@ license = "AGPL-3.0-or-later"
 [features]
 default = ["development-debug"]
 development-debug = []
-usb-ccid = ["dep:nrf-usbd", "dep:usb-device"]
+usb-ccid = ["dep:nrf52840-hal", "dep:usb-device", "dep:usbd-ccid", "dep:heapless", "dep:interchange"]
 cc310-sha256 = []
 cc310-entropy = ["cc310-sha256"]
 cc310-cmac = ["cc310-entropy"]
@@ -21,8 +21,11 @@ microcard-core = { path = "../../crates/microcard-core" }
 cortex-m = {version="0.7", features=["critical-section-single-core"]}
 cortex-m-rt = "0.7"
 embedded-alloc = "0.6"
-nrf-usbd = { version = "0.3.0", optional = true }
+nrf52840-hal = { version = "0.19", optional = true }
 usb-device = { version = "0.3.2", optional = true }
+usbd-ccid = { version = "0.5.0", optional = true }
+heapless = { version = "0.9", optional = true }
+interchange = { version = "0.3", optional = true }
 [build-dependencies]
 sha2 = "0.10"
 [profile.release]

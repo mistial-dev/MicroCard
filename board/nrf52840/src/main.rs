@@ -19,6 +19,12 @@ use microcard_core::{
     Error, Result,
 };
 #[cfg(feature = "usb-ccid")]
+use nrf52840_hal::{
+    clocks::{Clocks, ExternalOscillator, Internal, LfOscStopped},
+    pac,
+    usbd::UsbPeripheral,
+};
+#[cfg(feature = "usb-ccid")]
 use usb_device::{
     bus::UsbBusAllocator,
     device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
@@ -46,16 +52,31 @@ const OWNERSHIP_MARKER_OFFSET: usize = 32;
 #[cfg(feature = "usb-ccid")]
 type BoardUsbDevice = UsbDevice<'static, usb_ccid::UsbBus>;
 #[cfg(feature = "usb-ccid")]
-type BoardCcidClass = usb_ccid::CcidClass<'static, usb_ccid::UsbBus>;
+type BoardCcidClass = usb_ccid::CcidClass<'static>;
+/// APDUs cross between the CCID class and the runtime through this channel. It is
+/// static because both halves are held for the lifetime of the USB stack.
+#[cfg(feature = "usb-ccid")]
+static APDU_CHANNEL: usb_ccid::ApduChannel = interchange::Channel::new();
 
 #[cfg(feature = "usb-ccid")]
-fn initialize_usb() -> Option<(BoardUsbDevice, BoardCcidClass)> {
-    let allocator = cortex_m::singleton!(
-        : UsbBusAllocator<usb_ccid::UsbBus> =
-            UsbBusAllocator::new(usb_ccid::UsbBus::new(usb_ccid::BoardUsbd))
+fn initialize_usb() -> Option<(BoardUsbDevice, BoardCcidClass, usb_ccid::ApduResponder<'static>)> {
+    let peripherals = pac::Peripherals::take()?;
+    // Taking the external oscillator by value is what lets `UsbPeripheral` exist at all,
+    // so an image that forgets the crystal fails to compile rather than to enumerate.
+    let clocks = cortex_m::singleton!(
+        : Clocks<ExternalOscillator, Internal, LfOscStopped> =
+            Clocks::new(peripherals.CLOCK).enable_ext_hfosc()
     )?;
-    let class = BoardCcidClass::new(allocator);
-    let strings = [StringDescriptors::new(LangID::EN)
+    let allocator = cortex_m::singleton!(
+        : UsbBusAllocator<usb_ccid::UsbBus> = UsbBusAllocator::new(usb_ccid::UsbBus::new(
+            UsbPeripheral::new(peripherals.USBD, clocks)
+        ))
+    )?;
+    let (requester, responder) = APDU_CHANNEL.split()?;
+    let class = BoardCcidClass::new(allocator, requester, None);
+    // Hosts conventionally request strings with EN_US rather than neutral EN, and
+    // usb-device matches the requested identifier exactly.
+    let strings = [StringDescriptors::new(LangID::EN_US)
         .manufacturer("MicroCard")
         .product("MicroCard virtual smart card")];
     let device = UsbDeviceBuilder::new(allocator, UsbVidPid(usb_ccid::USB_VID, usb_ccid::USB_PID))
@@ -65,7 +86,7 @@ fn initialize_usb() -> Option<(BoardUsbDevice, BoardCcidClass)> {
         .ok()?
         .device_release(0x0100)
         .build();
-    Some((device, class))
+    Some((device, class, responder))
 }
 const WDT: usize = 0x40010000;
 fn now() -> u32 {
@@ -1666,7 +1687,8 @@ fn main() -> ! {
         cortex_m::asm::isb();
     }
     #[cfg(feature = "usb-ccid")]
-    let mut usb_stack: Option<(BoardUsbDevice, BoardCcidClass)> = None;
+    let mut usb_stack: Option<(BoardUsbDevice, BoardCcidClass, usb_ccid::ApduResponder<'static>)> =
+        None;
     #[cfg(feature = "usb-ccid")]
     let mut usb_was_powered = false;
     let mut command = [0; MAX_SHORT_COMMAND_BYTES];
@@ -1677,46 +1699,38 @@ fn main() -> ! {
             if powered && usb_stack.is_none() {
                 usb_stack = initialize_usb();
                 usb_was_powered = usb_stack.is_some();
+                if usb_was_powered {
+                    // Building the device enabled USBD and raised the pull-up. Re-attach
+                    // once the supply regulator reports ready, bounded so a regulator
+                    // that never settles cannot wedge the management transport.
+                    let start = now();
+                    usb_ccid::attach_when_regulator_ready(|| {
+                        feed();
+                        now().wrapping_sub(start) > 100_000
+                    });
+                }
             }
-            if let Some((device, class)) = usb_stack.as_mut() {
+            if let Some((device, class, responder)) = usb_stack.as_mut() {
                 if powered {
                     if !usb_was_powered {
                         let _ = device.force_reset();
                         usb_was_powered = true;
                     }
                     let _ = device.poll(&mut [class]);
-                    if class.take_session_reset() {
-                        endpoint.reset();
-                    }
-                    let pending = class.pending_apdu().map(|(sequence, apdu)| {
-                        let length = apdu.len();
-                        command[..length].copy_from_slice(apdu);
-                        (sequence, length)
-                    });
-                    if let Some((sequence, length)) = pending {
-                        let response = endpoint.exchange_with_cancel(
-                            &command[..length],
-                            &mut || {
-                                if !usb_ccid::power_ready() {
-                                    class.disconnect();
-                                    return true;
-                                }
-                                let _ = device.poll(&mut [class]);
-                                class.execution_cancelled(sequence)
-                            },
-                        );
-                        if class.execution_cancelled(sequence) {
-                            let _ = class.acknowledge_cancelled(sequence);
-                        } else if class.abort_pending(sequence) {
-                            // The VM has stopped; keep the slot blocked until the
-                            // matching second abort half arrives.
-                        } else if class.complete_apdu(sequence, &response).is_err() {
-                            let _ =
-                                class.fail_apdu(sequence, microcard_core::ccid::ERROR_ICC_MUTE);
+                    // One APDU is in flight at a time, so the runtime answers it
+                    // synchronously and hands the reply straight back to the class.
+                    if let Some(request) = responder.take_request() {
+                        let reply = endpoint.exchange_with_cancel(&request, &mut || {
+                            feed();
+                            !usb_ccid::power_ready()
+                        });
+                        let mut outgoing = heapless::Vec::new();
+                        if outgoing.extend_from_slice(&reply).is_ok() {
+                            let _ = responder.respond(outgoing);
                         }
                     }
+                    class.check_for_app_response();
                 } else if usb_was_powered {
-                    class.disconnect();
                     endpoint.reset();
                     usb_was_powered = false;
                 }

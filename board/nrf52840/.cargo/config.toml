@@ -2,3 +2,9 @@
 target = "thumbv7em-none-eabihf"
 [target.thumbv7em-none-eabihf]
 rustflags = ["-C", "link-arg=-Tlink.x"]
+# Development USB identity. 0x20A0/0x430A is a shared pid.codes USB-HOBBY allocation.
+# It is not a distributed-product identity. A distributed build supplies its own pair
+# through these same variables, which build.rs reads and refuses when unset or zero.
+[env]
+MICROCARD_USB_VID = { value = "0x20A0", force = false }
+MICROCARD_USB_PID = { value = "0x430A", force = false }
