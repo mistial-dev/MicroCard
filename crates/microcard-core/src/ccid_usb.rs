@@ -938,4 +938,50 @@ mod tests {
             Err(Error::Missing)
         );
     }
+    #[test]
+    fn controller_accepts_consecutive_transfers_after_unsupported_commands() {
+        // Replays the opening sequence macOS sends: slot status, power on with a
+        // specific voltage class, two commands this profile does not implement, then
+        // three back to back transfers. A reader that answers only the first transfer
+        // looks to a host like a five second timeout on every later command.
+        let mut controller = Controller::new();
+        let mut output = [0u8; ccid::MAX_RESPONSE_MESSAGE_BYTES];
+        let mut assembler = BulkOutAssembler::default();
+
+        for message in [
+            command(ccid::PC_TO_RDR_GET_SLOT_STATUS, 0, &[]),
+            {
+                let mut power = command(ccid::PC_TO_RDR_ICC_POWER_ON, 1, &[]);
+                power[7] = 1;
+                power
+            },
+            command(0x6c, 2, &[]),
+            command(0x73, 255, &[0; 8]),
+        ] {
+            assert!(assembler.push(&message).expect("push").is_some());
+            let answered = matches!(
+                controller.handle_bulk(assembler.message().expect("message"), &mut output),
+                Ok(ControllerAction::Response { .. })
+            );
+            assembler.release();
+            assert!(answered, "every profile command must answer");
+        }
+
+        for sequence in [3u8, 4, 5] {
+            let transfer =
+                command(ccid::PC_TO_RDR_XFR_BLOCK, sequence, b"\x00\xa4\x04\x00\x00");
+            assert!(assembler.push(&transfer).expect("push").is_some());
+            let dispatched = matches!(
+                controller.handle_bulk(assembler.message().expect("message"), &mut output),
+                Ok(ControllerAction::Dispatch { .. })
+            );
+            assert!(dispatched, "transfer {sequence} was not dispatched");
+            let length = controller
+                .complete(sequence, b"\x90\x00", &mut output)
+                .expect("complete");
+            assert_eq!(length, ccid::HEADER_BYTES + 2);
+            assembler.release();
+        }
+    }
+
 }
