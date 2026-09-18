@@ -1,0 +1,1771 @@
+{
+  "source": "Java Card Platform Virtual Machine Specification, Classic Edition 3.2 (F74158_05), Table 8-1 for the opcode values and section 7.5 for the operand layout of each instruction.",
+  "note": "Operand names are the byte names the specification lists under Format, in order. A null length marks a variable-length instruction, whose size depends on its operands.",
+  "reserved": [
+    {
+      "name": "impdep1",
+      "value": 254
+    },
+    {
+      "name": "impdep2",
+      "value": 255
+    }
+  ],
+  "opcodes": [
+    {
+      "name": "nop",
+      "value": 0,
+      "section": "nop",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "aconst_null",
+      "value": 1,
+      "section": "aconst_null",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_m1",
+      "value": 2,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_0",
+      "value": 3,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_1",
+      "value": 4,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_2",
+      "value": 5,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_3",
+      "value": 6,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_4",
+      "value": 7,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sconst_5",
+      "value": 8,
+      "section": "sconst_<s>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iconst_m1",
+      "value": 9,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iconst_0",
+      "value": 10,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iconst_1",
+      "value": 11,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iconst_2",
+      "value": 12,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iconst_3",
+      "value": 13,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iconst_4",
+      "value": 14,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iconst_5",
+      "value": 15,
+      "section": "iconst_<i>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "bspush",
+      "value": 16,
+      "section": "bspush",
+      "operands": [
+        "byte"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "sspush",
+      "value": 17,
+      "section": "sspush",
+      "operands": [
+        "byte1",
+        "byte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "bipush",
+      "value": 18,
+      "section": "bipush",
+      "operands": [
+        "byte"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "sipush",
+      "value": 19,
+      "section": "sipush",
+      "operands": [
+        "byte1",
+        "byte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "iipush",
+      "value": 20,
+      "section": "iipush",
+      "operands": [
+        "byte1",
+        "byte2",
+        "byte3",
+        "byte4"
+      ],
+      "length": 5,
+      "int_only": true
+    },
+    {
+      "name": "aload",
+      "value": 21,
+      "section": "aload",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "sload",
+      "value": 22,
+      "section": "sload",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "iload",
+      "value": 23,
+      "section": "iload",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": true
+    },
+    {
+      "name": "aload_0",
+      "value": 24,
+      "section": "aload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "aload_1",
+      "value": 25,
+      "section": "aload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "aload_2",
+      "value": 26,
+      "section": "aload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "aload_3",
+      "value": 27,
+      "section": "aload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sload_0",
+      "value": 28,
+      "section": "sload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sload_1",
+      "value": 29,
+      "section": "sload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sload_2",
+      "value": 30,
+      "section": "sload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sload_3",
+      "value": 31,
+      "section": "sload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iload_0",
+      "value": 32,
+      "section": "iload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iload_1",
+      "value": 33,
+      "section": "iload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iload_2",
+      "value": 34,
+      "section": "iload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "iload_3",
+      "value": 35,
+      "section": "iload_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "aaload",
+      "value": 36,
+      "section": "aaload",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "baload",
+      "value": 37,
+      "section": "baload",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "saload",
+      "value": 38,
+      "section": "saload",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iaload",
+      "value": 39,
+      "section": "iaload",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "astore",
+      "value": 40,
+      "section": "astore",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "sstore",
+      "value": 41,
+      "section": "sstore",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "istore",
+      "value": 42,
+      "section": "istore",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "astore_0",
+      "value": 43,
+      "section": "astore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "astore_1",
+      "value": 44,
+      "section": "astore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "astore_2",
+      "value": 45,
+      "section": "astore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "astore_3",
+      "value": 46,
+      "section": "astore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sstore_0",
+      "value": 47,
+      "section": "sstore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sstore_1",
+      "value": 48,
+      "section": "sstore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sstore_2",
+      "value": 49,
+      "section": "sstore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sstore_3",
+      "value": 50,
+      "section": "sstore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "istore_0",
+      "value": 51,
+      "section": "istore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "istore_1",
+      "value": 52,
+      "section": "istore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "istore_2",
+      "value": 53,
+      "section": "istore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "istore_3",
+      "value": 54,
+      "section": "istore_<n>",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "aastore",
+      "value": 55,
+      "section": "aastore",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "bastore",
+      "value": 56,
+      "section": "bastore",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sastore",
+      "value": 57,
+      "section": "sastore",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iastore",
+      "value": 58,
+      "section": "iastore",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "pop",
+      "value": 59,
+      "section": "pop",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "pop2",
+      "value": 60,
+      "section": "pop2",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "dup",
+      "value": 61,
+      "section": "dup",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "dup2",
+      "value": 62,
+      "section": "dup2",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "dup_x",
+      "value": 63,
+      "section": "dup_x",
+      "operands": [
+        "mn"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "swap_x",
+      "value": 64,
+      "section": "swap_x",
+      "operands": [
+        "mn"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "sadd",
+      "value": 65,
+      "section": "sadd",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iadd",
+      "value": 66,
+      "section": "iadd",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "ssub",
+      "value": 67,
+      "section": "ssub",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "isub",
+      "value": 68,
+      "section": "isub",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "smul",
+      "value": 69,
+      "section": "smul",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "imul",
+      "value": 70,
+      "section": "imul",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sdiv",
+      "value": 71,
+      "section": "sdiv",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "idiv",
+      "value": 72,
+      "section": "idiv",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "srem",
+      "value": 73,
+      "section": "srem",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "irem",
+      "value": 74,
+      "section": "irem",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sneg",
+      "value": 75,
+      "section": "sneg",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "ineg",
+      "value": 76,
+      "section": "ineg",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sshl",
+      "value": 77,
+      "section": "sshl",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "ishl",
+      "value": 78,
+      "section": "ishl",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sshr",
+      "value": 79,
+      "section": "sshr",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "ishr",
+      "value": 80,
+      "section": "ishr",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sushr",
+      "value": 81,
+      "section": "sushr",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iushr",
+      "value": 82,
+      "section": "iushr",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sand",
+      "value": 83,
+      "section": "sand",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "iand",
+      "value": 84,
+      "section": "iand",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sor",
+      "value": 85,
+      "section": "sor",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "ior",
+      "value": 86,
+      "section": "ior",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sxor",
+      "value": 87,
+      "section": "sxor",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "ixor",
+      "value": 88,
+      "section": "ixor",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "sinc",
+      "value": 89,
+      "section": "sinc",
+      "operands": [
+        "index",
+        "const"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "iinc",
+      "value": 90,
+      "section": "iinc",
+      "operands": [
+        "index",
+        "const"
+      ],
+      "length": 3,
+      "int_only": true
+    },
+    {
+      "name": "s2b",
+      "value": 91,
+      "section": "s2b",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "s2i",
+      "value": 92,
+      "section": "s2i",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "i2b",
+      "value": 93,
+      "section": "i2b",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "i2s",
+      "value": 94,
+      "section": "i2s",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "icmp",
+      "value": 95,
+      "section": "icmp",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "ifeq",
+      "value": 96,
+      "section": "if<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "ifne",
+      "value": 97,
+      "section": "if<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "iflt",
+      "value": 98,
+      "section": "if<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "ifge",
+      "value": 99,
+      "section": "if<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "ifgt",
+      "value": 100,
+      "section": "if<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "ifle",
+      "value": 101,
+      "section": "if<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "ifnull",
+      "value": 102,
+      "section": "ifnull",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "ifnonnull",
+      "value": 103,
+      "section": "ifnonnull",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_acmpeq",
+      "value": 104,
+      "section": "if_acmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_acmpne",
+      "value": 105,
+      "section": "if_acmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpeq",
+      "value": 106,
+      "section": "if_scmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpne",
+      "value": 107,
+      "section": "if_scmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_scmplt",
+      "value": 108,
+      "section": "if_scmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpge",
+      "value": 109,
+      "section": "if_scmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpgt",
+      "value": 110,
+      "section": "if_scmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "if_scmple",
+      "value": 111,
+      "section": "if_scmp<cond>",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "goto",
+      "value": 112,
+      "section": "goto",
+      "operands": [
+        "branch"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "jsr",
+      "value": 113,
+      "section": "jsr",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ret",
+      "value": 114,
+      "section": "ret",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "stableswitch",
+      "value": 115,
+      "section": "stableswitch",
+      "operands": [
+        "defaultbyte1",
+        "defaultbyte2",
+        "lowbyte1",
+        "lowbyte2",
+        "highbyte1",
+        "highbyte2",
+        "jump offsets\u2026"
+      ],
+      "length": null,
+      "int_only": false
+    },
+    {
+      "name": "itableswitch",
+      "value": 116,
+      "section": "itableswitch",
+      "operands": [
+        "defaultbyte1",
+        "defaultbyte2",
+        "lowbyte1",
+        "lowbyte2",
+        "lowbyte3",
+        "lowbyte4",
+        "highbyte1",
+        "highbyte2",
+        "highbyte3",
+        "highbyte4",
+        "jump offsets\u2026"
+      ],
+      "length": null,
+      "int_only": true
+    },
+    {
+      "name": "slookupswitch",
+      "value": 117,
+      "section": "slookupswitch",
+      "operands": [
+        "defaultbyte1",
+        "defaultbyte2",
+        "npairs1",
+        "npairs2",
+        "match-offset pairs\u2026"
+      ],
+      "length": null,
+      "int_only": false
+    },
+    {
+      "name": "ilookupswitch",
+      "value": 118,
+      "section": "ilookupswitch",
+      "operands": [
+        "defaultbyte1",
+        "defaultbyte2",
+        "npairs1",
+        "npairs2",
+        "match-offset pairs\u2026"
+      ],
+      "length": null,
+      "int_only": true
+    },
+    {
+      "name": "areturn",
+      "value": 119,
+      "section": "areturn",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "sreturn",
+      "value": 120,
+      "section": "sreturn",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "ireturn",
+      "value": 121,
+      "section": "ireturn",
+      "operands": [],
+      "length": 1,
+      "int_only": true
+    },
+    {
+      "name": "return",
+      "value": 122,
+      "section": "return",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "getstatic_a",
+      "value": 123,
+      "section": "getstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getstatic_b",
+      "value": 124,
+      "section": "getstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getstatic_s",
+      "value": 125,
+      "section": "getstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getstatic_i",
+      "value": 126,
+      "section": "getstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": true
+    },
+    {
+      "name": "putstatic_a",
+      "value": 127,
+      "section": "putstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "putstatic_b",
+      "value": 128,
+      "section": "putstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "putstatic_s",
+      "value": 129,
+      "section": "putstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "putstatic_i",
+      "value": 130,
+      "section": "putstatic_<t>",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": true
+    },
+    {
+      "name": "getfield_a",
+      "value": 131,
+      "section": "getfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "getfield_b",
+      "value": 132,
+      "section": "getfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "getfield_s",
+      "value": 133,
+      "section": "getfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "getfield_i",
+      "value": 134,
+      "section": "getfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": true
+    },
+    {
+      "name": "putfield_a",
+      "value": 135,
+      "section": "putfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "putfield_b",
+      "value": 136,
+      "section": "putfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "putfield_s",
+      "value": 137,
+      "section": "putfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "putfield_i",
+      "value": 138,
+      "section": "putfield_<t>",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": true
+    },
+    {
+      "name": "invokevirtual",
+      "value": 139,
+      "section": "invokevirtual",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "invokespecial",
+      "value": 140,
+      "section": "invokespecial",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "invokestatic",
+      "value": 141,
+      "section": "invokestatic",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "invokeinterface",
+      "value": 142,
+      "section": "invokeinterface",
+      "operands": [
+        "nargs",
+        "indexbyte1",
+        "indexbyte2",
+        "method"
+      ],
+      "length": 5,
+      "int_only": false
+    },
+    {
+      "name": "new",
+      "value": 143,
+      "section": "new",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "newarray",
+      "value": 144,
+      "section": "newarray",
+      "operands": [
+        "atype"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "anewarray",
+      "value": 145,
+      "section": "anewarray",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "arraylength",
+      "value": 146,
+      "section": "arraylength",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "athrow",
+      "value": 147,
+      "section": "athrow",
+      "operands": [],
+      "length": 1,
+      "int_only": false
+    },
+    {
+      "name": "checkcast",
+      "value": 148,
+      "section": "checkcast",
+      "operands": [
+        "atype",
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 4,
+      "int_only": false
+    },
+    {
+      "name": "instanceof",
+      "value": 149,
+      "section": "instanceof",
+      "operands": [
+        "atype",
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 4,
+      "int_only": false
+    },
+    {
+      "name": "sinc_w",
+      "value": 150,
+      "section": "sinc_w",
+      "operands": [
+        "index",
+        "byte1",
+        "byte2"
+      ],
+      "length": 4,
+      "int_only": false
+    },
+    {
+      "name": "iinc_w",
+      "value": 151,
+      "section": "iinc_w",
+      "operands": [
+        "index",
+        "byte1",
+        "byte2"
+      ],
+      "length": 4,
+      "int_only": true
+    },
+    {
+      "name": "ifeq_w",
+      "value": 152,
+      "section": "if<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ifne_w",
+      "value": 153,
+      "section": "if<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "iflt_w",
+      "value": 154,
+      "section": "if<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ifge_w",
+      "value": 155,
+      "section": "if<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ifgt_w",
+      "value": 156,
+      "section": "if<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ifle_w",
+      "value": 157,
+      "section": "if<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ifnull_w",
+      "value": 158,
+      "section": "ifnull_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "ifnonnull_w",
+      "value": 159,
+      "section": "ifnonnull_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_acmpeq_w",
+      "value": 160,
+      "section": "if_acmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_acmpne_w",
+      "value": 161,
+      "section": "if_acmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpeq_w",
+      "value": 162,
+      "section": "if_scmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpne_w",
+      "value": 163,
+      "section": "if_scmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_scmplt_w",
+      "value": 164,
+      "section": "if_scmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpge_w",
+      "value": 165,
+      "section": "if_scmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_scmpgt_w",
+      "value": 166,
+      "section": "if_scmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "if_scmple_w",
+      "value": 167,
+      "section": "if_scmp<cond>_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "goto_w",
+      "value": 168,
+      "section": "goto_w",
+      "operands": [
+        "branchbyte1",
+        "branchbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getfield_a_w",
+      "value": 169,
+      "section": "getfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getfield_b_w",
+      "value": 170,
+      "section": "getfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getfield_s_w",
+      "value": 171,
+      "section": "getfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "getfield_i_w",
+      "value": 172,
+      "section": "getfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": true
+    },
+    {
+      "name": "getfield_a_this",
+      "value": 173,
+      "section": "getfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "getfield_b_this",
+      "value": 174,
+      "section": "getfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "getfield_s_this",
+      "value": 175,
+      "section": "getfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "getfield_i_this",
+      "value": 176,
+      "section": "getfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": true
+    },
+    {
+      "name": "putfield_a_w",
+      "value": 177,
+      "section": "putfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "putfield_b_w",
+      "value": 178,
+      "section": "putfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "putfield_s_w",
+      "value": 179,
+      "section": "putfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": false
+    },
+    {
+      "name": "putfield_i_w",
+      "value": 180,
+      "section": "putfield_<t>_w",
+      "operands": [
+        "indexbyte1",
+        "indexbyte2"
+      ],
+      "length": 3,
+      "int_only": true
+    },
+    {
+      "name": "putfield_a_this",
+      "value": 181,
+      "section": "putfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "putfield_b_this",
+      "value": 182,
+      "section": "putfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "putfield_s_this",
+      "value": 183,
+      "section": "putfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": false
+    },
+    {
+      "name": "putfield_i_this",
+      "value": 184,
+      "section": "putfield_<t>_this",
+      "operands": [
+        "index"
+      ],
+      "length": 2,
+      "int_only": true
+    }
+  ]
+}

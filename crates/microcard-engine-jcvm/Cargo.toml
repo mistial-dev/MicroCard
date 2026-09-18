@@ -3,4 +3,8 @@ name = "microcard-engine-jcvm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+[features]
+# Mnemonics for error messages and tooling. A card build leaves this off, because the names
+# cost flash and nothing on the card prints them.
+diagnostics = []
 [dependencies]

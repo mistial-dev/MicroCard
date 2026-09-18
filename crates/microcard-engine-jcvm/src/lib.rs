@@ -1,9 +1,12 @@
 //! Java Card execution engine, per [docs/JCVM_PROFILE.md](../../../docs/JCVM_PROFILE.md).
 //!
-//! Only the CAP container is implemented. There is no verifier, linker or interpreter yet,
-//! and nothing on the card reaches this crate.
+//! The CAP container and the bytecode decoder are implemented. There is no linker or
+//! interpreter yet, and nothing on the card reaches this crate.
 #![no_std]
 pub mod cap;
+pub mod code;
+#[allow(dead_code)]
+mod jcvm_opcodes;
 
 /// Why a Java Card structure was refused.
 ///

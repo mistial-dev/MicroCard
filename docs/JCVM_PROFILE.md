@@ -1,23 +1,22 @@
 # Java Card profile
 
-The Java Card execution target this project commits to. The profile exists first so the loader, the verifier and the interpreter can each be judged against a written target instead of against each other.
+The target is a complete Java Card virtual machine. This document records what that means concretely, so the loader, the verifier and the interpreter can each be judged against a written target instead of against each other.
 
-Implemented so far: the CAP container in `crates/microcard-engine-jcvm`, which reads a Load File Data Block in place and refuses one that disagrees with itself. There is no verifier, linker or interpreter, and nothing on the card reaches that crate.
+OpenFIPS201 is the first applet the engine has to run, and its measurements pin the first milestone. It is a test vehicle rather than the boundary of the work. Where a number below was measured from it, the text says so, and where a feature is absent from it the engine still implements the feature.
 
-Every number below was measured from the eight release variants of the OpenPhysical fork of OpenFIPS201, which is the applet this engine has to run. Where a limit comes from that applet rather than from the specification, the table says so.
+Implemented so far: the CAP container and the bytecode decoder in `crates/microcard-engine-jcvm`. The container reads a Load File Data Block in place and refuses one that disagrees with itself. The decoder measures every instruction the specification defines and builds the instruction-boundary map. There is no linker or interpreter, and nothing on the card reaches that crate.
 
 ## Version and container
 
 | Item | Value |
 | --- | --- |
-| Java Card | Classic 3.0.5 |
+| Java Card | Classic 3.0.5 as the first target version |
 | CAP format | 2.1, compact |
-| Header flags | `0x04`, meaning an applet package |
-| 32-bit integers | absent, so the `int` opcode family is unreachable |
-| Export component | absent |
-| Extended CAP | absent |
+| Instruction set | all 185 opcodes of JCVM section 8.1, including the 32-bit integer family |
 
-Export file version 1.6 is the marker for 3.0.5. A card exporting 1.5 is a 3.0.4 card and rejects this applet at link time, so the imported version numbers are the part of the profile that decides whether the target version is real.
+Export file version 1.6 is the marker for 3.0.5. A card exporting 1.5 is a 3.0.4 card and rejects an applet built for 3.0.5 at link time, so the imported version numbers are the part of the profile that decides whether the target version is real.
+
+The first test applet declares CAP 2.1 with header flags `0x04`, which is an applet package with no 32-bit integers, no Export component and no extended layout. Those are properties of that package. A package declaring 32-bit integers is a package this engine runs, and `ACC_INT` is read as the package's own declaration of what its methods may contain.
 
 ## Imported packages
 
@@ -34,19 +33,22 @@ Six, and no others.
 
 An import resolves when its major version matches and its minor version is at least the one requested.
 
-## Out of scope
+## Order of work
 
-| Feature | Decision |
-| --- | --- |
-| Logical channels | absent. The secure channel serves the basic channel only |
-| Shareable interfaces | the owner-tag check is general, and shareable interface lookup returns an unsupported error |
-| `MultiSelectable` | absent |
-| Java Card RMI | absent |
-| Garbage collection | omitted. Every `requestObjectDeletion` in the target applet is guarded by `isObjectDeletionSupported` |
-| `jsr` and the reserved opcodes | rejected at verification |
-| The `int` opcode family | rejected at verification while 32-bit support is off |
+Nothing here is a permanent exclusion. Each row says what the engine does today and what has to happen before it does more.
 
-The first three make exactly two firewall contexts reachable, so multi-applet isolation stays unproven until a second applet exists. That limitation is recorded here rather than discovered later.
+| Feature | Today | To finish |
+| --- | --- | --- |
+| The 32-bit integer family | decoded, and refused in a package whose `ACC_INT` is clear | interpreter arms |
+| `jsr` and `ret` | decoded, and refused by policy | subroutine dataflow analysis in the verifier |
+| The reserved opcodes | refused everywhere | nothing. They cannot appear in a CAP file, JCVM section 7.2 |
+| Logical channels | absent | channel state in the secure channel and in selection |
+| Shareable interfaces | absent | cross-context invocation through the firewall |
+| `MultiSelectable` | absent | per-channel applet state |
+| Java Card RMI | absent | the remote object layer above shareable interfaces |
+| Garbage collection | absent | a compacting or mark-sweep pass over the object heap |
+
+Until shareable interfaces and multiple channels exist, exactly two firewall contexts are reachable, so multi-applet isolation stays unproven until a second applet exists. That limitation is recorded here rather than discovered later.
 
 ## Components
 
@@ -77,11 +79,13 @@ The journaled state caps a snapshot at 49,152 bytes and holds packages inside it
 
 Structural verification is mandatory and runs in one streaming pass at load. It covers the header magic and flags, directory tiling without gaps or overlaps, import resolution, applet offsets landing on method headers, class consistency through a bounded acyclic superclass walk, constant pool tags and token ranges, per-method stack and local bounds, exception handler ranges on instruction boundaries, and an instruction-boundary bitmap built by linear decode that every branch, switch and handler target is checked against.
 
+The bitmap is built already. A linear decode marks where every instruction starts, including unreachable code, so no byte of a method escapes the walk. Branch offsets are signed and count from the address of their own opcode, and a target that misses a boundary is refused. That single check removes the whole class of attacks where a jump lands on an operand byte and turns a constant into an opcode. Switch tables are measured from their own operands before anything indexes into them, and lookup switch pairs must be sorted, which is what lets a card search them.
+
 Full type and dataflow verification is deferred. In its place the operand stack and the locals carry a one-bit reference tag per slot, checked on every push and pop, which makes reference and primitive confusion unrepresentable at runtime. This is the opposite trade from the MC04 engine, which verifies hard and runs lean, and it is deliberate.
 
 ## Cryptography
 
-Required by the target applet: SHA-256 and SHA-384, ECDSA over P-256 and P-384, AES-CMAC-128, AES ECB and CBC at 128, 192 and 256, 3DES ECB, raw RSA at 1024, 2048 and 3072, EC SVDP-DH, and secure random.
+The API surface is the whole of Java Card 3.0.5. Required by the first test applet, and therefore first to be implemented: SHA-256 and SHA-384, ECDSA over P-256 and P-384, AES-CMAC-128, AES ECB and CBC at 128, 192 and 256, 3DES ECB, raw RSA at 1024, 2048 and 3072, EC SVDP-DH, and secure random.
 
 Elliptic curve domain parameters arrive from the applet as explicit field values rather than as named curves. They are matched byte for byte against committed P-256 and P-384 tables and bound to the fixed-curve backend on a match, and an unrecognised parameter set raises an illegal value error.
 
