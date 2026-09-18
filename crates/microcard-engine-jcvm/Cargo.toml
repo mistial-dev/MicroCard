@@ -8,3 +8,7 @@ license.workspace = true
 # cost flash and nothing on the card prints them.
 diagnostics = []
 [dependencies]
+[dev-dependencies]
+# The test host answers digests with a real implementation, so the engine is exercised
+# against the same answers a card would give.
+sha2.workspace = true
