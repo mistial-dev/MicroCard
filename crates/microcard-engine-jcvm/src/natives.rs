@@ -371,7 +371,7 @@ mod tests {
             frame.pop_short().unwrap();
         }
         let compare = framework("javacard/framework/Util", "arrayCompare", true);
-        let mut run = |heap: &mut Heap, frame: &mut Frame| {
+        let run = |heap: &mut Heap, frame: &mut Frame| {
             frame.push_reference(left).unwrap();
             frame.push_short(0).unwrap();
             frame.push_reference(right).unwrap();
