@@ -8,9 +8,11 @@ use crate::{Error, Result};
 
 mod directory;
 mod header;
+mod import;
 
 pub use directory::Directory;
 pub use header::Header;
+pub use import::{Import, PackageRef};
 
 /// Component tags, JCVM §6.2. The tag doubles as the position in the Directory table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -153,6 +155,14 @@ impl<'a> LoadFile<'a> {
 
     pub fn directory(&self) -> Result<Directory<'a>> {
         Directory::parse(self.directory.ok_or(Error::Format)?.info)
+    }
+
+    /// The imports, or an empty table when the package borrows nothing.
+    pub fn imports(&self) -> Result<Import<'a>> {
+        match self.component(Tag::Import) {
+            Some(component) => Import::parse(component.info),
+            None => Import::parse(&[0]),
+        }
     }
 }
 

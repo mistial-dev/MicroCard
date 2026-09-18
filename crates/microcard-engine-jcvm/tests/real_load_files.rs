@@ -9,6 +9,16 @@
 //! Produce the blocks with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
 use microcard_engine_jcvm::cap::{LoadFile, Tag};
 
+/// The six packages docs/JCVM_PROFILE.md commits to, with the versions it names.
+const PROFILE: [(&[u8], u8, u8); 6] = [
+    (&[0xa0, 0, 0, 0, 0x62, 0, 1], 1, 0),
+    (&[0xa0, 0, 0, 0, 0x62, 1, 1], 1, 6),
+    (&[0xa0, 0, 0, 0, 0x62, 1, 2], 1, 6),
+    (&[0xa0, 0, 0, 0, 0x62, 2, 1], 1, 6),
+    (&[0xa0, 0, 0, 0, 0x62, 2, 9], 1, 0),
+    (&[0xa0, 0, 0, 1, 0x51, 0], 1, 5),
+];
+
 #[test]
 fn every_supplied_load_file_parses_as_a_supported_package() {
     let Ok(directory) = std::env::var("MICROCARD_JCVM_LOAD_FILES") else {
@@ -35,6 +45,26 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
         assert_eq!(directory.applet_count, 1);
         assert_eq!(directory.import_count, 6);
         assert!(file.component(Tag::Method).is_some());
+
+        // The profile says six packages and no others, and it names the version of each.
+        // A card exporting anything less cannot link this package, which is what makes the
+        // target version real rather than a label.
+        let imports = file.imports().expect("imports");
+        assert_eq!(imports.count(), PROFILE.len());
+        for package in imports.iter() {
+            let (_, major, minor) = PROFILE
+                .iter()
+                .find(|(aid, _, _)| *aid == package.aid)
+                .unwrap_or_else(|| panic!("{}: unexpected import {:02x?}", path.display(), package.aid));
+            assert_eq!(
+                (package.major, package.minor),
+                (*major, *minor),
+                "{}: {:02x?}",
+                path.display(),
+                package.aid
+            );
+            assert!(package.satisfied_by(*major, *minor));
+        }
         // Descriptor and Debug are excluded from a Load File Data Block, and their absence
         // is why the block is a third of the archive that carried it.
         assert!(file.component(Tag::Descriptor).is_none());
