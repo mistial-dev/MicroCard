@@ -192,6 +192,7 @@ mod op {
     pub const INVOKEINTERFACE: u8 = 142;
     pub const NEW: u8 = 143;
     pub const NEWARRAY: u8 = 144;
+    pub const ANEWARRAY: u8 = 145;
     pub const ATHROW: u8 = 147;
     pub const ARRAYLENGTH: u8 = 146;
     pub const GETFIELD_A_THIS: u8 = 169;
@@ -730,9 +731,27 @@ pub fn run_body(
                 }
                 frame.push_short(info.length as i16)?
             }
+            op::ANEWARRAY => {
+                // The element class is named but not recorded. Every reference element is
+                // one word whatever it points at, and a store is checked against the
+                // object it actually finds rather than against a declared type.
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                let _ = index;
+                let length = frame.pop_short()?;
+                if length < 0 {
+                    return Err(Error::Bounds);
+                }
+                let array =
+                    machine
+                        .heap
+                        .new_array(heap::KIND_REFERENCE, length as u16, machine.context)?;
+                frame.push_reference(array)?
+            }
             op::NEWARRAY => {
-                // The type code is the same one an array header carries, JCVM Table 7-2.
-                let kind = byte(code, pc + 1)?;
+                // The instruction numbers its types from 10, JCVM Table 7-2, and the
+                // static field component numbers the same types from 2. Passing one
+                // through as the other builds an array of a type nothing can read.
+                let kind = array_kind(byte(code, pc + 1)?)?;
                 let length = frame.pop_short()?;
                 if length < 0 {
                     return Err(Error::Bounds);
@@ -1017,6 +1036,20 @@ pub fn run_body(
         }
         pc = next;
     }
+}
+
+/// The heap's element type for an array type code in the instruction set.
+///
+/// JCVM Table 7-2 numbers these from 10 while the static field component numbers the same
+/// types from 2, so the two have to be translated rather than shared.
+fn array_kind(atype: u8) -> Result<u8> {
+    Ok(match atype {
+        10 => heap::KIND_BOOLEAN,
+        11 => heap::KIND_BYTE,
+        12 => heap::KIND_SHORT,
+        13 => heap::KIND_INT,
+        _ => return Err(Error::Format),
+    })
 }
 
 /// A handler starts with an empty stack holding only the exception, JCVM §3.6.
@@ -1469,26 +1502,26 @@ mod tests {
     fn an_array_round_trips_through_the_heap() {
         // newarray byte[5], store 7 at index 1, read it back.
         let code = [
-            op::SCONST_5, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::SCONST_5, op::NEWARRAY, 11, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_1, op::BSPUSH, 7, op::BASTORE,
             op::ALOAD_0, op::SCONST_1, op::BALOAD, op::SRETURN,
         ];
         assert_eq!(short(&code), 7);
         // arraylength reads the header rather than trusting the caller.
-        let code = [op::SCONST_5, op::NEWARRAY, heap::KIND_SHORT, op::ARRAYLENGTH, op::SRETURN];
+        let code = [op::SCONST_5, op::NEWARRAY, 12, op::ARRAYLENGTH, op::SRETURN];
         assert_eq!(short(&code), 5);
     }
 
     #[test]
     fn an_index_outside_the_array_is_refused_in_both_directions() {
         let code = [
-            op::SCONST_1, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::SCONST_1, op::NEWARRAY, 11, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_1, op::BALOAD, op::SRETURN,
         ];
         assert_eq!(execute(&code, 2), Err(Error::Bounds));
         // A negative index is out of bounds rather than a large positive one.
         let code = [
-            op::SCONST_1, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::SCONST_1, op::NEWARRAY, 11, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_M1, op::BALOAD, op::SRETURN,
         ];
         assert_eq!(execute(&code, 2), Err(Error::Bounds));
@@ -1498,13 +1531,13 @@ mod tests {
     fn the_instruction_and_the_array_have_to_agree_on_the_element_type() {
         // saload on a byte array would read two bytes as one short.
         let code = [
-            op::SCONST_5, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::SCONST_5, op::NEWARRAY, 11, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_0, op::SALOAD, op::SRETURN,
         ];
         assert_eq!(execute(&code, 2), Err(Error::Type));
         // aaload on a short array would turn a number into a reference.
         let code = [
-            op::SCONST_5, op::NEWARRAY, heap::KIND_SHORT, op::ASTORE_0,
+            op::SCONST_5, op::NEWARRAY, 12, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_0, op::AALOAD, op::ARETURN,
         ];
         assert_eq!(execute(&code, 2), Err(Error::Type));
@@ -1513,7 +1546,7 @@ mod tests {
     #[test]
     fn a_reference_array_holds_references_and_says_so() {
         let code = [
-            op::SCONST_5, op::NEWARRAY, heap::KIND_REFERENCE, op::ASTORE_0,
+            op::SCONST_5, op::ANEWARRAY, 0x00, 0x00, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_0, op::ALOAD_0, op::AASTORE,
             op::ALOAD_0, op::SCONST_0, op::AALOAD, op::ARETURN,
         ];
@@ -1530,7 +1563,7 @@ mod tests {
 
     #[test]
     fn a_negative_length_array_is_refused() {
-        let code = [op::SCONST_M1, op::NEWARRAY, heap::KIND_BYTE, op::ARETURN];
+        let code = [op::SCONST_M1, op::NEWARRAY, 11, op::ARETURN];
         assert_eq!(execute(&code, 0), Err(Error::Bounds));
     }
 

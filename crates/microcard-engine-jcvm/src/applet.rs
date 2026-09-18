@@ -307,11 +307,14 @@ mod tests {
 
     /// Opcodes this test spells out, so the bytecode reads like the applet it stands for.
     mod op {
+        #[allow(dead_code)]
         pub const ACONST_NULL: u8 = 1;
         pub const SCONST_0: u8 = 3;
+        #[allow(dead_code)]
         pub const SCONST_1: u8 = 4;
         pub const SSPUSH: u8 = 17;
         pub const ALOAD_0: u8 = 24;
+        #[allow(dead_code)]
         pub const SLOAD_1: u8 = 29;
         pub const ASTORE_0: u8 = 43;
         pub const DUP: u8 = 61;
