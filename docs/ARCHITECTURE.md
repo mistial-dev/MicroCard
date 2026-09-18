@@ -44,7 +44,7 @@ The interpreter does not delegate memory safety to a package signature. A correc
 
 Persistent credential retry counters are a deliberate exception to ordinary rollback: a failed PIN attempt must not become free because later managed code faults. Retry-floor persistence is enforced below managed execution.
 
-The simulator supplies files, process I/O, host entropy and software cryptography through platform interfaces. The nRF52840 backend supplies UART, flash, hardware entropy, time, watchdog and logical GPIO. The default cryptographic provider uses Rust implementations. Optional CC310 integrations require their own physical validation. USB CCID is a transport integration with outstanding hardware interoperability work.
+The simulator supplies files, process I/O, host entropy and software cryptography through platform interfaces. The nRF52840 backend supplies UART, flash, hardware entropy, time, watchdog and logical GPIO. The default cryptographic provider uses Rust implementations. Optional CC310 integrations require their own physical validation. USB CCID has enumerated and carried secure messaging on the DK, with abort timing, disconnect and sustained throughput outstanding.
 
 The managed-code boundary assumes trusted Rust firmware. Resistance to attackers with debug access requires the production controls in [hardware results](HARDWARE_SMOKE.md) and [board requirements](BOARD_PORT_CHECKLIST.md).
 

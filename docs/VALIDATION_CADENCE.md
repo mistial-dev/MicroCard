@@ -20,6 +20,10 @@ Consolidate several related changes when practical. A source-control checkpoint 
 
 This checkpoint does not run a sustained fuzz campaign.
 
+## What continuous integration adds
+
+The workflow runs two things the checkpoint gate leaves out. `scripts/wallet_acceptance.py` builds the Java wallet and drives the whole demonstration, which is the only gate covering host code outside this repository's Python and Rust. Both nRF52840 link steps also run there. Reproduce the whole workflow locally with `act` before pushing anything that touches the wallet, a sample reader or the secure channel, because a green checkpoint gate alone has already missed a wallet failure.
+
 ## Dedicated fuzz checkpoint
 
 Build the affected fuzz target when its interface changes. During ordinary development, stop there unless a focused regression exposes a reason for a short reproducer run. Accumulate related parser, verifier, native-boundary, cryptographic-boundary and state-transition changes, then run one sustained campaign at a dedicated fuzz checkpoint or release candidate. Run no scheduled sustained campaign during ordinary development. Documentation, isolated API wiring, managed-library changes and ordinary security checkpoints do not repeat long campaigns.

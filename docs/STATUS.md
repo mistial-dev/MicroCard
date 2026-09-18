@@ -16,8 +16,8 @@ MicroCard has a working simulator path from annotated C# source to verified exec
 
 ## Hardware evidence
 
-The nRF52840 DK has run UART SCP03, signed loading, installed assembly execution, persistent domain storage, and key-continuity checks across reboot. Development debug access remains enabled. USB CCID and optional CryptoCell paths compile but still require physical interoperability and fault testing.
+The nRF52840 DK has run UART SCP03, signed loading, installed assembly execution, persistent domain storage, and key-continuity checks across reboot. It has also enumerated as a USB CCID reader and carried SCP03 at every security level through GlobalPlatformPro and the Java wallet. Development debug access remains enabled. Abort timing, disconnect, sustained throughput and the optional CryptoCell paths still require physical testing.
 
 ## Release limits
 
-The profile and wire formats may change before v1. The firmware has not completed production provisioning, debug lockout, verified-boot, side-channel, flash-endurance, USB CCID, or independent hardware-crypto acceptance. See the [roadmap](ROADMAP.md) and [hardware evidence](HARDWARE_SMOKE.md).
+The profile and wire formats may change before v1. The firmware has not completed production provisioning, debug lockout, verified-boot, side-channel, flash-endurance, USB CCID fault, or independent hardware-crypto acceptance. See the [roadmap](ROADMAP.md) and [hardware evidence](HARDWARE_SMOKE.md).

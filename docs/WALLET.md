@@ -58,4 +58,4 @@ microcard-wallet readers
 microcard-wallet inventory --reader 'MicroCard' --assets ASSETS --management-key KEY
 ```
 
-Physical USB CCID interoperability remains a hardware acceptance item. The simulator path exercises the same Rust management and execution code but does not prove host USB behavior.
+The wallet has run its inventory over the DK reader at security level 33. Signing, recovery and persistence over that path remain a hardware acceptance item, and the simulator path exercises the same Rust management and execution code without proving host USB behavior. See the [hardware evidence](HARDWARE_SMOKE.md).

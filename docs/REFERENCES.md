@@ -24,7 +24,7 @@ Original MicroCard implementation and corpus. HIVE/.NET Card decompiled code, ve
 
 ## Java Card VM source material (planned engine, no code yet)
 
-The [roadmap](ROADMAP.md) reserves a second Rust execution engine for Java Card. No MicroCard code implements or consumes these documents yet, so nothing below is a normative reference map entry and no Java Card compliance is claimed. The list records what was collected, its edition and where it lives, so the version and CAP-subset decision can start from pinned material.
+The [roadmap](ROADMAP.md) reserves a second Rust execution engine for Java Card. No MicroCard code implements or consumes these documents yet, so nothing below is a normative reference map entry and no Java Card compliance is claimed. The list records what was collected, its edition and where it lives. [JCVM_PROFILE.md](JCVM_PROFILE.md) records the decision that came out of it, which is Java Card Classic 3.0.5 with compact CAP 2.1. The 3.0.5 editions themselves are not pinned here, so every clause the engine relies on is read in an edition later than the one it targets until they are.
 
 Oracle publishes these specifications under the Oracle Technology Network Developer License. Unchanged copies are stored under ignored `references/downloads/javacard/` with their license annexes and copyright notices retained, and are pinned by URL and hash in `references/downloads.json`. Only paths, hashes, editions and URLs are committed.
 
