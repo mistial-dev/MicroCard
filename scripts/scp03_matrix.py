@@ -2,6 +2,7 @@
 """Build and test every meaningful SCP03 capability combination of microcard-core."""
 import argparse
 import itertools
+import os
 import pathlib
 import subprocess
 import sys
@@ -10,9 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 CRATE = "microcard-core"
 # scp03-renc implies scp03-rmac through Cargo, so the reserved b7 b6 = 10 encoding of
 # SCP03 1.1.2.6 Table 5-1 cannot be selected and is absent from this sweep.
-# scp03-s16 and scp03-pseudo-random are declared but refuse to compile until their wire
-# formats land, so they join this sweep when they do.
-OPTIONAL = ["scp03-rmac", "scp03-renc"]
+OPTIONAL = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
 
 
 def combinations():
@@ -24,6 +23,29 @@ def combinations():
                 continue
             seen.append(list(chosen))
     return seen
+
+
+def oracle(features):
+    """Replay the independent host implementation against a card built this way.
+
+    Only builds offering R-MAC are replayed, because the sample reader the acceptance
+    script executes demands security level 0x13 and a card without R-MAC cannot reach it.
+    """
+    arguments = ["--no-default-features"]
+    if features:
+        arguments += ["--features", ",".join(features)]
+    environment = {
+        **os.environ,
+        "MICROCARD_BUILD": " ".join(["-p", "microcard-sim", *arguments]),
+    }
+    result = subprocess.run(
+        ["python3", "scripts/scp03_acceptance.py"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    return result.returncode == 0, result.stdout + result.stderr
 
 
 def run(features, check_only):
@@ -38,6 +60,11 @@ def run(features, check_only):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="compile only, skip the test run")
+    parser.add_argument(
+        "--oracle",
+        action="store_true",
+        help="also replay scripts/scp03_acceptance.py against a simulator built each way",
+    )
     arguments = parser.parse_args()
     failures = []
     for features in combinations():
@@ -46,6 +73,11 @@ def main():
         print(f"{'PASS' if ok else 'FAIL'} {label}")
         if not ok:
             failures.append((label, output))
+        elif arguments.oracle and "scp03-rmac" in features:
+            ok, output = oracle(features)
+            print(f"{'PASS' if ok else 'FAIL'} {label} host oracle")
+            if not ok:
+                failures.append((f"{label} host oracle", output))
     for label, output in failures:
         print(f"\n--- {label} ---\n{output[-2000:]}", file=sys.stderr)
     if failures:

@@ -92,11 +92,44 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
         }
         if c.cla == 0x80 && c.ins == 0x50 {
             self.reset();
-            if c.data.len() != 8 || c.p2 != 0 || !matches!(c.p1, 0 | 1) {
+            if c.p2 != 0 || !matches!(c.p1, 0 | 1) {
                 return Err(Error::Format);
             }
-            let mut challenge = [0; 8];
-            self.card.random(&mut challenge)?;
+            if c.data.len() != crate::scp03::CHALLENGE_BYTES {
+                // Report the length itself rather than a generic failure. A host that
+                // assumed the other challenge width learns which one to use, and
+                // GlobalPlatformPro retries in S16 on exactly this status word.
+                let mut wrong_length = Vec::new();
+                wrong_length.try_reserve_exact(2).map_err(|_| Error::Quota)?;
+                wrong_length.extend([0x67, 0x00]);
+                return Ok(wrong_length);
+            }
+            // A derived challenge spends a sequence counter value, so the counter is
+            // taken before anything else can fail and the response carries it back.
+            #[cfg_attr(not(feature = "scp03-pseudo-random"), allow(unused_mut))]
+            let mut sequence = [0; crate::scp03::SEQUENCE_BYTES];
+            #[cfg(feature = "scp03-pseudo-random")]
+            let challenge = {
+                let issued = match self.card.next_secure_channel_sequence() {
+                    Ok(issued) => issued,
+                    // The counter has no more values, so no further session can be opened
+                    // without replacing the key set.
+                    Err(_) => return fixed_response(&[0x69, 0x85]),
+                };
+                sequence.copy_from_slice(&issued.to_be_bytes()[1..]);
+                crate::scp03::pseudo_random_challenge(
+                    &self.keys,
+                    sequence,
+                    &globalplatform::ISD_AID,
+                    self.card.crypto_provider(),
+                )?
+            };
+            #[cfg(not(feature = "scp03-pseudo-random"))]
+            let challenge = {
+                let mut challenge = [0; crate::scp03::CHALLENGE_BYTES];
+                self.card.random(&mut challenge)?;
+                challenge
+            };
             let (session, crypt) = Session::initiate_with(
                 &self.keys,
                 c.data[..].try_into().unwrap(),
@@ -105,12 +138,18 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
             )?;
             self.session = Some(session);
             let mut r = Vec::new();
-            r.try_reserve_exact(31).map_err(|_| Error::Quota)?;
+            // Ten key diversification bytes, three of key information, the challenge, the
+            // card cryptogram, the sequence counter where the challenge is derived, then
+            // the status word, SCP03 Table 7-3.
+            let length =
+                10 + 3 + 2 * crate::scp03::CHALLENGE_BYTES + crate::scp03::SEQUENCE_BYTES + 2;
+            r.try_reserve_exact(length).map_err(|_| Error::Quota)?;
             r.resize(10, 0);
-            // SCP03 1.1.2 Table 5-1: random challenge, R-MAC, no R-ENC.
+            // Key version, SCP identifier, then the i parameter this build implements.
             r.extend([1, 3, crate::scp03::SCP03_I]);
             r.extend(challenge);
             r.extend(crypt);
+            r.extend(sequence);
             r.extend([0x90, 0]);
             return Ok(r);
         }
@@ -291,5 +330,49 @@ mod tests {
 
         command[12] ^= 1;
         assert_eq!(endpoint.exchange(&command), [0x6a, 0x82]);
+    }
+
+    #[cfg(feature = "scp03-pseudo-random")]
+    #[test]
+    fn the_sequence_counter_advances_and_never_repeats_across_a_restart() {
+        use crate::scp03::{CHALLENGE_BYTES, SEQUENCE_BYTES};
+        let offset = 13 + 2 * CHALLENGE_BYTES;
+        let initialize_update = |endpoint: &mut Endpoint<MemoryFlash, TestPlatform>| {
+            let mut command = vec![0x80, 0x50, 0, 0, CHALLENGE_BYTES as u8];
+            command.extend(core::iter::repeat_n(0x77, CHALLENGE_BYTES));
+            command.push(0);
+            let response = endpoint.exchange(&command);
+            assert_eq!(response.len(), offset + SEQUENCE_BYTES + 2);
+            assert_eq!(&response[response.len() - 2..], &[0x90, 0x00]);
+            (
+                response[offset..offset + SEQUENCE_BYTES].to_vec(),
+                response[13..13 + CHALLENGE_BYTES].to_vec(),
+            )
+        };
+
+        // The card keeps its flash, which is what a power cycle leaves behind.
+        let mut flash = MemoryFlash::new(16384);
+        let mut seen = alloc::vec::Vec::new();
+        for _ in 0..3 {
+            let mut endpoint = Endpoint::new(
+                Card::open(flash, TestPlatform, [0x33; 16]).unwrap(),
+                Keys {
+                    enc: [0x11; 16],
+                    mac: [0x22; 16],
+                },
+            );
+            for _ in 0..4 {
+                let (sequence, challenge) = initialize_update(&mut endpoint);
+                // Every counter value is new, and the challenge moves with it even though
+                // the platform entropy source is a constant.
+                assert!(!seen.iter().any(|(s, _)| s == &sequence), "counter repeated");
+                assert!(
+                    !seen.iter().any(|(_, c)| c == &challenge),
+                    "challenge repeated"
+                );
+                seen.push((sequence, challenge));
+            }
+            flash = endpoint.card.into_flash();
+        }
     }
 }

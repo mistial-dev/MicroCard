@@ -8,15 +8,6 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
-#[cfg(feature = "scp03-s16")]
-compile_error!(
-    "scp03-s16 is not implemented yet: the command MAC and challenge widths are still S8"
-);
-#[cfg(feature = "scp03-pseudo-random")]
-compile_error!(
-    "scp03-pseudo-random is not implemented yet: the sequence counter has no durable store"
-);
-
 /// The SCP03 `i` parameter this build advertises, SCP03 1.1.2.6 Table 5-1.
 ///
 /// Derived from the enabled capabilities rather than written down, so the value reported
@@ -49,6 +40,13 @@ pub const MAC_BYTES: usize = if S16 { 16 } else { 8 };
 /// The KDF `L` parameter for challenges and cryptograms, in bits.
 pub const CRYPTOGRAM_BITS: u16 = if S16 { 128 } else { 64 };
 
+/// The card challenge is derived rather than drawn from entropy, SCP03 1.1.2.6 §6.2.2.1.
+pub const PSEUDO_RANDOM: bool = cfg!(feature = "scp03-pseudo-random");
+
+/// Width of the sequence counter that seeds a derived challenge and travels in the
+/// INITIALIZE UPDATE response.
+pub const SEQUENCE_BYTES: usize = if PSEUDO_RANDOM { 3 } else { 0 };
+
 /// Management commands require at least command integrity. Package signatures authorize
 /// the code itself, so command encryption stays the caller's choice.
 pub const MANAGEMENT_SECURITY_LEVEL: u8 = 0x01;
@@ -79,7 +77,7 @@ pub struct Session {
     mac: [u8; 16],
     rmac: [u8; 16],
     chain: [u8; 16],
-    host: [u8; 8],
+    host: [u8; CHALLENGE_BYTES],
     counter: u32,
     level: u8,
     active: bool,
@@ -98,26 +96,32 @@ impl Verified<'_> {
     }
 }
 impl Session {
-    pub fn initiate(keys: &Keys, host: [u8; 8], card: [u8; 8]) -> (Self, [u8; 8]) {
+    pub fn initiate(
+        keys: &Keys,
+        host: [u8; CHALLENGE_BYTES],
+        card: [u8; CHALLENGE_BYTES],
+    ) -> (Self, [u8; CHALLENGE_BYTES]) {
         Self::initiate_with(keys, host, card, &mut SoftwareCrypto).unwrap()
     }
 
     pub fn initiate_with(
         keys: &Keys,
-        host: [u8; 8],
-        card: [u8; 8],
+        host: [u8; CHALLENGE_BYTES],
+        card: [u8; CHALLENGE_BYTES],
         provider: &mut impl CryptoProvider,
-    ) -> Result<(Self, [u8; 8])> {
+    ) -> Result<(Self, [u8; CHALLENGE_BYTES])> {
         let context = [&host[..], &card[..]];
         let enc = Zeroizing::new(derive_with(provider, &keys.enc, 4, 128, &context)?);
         let mac = Zeroizing::new(derive_with(provider, &keys.mac, 6, 128, &context)?);
         let rmac = Zeroizing::new(derive_with(provider, &keys.mac, 7, 128, &context)?);
-        let crypt_material = Zeroizing::new(derive_with(provider, &mac, 0, 64, &context)?);
-        let crypt = crypt_material[..8]
+        let crypt_material =
+            Zeroizing::new(derive_with(provider, &mac, 0, CRYPTOGRAM_BITS, &context)?);
+        let crypt = crypt_material[..CHALLENGE_BYTES]
             .try_into()
             .unwrap();
-        let host_material = Zeroizing::new(derive_with(provider, &mac, 1, 64, &context)?);
-        let host = host_material[..8]
+        let host_material =
+            Zeroizing::new(derive_with(provider, &mac, 1, CRYPTOGRAM_BITS, &context)?);
+        let host = host_material[..CHALLENGE_BYTES]
             .try_into()
             .unwrap();
         Ok((
@@ -148,7 +152,7 @@ impl Session {
                 || c.cla != 0x84
                 || c.ins != 0x82
                 || c.p2 != 0
-                || c.data.len() != 16
+                || c.data.len() != CHALLENGE_BYTES + MAC_BYTES
             {
                 return Err(Error::Authentication);
             }
@@ -176,14 +180,14 @@ impl Session {
         c: &Command<'_>,
         provider: &mut impl CryptoProvider,
     ) -> Result<usize> {
-        if c.cla != 0x84 || c.data.len() < 8 || c.data.len() > 255 {
+        if c.cla != 0x84 || c.data.len() < MAC_BYTES || c.data.len() > 255 {
             return Err(Error::Authentication);
         }
-        let n = c.data.len() - 8;
+        let n = c.data.len() - MAC_BYTES;
         let header = [c.cla, c.ins, c.p1, c.p2, c.data.len() as u8];
         let mut mac = [0; 16];
         provider.aes_cmac_parts_into(&self.mac, &[&self.chain, &header, &c.data[..n]], &mut mac)?;
-        if !bool::from(mac[..8].ct_eq(&c.data[n..])) {
+        if !bool::from(mac[..MAC_BYTES].ct_eq(&c.data[n..])) {
             return Err(Error::Authentication);
         }
         self.chain = mac;
@@ -317,6 +321,28 @@ impl Session {
     }
 }
 
+/// Derive the card challenge from the sequence counter, SCP03 1.1.2.6 §6.2.2.1.
+///
+/// The challenge stays unpredictable to anyone without the static key, and the card needs
+/// no entropy source at session start. The context is the counter followed by the AID of
+/// the application being selected, so two cards sharing a key set still differ.
+#[cfg(feature = "scp03-pseudo-random")]
+pub fn pseudo_random_challenge(
+    keys: &Keys,
+    sequence: [u8; SEQUENCE_BYTES],
+    aid: &[u8],
+    provider: &mut impl CryptoProvider,
+) -> Result<[u8; CHALLENGE_BYTES]> {
+    let material = Zeroizing::new(derive_with(
+        provider,
+        &keys.enc,
+        2,
+        CRYPTOGRAM_BITS,
+        &[&sequence[..], aid],
+    )?);
+    Ok(material[..CHALLENGE_BYTES].try_into().unwrap())
+}
+
 fn derive_with(
     provider: &mut impl CryptoProvider,
     key: &[u8; 16],
@@ -397,6 +423,8 @@ mod tests {
         }
     }
 
+    // The committed vectors are S8 known-answer data, so they only reproduce here.
+    #[cfg(not(feature = "scp03-s16"))]
     #[test]
     fn gp4net_vectors_cover_session_derivation_and_cryptograms() {
         // Independently generated Gp4Net fixtures implementing SCP03 1.1.2
@@ -438,6 +466,8 @@ mod tests {
         }
     }
 
+    // The committed vectors are S8 known-answer data, so they only reproduce here.
+    #[cfg(not(feature = "scp03-s16"))]
     #[test]
     fn globalplatformpro_trace_authenticates_and_chains_first_command() {
         // Captured by GlobalPlatformPro against a physical SCP03 card. The
@@ -468,6 +498,8 @@ mod tests {
         assert_eq!(verified.command().le, Some(256));
     }
 
+    // The committed vectors are S8 known-answer data, so they only reproduce here.
+    #[cfg(not(feature = "scp03-s16"))]
     #[test]
     fn globalplatformpro_trace_decrypts_first_level03_command() {
         let keys = Keys {
@@ -492,7 +524,7 @@ mod tests {
     }
 
     // Security level 0x11 needs response integrity, so this build must offer it.
-    #[cfg(feature = "scp03-rmac")]
+    #[cfg(all(feature = "scp03-rmac", not(feature = "scp03-s16")))]
     #[test]
     fn globalplatformpro_trace_emits_first_level11_response_mac() {
         let keys = Keys {
@@ -525,6 +557,8 @@ mod tests {
         );
     }
 
+    // The committed vectors are S8 known-answer data, so they only reproduce here.
+    #[cfg(not(feature = "scp03-s16"))]
     #[test]
     fn gp4net_level13_vector_decrypts_command_and_emits_response_mac() {
         // Independently generated by the user-authorized Gp4Net SCP03
@@ -585,6 +619,53 @@ mod tests {
         );
     }
 
+    // S16 doubles the challenges and cryptograms, so these are the S16 counterpart of
+    // the Gp4Net tables above. They come from GlobalPlatformPro's own derivation, and
+    // the same generator reproduces the S8 tables exactly.
+    #[cfg(feature = "scp03-s16")]
+    #[test]
+    fn gppro_s16_vectors_cover_session_derivation_and_cryptograms() {
+        #[derive(serde::Deserialize)]
+        struct Vector {
+            static_enc: alloc::string::String,
+            static_mac: alloc::string::String,
+            host_challenge: alloc::string::String,
+            card_challenge: alloc::string::String,
+            session_enc: alloc::string::String,
+            session_mac: alloc::string::String,
+            session_rmac: alloc::string::String,
+            card_cryptogram: alloc::string::String,
+            host_cryptogram: alloc::string::String,
+        }
+        #[derive(serde::Deserialize)]
+        struct File {
+            cryptogram_bits: u16,
+            vectors: alloc::vec::Vec<Vector>,
+        }
+        let file: File = serde_json::from_str(include_str!(
+            "../tests/vectors/scp03_s16_gppro.json"
+        ))
+        .unwrap();
+        assert_eq!(file.cryptogram_bits, CRYPTOGRAM_BITS);
+        assert_eq!(file.vectors.len(), 2);
+        for vector in &file.vectors {
+            let keys = Keys {
+                enc: hex(&vector.static_enc),
+                mac: hex(&vector.static_mac),
+            };
+            let (session, card_cryptogram) = Session::initiate(
+                &keys,
+                hex(&vector.host_challenge),
+                hex(&vector.card_challenge),
+            );
+            assert_eq!(session.enc, hex::<16>(&vector.session_enc));
+            assert_eq!(session.mac, hex::<16>(&vector.session_mac));
+            assert_eq!(session.rmac, hex::<16>(&vector.session_rmac));
+            assert_eq!(card_cryptogram, hex::<16>(&vector.card_cryptogram));
+            assert_eq!(session.host, hex::<16>(&vector.host_cryptogram));
+        }
+    }
+
     #[cfg(feature = "scp03-renc")]
     #[test]
     fn level33_encrypts_response_data_and_macs_the_ciphertext() {
@@ -592,7 +673,7 @@ mod tests {
             enc: [0x11; 16],
             mac: [0x22; 16],
         };
-        let (mut session, _) = Session::initiate(&keys, [0x31; 8], [0x42; 8]);
+        let (mut session, _) = Session::initiate(&keys, [0x31; CHALLENGE_BYTES], [0x42; CHALLENGE_BYTES]);
         session.active = true;
         session.level = 0x33;
         session.counter = 7;
@@ -643,7 +724,7 @@ mod tests {
             enc: [0x11; 16],
             mac: [0x22; 16],
         };
-        let (mut session, _) = Session::initiate(&keys, [0x31; 8], [0x42; 8]);
+        let (mut session, _) = Session::initiate(&keys, [0x31; CHALLENGE_BYTES], [0x42; CHALLENGE_BYTES]);
         session.active = true;
         session.level = 0x33;
 
@@ -657,6 +738,56 @@ mod tests {
         assert_eq!(error, alloc::vec![0x6a, 0x88]);
         let error_with_data = session.response(b"ignored", 0x6982).unwrap();
         assert_eq!(error_with_data, alloc::vec![0x69, 0x82]);
+    }
+
+    /// Vectors recomputed with an independent Python implementation of SP 800-108
+    /// counter mode over the same static key, so the derivation is pinned from outside.
+    #[cfg(feature = "scp03-pseudo-random")]
+    #[test]
+    fn derived_challenges_are_pinned_to_the_sequence_counter() {
+        let keys = Keys {
+            enc: [0x11; 16],
+            mac: [0x22; 16],
+        };
+        // The KDF length parameter differs between the widths, so each mode has its own
+        // answers rather than a prefix of the other.
+        let expected: [(&[u8; 3], [u8; 16], [u8; 8]); 3] = [
+            (
+                &[0, 0, 0],
+                [
+                    0x7e, 0x8f, 0x4c, 0x1f, 0x8d, 0x73, 0x28, 0xf4, 0x3b, 0xfa, 0x8e, 0x05, 0x48,
+                    0xb9, 0x3f, 0x17,
+                ],
+                [0xa4, 0x56, 0x0a, 0x67, 0x1a, 0x67, 0xd3, 0xfe],
+            ),
+            (
+                &[0, 0, 1],
+                [
+                    0xd8, 0x73, 0xfb, 0x79, 0x53, 0x35, 0xcb, 0xbe, 0x58, 0x44, 0x87, 0x3e, 0x12,
+                    0x73, 0x4e, 0x0f,
+                ],
+                [0x6c, 0xd3, 0x1e, 0xbb, 0x66, 0x02, 0x9c, 0xbc],
+            ),
+            (
+                &[0x12, 0x34, 0x56],
+                [
+                    0x50, 0xb3, 0xd9, 0x75, 0x09, 0x84, 0xa2, 0x27, 0x55, 0x57, 0x9d, 0xf8, 0x36,
+                    0x78, 0x84, 0xf6,
+                ],
+                [0x84, 0x27, 0x0d, 0x5b, 0x4b, 0x58, 0x19, 0x5f],
+            ),
+        ];
+        for (sequence, wide, narrow) in expected {
+            let derived = pseudo_random_challenge(
+                &keys,
+                *sequence,
+                &crate::globalplatform::ISD_AID,
+                &mut SoftwareCrypto,
+            )
+            .unwrap();
+            let challenge: &[u8] = if S16 { &wide } else { &narrow };
+            assert_eq!(derived[..], *challenge, "counter {sequence:?}");
+        }
     }
 
     #[test]
@@ -719,7 +850,7 @@ mod tests {
         let mut provider = RecordingProvider::default();
         let _ = keys.storage_key_with(&mut provider).unwrap();
         let (mut session, _) =
-            Session::initiate_with(&keys, [0x31; 8], [0x42; 8], &mut provider).unwrap();
+            Session::initiate_with(&keys, [0x31; CHALLENGE_BYTES], [0x42; CHALLENGE_BYTES], &mut provider).unwrap();
         assert_eq!(provider.cmacs, 6);
 
         session.active = true;
@@ -745,17 +876,17 @@ mod tests {
             command.ins,
             command.p1,
             command.p2,
-            (command.data.len() + 8) as u8,
+            (command.data.len() + MAC_BYTES) as u8,
         ]);
         mac_input.extend_from_slice(&command.data);
         let mac = crate::crypto::cmac(&session.mac, &mac_input);
-        command.data.to_mut().extend_from_slice(&mac[..8]);
+        command.data.to_mut().extend_from_slice(&mac[..MAC_BYTES]);
 
         let verified = session.unwrap_with(command, &mut provider).unwrap();
         assert_eq!(verified.command().data.as_ref(), plaintext);
         assert_eq!((provider.blocks, provider.decrypts), (1, 1));
         let response = session.response_with(b"ok", 0x9000, &mut provider).unwrap();
-        assert_eq!(response.len(), 12);
+        assert_eq!(response.len(), 2 + MAC_BYTES + 2);
         assert_eq!(provider.cmacs, 8);
     }
 
@@ -765,17 +896,17 @@ mod tests {
             enc: [0x11; 16],
             mac: [0x22; 16],
         };
-        let (mut session, _) = Session::initiate(&keys, [0x31; 8], [0x42; 8]);
+        let (mut session, _) = Session::initiate(&keys, [0x31; CHALLENGE_BYTES], [0x42; CHALLENGE_BYTES]);
         session.active = true;
         session.level = 0x01;
         let payload = [0x01, 0x02, 0x03];
         let mut mac_input = session.chain.to_vec();
-        mac_input.extend_from_slice(&[0x84, 0xca, 0, 0, (payload.len() + 8) as u8]);
+        mac_input.extend_from_slice(&[0x84, 0xca, 0, 0, (payload.len() + MAC_BYTES) as u8]);
         mac_input.extend_from_slice(&payload);
         let mac = crate::crypto::cmac(&session.mac, &mac_input);
-        let mut raw = alloc::vec![0x84, 0xca, 0, 0, (payload.len() + 8) as u8];
+        let mut raw = alloc::vec![0x84, 0xca, 0, 0, (payload.len() + MAC_BYTES) as u8];
         raw.extend_from_slice(&payload);
-        raw.extend_from_slice(&mac[..8]);
+        raw.extend_from_slice(&mac[..MAC_BYTES]);
         raw.push(0);
         let command = Command::parse(&raw).unwrap();
         assert!(matches!(command.data, Cow::Borrowed(_)));
@@ -811,11 +942,11 @@ mod tests {
             Err(Error::Native)
         ));
         assert!(matches!(
-            Session::initiate_with(&keys, [0x31; 8], [0x42; 8], &mut FailingProvider,),
+            Session::initiate_with(&keys, [0x31; CHALLENGE_BYTES], [0x42; CHALLENGE_BYTES], &mut FailingProvider,),
             Err(Error::Native)
         ));
 
-        let (mut session, _) = Session::initiate(&keys, [0x31; 8], [0x42; 8]);
+        let (mut session, _) = Session::initiate(&keys, [0x31; CHALLENGE_BYTES], [0x42; CHALLENGE_BYTES]);
         session.active = true;
         session.level = 0x11;
         assert!(matches!(

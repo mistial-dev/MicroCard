@@ -47,8 +47,8 @@ fuzz_target!(|data: &[u8]| {
                 enc: [1; 16],
                 mac: [2; 16],
             },
-            [3; 8],
-            [4; 8],
+            [3; microcard_core::scp03::CHALLENGE_BYTES],
+            [4; microcard_core::scp03::CHALLENGE_BYTES],
         );
         let _ = s.authenticate(&c);
         let _ = s.unwrap(c);

@@ -180,8 +180,10 @@ def main():
         assert len(derived) == 16
         assert client.command(0x10, b"\x01\x03abc") == derived
         assert len(client.command(0x10, b"\x02\x00")) == 16
-        # SCP03 padding and the command MAC leave 237 context bytes in a short APDU.
-        assert len(client.command(0x10, b"\x03\xed" + bytes(range(237)))) == 16
+        # SCP03 padding and the command MAC bound the context a short APDU can carry, and
+        # a 16-byte MAC in S16 mode takes eight bytes more than an 8-byte one.
+        context = (255 - client.width) // 16 * 16 - 3
+        assert len(client.command(0x10, bytes([3, context]) + bytes(range(context)))) == 16
         client.command(0x10, b"\x04\xf0", status=0x6700)
         assert {path.name: path.read_bytes() for path in state.glob("slot*.bin")} == installed
 

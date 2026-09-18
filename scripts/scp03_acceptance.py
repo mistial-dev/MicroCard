@@ -10,34 +10,77 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 SIM=ROOT/'target/debug/microcard-sim'
+# Extra cargo arguments for the simulator build, so the same oracle can be replayed against
+# a card built with a different set of SCP03 capabilities.
+BUILD=os.environ.get('MICROCARD_BUILD','').split()
 def cmac(k,b):
  c=CMAC(algorithms.AES(k)); c.update(b); return c.finalize()
 def kdf(k,c,bits,context): return cmac(k,bytes(11)+bytes([c,0])+bits.to_bytes(2,'big')+b'\x01'+context)
 def aes(k,mode,data):
  e=Cipher(algorithms.AES(k),mode).encryptor(); return e.update(data)+e.finalize()
+def unaes(k,mode,data):
+ d=Cipher(algorithms.AES(k),mode).decryptor(); return d.update(data)+d.finalize()
 class Client:
  def __init__(self,keys,state):
   self.keys=keys.read_bytes();self.p=subprocess.Popen([SIM,'serve',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
  def raw(self,b):
   self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline();assert line,'simulator terminated';return bytes.fromhex(line)
- def connect(self,level=0x13):
-  host=os.urandom(8);r=self.raw(bytes.fromhex('8050000008')+host+b'\x00');assert len(r)==31 and r[-2:]==b'\x90\x00';assert r[10:13]==bytes([1,3,0x20]),'SCP03 capabilities mismatch'
-  context=host+r[13:21];self.enc=kdf(self.keys[:16],4,128,context);self.mac=kdf(self.keys[16:],6,128,context);self.rmac=kdf(self.keys[16:],7,128,context)
-  assert r[21:29]==kdf(self.mac,0,64,context)[:8]
+ def connect(self,level=None):
+  # Ask with the legacy width first. A card in S16 reports the wrong length, which is
+  # how a host discovers the mode without knowing it in advance.
+  host=os.urandom(8);probe=self.raw(bytes.fromhex('8050000008')+host+b'\x00')
+  self.s16=probe[-2:]==b'\x67\x00'
+  self.width=16 if self.s16 else 8
+  if self.s16:
+   host=os.urandom(16);r=self.raw(bytes.fromhex('8050000010')+host+b'\x00')
+  else:
+   r=probe
+  assert r[-2:]==b'\x90\x00',r.hex()
+  kvn,scp,i=r[10],r[11],r[12]
+  assert (kvn,scp)==(1,3),'SCP03 key information mismatch'
+  assert bool(i&0x01)==self.s16,'announced S16 bit disagrees with the response length'
+  # Ten diversification bytes, three of key information, challenge, cryptogram, and the
+  # sequence counter only where the challenge is derived from it.
+  sequence=3 if i&0x10 else 0
+  assert len(r)==10+3+2*self.width+sequence+2,(len(r),r.hex())
+  self.i=i
+  self.supported=0x03|(0x10 if i&0x20 else 0)|(0x20 if i&0x40 else 0)
+  # Without an explicit request, take the level the sample readers ask for, dropping
+  # response integrity when the build does not offer it.
+  if level is None: level=0x13&self.supported|0x03
+  bits=128 if self.s16 else 64
+  if sequence:
+   # A derived challenge is reproducible from the counter, so recompute it here.
+   counter=r[13+2*self.width:13+2*self.width+3]
+   assert r[13:13+self.width]==kdf(self.keys[:16],2,bits,counter+bytes.fromhex('A000000151000000'))[:self.width]
+   assert counter>getattr(self,'counter_seen',b''),'sequence counter did not advance'
+   self.counter_seen=counter
+  context=host+r[13:13+self.width];self.enc=kdf(self.keys[:16],4,128,context);self.mac=kdf(self.keys[16:],6,128,context);self.rmac=kdf(self.keys[16:],7,128,context)
+  assert r[13+self.width:13+2*self.width]==kdf(self.mac,0,bits,context)[:self.width]
   self.chain=bytes(16);self.counter=0;self.level=level
-  b=bytes([0x84,0x82,level,0,16])+kdf(self.mac,1,64,context)[:8];self.chain=cmac(self.mac,self.chain+b)
-  assert self.raw(b+self.chain[:8])==b'\x90\x00'
+  cryptogram=kdf(self.mac,1,bits,context)[:self.width]
+  b=bytes([0x84,0x82,level,0,2*self.width])+cryptogram;self.chain=cmac(self.mac,self.chain+b)
+  assert self.raw(b+self.chain[:self.width])==b'\x90\x00'
  def encode(self,ins,data=b'',p1=0,p2=0):
   self.counter+=1
   if self.level&2 and data:
    padded=data+b'\x80';padded+=bytes((-len(padded))%16)
    iv=aes(self.enc,modes.ECB(),self.counter.to_bytes(16,'big'));data=aes(self.enc,modes.CBC(iv),padded)
-  b=bytes([0x84,ins,p1,p2,len(data)+8])+data;self.chain=cmac(self.mac,self.chain+b);return b+self.chain[:8]
+  b=bytes([0x84,ins,p1,p2,len(data)+self.width])+data;self.chain=cmac(self.mac,self.chain+b);return b+self.chain[:self.width]
  def command(self,ins,data=b'',status=0x9000,p1=0,p2=0):
   r=self.raw(self.encode(ins,data,p1,p2));assert r[-2:]==status.to_bytes(2,'big'),(hex(ins),r.hex())
-  if self.level&0x10 and (status==0x9000 or status>>8 in (0x62,0x63)):
-   assert r[-10:-2]==cmac(self.rmac,self.chain+r[:-10]+r[-2:])[:8];return r[:-10]
+  if self.level&0x10 and (status==0x9000 or status>>8 in (0x62,0x63)): return self.unprotect(r)
   return r[:-2]
+ def unprotect(self,r):
+  """Verify the response MAC and recover the body, SCP03 §§6.2.6-6.2.7."""
+  cut=self.width+2;assert len(r)>=cut
+  assert r[-cut:-2]==cmac(self.rmac,self.chain+r[:-cut]+r[-2:])[:self.width]
+  body=r[:-cut]
+  # The R-MAC covers the ciphered data, so decryption follows verification.
+  if self.level&0x20 and body:
+   iv=aes(self.enc,modes.ECB(),bytes([0x80])+self.counter.to_bytes(16,'big')[1:])
+   plain=unaes(self.enc,modes.CBC(iv),body);body=plain[:plain.rindex(0x80)]
+  return body
  def close(self): self.p.stdin.close();assert self.p.wait(timeout=5)==0
 
 class BinaryClient(Client):
@@ -93,17 +136,21 @@ def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
  return incarnation
 
 def main():
- subprocess.run(['cargo','build','-q'],cwd=ROOT,check=True)
+ subprocess.run(['cargo','build','-q',*BUILD],cwd=ROOT,check=True)
  ensure_assembly('samples/Counter','counter')
  ensure_assembly('samples/KeyOperations','keys')
  with tempfile.TemporaryDirectory(prefix='microcard-') as td:
   td=pathlib.Path(td);keys=td/'management.key';keys.write_bytes(os.urandom(32));keys.chmod(0o600)
   c=Client(keys,td/'state')
   select=bytes.fromhex('00A4040008A000000151000000');fci=c.raw(select)
-  assert fci[:4]==bytes.fromhex('6F368408') and bytes.fromhex('A000000151000000') in fci and bytes.fromhex('2A864886FC6B040320') in fci and fci[-2:]==b'\x90\x00'
+  assert fci[:4]==bytes.fromhex('6F368408') and bytes.fromhex('A000000151000000') in fci and fci[-2:]==b'\x90\x00'
+  # The card recognition data ends the SCP03 OID with the i parameter, so read it here
+  # and hold it against what INITIALIZE UPDATE announces.
+  oid=bytes.fromhex('2A864886FC6B0403');assert oid in fci;announced=fci[fci.index(oid)+len(oid)]
   card_data=c.raw(bytes.fromhex('80CA006600'));assert card_data[:4]==bytes.fromhex('66267324') and card_data[-2:]==b'\x90\x00'
   assert c.raw(bytes.fromhex('80CA9F7F00'))==b'\x6a\x88'
-  c.connect();bootstrap_isd(c)
+  c.connect();assert c.i==announced,'card recognition data and INITIALIZE UPDATE disagree on i'
+  bootstrap_isd(c)
   isd=c.command(0xf2,b'\x4f\x00',p1=0x80,p2=0x02);assert isd[:4]==b'\xe3\x13\x4f\x08' and bytes.fromhex('A000000151000000') in isd
   inc=c.command(0xe0,b'team');assert len(inc)==16
   subprocess.run([SIM,'keygen',td/'signing.seed'],check=True)
@@ -126,12 +173,19 @@ def main():
   c.command(0xec,b'["team","F04D430002"]');c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
   c.command(0xec,b'["team","F04D430003"]');c.command(0xa4,bytes.fromhex('F04D430003'));assert c.command(0x10,b'X')==b'X'
   c.command(0xec,b'["team","F04D430004"]');c.command(0xa4,bytes.fromhex('F04D430004'));assert c.command(0x10)==hashlib.sha256(b'a').digest()[:1]
-  c.close()
-  c=Client(keys,td/'state');c.connect();c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
+  reboot_floor=getattr(c,'counter_seen',b'');c.close()
+  c=Client(keys,td/'state');c.connect()
+  # A reserved block is durable before it is used, so a restart can only skip values.
+  assert getattr(c,'counter_seen',b'')>reboot_floor or not reboot_floor,'sequence counter rolled back'
+  c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
   c.command(0xa4,bytes.fromhex('F04D430001'));assert c.command(0x10)==b'\x03'
   replay=c.encode(0x10);r=c.raw(replay);assert r[-2:]==b'\x90\x00';assert c.raw(replay)==b'\x69\x82';assert c.raw(c.encode(0x10))==b'\x69\x82'
-  for level in [1,3,0x11]:
-   c.connect(level);c.command(0xe0,b'forbidden',0x6985)
+  # Every level carrying a command MAC serves management, and reading the policy back
+  # exercises response integrity and confidentiality wherever the build offers them.
+  for level in [l for l in (1,3,0x11,0x13,0x33) if l&~c.supported==0]:
+   c.connect(level);assert c.command(0xe3,b'team')==allowed[:1]+allowed[6:],hex(level)
+  # Level 0 carries no MAC, so it authorizes nothing.
+  c.connect(0);c.command(0xe0,b'forbidden',0x6985)
   c.connect();bad=bytearray(c.encode(0xe0,b'bad'));bad[-1]^=1;assert c.raw(bad)==b'\x69\x82'
   c.connect();c.command(0xe4,b'team');c.command(0x10,status=0x6982);c.close()
  # A separate state keeps the four-instance quota explicit.

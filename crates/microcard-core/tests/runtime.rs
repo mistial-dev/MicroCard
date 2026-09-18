@@ -154,8 +154,8 @@ fn malformed_input_smoke_fuzz() {
                 enc: [1; 16],
                 mac: [2; 16],
             },
-            [0; 8],
-            [1; 8],
+            [0; scp03::CHALLENGE_BYTES],
+            [1; scp03::CHALLENGE_BYTES],
         )
         .0;
         if let Ok(command) = apdu::Command::parse(&bytes) {

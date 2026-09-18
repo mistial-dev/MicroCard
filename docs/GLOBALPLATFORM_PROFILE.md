@@ -4,7 +4,7 @@ MicroCard implements a deliberately bounded subset of GlobalPlatform Card Specif
 
 ## Discovery
 
-The basic channel accepts ISO SELECT by DF name for the GlobalPlatform default Issuer Security Domain AID `A000000151000000`, and the empty default-selection form used for ISD discovery, before authentication. A successful selection returns an FCI template containing that AID and ends any existing secure-channel session. Its proprietary data advertises GlobalPlatform 2.3.1, SCP03 implementation `i=20` and a conservative 224-byte command-data ceiling.
+The basic channel accepts ISO SELECT by DF name for the GlobalPlatform default Issuer Security Domain AID `A000000151000000`, and the empty default-selection form used for ISD discovery, before authentication. A successful selection returns an FCI template containing that AID and ends any existing secure-channel session. Its proprietary data advertises GlobalPlatform 2.3.1, the SCP03 implementation option this build derives from its enabled capabilities and a conservative 224-byte command-data ceiling.
 
 Before SCP03 authentication, GlobalPlatform GET DATA `0066` returns Appendix H format-1 Card Recognition Data. Optional CPLC, IIN, CIN and key-information objects are absent and return `6A88`. No fabricated production identity is exposed. Once a secure channel is active, an unsecured GET DATA fails secure messaging and tears down that session. The same Card Recognition Data is available through authenticated secure messaging.
 

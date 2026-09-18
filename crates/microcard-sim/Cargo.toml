@@ -3,8 +3,16 @@ name = "microcard-sim"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+[features]
+# Forwarded so a simulator can be built for any SCP03 capability set the card offers,
+# which is what lets the host oracle be replayed across the whole matrix.
+default = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
+scp03-rmac = ["microcard-core/scp03-rmac"]
+scp03-renc = ["microcard-core/scp03-renc"]
+scp03-s16 = ["microcard-core/scp03-s16"]
+scp03-pseudo-random = ["microcard-core/scp03-pseudo-random"]
 [dependencies]
-microcard-core = { path = "../microcard-core", features = ["hal-conformance"] }
+microcard-core = { path = "../microcard-core", default-features = false, features = ["hal-conformance"] }
 serde_json.workspace = true
 ed25519-dalek.workspace = true
 getrandom = "0.2"

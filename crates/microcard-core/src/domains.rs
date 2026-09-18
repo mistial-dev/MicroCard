@@ -996,7 +996,26 @@ impl<'de> Deserialize<'de> for BlobStore {
 struct State {
     isd: Domain,
     domains: Domains,
+    /// First SCP03 sequence counter value never yet handed out, SCP03 1.1.2.6 §6.2.2.1.
+    ///
+    /// Reserved ahead of use so a power cut can only skip values, never repeat one. A
+    /// card that has opened no derived-challenge session omits the field, which keeps
+    /// existing snapshots byte-identical through the canonical re-encoding check.
+    #[serde(default, skip_serializing_if = "sequence_unused")]
+    scp03_sequence: u32,
 }
+
+fn sequence_unused(reserved: &u32) -> bool {
+    *reserved == 0
+}
+
+/// Values reserved by one durable write, so a secure channel does not cost a flash write.
+#[cfg(feature = "scp03-pseudo-random")]
+const SEQUENCE_WINDOW: u32 = 64;
+
+/// The counter travels in three bytes, so this is the last value it can express.
+#[cfg(feature = "scp03-pseudo-random")]
+const SEQUENCE_CEILING: u32 = 0x00ff_ffff;
 impl State {
     fn try_clone(&self) -> Result<Self> {
         self.try_clone_with(&mut crate::fallible_clone::CloneContext::new())
@@ -1009,6 +1028,7 @@ impl State {
         Ok(Self {
             isd: self.isd.try_clone_with(context)?,
             domains: self.domains.try_clone_with(context)?,
+            scp03_sequence: self.scp03_sequence,
         })
     }
 
@@ -2324,6 +2344,9 @@ pub struct Card<F: Flash, P: Platform, S: PackageStaging = RamStaging> {
     globalplatform_load: Option<GlobalPlatformLoad>,
     selected: Option<(String, [u8; 16], String)>,
     transaction: Option<PendingTransaction>,
+    /// Next sequence counter value to issue, and the reserved value it stops at.
+    #[cfg(feature = "scp03-pseudo-random")]
+    sequence: (u32, u32),
 }
 
 struct PendingTransaction {
@@ -2408,6 +2431,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 let state = State {
                     isd: Domain::new(incarnation, RegistryAid::isd(), DomainPolicy::standard()?),
                     domains: Domains::new(),
+                    scp03_sequence: 0,
                 };
                 let encoded =
                     Zeroizing::new(serde_json::to_vec(&state).map_err(|_| Error::Storage)?);
@@ -2575,6 +2599,8 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         for (id, assembly) in linked_roots {
             execution_units(&state, id, assembly)?;
         }
+        #[cfg(feature = "scp03-pseudo-random")]
+        let sequence = (state.scp03_sequence, state.scp03_sequence);
         Ok(Self {
             journal,
             state,
@@ -2583,8 +2609,39 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             globalplatform_load: None,
             selected: None,
             transaction: None,
+            #[cfg(feature = "scp03-pseudo-random")]
+            sequence,
         })
     }
+
+    /// Hand out the next SCP03 sequence counter value, SCP03 1.1.2.6 §6.2.2.1.
+    ///
+    /// A block of values is made durable before any of them is used, so a power cut loses
+    /// the unused remainder rather than replaying a value that already seeded a challenge.
+    #[cfg(feature = "scp03-pseudo-random")]
+    pub(crate) fn next_secure_channel_sequence(&mut self) -> Result<u32> {
+        if self.sequence.0 >= self.sequence.1 {
+            if self.state.scp03_sequence > SEQUENCE_CEILING {
+                return Err(Error::Unauthorized);
+            }
+            let reserved = self
+                .state
+                .scp03_sequence
+                .saturating_add(SEQUENCE_WINDOW)
+                .min(SEQUENCE_CEILING + 1);
+            let mut next = self.state.try_clone()?;
+            next.scp03_sequence = reserved;
+            self.commit(next)?;
+            self.sequence.1 = reserved;
+        }
+        let issued = self.sequence.0;
+        if issued > SEQUENCE_CEILING {
+            return Err(Error::Unauthorized);
+        }
+        self.sequence.0 = issued + 1;
+        Ok(issued)
+    }
+    #[cfg_attr(feature = "scp03-pseudo-random", allow(dead_code))]
     pub(crate) fn random(&mut self, b: &mut [u8]) -> Result<()> {
         self.platform.random(b)
     }
