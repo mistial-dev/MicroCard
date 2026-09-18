@@ -13,9 +13,14 @@ Implemented so far, in `crates/microcard-engine-jcvm`:
 | Structural verification | one pass at load, over a whole package |
 | Object heap | objects and arrays, with the owner context checked on every access |
 | Linking | constant pool entries resolved to field offsets and method bodies as each instruction runs |
-| Interpreter | arithmetic, locals, the operand stack, control flow, arrays, fields, statics, invocation, throw and catch |
+| Interpreter | arithmetic, locals, the stack, control flow, arrays, fields, statics, invocation, casts, throw and catch |
+| API tokens | the six imported packages, read out of their export files into a committed table |
+| Native classes | Util, ISOException, APDU, JCSystem, Applet, OwnerPIN, and the key and algorithm objects |
+| Applet lifecycle | install, register, select and process, driven from outside the engine |
 
-What is missing before an applet runs: interface dispatch, the static field image initialisers, the applet lifecycle, the native API classes, and the path that delivers a package to this engine. Nothing on the card reaches the crate yet.
+What this adds up to: four of the eight OpenFIPS201 release variants install, register, accept a SELECT and answer PIV commands with their own status words, through `microcard-sim serve-jcvm`. A wrong PIN answers with the tries that remain and the count goes down, which is the applet's own retry counter surviving from one command to the next.
+
+The four fips variants run power-up self tests during install and stop at a cipher operation. What is missing to finish them, and to make the others do more than answer from an empty card: the cipher, signature and key agreement operations through the host, the rest of the APDU methods, and the GlobalPlatform secure channel.
 
 ## Version and container
 

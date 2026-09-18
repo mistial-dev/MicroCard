@@ -235,6 +235,41 @@ impl Flash for FileFlash {
     }
 }
 
+/// The card an applet's cryptography reaches, answered in software.
+///
+/// A real card would use its accelerators. What matters here is that the answers are the
+/// ones a card would give, so an applet that checks a digest against its own expectation
+/// agrees with this one.
+struct JavaCardHost;
+
+impl microcard_engine_jcvm::host::Host for JavaCardHost {
+    fn random(&mut self, output: &mut [u8]) -> microcard_engine_jcvm::Result<()> {
+        getrandom::getrandom(output).map_err(|_| microcard_engine_jcvm::Error::Unsupported)
+    }
+
+    fn digest(
+        &mut self,
+        algorithm: u8,
+        message: &[u8],
+        output: &mut [u8],
+    ) -> microcard_engine_jcvm::Result<usize> {
+        use sha2::Digest;
+        // The algorithms the profile commits to. Anything else is refused rather than
+        // answered with something that looks like a digest.
+        match algorithm {
+            4 => {
+                output[..32].copy_from_slice(&sha2::Sha256::digest(message));
+                Ok(32)
+            }
+            5 => {
+                output[..48].copy_from_slice(&sha2::Sha384::digest(message));
+                Ok(48)
+            }
+            _ => Err(microcard_engine_jcvm::Error::Unsupported),
+        }
+    }
+}
+
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!("microcard-sim {}", env!("CARGO_PKG_VERSION"));
@@ -254,7 +289,35 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
  Some("verify-assembly") if a.len()==3=>{let bytes=fs::read(&a[2])?;let assembly=Assembly::parse(&bytes).map_err(|e|format!("{e:?}"))?;assembly.framework_imports().map_err(|e|format!("{e:?}"))?;let identity=assembly.identity().map_err(|e|format!("{e:?}"))?;println!("MC04 {} {}.{}.{}.{} {} methods",identity.name,identity.version[0],identity.version[1],identity.version[2],identity.version[3],assembly.row_count(6).map_err(|e|format!("{e:?}"))?);},
  Some("run-mc04") if a.len()>=4=>{let bytes=fs::read(&a[2])?;let assembly=Assembly::parse(&bytes).map_err(|e|format!("{e:?}"))?;let args=a[4..].iter().map(|s|s.parse()).collect::<std::result::Result<Vec<i32>,_>>()?;println!("{:?}",mc04_vm::execute(&assembly,a[3].parse()?,&args).map_err(|e|format!("{e:?}"))?);},
  Some("serve"|"serve-binary") if a.len()==4=>{let b=fs::read(&a[2])?;if b.len()!=32{return Err("management key file must contain ENC16 || MAC16".into())}let keys=Keys{enc:b[..16].try_into()?,mac:b[16..].try_into()?};let mut hardware=Hardware;let storage_key=keys.storage_key_with(&mut hardware).map_err(|e|format!("{e:?}"))?;let dir=Path::new(&a[3]);fs::create_dir_all(dir)?;let mut flash=FileFlash{dir:dir.into()};flash.initialize().map_err(|e|format!("{e:?}"))?;let card=Card::open(flash,hardware,storage_key).map_err(|e|format!("{e:?}"))?;let mut endpoint=microcard_core::transport::Endpoint::new(card,keys);if a[1]=="serve-binary"{use std::io::Read;let mut decoder=microcard_core::framing::Decoder::default();for byte in io::stdin().lock().bytes(){if let Some(frame)=decoder.push(byte?,0){let response=endpoint.exchange(frame);io::stdout().write_all(&(response.len() as u16).to_le_bytes())?;io::stdout().write_all(&response)?;io::stdout().flush()?;}}return Ok(())}for line in io::stdin().lock().lines(){let line=line?;let raw=unhex(line.trim())?;println!("{}",hex(&endpoint.exchange(&raw))?);io::stdout().flush()?;}},
- _=>return Err("commands: keygen PATH | pack ASSEMBLY METADATA DOMAIN INCARNATION_HEX VERSION SEED OUTPUT --explicit-sign | verify PACKAGE | verify-assembly ASSEMBLY | run-mc04 ASSEMBLY METHOD [INT...] | serve MANAGEMENT_KEYS STATE_DIR".into())}
+ Some("serve-jcvm") if a.len()==3=>{
+  // A Java Card applet, installed and then handed one APDU per line. The transport is
+  // the same text protocol the other serve modes use, so a host driving this needs to
+  // know nothing about the engine behind it.
+  let block=fs::read(&a[2])?;
+  let file=microcard_engine_jcvm::cap::LoadFile::parse(&block).map_err(|e|format!("{e:?}"))?;
+  let sizes=microcard_engine_jcvm::applet::Sizes{heap_bytes:64*1024,frame_words:8192,..Default::default()};
+  let mut card=microcard_engine_jcvm::applet::Card::new(&file,sizes).map_err(|e|format!("{e:?}"))?;
+  let mut host=JavaCardHost;
+  // The install parameters GlobalPlatform would deliver, empty here because nothing has
+  // asked for an instance AID or privileges.
+  card.install(&file,&mut host,&[0,0,0]).map_err(|e|format!("{e:?}"))?;
+  let mut selected=false;
+  for line in io::stdin().lock().lines(){
+   let line=line?;let raw=unhex(line.trim())?;
+   // A SELECT by name is what makes an applet current, JCRE §4.
+   let selecting=raw.len()>=4&&raw[0]&0xfc==0&&raw[1]==0xa4&&raw[2]==0x04;
+   let answer=card.process(&file,&mut host,&raw,selecting);
+   let (data,sw)=match answer{
+    Ok(response)=>{if selecting&&response.sw==0x9000{selected=true}(response.data,response.sw)}
+    // A failure the engine could not run at all is reported as the status word that says
+    // the card does not know what happened, which is what a real card would send.
+    Err(_)=>(Vec::new(),0x6f00u16)};
+   let _=selected;
+   let mut out=data;out.extend(sw.to_be_bytes());
+   println!("{}",hex(&out)?);io::stdout().flush()?;
+  }
+ },
+ _=>return Err("commands: keygen PATH | pack ASSEMBLY METADATA DOMAIN INCARNATION_HEX VERSION SEED OUTPUT --explicit-sign | verify PACKAGE | verify-assembly ASSEMBLY | run-mc04 ASSEMBLY METHOD [INT...] | serve MANAGEMENT_KEYS STATE_DIR | serve-jcvm LOAD_FILE".into())}
     Ok(())
 }
 

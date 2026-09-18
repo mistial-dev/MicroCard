@@ -96,6 +96,20 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
                     .unwrap_or_else(|error| panic!("{name}: select {error:?}"));
                 assert_eq!(response.sw, 0x9000, "{name}");
                 eprintln!("{name}: installed, registered and selected");
+                // A PIV GET DATA for the card capability container. What matters is that
+                // the applet's own process method ran and chose the answer, whatever that
+                // answer is.
+                let get_data = [
+                    0x00, 0xcb, 0x3f, 0xff, 0x05, 0x5c, 0x03, 0x5f, 0xc1, 0x07,
+                ];
+                match card.process(&file, &mut host, &get_data, false) {
+                    Ok(response) => eprintln!(
+                        "{name}: GET DATA answered {:04x} with {} bytes",
+                        response.sw,
+                        response.data.len()
+                    ),
+                    Err(error) => eprintln!("{name}: GET DATA stopped at {error:?}"),
+                }
                 selected += 1;
             }
             // The engine runs the applet's own install bytecode until it reaches

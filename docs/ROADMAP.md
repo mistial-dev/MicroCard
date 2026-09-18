@@ -45,7 +45,9 @@ This is the authoritative public work list. Checked items have repeatable reposi
 - [ ] Specify persistent objects, firewall contexts, transactions, lifecycle, and domain mapping.
 - [x] Read the CAP container and verify a package structurally, checked against real applet packages.
 - [x] Interpret the instruction set below the API layer, including fields, arrays, invocation and exceptions.
-- [ ] Implement interface dispatch, the static field image and the applet lifecycle.
-- [ ] Implement the native API classes for the imported packages.
-- [ ] Deliver a package to the engine through the loader and dispatch APDUs to it.
+- [x] Implement interface dispatch and the applet lifecycle.
+- [x] Implement the native API classes an applet needs to install, select and process.
+- [x] Run a real applet in the simulator. OpenFIPS201 installs, selects and answers PIV commands through `serve-jcvm`.
+- [ ] Answer the cipher, signature and key agreement operations through the card.
+- [ ] Deliver a package to the engine through GlobalPlatform loading rather than a file path.
 - [ ] Add independent conformance and cross-engine isolation tests.
