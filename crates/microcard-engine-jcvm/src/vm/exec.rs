@@ -14,6 +14,7 @@ use super::heap::{self, Context, Heap};
 use crate::cap::Method;
 use crate::code::{Limits, constant_pool_index, instruction_length};
 use crate::link::Linked;
+use crate::host::Host;
 use crate::natives::{self, Jcre, Native};
 use crate::{Error, Result};
 
@@ -37,6 +38,8 @@ pub const MAX_DEPTH: u8 = 16;
 /// What a running method is allowed to touch.
 pub struct Machine<'a, 'h, 'p> {
     pub heap: &'a mut Heap<'h>,
+    /// The card, for anything the engine cannot compute itself.
+    pub host: &'a mut dyn Host,
     /// The package, for resolving what an instruction names.
     pub linked: &'a Linked<'p>,
     /// The Method component, which every method offset counts from.
@@ -52,8 +55,12 @@ pub struct Machine<'a, 'h, 'p> {
 }
 
 impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
+    /// Everything one command runs against. The pieces are unrelated to each other, which
+    /// is why they arrive separately rather than as a struct that would only exist here.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         heap: &'a mut Heap<'h>,
+        host: &'a mut dyn Host,
         linked: &'a Linked<'p>,
         methods: Method<'p>,
         statics: &'a mut [u8],
@@ -63,6 +70,7 @@ impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
     ) -> Self {
         Self {
             heap,
+            host,
             linked,
             methods,
             statics,
@@ -193,12 +201,16 @@ mod op {
     pub const NEW: u8 = 143;
     pub const NEWARRAY: u8 = 144;
     pub const ANEWARRAY: u8 = 145;
+    pub const CHECKCAST: u8 = 148;
+    pub const INSTANCEOF: u8 = 149;
     pub const ATHROW: u8 = 147;
     pub const ARRAYLENGTH: u8 = 146;
-    pub const GETFIELD_A_THIS: u8 = 169;
-    pub const PUTFIELD_A_THIS: u8 = 173;
-    pub const GETFIELD_A_W: u8 = 177;
-    pub const PUTFIELD_A_W: u8 = 181;
+    // The wide forms come before the this forms, which is the opposite of what the
+    // shorter mnemonics suggest. The test below pins each against the generated table.
+    pub const GETFIELD_A_W: u8 = 169;
+    pub const GETFIELD_A_THIS: u8 = 173;
+    pub const PUTFIELD_A_W: u8 = 177;
+    pub const PUTFIELD_A_THIS: u8 = 181;
     pub const GOTO_W: u8 = 168;
 }
 
@@ -337,43 +349,84 @@ fn catches(machine: &Machine, catch_type: u16, thrown: u16) -> Result<bool> {
     if catch_type == 0 {
         return Ok(true);
     }
-    // An exception the card threw is an instance of a class the card provides, and the
-    // catch clause names it through the applet's imports.
-    if natives::is_native_class(thrown) {
-        let entry = machine.linked.constants()?.get(catch_type)?;
-        let value = u16::from_be_bytes([entry.info[0], entry.info[1]]);
-        let crate::cap::ClassRef::External { package, class } =
-            crate::cap::ClassRef::decode(value)
+    class_matches(machine, thrown, catch_type)
+}
+
+/// Whether a class reaches the class a constant pool entry names.
+///
+/// A catch and a cast ask the same question, so they are answered in one place. A class
+/// the card provides answers through the hierarchy its export file records, and an
+/// applet's own class answers by walking what it extends and implements.
+fn class_matches(machine: &Machine, class: u16, index: u16) -> Result<bool> {
+    let entry = machine.linked.constants()?.get(index)?;
+    let target = u16::from_be_bytes([entry.info[0], entry.info[1]]);
+    if natives::is_native_class(class) {
+        let crate::cap::ClassRef::External {
+            package,
+            class: token,
+        } = crate::cap::ClassRef::decode(target)
         else {
             return Ok(false);
         };
-        let caught = machine.linked.api_class(package, class)?;
+        let wanted = machine.linked.api_class(package, token)?;
         let position = crate::jcvm_api::PACKAGES
             .iter()
-            .position(|entry| entry.classes.iter().any(|candidate| candidate == caught))
+            .position(|entry| entry.classes.iter().any(|candidate| candidate == wanted))
             .ok_or(Error::Missing)?;
         return Ok(natives::native_is_a(
-            thrown,
-            natives::native_class(position, caught.token),
+            class,
+            natives::native_class(position, wanted.token),
         ));
     }
-    let wanted = match machine.linked.class_ref(catch_type) {
-        Ok(class) => class,
-        // A catch type in another package needs its export file to compare against.
-        Err(_) => return Ok(false),
-    };
     let classes = machine.linked.classes();
-    let mut at = crate::cap::ClassRef::Internal(thrown);
+    let mut at = crate::cap::ClassRef::Internal(class);
     for _ in 0..=u8::MAX {
-        let crate::cap::ClassRef::Internal(offset) = at else {
-            return Ok(false);
+        let class = match at {
+            crate::cap::ClassRef::Internal(offset) => offset,
+            // The chain left this package, so the only way to match is for the target to
+            // name the same class outright.
+            other => return Ok(other == crate::cap::ClassRef::decode(target)),
         };
-        if offset == wanted {
+        if crate::cap::ClassRef::decode(target) == crate::cap::ClassRef::Internal(class) {
             return Ok(true);
         }
-        at = classes.at(offset)?.super_class;
+        let entry = classes.at(class)?;
+        for (implemented, _) in entry.interfaces() {
+            if implemented == crate::cap::ClassRef::decode(target) {
+                return Ok(true);
+            }
+        }
+        at = entry.super_class;
     }
     Ok(false)
+}
+
+/// Whether an object can be used as the type a cast names, JCVM §7.5.16.
+///
+/// The type code decides what is being asked. For a primitive array the code is the whole
+/// answer. Otherwise the constant pool names a class.
+fn assignable(
+    machine: &Machine,
+    object: Reference,
+    atype: u8,
+    named: Option<(usize, u16)>,
+) -> Result<bool> {
+    let info = machine.heap.info(object)?;
+    if (10..=13).contains(&atype) {
+        return Ok(info.is_array() && info.kind == array_kind(atype)?);
+    }
+    let Some((_, index)) = named else {
+        return Err(Error::Format);
+    };
+    if atype == 14 {
+        // An array of references to the named class. The element type is all this engine
+        // records, so the element class itself is not checked.
+        return Ok(info.is_array() && info.kind == heap::KIND_REFERENCE);
+    }
+    if info.is_array() {
+        return Ok(false);
+    }
+    class_matches(machine, info.class, index)
 }
 
 /// Run a method body with no arena, which refuses any invocation it meets.
@@ -731,6 +784,35 @@ pub fn run_body(
                 }
                 frame.push_short(info.length as i16)?
             }
+            op::CHECKCAST | op::INSTANCEOF => {
+                let object = frame.pop_reference()?;
+                // A cast of null always succeeds, JCVM §7.5.16, and an instanceof of null
+                // is always false.
+                let answer = if object == NULL {
+                    opcode == op::CHECKCAST
+                } else {
+                    let atype = byte(code, pc + 1)?;
+                    assignable(machine, object, atype, constant_pool_index(code, pc)?)?
+                };
+                if opcode == op::INSTANCEOF {
+                    frame.push_short((answer && object != NULL) as i16)?;
+                } else if answer {
+                    frame.push_reference(object)?;
+                } else {
+                    let exception = natives::new_exception(
+                        machine.heap,
+                        "java/lang/ClassCastException",
+                        machine.context,
+                    )?;
+                    match find_handler(machine, body, code.len(), pc, exception)? {
+                        Some(target) => {
+                            enter_handler(frame, exception)?;
+                            next = target;
+                        }
+                        None => return Ok(Outcome::Thrown(exception)),
+                    }
+                }
+            }
             op::ANEWARRAY => {
                 // The element class is named but not recorded. Every reference element is
                 // one word whatever it points at, and a store is checked against the
@@ -820,9 +902,22 @@ pub fn run_body(
 
             op::NEW => {
                 let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
-                let class = machine.linked.class_ref(index)?;
-                let words = machine.linked.instance_words(class)?;
-                let object = machine.heap.new_object(class, words, machine.context)?;
+                let entry = machine.linked.constants()?.get(index)?;
+                let value = u16::from_be_bytes([entry.info[0], entry.info[1]]);
+                let object = match crate::cap::ClassRef::decode(value) {
+                    crate::cap::ClassRef::Internal(class) => {
+                        let words = machine.linked.instance_words(class)?;
+                        machine.heap.new_object(class, words, machine.context)?
+                    }
+                    // A class the card provides. Its state is the card's rather than the
+                    // applet's, so the object carries the words this engine needs instead
+                    // of fields the applet could name.
+                    crate::cap::ClassRef::External { package, class } => {
+                        let wanted = machine.linked.api_class(package, class)?;
+                        natives::new_api_object(machine.heap, wanted, machine.context)?
+                    }
+                    crate::cap::ClassRef::None => return Err(Error::Format),
+                };
                 frame.push_reference(object)?
             }
 
@@ -853,26 +948,26 @@ pub fn run_body(
                 let object = frame.pop_reference()?;
                 put_field_value(machine, object, index, kind, value)?
             }
-            op::GETFIELD_A_THIS..=172 => {
+            op::GETFIELD_A_THIS..=176 => {
                 let index = field_index(code, pc, machine)?;
                 // The receiver is local zero, which is what makes these the shortest way
                 // for a method to reach its own fields.
                 let object = frame.load_reference(0)?;
                 read_field(machine, frame, object, index, opcode - op::GETFIELD_A_THIS)?
             }
-            op::PUTFIELD_A_THIS..=176 => {
+            op::PUTFIELD_A_THIS..=184 => {
                 let index = field_index(code, pc, machine)?;
                 let kind = opcode - op::PUTFIELD_A_THIS;
                 let value = take_field_value(frame, kind)?;
                 let object = frame.load_reference(0)?;
                 put_field_value(machine, object, index, kind, value)?
             }
-            op::GETFIELD_A_W..=180 => {
+            op::GETFIELD_A_W..=172 => {
                 let index = field_index(code, pc, machine)?;
                 let object = frame.pop_reference()?;
                 read_field(machine, frame, object, index, opcode - op::GETFIELD_A_W)?
             }
-            op::PUTFIELD_A_W..=184 => {
+            op::PUTFIELD_A_W..=180 => {
                 let index = field_index(code, pc, machine)?;
                 let kind = opcode - op::PUTFIELD_A_W;
                 let value = take_field_value(frame, kind)?;
@@ -890,6 +985,7 @@ pub fn run_body(
                         Some(natives::call(
                             target,
                             machine.heap,
+                            machine.host,
                             frame,
                             machine.context,
                             &mut machine.jcre,
@@ -944,6 +1040,7 @@ pub fn run_body(
                     match natives::call(
                         target,
                         machine.heap,
+                        machine.host,
                         frame,
                         machine.context,
                         &mut machine.jcre,
@@ -1195,8 +1292,10 @@ mod tests {
         let mut slab = vec![0u8; 1024];
         let mut heap = Heap::new(&mut slab)?;
         let mut statics = vec![0u8; package.static_bytes as usize + 8];
+        let mut host = crate::host::NoHost;
         let mut machine = Machine::new(
             &mut heap,
+            &mut host,
             &linked,
             methods,
             &mut statics,
@@ -1271,8 +1370,10 @@ mod tests {
         let mut slab = vec![0u8; 1024];
         let mut heap = Heap::new(&mut slab).unwrap();
         let mut statics = vec![0u8; 8];
+        let mut host = crate::host::NoHost;
         let mut machine = Machine::new(
             &mut heap,
+            &mut host,
             &linked,
             methods,
             &mut statics,
@@ -1435,11 +1536,42 @@ mod tests {
 
     #[test]
     fn an_instruction_this_loop_cannot_run_yet_says_so() {
-        // checkcast, which needs the class hierarchy walk the cast rules describe.
+        // jsr, which the verifier refuses and the loop therefore never runs.
         assert_eq!(
-            execute(&[op::ACONST_NULL, 0x94, 0, 0, 0, op::SRETURN], 1),
+            execute(&[0x71, 0x00, 0x00, op::RETURN], 1),
             Err(Error::Unsupported)
         );
+    }
+
+    #[test]
+    fn the_opcode_constants_match_the_generated_table() {
+        // These are written out by name for readability, and the wide and this forms of
+        // the field instructions run in the opposite order to what the mnemonics suggest.
+        // Getting one wrong sends an instruction to another instruction's arm, which is
+        // how a field read once ran the code for a field write.
+        for (value, name) in [
+            (op::GETFIELD_A, "getfield_a"),
+            (op::PUTFIELD_A, "putfield_a"),
+            (op::GETFIELD_A_W, "getfield_a_w"),
+            (op::GETFIELD_A_THIS, "getfield_a_this"),
+            (op::PUTFIELD_A_W, "putfield_a_w"),
+            (op::PUTFIELD_A_THIS, "putfield_a_this"),
+            (op::GETSTATIC_A, "getstatic_a"),
+            (op::PUTSTATIC_A, "putstatic_a"),
+            (op::INVOKEVIRTUAL, "invokevirtual"),
+            (op::INVOKESPECIAL, "invokespecial"),
+            (op::INVOKESTATIC, "invokestatic"),
+            (op::INVOKEINTERFACE, "invokeinterface"),
+            (op::NEW, "new"),
+            (op::NEWARRAY, "newarray"),
+            (op::ANEWARRAY, "anewarray"),
+            (op::ARRAYLENGTH, "arraylength"),
+            (op::ATHROW, "athrow"),
+            (op::CHECKCAST, "checkcast"),
+            (op::INSTANCEOF, "instanceof"),
+        ] {
+            assert_eq!(crate::jcvm_opcodes::NAME[value as usize], name);
+        }
     }
 
     #[test]

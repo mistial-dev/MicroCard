@@ -102,6 +102,7 @@ impl<'a> Linked<'a> {
         let ClassRef::Internal(class) = ClassRef::decode(u16::from_be_bytes([info[0], info[1]]))
         else {
             // A field of a class in another package needs that package's export file.
+            crate::natives::report("link", "instance field in another package");
             return Err(Error::Unsupported);
         };
         let token = info[2] & !PRIVATE_TOKEN;
@@ -152,6 +153,7 @@ impl<'a> Linked<'a> {
     pub fn static_method(&self, index: u16) -> Result<u16> {
         let info = self.entry(index, CONSTANT_STATIC_METHODREF)?;
         if info[0] & 0x80 != 0 {
+            crate::natives::report("link", "external static method reached the internal path");
             return Err(Error::Unsupported);
         }
         // Before CAP 2.3 the first byte is padding. From 2.3 it indexes a method block,
@@ -246,7 +248,10 @@ impl<'a> Linked<'a> {
     /// The class a `CONSTANT_Classref` names, when it names one in this package.
     pub fn class_ref(&self, index: u16) -> Result<u16> {
         let entry = self.file.constants()?.get(index)?;
-        entry.internal_class().ok_or(Error::Unsupported)
+        entry.internal_class().ok_or_else(|| {
+            crate::natives::report("link", "class reference into another package");
+            Error::Unsupported
+        })
     }
 
     /// The class and token a virtual or super method reference names.
