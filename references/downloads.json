@@ -20,6 +20,11 @@
     "sha256": "973a10834f7fe8befd98da9af65393622234b80745092bd85248804c57b648dd"
   },
   {
+    "file": "GPC_2.3_D_SCP03_v1.1.2.6.pdf",
+    "url": "https://globalplatform.org/wp-content/uploads/2019/12/GPC_2.3_D_SCP03_v1.1.2.6.pdf",
+    "sha256": "ee65c3cc4e55c93d1e10b00d248fc8e1215ec32218f4ad89f013b5ed2baf2d66"
+  },
+  {
     "file": "NIST.SP.800-38B.pdf",
     "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-38B.pdf",
     "sha256": "da9dc0f1e1f08af917caf4a831a7497cf18997b8046353af89570a812f1ec5a2"
