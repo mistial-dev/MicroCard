@@ -39,6 +39,7 @@ Every document in this directory, grouped by what you are trying to do. The [sta
 
 ## Hardware
 
+- [Dongle](DONGLE.md) — flashing a USB dongle, which needs no debug probe.
 - [Board](BOARD.md) — the nRF52840 backend guide.
 - [First flash](FIRST_FLASH.md) — preparing artifacts and provisioning a device.
 - [Hardware smoke](HARDWARE_SMOKE.md) — what has actually run on a board, bound to a revision.

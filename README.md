@@ -27,15 +27,14 @@ The Java client uses GlobalPlatformPro for SCP03 command encryption, command MAC
 
 ## Try the Java Card engine
 
-Build a Load File Data Block from a CAP file, then run it. The CAP file is a third-party build output and stays outside this repository.
+An OpenFIPS201 build is committed, so this runs on a clean checkout.
 
 ```sh
-python3 scripts/jcvm_cap_inventory.py OpenFIPS201-standard-CS2-attestation-false.cap --load-file applet.lfdb
 cargo build
-python3 scripts/jcvm_applet_acceptance.py applet.lfdb
+python3 scripts/piv_vector_acceptance.py
 ```
 
-That drives a SELECT, a GET DATA and two VERIFY commands through `microcard-sim serve-jcvm` and checks the applet's own answers, including that its PIN retry counter goes down and stays down.
+That replays twelve PIV commands through `microcard-sim serve-jcvm` and compares the applet's own status words against committed expectations. Half of those commands are authentic encodings captured from real cards. Their provenance and license are recorded beside them in `crates/microcard-engine-jcvm/tests/vectors`. Pass a different Load File Data Block to `scripts/jcvm_applet_acceptance.py` to drive another build, producing one with `scripts/jcvm_cap_inventory.py --load-file`.
 
 ## Security model
 
@@ -66,7 +65,7 @@ cd board/nrf52840
 cargo build --release --locked
 ```
 
-Read the [board guide](docs/BOARD.md) and [first flash](docs/FIRST_FLASH.md) before provisioning or flashing.
+The quickest hardware to talk to is a USB dongle, which needs no debug probe. See [the dongle guide](docs/DONGLE.md). For the nRF52840 DK, read the [board guide](docs/BOARD.md) and [first flash](docs/FIRST_FLASH.md) before provisioning or flashing.
 
 ## Repository map
 
