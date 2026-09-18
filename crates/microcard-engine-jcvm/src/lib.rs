@@ -4,6 +4,7 @@
 //! interpreter yet, and nothing on the card reaches this crate.
 #![no_std]
 extern crate alloc;
+pub mod applet;
 pub mod cap;
 pub mod code;
 pub mod link;
@@ -44,6 +45,8 @@ pub enum Error {
     Firewall,
     /// A name resolved to nothing, such as a method token no class in the chain defines.
     Missing,
+    /// The package was refused rather than run, such as an install that threw.
+    Unauthorized,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

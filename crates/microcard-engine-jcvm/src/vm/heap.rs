@@ -71,6 +71,17 @@ impl<'a> Heap<'a> {
         Ok(Self { bytes, next: 2 })
     }
 
+    /// Take a slab that already holds objects, continuing from where it was left.
+    ///
+    /// The heap is position independent, so resuming is a matter of remembering how much
+    /// was used. That is what lets one heap outlive the command that allocated in it.
+    pub fn resume(bytes: &'a mut [u8], used: usize) -> Result<Self> {
+        if used < 2 || used > bytes.len() {
+            return Err(Error::Bounds);
+        }
+        Ok(Self { bytes, next: used })
+    }
+
     /// Bytes handed out so far, which is what a writeback has to persist.
     pub fn used(&self) -> usize {
         self.next
