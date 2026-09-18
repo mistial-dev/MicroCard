@@ -12,6 +12,8 @@ use crate::vm::frame::{Frame, Reference};
 use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
+mod security;
+
 /// A class the card provides, encoded so it cannot collide with a class in a package.
 ///
 /// The high bit marks it, the next byte is the package's position in the API table and the
@@ -76,6 +78,8 @@ pub struct Jcre {
     pub selecting: bool,
     /// Transactions are counted rather than nested. A second begin is an error, JCRE §7.
     pub transaction_depth: u8,
+    /// The applet's lifecycle byte, which GlobalPlatform keeps rather than the applet.
+    pub lifecycle: u8,
 }
 
 impl Jcre {
@@ -89,6 +93,8 @@ impl Jcre {
             data_offset: 5,
             selecting: false,
             transaction_depth: 0,
+            // Selectable, GP 2.3 Table 11-4. An applet moves itself on from here.
+            lifecycle: 0x07,
         }
     }
 }
@@ -110,6 +116,7 @@ pub enum Native {
 pub fn call(
     target: ApiTarget,
     heap: &mut Heap,
+    host: &mut dyn crate::host::Host,
     frame: &mut Frame,
     context: heap::Context,
     jcre: &mut Jcre,
@@ -165,8 +172,61 @@ pub fn call(
             frame.pop_reference()?;
             Ok(Native::Returned)
         }
-        _ => Ok(Native::Unimplemented),
+        _ => {
+            let handled = security::call(class, method, heap, host, frame, context, jcre)?;
+            if let Native::Unimplemented = handled {
+                report(class, method);
+            }
+            Ok(handled)
+        }
     }
+}
+
+/// Name what the card cannot answer, which is the difference between a usable diagnostic
+/// and a refusal with nothing to act on. A card build leaves this out.
+pub(crate) fn report(class: &str, method: &str) {
+    #[cfg(feature = "diagnostics")]
+    {
+        extern crate std;
+        std::eprintln!("jcvm: no native for {class}.{method}");
+    }
+    let _ = (class, method);
+}
+
+/// Read one of a native object's state words, checking it is one.
+fn word_field(heap: &Heap, object: Reference, index: usize) -> Result<u16> {
+    if !is_native_class(heap.info(object)?.class) {
+        return Err(Error::Type);
+    }
+    heap.get_word(object, index)
+}
+
+/// Allocate an instance of a class the card provides, named by its API entry.
+pub fn new_api_object(
+    heap: &mut Heap,
+    class: &ApiClass,
+    context: heap::Context,
+) -> Result<Reference> {
+    let index = PACKAGES
+        .iter()
+        .position(|package| package.classes.iter().any(|entry| entry == class))
+        .ok_or(Error::Missing)?;
+    heap.new_object(native_class(index, class.token), security::STATE_WORDS, context)
+}
+
+/// Allocate an instance of a class the card provides, with room for its state.
+fn new_native(
+    heap: &mut Heap,
+    name: &str,
+    words: u16,
+    context: heap::Context,
+) -> Result<Reference> {
+    for (index, package) in PACKAGES.iter().enumerate() {
+        if let Some(class) = package.classes.iter().find(|entry| entry.name == name) {
+            return heap.new_object(native_class(index, class.token), words, context);
+        }
+    }
+    Err(Error::Missing)
 }
 
 /// `javacard.framework.APDU`, JCRE §4. The buffer is an ordinary byte array on the heap,
@@ -444,7 +504,7 @@ mod tests {
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
         frame.push_short(0x6a80u16 as i16).unwrap();
         let target = framework("javacard/framework/ISOException", "throwIt", true);
-        let Native::Threw(exception) = call(target, &mut heap, &mut frame, 1, &mut idle()).unwrap() else {
+        let Native::Threw(exception) = call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap() else {
             panic!("throwIt has to throw");
         };
         assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 0x6a80);
@@ -505,6 +565,7 @@ mod tests {
         call(
             framework("javacard/framework/Util", "setShort", true),
             &mut heap,
+            &mut crate::host::NoHost,
             &mut frame,
             1,
             &mut idle(),
@@ -518,6 +579,7 @@ mod tests {
         call(
             framework("javacard/framework/Util", "getShort", true),
             &mut heap,
+            &mut crate::host::NoHost,
             &mut frame,
             1,
             &mut idle(),
@@ -545,6 +607,7 @@ mod tests {
         call(
             framework("javacard/framework/Util", "arrayCopyNonAtomic", true),
             &mut heap,
+            &mut crate::host::NoHost,
             &mut frame,
             1,
             &mut idle(),
@@ -569,6 +632,7 @@ mod tests {
             call(
                 framework("javacard/framework/Util", "arrayFillNonAtomic", true),
                 &mut heap,
+                &mut crate::host::NoHost,
                 &mut frame,
                 1,
                 &mut idle(),
@@ -583,7 +647,7 @@ mod tests {
             frame.push_reference(right).unwrap();
             frame.push_short(0).unwrap();
             frame.push_short(4).unwrap();
-            call(compare, heap, frame, 1, &mut idle()).unwrap();
+            call(compare, heap, &mut crate::host::NoHost, frame, 1, &mut idle()).unwrap();
             frame.pop_short().unwrap()
         };
         assert_eq!(run(&mut heap, &mut frame), 0);
@@ -607,7 +671,7 @@ mod tests {
             true,
         );
         assert!(matches!(
-            call(target, &mut heap, &mut frame, 1, &mut idle()).unwrap(),
+            call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap(),
             Native::Unimplemented
         ));
     }

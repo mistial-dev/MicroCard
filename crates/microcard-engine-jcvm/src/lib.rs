@@ -7,6 +7,7 @@ extern crate alloc;
 pub mod applet;
 pub mod cap;
 pub mod code;
+pub mod host;
 pub mod link;
 pub mod natives;
 #[allow(dead_code)]
