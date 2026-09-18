@@ -65,6 +65,14 @@ def rust(schema: dict) -> str:
         *table(schema, lambda op: "true" if op["int_only"] else "false", "false", width=8),
         "];",
         "",
+        "/// Whether control continues to the instruction that follows this one.",
+        "///",
+        "/// False for the returns, athrow, the unconditional jumps and the switches. A",
+        "/// conditional branch both falls through and branches.",
+        "pub const FALLS_THROUGH: [bool; 256] = [",
+        *table(schema, lambda op: "true" if op["falls_through"] else "false", "false", width=8),
+        "];",
+        "",
         "/// Width in bytes of the branch offset the instruction carries, or zero.",
         "///",
         "/// The offset is signed and counts from the address of the opcode, JCVM section 7.5.",
@@ -99,15 +107,16 @@ def markdown(schema: dict) -> str:
         "appear in a CAP file. A variable-length entry has no size here because its size "
         "depends on its operands.",
         "",
-        "| Opcode | Mnemonic | Operands | Bytes | Needs int | Branch width |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Opcode | Mnemonic | Operands | Bytes | Needs int | Branch width | Falls through |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for opcode in schema["opcodes"]:
         operands = ", ".join(opcode["operands"]) or "none"
         length = opcode["length"] or "variable"
         needs = "yes" if opcode["int_only"] else "no"
         branch = branch_width(opcode) or ""
-        lines.append(f"| `{opcode['value']:#04x}` | `{opcode['name']}` | {operands} | {length} | {needs} | {branch} |")
+        through = "yes" if opcode["falls_through"] else "no"
+        lines.append(f"| `{opcode['value']:#04x}` | `{opcode['name']}` | {operands} | {length} | {needs} | {branch} | {through} |")
     lines += ["", "| Opcode | Reserved mnemonic |", "| --- | --- |"]
     for reserved in schema["reserved"]:
         lines.append(f"| `{reserved['value']:#04x}` | `{reserved['name']}` |")

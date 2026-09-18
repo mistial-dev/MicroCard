@@ -8,6 +8,7 @@
 //!
 //! Produce the blocks with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
 use microcard_engine_jcvm::cap::{LoadFile, MethodHeader, Tag};
+use microcard_engine_jcvm::code::{Boundaries, Limits, verify_targets};
 
 /// The six packages docs/JCVM_PROFILE.md commits to, with the versions it names.
 const PROFILE: [(&[u8], u8, u8); 6] = [
@@ -95,6 +96,66 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
         // is why the block is a third of the archive that carried it.
         assert!(file.component(Tag::Descriptor).is_none());
         assert!(file.component(Tag::Debug).is_none());
+        // Every method the package declares, from the class method tables and the applet
+        // install offsets. A method records no length, so the next offset is its bound.
+        let classes = file.classes().expect("classes");
+        let mut offsets: Vec<usize> = classes
+            .iter()
+            .flat_map(|class| class.method_offsets().collect::<Vec<u16>>())
+            .map(usize::from)
+            .chain(applets.iter().map(|a| a.install_method_offset as usize))
+            // Static methods and constructors appear in no class method table. Their only
+            // offsets are the internal static references in the constant pool, and without
+            // them a method's extent swallows whatever follows it.
+            .chain(
+                file.constants()
+                    .expect("constants")
+                    .iter()
+                    .filter_map(|entry| entry.internal_static_method())
+                    .map(usize::from),
+            )
+            .collect();
+        offsets.sort_unstable();
+        offsets.dedup();
+        assert!(offsets.len() > 100, "{}: {} methods", path.display(), offsets.len());
+
+        // The package declares no 32-bit integers, and subroutines have not been emitted by
+        // a converter for many years, so this is the policy every method is walked under.
+        let limits = Limits {
+            int: header.flags & 0x01 != 0,
+            ..Limits::IMPLEMENTED
+        };
+        let mut scratch = vec![0u8; 4096];
+        let mut walked = 0;
+        for (index, &offset) in offsets.iter().enumerate() {
+            let end = offsets.get(index + 1).copied().unwrap_or(methods.bytes().len());
+            let (method_header, code) = methods
+                .method(offset, end)
+                .unwrap_or_else(|error| panic!("{}: method at {offset} {error:?}", path.display()));
+            if method_header.abstract_method() {
+                continue;
+            }
+            if scratch.len() < Boundaries::scratch_for(code.len()) {
+                scratch.resize(Boundaries::scratch_for(code.len()), 0);
+            }
+            // Entry points are the first instruction and every handler that lands inside
+            // this method. A method's extent is bounded above by the next offset the
+            // package names, and a package can carry a method nothing names, so decoding
+            // everything in between would decode the next method's header as code.
+            let body = offset + method_header.length;
+            let mut entries = vec![0usize];
+            entries.extend(methods.handlers().filter_map(|handler| {
+                let target = handler.handler_offset as usize;
+                (target >= body && target < end).then(|| target - body)
+            }));
+            let boundaries = Boundaries::reachable(code, &mut scratch, limits, &entries)
+                .unwrap_or_else(|error| panic!("{}: decode at {offset} {error:?}", path.display()));
+            verify_targets(code, &boundaries)
+                .unwrap_or_else(|error| panic!("{}: targets at {offset} {error:?}", path.display()));
+            walked += 1;
+        }
+        assert!(walked > 100, "{}: walked {walked}", path.display());
+
         parsed += 1;
     }
     assert!(parsed > 0, "no .lfdb file in {directory}");

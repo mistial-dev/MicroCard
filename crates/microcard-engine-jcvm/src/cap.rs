@@ -7,16 +7,24 @@
 use crate::{Error, Result};
 
 mod applet;
+mod class;
+mod constant_pool;
 mod directory;
 mod header;
 mod import;
 mod method;
 
 pub use applet::{Applet, AppletRef};
+pub use class::{ACC_INTERFACE, ACC_REMOTE, ACC_SHAREABLE, Class, ClassInfo, ClassRef};
+pub use constant_pool::{
+    CONSTANT_CLASSREF, CONSTANT_INSTANCE_FIELDREF, CONSTANT_STATIC_FIELDREF,
+    CONSTANT_STATIC_METHODREF, CONSTANT_SUPER_METHODREF, CONSTANT_VIRTUAL_METHODREF,
+    ConstantPool, Entry,
+};
 pub use directory::Directory;
-pub use header::Header;
+pub use header::{Header, MAGIC};
 pub use import::{Import, PackageRef};
-pub use method::{Handler, Method, MethodHeader};
+pub use method::{ACC_ABSTRACT, ACC_EXTENDED, Handler, Method, MethodHeader};
 
 /// Component tags, JCVM §6.2. The tag doubles as the position in the Directory table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -164,6 +172,22 @@ impl<'a> LoadFile<'a> {
     /// The applets this package declares. An applet package always has one.
     pub fn applets(&self) -> Result<Applet<'a>> {
         Applet::parse(self.component(Tag::Applet).ok_or(Error::Format)?.info)
+    }
+
+    /// The classes and interfaces, which need the header to know their own layout.
+    pub fn classes(&self) -> Result<Class<'a>> {
+        Class::parse(
+            self.component(Tag::Class).ok_or(Error::Format)?.info,
+            &self.header()?,
+        )
+    }
+
+    /// The constant pool, or an empty one when the package references nothing.
+    pub fn constants(&self) -> Result<ConstantPool<'a>> {
+        match self.component(Tag::ConstantPool) {
+            Some(component) => ConstantPool::parse(component.info),
+            None => ConstantPool::parse(&[0, 0]),
+        }
     }
 
     /// The Method component, which holds every method body and the handler table.

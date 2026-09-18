@@ -4,7 +4,7 @@
 //! every branch, switch and handler target against that map removes the entire class of
 //! attacks that jump into the middle of an instruction, where the operand bytes of one
 //! instruction become the opcode of another. It costs one pass and a bitmap.
-use crate::jcvm_opcodes::{BRANCH_WIDTH, DEFINED, FIXED_LENGTH, INT_ONLY};
+use crate::jcvm_opcodes::{BRANCH_WIDTH, DEFINED, FALLS_THROUGH, FIXED_LENGTH, INT_ONLY};
 use crate::{Error, Result};
 
 /// `jsr` and `ret`, JCVM §7.5. Subroutines need their own dataflow analysis to verify, so
@@ -113,41 +113,194 @@ pub fn instruction_length(code: &[u8], at: usize) -> Result<usize> {
     Ok(length)
 }
 
+/// Every target the instruction at `at` can transfer control to, as absolute offsets.
+///
+/// Offsets in the encoding are signed and count from the address of the opcode, JCVM §7.5,
+/// so this is where that arithmetic happens once for every caller.
+fn for_each_target(
+    code: &[u8],
+    at: usize,
+    length: usize,
+    mut visit: impl FnMut(i64) -> Result<()>,
+) -> Result<()> {
+    let opcode = code[at];
+    let width = BRANCH_WIDTH[opcode as usize] as usize;
+    if width != 0 {
+        let offset = if width == 1 {
+            *code.get(at + 1).ok_or(Error::Bounds)? as i8 as i32
+        } else {
+            word(code, at + 1)? as i32
+        };
+        visit(at as i64 + offset as i64)?;
+    }
+    match opcode {
+        STABLESWITCH | ITABLESWITCH => {
+            let header = if opcode == ITABLESWITCH { 1 + 2 + 4 + 4 } else { 1 + 2 + 2 + 2 };
+            visit(at as i64 + word(code, at + 1)? as i64)?;
+            let mut entry = at + header;
+            while entry < at + length {
+                visit(at as i64 + word(code, entry)? as i64)?;
+                entry += 2;
+            }
+        }
+        SLOOKUPSWITCH | ILOOKUPSWITCH => {
+            let match_width = if opcode == ILOOKUPSWITCH { 4 } else { 2 };
+            visit(at as i64 + word(code, at + 1)? as i64)?;
+            let mut entry = at + 5;
+            let mut previous: Option<i32> = None;
+            while entry < at + length {
+                // Pairs are sorted by match value, JCVM §7.5, which is what lets a card
+                // search them instead of scanning.
+                let key = if match_width == 4 {
+                    long(code, entry)?
+                } else {
+                    word(code, entry)? as i32
+                };
+                if previous.is_some_and(|last| last >= key) {
+                    return Err(Error::Format);
+                }
+                previous = Some(key);
+                visit(at as i64 + word(code, entry + match_width)? as i64)?;
+                entry += match_width + 2;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Where the instructions of one method start.
 ///
-/// The map is built into caller-supplied scratch, because the largest method in the target
-/// applet needs about 5 KB of bitmap and a card decides for itself where that lives.
+/// The map is built into caller-supplied scratch, because a large method needs a kilobyte
+/// or so of bitmap and a card decides for itself where that lives.
 pub struct Boundaries<'a> {
-    bits: &'a [u8],
+    bits: &'a mut [u8],
     length: usize,
 }
 
 impl<'a> Boundaries<'a> {
     /// Bytes of scratch needed for a method of this size.
+    ///
+    /// Two bits per byte of code. One records where an instruction starts, the other holds
+    /// the offsets the walk still has to visit.
     pub const fn scratch_for(code_length: usize) -> usize {
-        code_length.div_ceil(8)
+        code_length.div_ceil(8) * 2
     }
 
-    /// Decode the whole method once and record where each instruction starts.
+    /// Decode a method linearly, from its first byte to its last.
     ///
-    /// Decoding linearly, rather than following the flow, is what makes the map complete.
-    /// Unreachable code is still decoded, so no byte of the method escapes the check.
+    /// This needs the method's exact extent. A load file does not always give one, so use
+    /// it where the extent is known, such as a method built for a test, and use `reachable`
+    /// for a method read out of a package.
     pub fn build(code: &[u8], scratch: &'a mut [u8], limits: Limits) -> Result<Self> {
-        let needed = Self::scratch_for(code.len());
-        let bits = scratch.get_mut(..needed).ok_or(Error::Bounds)?;
-        bits.fill(0);
+        let mut map = Self::empty(code, scratch)?;
         let mut at = 0;
         while at < code.len() {
             limits.allows(code[at])?;
-            bits[at / 8] |= 1 << (at % 8);
+            map.mark(at);
             at += instruction_length(code, at)?;
         }
-        // A last instruction claiming more bytes than the method holds is caught above, so
+        // An instruction claiming more bytes than the method holds is caught above, so
         // reaching here means the decode landed exactly on the end.
+        Ok(map)
+    }
+
+    /// Decode every instruction control can reach from the given entry points.
+    ///
+    /// A method in a CAP file records no length, and the offsets that name methods do not
+    /// name all of them. A package can carry a method that nothing references, so the byte
+    /// after a method's last instruction is not reliably the start of anything known.
+    /// Decoding by reachability sidesteps that. Bytes no path reaches are never decoded,
+    /// and since every branch target is checked against this map, execution cannot reach
+    /// them either.
+    ///
+    /// `code` still has to be bounded above by the next method offset the package does
+    /// name. That bound is what stops a branch from entering another method's body while
+    /// running on this method's frame.
+    pub fn reachable(
+        code: &[u8],
+        scratch: &'a mut [u8],
+        limits: Limits,
+        entries: &[usize],
+    ) -> Result<Self> {
+        let mut map = Self::empty(code, scratch)?;
+        for &entry in entries {
+            if entry >= code.len() {
+                return Err(Error::Bounds);
+            }
+            map.enqueue(entry);
+        }
+        // Each sweep follows every pending path as far as it goes. A path that reaches an
+        // instruction already decoded stops there, so the total work is bounded by the
+        // number of instructions however the branches are arranged.
+        while let Some(start) = map.take_pending() {
+            let mut at = start;
+            loop {
+                if at >= code.len() {
+                    return Err(Error::Bounds);
+                }
+                if !map.mark(at) {
+                    break;
+                }
+                limits.allows(code[at])?;
+                let length = instruction_length(code, at)?;
+                let bound = code.len();
+                for_each_target(code, at, length, |target| {
+                    let target = bounded(target, bound)?;
+                    map.enqueue(target);
+                    Ok(())
+                })?;
+                if !FALLS_THROUGH[code[at] as usize] {
+                    break;
+                }
+                at += length;
+            }
+        }
+        Ok(map)
+    }
+
+    fn empty(code: &[u8], scratch: &'a mut [u8]) -> Result<Self> {
+        let needed = Self::scratch_for(code.len());
+        let bits = scratch.get_mut(..needed).ok_or(Error::Bounds)?;
+        bits.fill(0);
         Ok(Self {
             bits,
             length: code.len(),
         })
+    }
+
+    /// Where the pending half of the scratch starts.
+    fn pending_base(&self) -> usize {
+        self.length.div_ceil(8)
+    }
+
+    /// Record a boundary, answering whether it was new.
+    fn mark(&mut self, at: usize) -> bool {
+        let mask = 1 << (at % 8);
+        let seen = self.bits[at / 8] & mask != 0;
+        self.bits[at / 8] |= mask;
+        !seen
+    }
+
+    fn enqueue(&mut self, at: usize) {
+        if self.is_boundary(at) {
+            return;
+        }
+        let base = self.pending_base();
+        self.bits[base + at / 8] |= 1 << (at % 8);
+    }
+
+    fn take_pending(&mut self) -> Option<usize> {
+        let base = self.pending_base();
+        for index in base..self.bits.len() {
+            if self.bits[index] == 0 {
+                continue;
+            }
+            let bit = self.bits[index].trailing_zeros() as usize;
+            self.bits[index] &= !(1 << bit);
+            return Some((index - base) * 8 + bit);
+        }
+        None
     }
 
     pub fn is_boundary(&self, offset: usize) -> bool {
@@ -159,69 +312,35 @@ impl<'a> Boundaries<'a> {
     }
 }
 
-/// Check that every branch and switch target lands on an instruction boundary.
+/// An absolute target, checked against the method it has to stay inside.
+fn bounded(target: i64, length: usize) -> Result<usize> {
+    if target < 0 || target as u64 >= length as u64 {
+        return Err(Error::Bounds);
+    }
+    Ok(target as usize)
+}
+
+/// Check that every target of every decoded instruction lands on an instruction boundary.
 ///
-/// Offsets are signed and count from the address of the branching opcode, JCVM §7.5.
+/// Run this after the map is built. A target inside the method that misses a boundary is
+/// a jump into the middle of an instruction, where an operand byte becomes an opcode.
 pub fn verify_targets(code: &[u8], boundaries: &Boundaries) -> Result<()> {
     let mut at = 0;
     while at < code.len() {
-        let opcode = code[at];
+        if !boundaries.is_boundary(at) {
+            // Not reachable, so it was never decoded and cannot be branched to either.
+            at += 1;
+            continue;
+        }
         let length = instruction_length(code, at)?;
-        let width = BRANCH_WIDTH[opcode as usize] as usize;
-        if width != 0 {
-            let offset = if width == 1 {
-                code[at + 1] as i8 as i32
-            } else {
-                word(code, at + 1)? as i32
-            };
-            check_target(boundaries, at, offset)?;
-        }
-        match opcode {
-            STABLESWITCH | ITABLESWITCH => {
-                let wide = opcode == ITABLESWITCH;
-                let header = if wide { 1 + 2 + 4 + 4 } else { 1 + 2 + 2 + 2 };
-                check_target(boundaries, at, word(code, at + 1)? as i32)?;
-                let mut entry = at + header;
-                while entry < at + length {
-                    check_target(boundaries, at, word(code, entry)? as i32)?;
-                    entry += 2;
-                }
+        for_each_target(code, at, length, |target| {
+            let target = bounded(target, boundaries.code_length())?;
+            if !boundaries.is_boundary(target) {
+                return Err(Error::Format);
             }
-            SLOOKUPSWITCH | ILOOKUPSWITCH => {
-                let match_width = if opcode == ILOOKUPSWITCH { 4 } else { 2 };
-                check_target(boundaries, at, word(code, at + 1)? as i32)?;
-                let mut entry = at + 5;
-                let mut previous: Option<i32> = None;
-                while entry < at + length {
-                    // Pairs are sorted by match value, JCVM §7.5, which is what lets a card
-                    // search them instead of scanning.
-                    let key = if match_width == 4 {
-                        long(code, entry)?
-                    } else {
-                        word(code, entry)? as i32
-                    };
-                    if previous.is_some_and(|last| last >= key) {
-                        return Err(Error::Format);
-                    }
-                    previous = Some(key);
-                    check_target(boundaries, at, word(code, entry + match_width)? as i32)?;
-                    entry += match_width + 2;
-                }
-            }
-            _ => {}
-        }
+            Ok(())
+        })?;
         at += length;
-    }
-    Ok(())
-}
-
-fn check_target(boundaries: &Boundaries, from: usize, offset: i32) -> Result<()> {
-    let target = from as i64 + offset as i64;
-    if target < 0 || target as usize >= boundaries.code_length() {
-        return Err(Error::Bounds);
-    }
-    if !boundaries.is_boundary(target as usize) {
-        return Err(Error::Format);
     }
     Ok(())
 }

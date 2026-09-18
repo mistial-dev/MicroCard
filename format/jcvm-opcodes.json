@@ -1,6 +1,6 @@
 {
   "source": "Java Card Platform Virtual Machine Specification, Classic Edition 3.2 (F74158_05), Table 8-1 for the opcode values and section 7.5 for the operand layout of each instruction.",
-  "note": "Operand names are the byte names the specification lists under Format, in order. A null length marks a variable-length instruction, whose size depends on its operands.",
+  "note": "Operand names are the byte names the specification lists under Format, in order. A null length marks a variable-length instruction, whose size depends on its operands. falls_through is false for the instructions after which control does not continue to the following instruction.",
   "reserved": [
     {
       "name": "impdep1",
@@ -18,7 +18,8 @@
       "section": "nop",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "aconst_null",
@@ -26,7 +27,8 @@
       "section": "aconst_null",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_m1",
@@ -34,7 +36,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_0",
@@ -42,7 +45,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_1",
@@ -50,7 +54,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_2",
@@ -58,7 +63,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_3",
@@ -66,7 +72,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_4",
@@ -74,7 +81,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sconst_5",
@@ -82,7 +90,8 @@
       "section": "sconst_<s>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iconst_m1",
@@ -90,7 +99,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iconst_0",
@@ -98,7 +108,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iconst_1",
@@ -106,7 +117,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iconst_2",
@@ -114,7 +126,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iconst_3",
@@ -122,7 +135,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iconst_4",
@@ -130,7 +144,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iconst_5",
@@ -138,7 +153,8 @@
       "section": "iconst_<i>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "bspush",
@@ -148,7 +164,8 @@
         "byte"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sspush",
@@ -159,7 +176,8 @@
         "byte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "bipush",
@@ -169,7 +187,8 @@
         "byte"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sipush",
@@ -180,7 +199,8 @@
         "byte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iipush",
@@ -193,7 +213,8 @@
         "byte4"
       ],
       "length": 5,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "aload",
@@ -203,7 +224,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sload",
@@ -213,7 +235,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iload",
@@ -223,7 +246,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "aload_0",
@@ -231,7 +255,8 @@
       "section": "aload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "aload_1",
@@ -239,7 +264,8 @@
       "section": "aload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "aload_2",
@@ -247,7 +273,8 @@
       "section": "aload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "aload_3",
@@ -255,7 +282,8 @@
       "section": "aload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sload_0",
@@ -263,7 +291,8 @@
       "section": "sload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sload_1",
@@ -271,7 +300,8 @@
       "section": "sload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sload_2",
@@ -279,7 +309,8 @@
       "section": "sload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sload_3",
@@ -287,7 +318,8 @@
       "section": "sload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iload_0",
@@ -295,7 +327,8 @@
       "section": "iload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iload_1",
@@ -303,7 +336,8 @@
       "section": "iload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iload_2",
@@ -311,7 +345,8 @@
       "section": "iload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "iload_3",
@@ -319,7 +354,8 @@
       "section": "iload_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "aaload",
@@ -327,7 +363,8 @@
       "section": "aaload",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "baload",
@@ -335,7 +372,8 @@
       "section": "baload",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "saload",
@@ -343,7 +381,8 @@
       "section": "saload",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iaload",
@@ -351,7 +390,8 @@
       "section": "iaload",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "astore",
@@ -361,7 +401,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sstore",
@@ -371,7 +412,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "istore",
@@ -379,7 +421,8 @@
       "section": "istore",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "astore_0",
@@ -387,7 +430,8 @@
       "section": "astore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "astore_1",
@@ -395,7 +439,8 @@
       "section": "astore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "astore_2",
@@ -403,7 +448,8 @@
       "section": "astore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "astore_3",
@@ -411,7 +457,8 @@
       "section": "astore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sstore_0",
@@ -419,7 +466,8 @@
       "section": "sstore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sstore_1",
@@ -427,7 +475,8 @@
       "section": "sstore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sstore_2",
@@ -435,7 +484,8 @@
       "section": "sstore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sstore_3",
@@ -443,7 +493,8 @@
       "section": "sstore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "istore_0",
@@ -451,7 +502,8 @@
       "section": "istore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "istore_1",
@@ -459,7 +511,8 @@
       "section": "istore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "istore_2",
@@ -467,7 +520,8 @@
       "section": "istore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "istore_3",
@@ -475,7 +529,8 @@
       "section": "istore_<n>",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "aastore",
@@ -483,7 +538,8 @@
       "section": "aastore",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "bastore",
@@ -491,7 +547,8 @@
       "section": "bastore",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sastore",
@@ -499,7 +556,8 @@
       "section": "sastore",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iastore",
@@ -507,7 +565,8 @@
       "section": "iastore",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "pop",
@@ -515,7 +574,8 @@
       "section": "pop",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "pop2",
@@ -523,7 +583,8 @@
       "section": "pop2",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "dup",
@@ -531,7 +592,8 @@
       "section": "dup",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "dup2",
@@ -539,7 +601,8 @@
       "section": "dup2",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "dup_x",
@@ -549,7 +612,8 @@
         "mn"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "swap_x",
@@ -559,7 +623,8 @@
         "mn"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sadd",
@@ -567,7 +632,8 @@
       "section": "sadd",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iadd",
@@ -575,7 +641,8 @@
       "section": "iadd",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "ssub",
@@ -583,7 +650,8 @@
       "section": "ssub",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "isub",
@@ -591,7 +659,8 @@
       "section": "isub",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "smul",
@@ -599,7 +668,8 @@
       "section": "smul",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "imul",
@@ -607,7 +677,8 @@
       "section": "imul",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sdiv",
@@ -615,7 +686,8 @@
       "section": "sdiv",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "idiv",
@@ -623,7 +695,8 @@
       "section": "idiv",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "srem",
@@ -631,7 +704,8 @@
       "section": "srem",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "irem",
@@ -639,7 +713,8 @@
       "section": "irem",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sneg",
@@ -647,7 +722,8 @@
       "section": "sneg",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ineg",
@@ -655,7 +731,8 @@
       "section": "ineg",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sshl",
@@ -663,7 +740,8 @@
       "section": "sshl",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ishl",
@@ -671,7 +749,8 @@
       "section": "ishl",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sshr",
@@ -679,7 +758,8 @@
       "section": "sshr",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ishr",
@@ -687,7 +767,8 @@
       "section": "ishr",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sushr",
@@ -695,7 +776,8 @@
       "section": "sushr",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iushr",
@@ -703,7 +785,8 @@
       "section": "iushr",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sand",
@@ -711,7 +794,8 @@
       "section": "sand",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iand",
@@ -719,7 +803,8 @@
       "section": "iand",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sor",
@@ -727,7 +812,8 @@
       "section": "sor",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ior",
@@ -735,7 +821,8 @@
       "section": "ior",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sxor",
@@ -743,7 +830,8 @@
       "section": "sxor",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ixor",
@@ -751,7 +839,8 @@
       "section": "ixor",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "sinc",
@@ -762,7 +851,8 @@
         "const"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iinc",
@@ -773,7 +863,8 @@
         "const"
       ],
       "length": 3,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "s2b",
@@ -781,7 +872,8 @@
       "section": "s2b",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "s2i",
@@ -789,7 +881,8 @@
       "section": "s2i",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "i2b",
@@ -797,7 +890,8 @@
       "section": "i2b",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "i2s",
@@ -805,7 +899,8 @@
       "section": "i2s",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "icmp",
@@ -813,7 +908,8 @@
       "section": "icmp",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "ifeq",
@@ -823,7 +919,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifne",
@@ -833,7 +930,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iflt",
@@ -843,7 +941,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifge",
@@ -853,7 +952,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifgt",
@@ -863,7 +963,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifle",
@@ -873,7 +974,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifnull",
@@ -883,7 +985,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifnonnull",
@@ -893,7 +996,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_acmpeq",
@@ -903,7 +1007,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_acmpne",
@@ -913,7 +1018,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpeq",
@@ -923,7 +1029,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpne",
@@ -933,7 +1040,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmplt",
@@ -943,7 +1051,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpge",
@@ -953,7 +1062,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpgt",
@@ -963,7 +1073,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmple",
@@ -973,7 +1084,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "goto",
@@ -983,7 +1095,8 @@
         "branch"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "jsr",
@@ -994,7 +1107,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ret",
@@ -1004,7 +1118,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "stableswitch",
@@ -1020,7 +1135,8 @@
         "jump offsets\u2026"
       ],
       "length": null,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "itableswitch",
@@ -1040,7 +1156,8 @@
         "jump offsets\u2026"
       ],
       "length": null,
-      "int_only": true
+      "int_only": true,
+      "falls_through": false
     },
     {
       "name": "slookupswitch",
@@ -1054,7 +1171,8 @@
         "match-offset pairs\u2026"
       ],
       "length": null,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "ilookupswitch",
@@ -1068,7 +1186,8 @@
         "match-offset pairs\u2026"
       ],
       "length": null,
-      "int_only": true
+      "int_only": true,
+      "falls_through": false
     },
     {
       "name": "areturn",
@@ -1076,7 +1195,8 @@
       "section": "areturn",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "sreturn",
@@ -1084,7 +1204,8 @@
       "section": "sreturn",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "ireturn",
@@ -1092,7 +1213,8 @@
       "section": "ireturn",
       "operands": [],
       "length": 1,
-      "int_only": true
+      "int_only": true,
+      "falls_through": false
     },
     {
       "name": "return",
@@ -1100,7 +1222,8 @@
       "section": "return",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "getstatic_a",
@@ -1111,7 +1234,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getstatic_b",
@@ -1122,7 +1246,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getstatic_s",
@@ -1133,7 +1258,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getstatic_i",
@@ -1144,7 +1270,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "putstatic_a",
@@ -1155,7 +1282,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putstatic_b",
@@ -1166,7 +1294,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putstatic_s",
@@ -1177,7 +1306,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putstatic_i",
@@ -1188,7 +1318,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "getfield_a",
@@ -1198,7 +1329,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_b",
@@ -1208,7 +1340,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_s",
@@ -1218,7 +1351,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_i",
@@ -1228,7 +1362,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "putfield_a",
@@ -1238,7 +1373,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_b",
@@ -1248,7 +1384,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_s",
@@ -1258,7 +1395,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_i",
@@ -1268,7 +1406,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "invokevirtual",
@@ -1279,7 +1418,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "invokespecial",
@@ -1290,7 +1430,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "invokestatic",
@@ -1301,7 +1442,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "invokeinterface",
@@ -1314,7 +1456,8 @@
         "method"
       ],
       "length": 5,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "new",
@@ -1325,7 +1468,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "newarray",
@@ -1335,7 +1479,8 @@
         "atype"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "anewarray",
@@ -1346,7 +1491,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "arraylength",
@@ -1354,7 +1500,8 @@
       "section": "arraylength",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "athrow",
@@ -1362,7 +1509,8 @@
       "section": "athrow",
       "operands": [],
       "length": 1,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "checkcast",
@@ -1374,7 +1522,8 @@
         "indexbyte2"
       ],
       "length": 4,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "instanceof",
@@ -1386,7 +1535,8 @@
         "indexbyte2"
       ],
       "length": 4,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "sinc_w",
@@ -1398,7 +1548,8 @@
         "byte2"
       ],
       "length": 4,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iinc_w",
@@ -1410,7 +1561,8 @@
         "byte2"
       ],
       "length": 4,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "ifeq_w",
@@ -1421,7 +1573,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifne_w",
@@ -1432,7 +1585,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "iflt_w",
@@ -1443,7 +1597,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifge_w",
@@ -1454,7 +1609,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifgt_w",
@@ -1465,7 +1621,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifle_w",
@@ -1476,7 +1633,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifnull_w",
@@ -1487,7 +1645,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "ifnonnull_w",
@@ -1498,7 +1657,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_acmpeq_w",
@@ -1509,7 +1669,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_acmpne_w",
@@ -1520,7 +1681,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpeq_w",
@@ -1531,7 +1693,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpne_w",
@@ -1542,7 +1705,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmplt_w",
@@ -1553,7 +1717,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpge_w",
@@ -1564,7 +1729,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmpgt_w",
@@ -1575,7 +1741,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "if_scmple_w",
@@ -1586,7 +1753,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "goto_w",
@@ -1597,7 +1765,8 @@
         "branchbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": false
     },
     {
       "name": "getfield_a_w",
@@ -1608,7 +1777,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_b_w",
@@ -1619,7 +1789,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_s_w",
@@ -1630,7 +1801,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_i_w",
@@ -1641,7 +1813,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "getfield_a_this",
@@ -1651,7 +1824,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_b_this",
@@ -1661,7 +1835,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_s_this",
@@ -1671,7 +1846,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "getfield_i_this",
@@ -1681,7 +1857,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "putfield_a_w",
@@ -1692,7 +1869,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_b_w",
@@ -1703,7 +1881,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_s_w",
@@ -1714,7 +1893,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_i_w",
@@ -1725,7 +1905,8 @@
         "indexbyte2"
       ],
       "length": 3,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     },
     {
       "name": "putfield_a_this",
@@ -1735,7 +1916,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_b_this",
@@ -1745,7 +1927,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_s_this",
@@ -1755,7 +1938,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": false
+      "int_only": false,
+      "falls_through": true
     },
     {
       "name": "putfield_i_this",
@@ -1765,7 +1949,8 @@
         "index"
       ],
       "length": 2,
-      "int_only": true
+      "int_only": true,
+      "falls_through": true
     }
   ]
 }

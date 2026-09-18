@@ -100,6 +100,45 @@ pub const INT_ONLY: [bool; 256] = [
     false, false, false, false, false, false, false, false,
 ];
 
+/// Whether control continues to the instruction that follows this one.
+///
+/// False for the returns, athrow, the unconditional jumps and the switches. A
+/// conditional branch both falls through and branches.
+pub const FALLS_THROUGH: [bool; 256] = [
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    false, true, false, false, false, false, false, false,
+    false, false, false, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, false, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    false, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+];
+
 /// Width in bytes of the branch offset the instruction carries, or zero.
 ///
 /// The offset is signed and counts from the address of the opcode, JCVM section 7.5.
