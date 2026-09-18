@@ -9,6 +9,7 @@
 //! `sushr` masks its operand to 16 bits before shifting, which is the difference between a
 //! logical and an arithmetic shift on a value held in a wider register.
 use super::frame::{Frame, NULL, Reference};
+use super::heap::{self, Context, Heap};
 use crate::code::{Limits, instruction_length};
 use crate::{Error, Result};
 
@@ -21,11 +22,24 @@ pub enum Outcome {
     Reference(Reference),
 }
 
+/// What a running method is allowed to touch.
+pub struct Machine<'a, 'h> {
+    pub heap: &'a mut Heap<'h>,
+    /// The context this code runs in, which the firewall compares against every object.
+    pub context: Context,
+    pub limits: Limits,
+}
+
 /// Opcodes this loop understands by name rather than by table.
 mod op {
     pub const NOP: u8 = 0;
     pub const ACONST_NULL: u8 = 1;
     pub const SCONST_M1: u8 = 2;
+    /// Used by tests, which spell the constants out rather than counting opcodes.
+    #[cfg(test)]
+    pub const SCONST_0: u8 = 3;
+    #[cfg(test)]
+    pub const SCONST_1: u8 = 4;
     pub const SCONST_5: u8 = 8;
     pub const ICONST_M1: u8 = 9;
     pub const ICONST_5: u8 = 15;
@@ -46,6 +60,14 @@ mod op {
     pub const ASTORE_0: u8 = 43;
     pub const SSTORE_0: u8 = 47;
     pub const ISTORE_0: u8 = 51;
+    pub const AALOAD: u8 = 36;
+    pub const BALOAD: u8 = 37;
+    pub const SALOAD: u8 = 38;
+    pub const IALOAD: u8 = 39;
+    pub const AASTORE: u8 = 55;
+    pub const BASTORE: u8 = 56;
+    pub const SASTORE: u8 = 57;
+    pub const IASTORE: u8 = 58;
     pub const POP: u8 = 59;
     pub const POP2: u8 = 60;
     pub const DUP: u8 = 61;
@@ -110,6 +132,8 @@ mod op {
     pub const IF_ACMPNE_W: u8 = 161;
     pub const IF_SCMPEQ_W: u8 = 162;
     pub const IF_SCMPLE_W: u8 = 167;
+    pub const NEWARRAY: u8 = 144;
+    pub const ARRAYLENGTH: u8 = 146;
     pub const GOTO_W: u8 = 168;
 }
 
@@ -144,12 +168,17 @@ fn byte(code: &[u8], at: usize) -> Result<u8> {
 /// `budget` counts instructions and is what stops a loop in the bytecode from holding the
 /// card. It is decremented per instruction and running out is an error rather than a
 /// silent stop, so a caller can tell a finished method from an abandoned one.
-pub fn run(code: &[u8], frame: &mut Frame, limits: Limits, budget: &mut u32) -> Result<Outcome> {
+pub fn run(
+    machine: &mut Machine,
+    code: &[u8],
+    frame: &mut Frame,
+    budget: &mut u32,
+) -> Result<Outcome> {
     let mut pc = 0usize;
     loop {
         *budget = budget.checked_sub(1).ok_or(Error::Quota)?;
         let opcode = byte(code, pc)?;
-        limits.allows(opcode)?;
+        machine.limits.allows(opcode)?;
         let length = instruction_length(code, pc)?;
         let mut next = pc + length;
         match opcode {
@@ -455,6 +484,83 @@ pub fn run(code: &[u8], frame: &mut Frame, limits: Limits, budget: &mut u32) -> 
                 next = target(pc, offset, code.len())?;
             }
 
+            op::ARRAYLENGTH => {
+                let array = frame.pop_reference()?;
+                let info = machine.heap.check_access(array, machine.context)?;
+                if !info.is_array() {
+                    return Err(Error::Type);
+                }
+                frame.push_short(info.length as i16)?
+            }
+            op::NEWARRAY => {
+                // The type code is the same one an array header carries, JCVM Table 7-2.
+                let kind = byte(code, pc + 1)?;
+                let length = frame.pop_short()?;
+                if length < 0 {
+                    return Err(Error::Bounds);
+                }
+                let array = machine
+                    .heap
+                    .new_array(kind, length as u16, machine.context)?;
+                frame.push_reference(array)?
+            }
+            op::BALOAD | op::SALOAD | op::AALOAD => {
+                let index = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                let info = machine.heap.check_access(array, machine.context)?;
+                // The instruction and the array have to agree on the element type, or a
+                // reference would be read as a number or the other way round.
+                let wanted = match opcode {
+                    op::BALOAD => [heap::KIND_BOOLEAN, heap::KIND_BYTE].contains(&info.kind),
+                    op::SALOAD => info.kind == heap::KIND_SHORT,
+                    _ => info.kind == heap::KIND_REFERENCE,
+                };
+                if !wanted {
+                    return Err(Error::Type);
+                }
+                let value = machine.heap.array_get(array, bounded_index(index)?)?;
+                if opcode == op::AALOAD {
+                    frame.push_reference(value as u16)?
+                } else {
+                    frame.push_short(value)?
+                }
+            }
+            op::IALOAD => {
+                let index = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                machine.heap.check_access(array, machine.context)?;
+                let value = machine.heap.array_get_int(array, bounded_index(index)?)?;
+                frame.push_int(value)?
+            }
+            op::BASTORE | op::SASTORE | op::AASTORE => {
+                let value = if opcode == op::AASTORE {
+                    frame.pop_reference()? as i16
+                } else {
+                    frame.pop_short()?
+                };
+                let index = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                let info = machine.heap.check_access(array, machine.context)?;
+                let wanted = match opcode {
+                    op::BASTORE => [heap::KIND_BOOLEAN, heap::KIND_BYTE].contains(&info.kind),
+                    op::SASTORE => info.kind == heap::KIND_SHORT,
+                    _ => info.kind == heap::KIND_REFERENCE,
+                };
+                if !wanted {
+                    return Err(Error::Type);
+                }
+                machine.heap.array_put(array, bounded_index(index)?, value)?
+            }
+            op::IASTORE => {
+                let value = frame.pop_int()?;
+                let index = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                machine.heap.check_access(array, machine.context)?;
+                machine
+                    .heap
+                    .array_put_int(array, bounded_index(index)?, value)?
+            }
+
             op::RETURN => return Ok(Outcome::Void),
             op::SRETURN => return Ok(Outcome::Short(frame.pop_short()?)),
             op::IRETURN => return Ok(Outcome::Int(frame.pop_int()?)),
@@ -466,6 +572,15 @@ pub fn run(code: &[u8], frame: &mut Frame, limits: Limits, budget: &mut u32) -> 
         }
         pc = next;
     }
+}
+
+/// An array index is a signed short, and a negative one is out of bounds rather than a
+/// large positive index.
+fn bounded_index(index: i16) -> Result<usize> {
+    if index < 0 {
+        return Err(Error::Bounds);
+    }
+    Ok(index as usize)
 }
 
 fn branch(code: &[u8], pc: usize, wide: bool) -> Result<usize> {
@@ -493,11 +608,18 @@ mod tests {
     use alloc::vec::Vec;
 
     fn execute(code: &[u8], locals: usize) -> Result<Outcome> {
+        let mut slab = vec![0u8; 512];
+        let mut heap = Heap::new(&mut slab)?;
+        let mut machine = Machine {
+            heap: &mut heap,
+            context: 1,
+            limits: Limits::IMPLEMENTED,
+        };
         let mut words = vec![0u16; Frame::words_for(locals, 16)];
         let mut tags = vec![0u8; Frame::tag_bytes_for(locals, 16)];
         let mut frame = Frame::new(&mut words, &mut tags, locals, 16)?;
         let mut budget = 1000;
-        run(code, &mut frame, Limits::IMPLEMENTED, &mut budget)
+        run(&mut machine, code, &mut frame, &mut budget)
     }
 
     fn short(code: &[u8]) -> i16 {
@@ -658,8 +780,77 @@ mod tests {
 
     #[test]
     fn an_instruction_this_loop_cannot_run_yet_says_so() {
-        // getfield_a, which needs the object heap.
+        // getfield_a, which needs the constant pool resolved to a field offset.
         assert_eq!(execute(&[0x83, 0x00, op::SRETURN], 1), Err(Error::Unsupported));
+    }
+
+    #[test]
+    fn an_array_round_trips_through_the_heap() {
+        // newarray byte[5], store 7 at index 1, read it back.
+        let code = [
+            op::SCONST_5, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::ALOAD_0, op::SCONST_1, op::BSPUSH, 7, op::BASTORE,
+            op::ALOAD_0, op::SCONST_1, op::BALOAD, op::SRETURN,
+        ];
+        assert_eq!(short(&code), 7);
+        // arraylength reads the header rather than trusting the caller.
+        let code = [op::SCONST_5, op::NEWARRAY, heap::KIND_SHORT, op::ARRAYLENGTH, op::SRETURN];
+        assert_eq!(short(&code), 5);
+    }
+
+    #[test]
+    fn an_index_outside_the_array_is_refused_in_both_directions() {
+        let code = [
+            op::SCONST_1, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::ALOAD_0, op::SCONST_1, op::BALOAD, op::SRETURN,
+        ];
+        assert_eq!(execute(&code, 2), Err(Error::Bounds));
+        // A negative index is out of bounds rather than a large positive one.
+        let code = [
+            op::SCONST_1, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::ALOAD_0, op::SCONST_M1, op::BALOAD, op::SRETURN,
+        ];
+        assert_eq!(execute(&code, 2), Err(Error::Bounds));
+    }
+
+    #[test]
+    fn the_instruction_and_the_array_have_to_agree_on_the_element_type() {
+        // saload on a byte array would read two bytes as one short.
+        let code = [
+            op::SCONST_5, op::NEWARRAY, heap::KIND_BYTE, op::ASTORE_0,
+            op::ALOAD_0, op::SCONST_0, op::SALOAD, op::SRETURN,
+        ];
+        assert_eq!(execute(&code, 2), Err(Error::Type));
+        // aaload on a short array would turn a number into a reference.
+        let code = [
+            op::SCONST_5, op::NEWARRAY, heap::KIND_SHORT, op::ASTORE_0,
+            op::ALOAD_0, op::SCONST_0, op::AALOAD, op::ARETURN,
+        ];
+        assert_eq!(execute(&code, 2), Err(Error::Type));
+    }
+
+    #[test]
+    fn a_reference_array_holds_references_and_says_so() {
+        let code = [
+            op::SCONST_5, op::NEWARRAY, heap::KIND_REFERENCE, op::ASTORE_0,
+            op::ALOAD_0, op::SCONST_0, op::ALOAD_0, op::AASTORE,
+            op::ALOAD_0, op::SCONST_0, op::AALOAD, op::ARETURN,
+        ];
+        // The array holds itself, and what comes back is tagged as a reference, which
+        // areturn requires.
+        assert!(matches!(execute(&code, 2), Ok(Outcome::Reference(_))));
+    }
+
+    #[test]
+    fn an_array_on_a_null_reference_is_refused_before_it_reads_anything() {
+        let code = [op::ACONST_NULL, op::ARRAYLENGTH, op::SRETURN];
+        assert_eq!(execute(&code, 0), Err(Error::Null));
+    }
+
+    #[test]
+    fn a_negative_length_array_is_refused() {
+        let code = [op::SCONST_M1, op::NEWARRAY, heap::KIND_BYTE, op::ARETURN];
+        assert_eq!(execute(&code, 0), Err(Error::Bounds));
     }
 
     #[test]
