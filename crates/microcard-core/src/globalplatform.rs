@@ -145,7 +145,9 @@ pub(crate) fn ssd_install_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Resu
 
 pub(crate) struct ApplicationInstall<'a> {
     pub load_aid: &'a [u8],
-    pub module_aid: &'a [u8],
+    /// The AID this instance answers to. GlobalPlatform lets it differ from the module AID,
+    /// and lets one module back several instances, which applets rely on to tell which
+    /// instance of themselves they are.
     pub instance_aid: &'a [u8],
 }
 
@@ -165,24 +167,55 @@ pub(crate) fn application_install<'a>(
     if offset != command.data.len()
         || !(5..=MAX_AID_BYTES).contains(&load_aid.len())
         || !(5..=MAX_AID_BYTES).contains(&module_aid.len())
-        || instance_aid != module_aid
-        || !matches!(privileges, [0] | [0, 0, 0])
-        || parameters != [0xc9, 0]
+        || !(5..=MAX_AID_BYTES).contains(&instance_aid.len())
         || !token.is_empty()
     {
         return Err(Error::Format);
     }
+    // Privileges are one or three bytes, GP §11.1.2. Every bit names an authority this card
+    // does not grant, so a request for any of them is refused rather than recorded and
+    // ignored.
+    match privileges {
+        [0] | [0, 0, 0] => {}
+        [_] | [_, _, _] => return Err(Error::Unauthorized),
+        _ => return Err(Error::Format),
+    }
+    // Parsed so a malformed field is refused. The value reaches an applet's install method
+    // once an engine exists that has one to hand it to.
+    install_parameter_value(parameters)?;
     Ok(ApplicationInstall {
         load_aid,
-        module_aid,
         instance_aid,
     })
+}
+
+/// The value of the C9 application-specific install parameter, GP §11.5.2.3.4.
+///
+/// The field is a list of tagged parameters. C9 is the one an applet's install method
+/// receives. An absent field and an empty C9 both mean no parameters.
+fn install_parameter_value(parameters: &[u8]) -> Result<&[u8]> {
+    if parameters.is_empty() {
+        return Ok(&[]);
+    }
+    if parameters[0] != 0xc9 {
+        return Err(Error::Format);
+    }
+    let length = usize::from(*parameters.get(1).ok_or(Error::Format)?);
+    // A long-form length here would exceed what a short APDU can carry anyway.
+    if length > 0x7f || parameters.len() != length + 2 {
+        return Err(Error::Format);
+    }
+    Ok(&parameters[2..])
 }
 
 pub(crate) struct LoadRequest<'a> {
     pub load_aid: &'a [u8],
     pub domain_aid: &'a [u8],
-    pub hash: [u8; 32],
+    /// The Load File Data Block Hash, which GlobalPlatform makes optional and which
+    /// GlobalPlatformPro leaves empty by default. The card computes the digest of what it
+    /// actually received either way, so an absent hash removes a declaration rather than a
+    /// check.
+    pub hash: Option<[u8; 32]>,
 }
 
 pub(crate) fn load_request<'a>(
@@ -197,19 +230,28 @@ pub(crate) fn load_request<'a>(
     let hash = take_lv(&command.data, &mut offset)?;
     let parameters = take_lv(&command.data, &mut offset)?;
     let token = take_lv(&command.data, &mut offset)?;
+    // Load parameters are advisory sizing hints, GP §11.6.2.3, so they are accepted and
+    // ignored. A load token authorizes delegated management, which this card does not
+    // implement, so a present token is refused rather than ignored.
+    let _ = parameters;
     if offset != command.data.len()
         || !(5..=MAX_AID_BYTES).contains(&load_aid.len())
         || !(5..=MAX_AID_BYTES).contains(&domain_aid.len())
-        || hash.len() != 32
-        || !parameters.is_empty()
         || !token.is_empty()
     {
         return Err(Error::Format);
     }
+    // A SHA-1 hash is representable here and this card cannot compute one, so accepting it
+    // would mean accepting a declaration it can never check.
+    let hash = match hash.len() {
+        0 => None,
+        32 => Some(hash.try_into().unwrap()),
+        _ => return Err(Error::Format),
+    };
     Ok(LoadRequest {
         load_aid,
         domain_aid,
-        hash: hash.try_into().unwrap(),
+        hash,
     })
 }
 
@@ -447,8 +489,49 @@ mod tests {
         };
         let parsed = application_install(&application).unwrap();
         assert_eq!(parsed.load_aid, load_aid);
-        assert_eq!(parsed.module_aid, aid);
         assert_eq!(parsed.instance_aid, aid);
+    }
+
+    #[test]
+    fn one_module_can_back_instances_under_their_own_aids() {
+        let load_aid = [0xa0; 16];
+        let module = [0xf0, 0x4d, 0x43, 0x53, 0x44];
+        let instance = [0xf0, 0x4d, 0x43, 0x53, 0x44, 0x01];
+        let install = |privileges: &[u8], parameters: &[u8], instance: &[u8]| {
+            let mut data = Vec::new();
+            for value in [&load_aid[..], &module, instance, privileges, parameters, &[]] {
+                data.push(value.len() as u8);
+                data.extend_from_slice(value);
+            }
+            application_install(&crate::apdu::Command {
+                cla: 0x80,
+                ins: 0xe6,
+                p1: 0x0c,
+                p2: 0,
+                data: data.into(),
+                le: None,
+            })
+            .map(|parsed| parsed.instance_aid.to_vec())
+        };
+        // An instance AID that differs from the module AID, which GlobalPlatform allows and
+        // applets rely on to tell which instance of themselves they are.
+        assert_eq!(install(&[0], &[0xc9, 0], &instance), Ok(instance.to_vec()));
+        // The same module under a second, different instance AID.
+        let other = [0xf0, 0x4d, 0x43, 0x53, 0x44, 0x02];
+        assert_eq!(install(&[0], &[0xc9, 0], &other), Ok(other.to_vec()));
+        // Install parameters an applet actually receives.
+        assert_eq!(
+            install(&[0], &[0xc9, 3, 1, 2, 3], &instance),
+            Ok(instance.to_vec())
+        );
+        // Three-byte privileges, all clear, are the other encoding GP permits.
+        assert_eq!(install(&[0, 0, 0], &[0xc9, 0], &instance), Ok(instance.to_vec()));
+        // A privilege this card does not grant is refused rather than quietly dropped.
+        assert_eq!(install(&[0x80], &[0xc9, 0], &instance), Err(Error::Unauthorized));
+        // A C9 field whose length disagrees with its contents.
+        assert_eq!(install(&[0], &[0xc9, 4, 1, 2], &instance), Err(Error::Format));
+        // A parameter field that is not a C9 at all.
+        assert_eq!(install(&[0], &[0xca, 0], &instance), Err(Error::Format));
     }
 
     #[test]
@@ -472,7 +555,7 @@ mod tests {
         let request = load_request(&command).unwrap();
         assert_eq!(request.load_aid, load_aid);
         assert_eq!(request.domain_aid, domain_aid);
-        assert_eq!(request.hash, hash);
+        assert_eq!(request.hash, Some(hash));
         assert_eq!(
             load_file_data(&[0xc4, 0x81, 0x80, 1]).unwrap(),
             (128, &[1][..])

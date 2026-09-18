@@ -2331,7 +2331,11 @@ pub(crate) fn encode_aid(value: &[u8]) -> Result<String> {
 
 struct GlobalPlatformLoad {
     domain_aid: RegistryAid,
-    hash: [u8; 32],
+    /// The load file AID the host declared. It is checked against the digest of what
+    /// actually arrived, at the end of the load rather than when it was declared, because
+    /// only the received bytes can settle it.
+    load_aid: RegistryAid,
+    hash: Option<[u8; 32]>,
     total: Option<usize>,
     next_block: u16,
     /// Which engine the block is for, decided from the first block's own bytes.
@@ -2754,9 +2758,6 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         if command.ins == 0xe6 && command.p1 == 0x02 {
             let request = crate::globalplatform::load_request(&command)?;
             let load_aid = RegistryAid::new(request.load_aid)?;
-            if load_aid != RegistryAid::synthetic(0x4c, &request.hash) {
-                return Err(Error::Format);
-            }
             if self.state.registry_aid_reserved_by_non_assembly(load_aid) {
                 return Err(Error::Busy);
             }
@@ -2767,6 +2768,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             self.abort_staging();
             self.globalplatform_load = Some(GlobalPlatformLoad {
                 domain_aid,
+                load_aid,
                 hash: request.hash,
                 total: None,
                 next_block: 0,
@@ -2804,8 +2806,9 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             }
             let install = crate::globalplatform::application_install(&command)?;
             let load_aid = RegistryAid::new(install.load_aid)?;
+            // The instance answers to its own AID, which GlobalPlatform lets differ from
+            // the module AID so one module can back several instances.
             let aid = encode_aid(install.instance_aid)?;
-            debug_assert_eq!(install.module_aid, install.instance_aid);
             self.install_instance_exact(load_aid, &aid, should_cancel)?;
             return fallible_filled(1, 0);
         }
@@ -3201,6 +3204,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 if !c.data.is_empty() {
                     return Err(Error::Format);
                 }
+                let declared_load_aid = self.globalplatform_load.as_ref().map(|load| load.load_aid);
                 let expected = self
                     .globalplatform_load
                     .as_ref()
@@ -3223,7 +3227,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 let p = PackageView::verify_with_expected_digest(
                     staged,
                     &mut self.platform,
-                    expected.as_ref().map(|(hash, _)| hash),
+                    expected.as_ref().and_then(|(hash, _)| hash.as_ref()),
                 )?;
                 if expected
                     .as_ref()
@@ -3232,6 +3236,19 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                     return Err(Error::Domain);
                 }
                 let registry_aid = RegistryAid::synthetic(0x4c, &p.digest);
+                // An MP03 load file declares no AID of its own, so MicroCard derives one
+                // from the digest and the host has to have declared that same one. Moving
+                // the check here from INSTALL is what lets a host leave the hash out, since
+                // the digest is only known once the whole load file has arrived.
+                //
+                // This constrains the load file AID alone. Instance AIDs are chosen at
+                // INSTALL [for install] and are free to differ from it and from each other,
+                // because one load file can back several instances. A Java Card load file
+                // declares its own package AID in the CAP Header, so it will be bound to
+                // that rather than to a digest.
+                if declared_load_aid.is_some_and(|declared| declared != registry_aid) {
+                    return Err(Error::Format);
+                }
                 let same_existing = self
                     .state
                     .domain(&p.manifest.domain)
@@ -5458,7 +5475,8 @@ mod tests {
         let mut reopened = Card::open(owned.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
         reopened.globalplatform_load = Some(GlobalPlatformLoad {
             domain_aid: RegistryAid::new(&requested).unwrap(),
-            hash: [7; 32],
+            load_aid: RegistryAid::synthetic(0x4c, &[7; 32]),
+            hash: Some([7; 32]),
             total: Some(1),
             next_block: 1,
             payload: Some(crate::globalplatform::Payload::Mp03),
@@ -5604,6 +5622,98 @@ mod tests {
             owned.state.domains["payments"].instances["F04D430001"].as_ref(),
             "Wallet"
         );
+    }
+
+    #[test]
+    fn one_load_file_backs_several_instances_under_their_own_aids() {
+        let mut owned = card();
+        let incarnation = create(&mut owned, "payments");
+        // A package offering two entry points, so it can be instantiated twice.
+        let package = multi_entry_package("payments", incarnation, "Twice", 1, 0x0301, 2);
+        let hash = owned.platform.sha256(&package).unwrap();
+        let load_aid = RegistryAid::synthetic(0x4c, &hash);
+        let domain_aid = owned.state.domains["payments"].registry_aid;
+        let mut request = Vec::new();
+        for value in [
+            load_aid.as_slice(),
+            domain_aid.as_slice(),
+            &hash[..],
+            &[] as &[u8],
+            &[],
+        ] {
+            request.push(value.len() as u8);
+            request.extend_from_slice(value);
+        }
+        let gp = |owned: &mut Card<MemoryFlash, TestPlatform>, p1: u8, p2: u8, ins: u8, data: Vec<u8>| {
+            owned.manage_globalplatform(Verified {
+                level: 0x13,
+                command: Command {
+                    cla: 0x80,
+                    ins,
+                    p1,
+                    p2,
+                    data: data.into(),
+                    le: None,
+                },
+            })
+        };
+        gp(&mut owned, 0x02, 0, 0xe6, request).unwrap();
+        let mut load_file =
+            alloc::vec![0xc4, 0x82, (package.len() >> 8) as u8, package.len() as u8,];
+        load_file.extend_from_slice(&package);
+        let blocks = load_file.len().div_ceil(180);
+        for (block, chunk) in load_file.chunks(180).enumerate() {
+            let last = block + 1 == blocks;
+            gp(
+                &mut owned,
+                if last { 0x80 } else { 0 },
+                block as u8,
+                0xe8,
+                chunk.to_vec(),
+            )
+            .unwrap();
+        }
+
+        // Each instance is installed under its own AID, with the module AID left alone.
+        let module_aid = [0xf0, 0x4d, 0x43, 0x03, 0x01];
+        for instance in [
+            [0xf0, 0x4d, 0x43, 0x03, 0x01],
+            [0xf0, 0x4d, 0x43, 0x03, 0x02],
+        ] {
+            let mut install = Vec::new();
+            for value in [
+                load_aid.as_slice(),
+                &module_aid,
+                &instance,
+                &[0][..],
+                &[0xc9, 0],
+                &[],
+            ] {
+                install.push(value.len() as u8);
+                install.extend_from_slice(value);
+            }
+            assert_eq!(gp(&mut owned, 0x0c, 0, 0xe6, install).unwrap(), [0]);
+        }
+        // Both live at once, backed by the one load file.
+        let instances = &owned.state.domains["payments"].instances;
+        assert_eq!(instances["F04D430301"].as_ref(), "Twice");
+        assert_eq!(instances["F04D430302"].as_ref(), "Twice");
+
+        // A third AID the package never offered is refused, because the package says which
+        // AIDs it can answer to.
+        let mut absent = Vec::new();
+        for value in [
+            load_aid.as_slice(),
+            &module_aid,
+            &[0xf0, 0x4d, 0x43, 0x03, 0x09],
+            &[0][..],
+            &[0xc9, 0],
+            &[],
+        ] {
+            absent.push(value.len() as u8);
+            absent.extend_from_slice(value);
+        }
+        assert_eq!(gp(&mut owned, 0x0c, 0, 0xe6, absent), Err(Error::Missing));
     }
 
     #[test]
