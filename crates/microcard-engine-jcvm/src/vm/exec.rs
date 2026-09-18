@@ -13,6 +13,7 @@ use super::heap::{self, Context, Heap};
 use crate::cap::Method;
 use crate::code::{Limits, constant_pool_index, instruction_length};
 use crate::link::Linked;
+use crate::natives::{self, Native};
 use crate::{Error, Result};
 
 /// How an invocation ended.
@@ -329,6 +330,26 @@ fn catches(machine: &Machine, catch_type: u16, thrown: u16) -> Result<bool> {
     // Zero catches everything, which is what a finally block compiles to.
     if catch_type == 0 {
         return Ok(true);
+    }
+    // An exception the card threw is an instance of a class the card provides, and the
+    // catch clause names it through the applet's imports.
+    if natives::is_native_class(thrown) {
+        let entry = machine.linked.constants()?.get(catch_type)?;
+        let value = u16::from_be_bytes([entry.info[0], entry.info[1]]);
+        let crate::cap::ClassRef::External { package, class } =
+            crate::cap::ClassRef::decode(value)
+        else {
+            return Ok(false);
+        };
+        let caught = machine.linked.api_class(package, class)?;
+        let position = crate::jcvm_api::PACKAGES
+            .iter()
+            .position(|entry| entry.classes.iter().any(|candidate| candidate == caught))
+            .ok_or(Error::Missing)?;
+        return Ok(natives::native_is_a(
+            thrown,
+            natives::native_class(position, caught.token),
+        ));
     }
     let wanted = match machine.linked.class_ref(catch_type) {
         Ok(class) => class,
@@ -837,6 +858,37 @@ pub fn run_body(
 
             op::INVOKESTATIC | op::INVOKESPECIAL => {
                 let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                // A call into an imported package is answered by the card rather than by
+                // any method in this package, so it is tried first.
+                let outcome = match machine.linked.external_static_method(index) {
+                    Ok(Some((package, class, method))) => {
+                        let target = machine.linked.api_method(package, class, method, true)?;
+                        Some(natives::call(
+                            target,
+                            machine.heap,
+                            frame,
+                            machine.context,
+                        )?)
+                    }
+                    _ => None,
+                };
+                if let Some(native) = outcome {
+                    match native {
+                        Native::Returned => {}
+                        Native::Unimplemented => return Err(Error::Unsupported),
+                        Native::Threw(exception) => {
+                            match find_handler(machine, body, code.len(), pc, exception)? {
+                                Some(target) => {
+                                    enter_handler(frame, exception)?;
+                                    next = target;
+                                }
+                                None => return Ok(Outcome::Thrown(exception)),
+                            }
+                        }
+                    }
+                    pc = next;
+                    continue;
+                }
                 // invokespecial reaches a constructor or a private method through the same
                 // constant type as invokestatic, and a superclass method through its own.
                 let method = match machine.linked.static_method(index) {
@@ -858,6 +910,28 @@ pub fn run_body(
             }
             op::INVOKEVIRTUAL => {
                 let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                // A method on a class the card provides is answered by the card. The
+                // receiver is an object whose class no package defines.
+                if let Some((package, class, method)) =
+                    machine.linked.external_class_method(index)?
+                {
+                    let target = machine.linked.api_method(package, class, method, false)?;
+                    match natives::call(target, machine.heap, frame, machine.context)? {
+                        Native::Returned => {}
+                        Native::Unimplemented => return Err(Error::Unsupported),
+                        Native::Threw(exception) => {
+                            match find_handler(machine, body, code.len(), pc, exception)? {
+                                Some(target) => {
+                                    enter_handler(frame, exception)?;
+                                    next = target;
+                                }
+                                None => return Ok(Outcome::Thrown(exception)),
+                            }
+                        }
+                    }
+                    pc = next;
+                    continue;
+                }
                 // The receiver sits under the arguments, and its class decides which body
                 // runs, which is the whole of dynamic dispatch.
                 let (declared, token) = machine.linked.virtual_ref(index)?;
@@ -1690,6 +1764,62 @@ mod tests {
             execute_package(&package).unwrap(),
             Outcome::Thrown(_)
         ));
+    }
+
+    #[test]
+    fn bytecode_can_call_the_api_and_catch_what_it_throws() {
+        use crate::cap::{CONSTANT_CLASSREF, CONSTANT_STATIC_METHODREF};
+        // sspush 0x6a80, invokestatic ISOException.throwIt, which must not return. The
+        // handler catches it and reads the reason back out through getReason.
+        let mut package = Package {
+            imports: vec![(
+                vec![0xa0, 0x00, 0x00, 0x00, 0x62, 0x01, 0x01],
+                1,
+                6,
+            )],
+            code: vec![
+                op::SSPUSH, 0x6a, 0x80, 0x8d, 0x00, 0x00, op::RETURN,
+                // The handler: the exception is on the stack, so ask it its reason.
+                0x8b, 0x00, 0x02, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        package.handlers = vec![[0; 8]];
+        let body = package.install_offset() + 2;
+        package.handlers = vec![handler(body, 7, body + 7, 1, true)];
+        package.constants = vec![
+            // ISOException.throwIt, static token 1 of class token 7.
+            [CONSTANT_STATIC_METHODREF, 0x80, 7, 1],
+            // The same class, named as a catch type.
+            [CONSTANT_CLASSREF, 0x80, 7, 0],
+            // ISOException.getReason, virtual token 1 of the same class.
+            [crate::cap::CONSTANT_VIRTUAL_METHODREF, 0x80, 7, 1],
+        ];
+        assert_eq!(
+            execute_package(&package).unwrap(),
+            Outcome::Short(0x6a80u16 as i16)
+        );
+    }
+
+    #[test]
+    fn an_api_method_the_card_does_not_provide_is_refused_by_name() {
+        use crate::cap::CONSTANT_STATIC_METHODREF;
+        // JCSystem.beginTransaction, which resolves to a real API method that this build
+        // has not implemented. The refusal is unsupported rather than missing.
+        let package = Package {
+            imports: vec![(vec![0xa0, 0x00, 0x00, 0x00, 0x62, 0x01, 0x01], 1, 6)],
+            // JCSystem is class token 8, and beginTransaction is its static token 1.
+            constants: vec![[CONSTANT_STATIC_METHODREF, 0x80, 8, 1]],
+            code: vec![0x8d, 0x00, 0x00, op::RETURN],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        assert_eq!(execute_package(&package), Err(Error::Unsupported));
     }
 
     #[test]

@@ -7,6 +7,7 @@ extern crate alloc;
 pub mod cap;
 pub mod code;
 pub mod link;
+pub mod natives;
 #[allow(dead_code)]
 mod jcvm_api;
 #[allow(dead_code)]

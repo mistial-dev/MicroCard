@@ -48,6 +48,11 @@ impl<'a> Linked<'a> {
         self.classes
     }
 
+    /// The constant pool, for a caller that has to read an entry before knowing its kind.
+    pub fn constants(&self) -> Result<crate::cap::ConstantPool<'a>> {
+        self.file.constants()
+    }
+
     /// Words an instance of this class occupies, including what it inherits.
     ///
     /// A class declares only its own fields, so the size of an object is the sum down the

@@ -19,6 +19,9 @@ pub struct ApiClass {
     pub token: u8,
     pub name: &'static str,
     pub is_interface: bool,
+    /// Names of the classes and interfaces this one extends, nearest first. A
+    /// catch clause matches any of them, which is how catching a supertype works.
+    pub supers: &'static [&'static str],
     pub methods: &'static [ApiMethod],
 }
 
@@ -33,93 +36,109 @@ pub struct ApiPackage {
     pub classes: &'static [ApiClass],
 }
 
+const SUPERS_A0000000620001_0: [&str; 0] = [];
 const METHODS_A0000000620001_0: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_1: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620001_1: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_2: [&str; 2] = ["java/lang/Object", "java/lang/Throwable"];
 const METHODS_A0000000620001_2: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_3: [&str; 3] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception"];
 const METHODS_A0000000620001_3: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_4: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_4: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_5: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "java/lang/IndexOutOfBoundsException"];
 const METHODS_A0000000620001_5: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_6: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_6: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_7: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_7: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_8: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_8: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_9: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_9: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_10: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_10: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620001_11: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620001_11: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
 const CLASSES_A0000000620001: [ApiClass; 12] = [
-    ApiClass { token: 0, name: "java/lang/Object", is_interface: false, methods: &METHODS_A0000000620001_0 },
-    ApiClass { token: 1, name: "java/lang/Throwable", is_interface: false, methods: &METHODS_A0000000620001_1 },
-    ApiClass { token: 2, name: "java/lang/Exception", is_interface: false, methods: &METHODS_A0000000620001_2 },
-    ApiClass { token: 3, name: "java/lang/RuntimeException", is_interface: false, methods: &METHODS_A0000000620001_3 },
-    ApiClass { token: 4, name: "java/lang/IndexOutOfBoundsException", is_interface: false, methods: &METHODS_A0000000620001_4 },
-    ApiClass { token: 5, name: "java/lang/ArrayIndexOutOfBoundsException", is_interface: false, methods: &METHODS_A0000000620001_5 },
-    ApiClass { token: 6, name: "java/lang/NegativeArraySizeException", is_interface: false, methods: &METHODS_A0000000620001_6 },
-    ApiClass { token: 7, name: "java/lang/NullPointerException", is_interface: false, methods: &METHODS_A0000000620001_7 },
-    ApiClass { token: 8, name: "java/lang/ClassCastException", is_interface: false, methods: &METHODS_A0000000620001_8 },
-    ApiClass { token: 9, name: "java/lang/ArithmeticException", is_interface: false, methods: &METHODS_A0000000620001_9 },
-    ApiClass { token: 10, name: "java/lang/SecurityException", is_interface: false, methods: &METHODS_A0000000620001_10 },
-    ApiClass { token: 11, name: "java/lang/ArrayStoreException", is_interface: false, methods: &METHODS_A0000000620001_11 },
+    ApiClass { token: 0, name: "java/lang/Object", is_interface: false, supers: &SUPERS_A0000000620001_0, methods: &METHODS_A0000000620001_0 },
+    ApiClass { token: 1, name: "java/lang/Throwable", is_interface: false, supers: &SUPERS_A0000000620001_1, methods: &METHODS_A0000000620001_1 },
+    ApiClass { token: 2, name: "java/lang/Exception", is_interface: false, supers: &SUPERS_A0000000620001_2, methods: &METHODS_A0000000620001_2 },
+    ApiClass { token: 3, name: "java/lang/RuntimeException", is_interface: false, supers: &SUPERS_A0000000620001_3, methods: &METHODS_A0000000620001_3 },
+    ApiClass { token: 4, name: "java/lang/IndexOutOfBoundsException", is_interface: false, supers: &SUPERS_A0000000620001_4, methods: &METHODS_A0000000620001_4 },
+    ApiClass { token: 5, name: "java/lang/ArrayIndexOutOfBoundsException", is_interface: false, supers: &SUPERS_A0000000620001_5, methods: &METHODS_A0000000620001_5 },
+    ApiClass { token: 6, name: "java/lang/NegativeArraySizeException", is_interface: false, supers: &SUPERS_A0000000620001_6, methods: &METHODS_A0000000620001_6 },
+    ApiClass { token: 7, name: "java/lang/NullPointerException", is_interface: false, supers: &SUPERS_A0000000620001_7, methods: &METHODS_A0000000620001_7 },
+    ApiClass { token: 8, name: "java/lang/ClassCastException", is_interface: false, supers: &SUPERS_A0000000620001_8, methods: &METHODS_A0000000620001_8 },
+    ApiClass { token: 9, name: "java/lang/ArithmeticException", is_interface: false, supers: &SUPERS_A0000000620001_9, methods: &METHODS_A0000000620001_9 },
+    ApiClass { token: 10, name: "java/lang/SecurityException", is_interface: false, supers: &SUPERS_A0000000620001_10, methods: &METHODS_A0000000620001_10 },
+    ApiClass { token: 11, name: "java/lang/ArrayStoreException", is_interface: false, supers: &SUPERS_A0000000620001_11, methods: &METHODS_A0000000620001_11 },
 ];
 
+const SUPERS_A0000000620101_18: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_18: [ApiMethod; 1] = [
     ApiMethod { token: 0, name: "uninstall", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_0: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_0: [ApiMethod; 0] = [
 ];
 
+const SUPERS_A0000000620101_17: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_17: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "select", descriptor: "(Z)Z", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "deselect", descriptor: "(Z)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_1: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_1: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "check", descriptor: "([BSB)Z", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getTriesRemaining", descriptor: "()B", is_static: false, static_token: false },
@@ -127,6 +146,7 @@ const METHODS_A0000000620101_1: [ApiMethod; 4] = [
     ApiMethod { token: 3, name: "reset", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_19: [&str; 2] = ["java/lang/Object", "javacard/framework/PIN"];
 const METHODS_A0000000620101_19: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "check", descriptor: "([BSB)Z", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getTriesRemaining", descriptor: "()B", is_static: false, static_token: false },
@@ -138,6 +158,7 @@ const METHODS_A0000000620101_19: [ApiMethod; 8] = [
     ApiMethod { token: 7, name: "setTriesRemaining", descriptor: "(B)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_20: [&str; 3] = ["java/lang/Object", "javacard/framework/PIN", "javacard/framework/OwnerPINx"];
 const METHODS_A0000000620101_20: [ApiMethod; 9] = [
     ApiMethod { token: 0, name: "check", descriptor: "([BSB)Z", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getTriesRemaining", descriptor: "()B", is_static: false, static_token: false },
@@ -150,9 +171,11 @@ const METHODS_A0000000620101_20: [ApiMethod; 9] = [
     ApiMethod { token: 8, name: "decrementTriesRemaining", descriptor: "()B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_2: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_2: [ApiMethod; 0] = [
 ];
 
+const SUPERS_A0000000620101_6: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_6: [ApiMethod; 7] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "([BSB)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -163,6 +186,7 @@ const METHODS_A0000000620101_6: [ApiMethod; 7] = [
     ApiMethod { token: 5, name: "getPartialBytes", descriptor: "(S[BSB)B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_5: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException"];
 const METHODS_A0000000620101_5: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -171,6 +195,7 @@ const METHODS_A0000000620101_5: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_8: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_8: [ApiMethod; 24] = [
     ApiMethod { token: 0, name: "abortTransaction", descriptor: "()V", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -198,6 +223,7 @@ const METHODS_A0000000620101_8: [ApiMethod; 24] = [
     ApiMethod { token: 22, name: "getAvailableMemory", descriptor: "([SSB)V", is_static: true, static_token: true },
 ];
 
+const SUPERS_A0000000620101_12: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "javacard/framework/CardRuntimeException"];
 const METHODS_A0000000620101_12: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -206,6 +232,7 @@ const METHODS_A0000000620101_12: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_9: [&str; 2] = ["java/lang/Object", "javacard/framework/PIN"];
 const METHODS_A0000000620101_9: [ApiMethod; 10] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(BB)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -219,11 +246,13 @@ const METHODS_A0000000620101_9: [ApiMethod; 10] = [
     ApiMethod { token: 8, name: "update", descriptor: "([BSB)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_21: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_21: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "buildOwnerPIN", descriptor: "(BBB)Ljavacard/framework/PIN;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_3: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_3: [ApiMethod; 11] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -238,6 +267,7 @@ const METHODS_A0000000620101_3: [ApiMethod; 11] = [
     ApiMethod { token: 7, name: "process", descriptor: "(Ljavacard/framework/APDU;)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_10: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_10: [ApiMethod; 25] = [
     ApiMethod { token: 0, name: "getInBlockSize", descriptor: "()S", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -266,6 +296,7 @@ const METHODS_A0000000620101_10: [ApiMethod; 25] = [
     ApiMethod { token: 17, name: "isValidCLA", descriptor: "()Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_4: [&str; 3] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception"];
 const METHODS_A0000000620101_4: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -274,6 +305,7 @@ const METHODS_A0000000620101_4: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_11: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "javacard/framework/CardRuntimeException"];
 const METHODS_A0000000620101_11: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -282,6 +314,7 @@ const METHODS_A0000000620101_11: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_22: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_22: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "assertIntegrity", descriptor: "(Ljava/lang/Object;)V", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -291,6 +324,7 @@ const METHODS_A0000000620101_22: [ApiMethod; 6] = [
     ApiMethod { token: 4, name: "clearArray", descriptor: "(Ljava/lang/Object;)S", is_static: true, static_token: true },
 ];
 
+const SUPERS_A0000000620101_7: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "javacard/framework/CardRuntimeException"];
 const METHODS_A0000000620101_7: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -299,6 +333,7 @@ const METHODS_A0000000620101_7: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_13: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "javacard/framework/CardRuntimeException"];
 const METHODS_A0000000620101_13: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -307,6 +342,7 @@ const METHODS_A0000000620101_13: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_14: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "javacard/framework/CardRuntimeException"];
 const METHODS_A0000000620101_14: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -315,6 +351,7 @@ const METHODS_A0000000620101_14: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_15: [&str; 4] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "javacard/framework/CardException"];
 const METHODS_A0000000620101_15: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -324,6 +361,7 @@ const METHODS_A0000000620101_15: [ApiMethod; 6] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620101_16: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620101_16: [ApiMethod; 9] = [
     ApiMethod { token: 0, name: "arrayCompare", descriptor: "([BS[BSS)B", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -337,31 +375,32 @@ const METHODS_A0000000620101_16: [ApiMethod; 9] = [
 ];
 
 const CLASSES_A0000000620101: [ApiClass; 23] = [
-    ApiClass { token: 0, name: "javacard/framework/ISO7816", is_interface: true, methods: &METHODS_A0000000620101_0 },
-    ApiClass { token: 1, name: "javacard/framework/PIN", is_interface: true, methods: &METHODS_A0000000620101_1 },
-    ApiClass { token: 2, name: "javacard/framework/Shareable", is_interface: true, methods: &METHODS_A0000000620101_2 },
-    ApiClass { token: 3, name: "javacard/framework/Applet", is_interface: false, methods: &METHODS_A0000000620101_3 },
-    ApiClass { token: 4, name: "javacard/framework/CardException", is_interface: false, methods: &METHODS_A0000000620101_4 },
-    ApiClass { token: 5, name: "javacard/framework/CardRuntimeException", is_interface: false, methods: &METHODS_A0000000620101_5 },
-    ApiClass { token: 6, name: "javacard/framework/AID", is_interface: false, methods: &METHODS_A0000000620101_6 },
-    ApiClass { token: 7, name: "javacard/framework/ISOException", is_interface: false, methods: &METHODS_A0000000620101_7 },
-    ApiClass { token: 8, name: "javacard/framework/JCSystem", is_interface: false, methods: &METHODS_A0000000620101_8 },
-    ApiClass { token: 9, name: "javacard/framework/OwnerPIN", is_interface: false, methods: &METHODS_A0000000620101_9 },
-    ApiClass { token: 10, name: "javacard/framework/APDU", is_interface: false, methods: &METHODS_A0000000620101_10 },
-    ApiClass { token: 11, name: "javacard/framework/PINException", is_interface: false, methods: &METHODS_A0000000620101_11 },
-    ApiClass { token: 12, name: "javacard/framework/APDUException", is_interface: false, methods: &METHODS_A0000000620101_12 },
-    ApiClass { token: 13, name: "javacard/framework/SystemException", is_interface: false, methods: &METHODS_A0000000620101_13 },
-    ApiClass { token: 14, name: "javacard/framework/TransactionException", is_interface: false, methods: &METHODS_A0000000620101_14 },
-    ApiClass { token: 15, name: "javacard/framework/UserException", is_interface: false, methods: &METHODS_A0000000620101_15 },
-    ApiClass { token: 16, name: "javacard/framework/Util", is_interface: false, methods: &METHODS_A0000000620101_16 },
-    ApiClass { token: 17, name: "javacard/framework/MultiSelectable", is_interface: true, methods: &METHODS_A0000000620101_17 },
-    ApiClass { token: 18, name: "javacard/framework/AppletEvent", is_interface: true, methods: &METHODS_A0000000620101_18 },
-    ApiClass { token: 19, name: "javacard/framework/OwnerPINx", is_interface: true, methods: &METHODS_A0000000620101_19 },
-    ApiClass { token: 20, name: "javacard/framework/OwnerPINxWithPredecrement", is_interface: true, methods: &METHODS_A0000000620101_20 },
-    ApiClass { token: 21, name: "javacard/framework/OwnerPINBuilder", is_interface: false, methods: &METHODS_A0000000620101_21 },
-    ApiClass { token: 22, name: "javacard/framework/SensitiveArrays", is_interface: false, methods: &METHODS_A0000000620101_22 },
+    ApiClass { token: 0, name: "javacard/framework/ISO7816", is_interface: true, supers: &SUPERS_A0000000620101_0, methods: &METHODS_A0000000620101_0 },
+    ApiClass { token: 1, name: "javacard/framework/PIN", is_interface: true, supers: &SUPERS_A0000000620101_1, methods: &METHODS_A0000000620101_1 },
+    ApiClass { token: 2, name: "javacard/framework/Shareable", is_interface: true, supers: &SUPERS_A0000000620101_2, methods: &METHODS_A0000000620101_2 },
+    ApiClass { token: 3, name: "javacard/framework/Applet", is_interface: false, supers: &SUPERS_A0000000620101_3, methods: &METHODS_A0000000620101_3 },
+    ApiClass { token: 4, name: "javacard/framework/CardException", is_interface: false, supers: &SUPERS_A0000000620101_4, methods: &METHODS_A0000000620101_4 },
+    ApiClass { token: 5, name: "javacard/framework/CardRuntimeException", is_interface: false, supers: &SUPERS_A0000000620101_5, methods: &METHODS_A0000000620101_5 },
+    ApiClass { token: 6, name: "javacard/framework/AID", is_interface: false, supers: &SUPERS_A0000000620101_6, methods: &METHODS_A0000000620101_6 },
+    ApiClass { token: 7, name: "javacard/framework/ISOException", is_interface: false, supers: &SUPERS_A0000000620101_7, methods: &METHODS_A0000000620101_7 },
+    ApiClass { token: 8, name: "javacard/framework/JCSystem", is_interface: false, supers: &SUPERS_A0000000620101_8, methods: &METHODS_A0000000620101_8 },
+    ApiClass { token: 9, name: "javacard/framework/OwnerPIN", is_interface: false, supers: &SUPERS_A0000000620101_9, methods: &METHODS_A0000000620101_9 },
+    ApiClass { token: 10, name: "javacard/framework/APDU", is_interface: false, supers: &SUPERS_A0000000620101_10, methods: &METHODS_A0000000620101_10 },
+    ApiClass { token: 11, name: "javacard/framework/PINException", is_interface: false, supers: &SUPERS_A0000000620101_11, methods: &METHODS_A0000000620101_11 },
+    ApiClass { token: 12, name: "javacard/framework/APDUException", is_interface: false, supers: &SUPERS_A0000000620101_12, methods: &METHODS_A0000000620101_12 },
+    ApiClass { token: 13, name: "javacard/framework/SystemException", is_interface: false, supers: &SUPERS_A0000000620101_13, methods: &METHODS_A0000000620101_13 },
+    ApiClass { token: 14, name: "javacard/framework/TransactionException", is_interface: false, supers: &SUPERS_A0000000620101_14, methods: &METHODS_A0000000620101_14 },
+    ApiClass { token: 15, name: "javacard/framework/UserException", is_interface: false, supers: &SUPERS_A0000000620101_15, methods: &METHODS_A0000000620101_15 },
+    ApiClass { token: 16, name: "javacard/framework/Util", is_interface: false, supers: &SUPERS_A0000000620101_16, methods: &METHODS_A0000000620101_16 },
+    ApiClass { token: 17, name: "javacard/framework/MultiSelectable", is_interface: true, supers: &SUPERS_A0000000620101_17, methods: &METHODS_A0000000620101_17 },
+    ApiClass { token: 18, name: "javacard/framework/AppletEvent", is_interface: true, supers: &SUPERS_A0000000620101_18, methods: &METHODS_A0000000620101_18 },
+    ApiClass { token: 19, name: "javacard/framework/OwnerPINx", is_interface: true, supers: &SUPERS_A0000000620101_19, methods: &METHODS_A0000000620101_19 },
+    ApiClass { token: 20, name: "javacard/framework/OwnerPINxWithPredecrement", is_interface: true, supers: &SUPERS_A0000000620101_20, methods: &METHODS_A0000000620101_20 },
+    ApiClass { token: 21, name: "javacard/framework/OwnerPINBuilder", is_interface: false, supers: &SUPERS_A0000000620101_21, methods: &METHODS_A0000000620101_21 },
+    ApiClass { token: 22, name: "javacard/framework/SensitiveArrays", is_interface: false, supers: &SUPERS_A0000000620101_22, methods: &METHODS_A0000000620101_22 },
 ];
 
+const SUPERS_A0000000620102_0: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_0: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -369,6 +408,7 @@ const METHODS_A0000000620102_0: [ApiMethod; 4] = [
     ApiMethod { token: 3, name: "isInitialized", descriptor: "()Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_4: [&str; 2] = ["java/lang/Object", "javacard/security/Key"];
 const METHODS_A0000000620102_4: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -376,6 +416,7 @@ const METHODS_A0000000620102_4: [ApiMethod; 4] = [
     ApiMethod { token: 3, name: "isInitialized", descriptor: "()Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_27: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_27: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "setP", descriptor: "([BSS)V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "setQ", descriptor: "([BSS)V", is_static: false, static_token: false },
@@ -385,6 +426,7 @@ const METHODS_A0000000620102_27: [ApiMethod; 6] = [
     ApiMethod { token: 5, name: "getG", descriptor: "([BS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_2: [&str; 2] = ["java/lang/Object", "javacard/security/Key"];
 const METHODS_A0000000620102_2: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -392,6 +434,7 @@ const METHODS_A0000000620102_2: [ApiMethod; 4] = [
     ApiMethod { token: 3, name: "isInitialized", descriptor: "()Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_3: [&str; 2] = ["java/lang/Object", "javacard/security/Key"];
 const METHODS_A0000000620102_3: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -399,6 +442,7 @@ const METHODS_A0000000620102_3: [ApiMethod; 4] = [
     ApiMethod { token: 3, name: "isInitialized", descriptor: "()Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_1: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_1: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "getG", descriptor: "([BS)S", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getP", descriptor: "([BS)S", is_static: false, static_token: false },
@@ -408,6 +452,7 @@ const METHODS_A0000000620102_1: [ApiMethod; 6] = [
     ApiMethod { token: 5, name: "setQ", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_5: [&str; 4] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PrivateKey", "javacard/security/DSAKey"];
 const METHODS_A0000000620102_5: [ApiMethod; 12] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -423,6 +468,7 @@ const METHODS_A0000000620102_5: [ApiMethod; 12] = [
     ApiMethod { token: 11, name: "setX", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_6: [&str; 4] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PublicKey", "javacard/security/DSAKey"];
 const METHODS_A0000000620102_6: [ApiMethod; 12] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -438,6 +484,7 @@ const METHODS_A0000000620102_6: [ApiMethod; 12] = [
     ApiMethod { token: 11, name: "setY", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_17: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_17: [ApiMethod; 15] = [
     ApiMethod { token: 0, name: "setFieldFP", descriptor: "([BSS)V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "setFieldF2M", descriptor: "(S)V", is_static: false, static_token: false },
@@ -456,6 +503,7 @@ const METHODS_A0000000620102_17: [ApiMethod; 15] = [
     ApiMethod { token: 14, name: "copyDomainParametersFrom", descriptor: "(Ljavacard/security/ECKey;)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_18: [&str; 4] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PrivateKey", "javacard/security/ECKey"];
 const METHODS_A0000000620102_18: [ApiMethod; 21] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -480,6 +528,7 @@ const METHODS_A0000000620102_18: [ApiMethod; 21] = [
     ApiMethod { token: 20, name: "copyDomainParametersFrom", descriptor: "(Ljavacard/security/ECKey;)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_19: [&str; 4] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PublicKey", "javacard/security/ECKey"];
 const METHODS_A0000000620102_19: [ApiMethod; 21] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -504,6 +553,7 @@ const METHODS_A0000000620102_19: [ApiMethod; 21] = [
     ApiMethod { token: 20, name: "copyDomainParametersFrom", descriptor: "(Ljavacard/security/ECKey;)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_23: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/SecretKey"];
 const METHODS_A0000000620102_23: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -513,6 +563,7 @@ const METHODS_A0000000620102_23: [ApiMethod; 6] = [
     ApiMethod { token: 5, name: "getKey", descriptor: "([BS)B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_10: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/SecretKey"];
 const METHODS_A0000000620102_10: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -522,6 +573,7 @@ const METHODS_A0000000620102_10: [ApiMethod; 6] = [
     ApiMethod { token: 5, name: "setKey", descriptor: "([BS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_24: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/SecretKey"];
 const METHODS_A0000000620102_24: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -531,6 +583,7 @@ const METHODS_A0000000620102_24: [ApiMethod; 6] = [
     ApiMethod { token: 5, name: "getKey", descriptor: "([BS)B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_28: [&str; 4] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PrivateKey", "javacard/security/DHKey"];
 const METHODS_A0000000620102_28: [ApiMethod; 12] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -546,6 +599,7 @@ const METHODS_A0000000620102_28: [ApiMethod; 12] = [
     ApiMethod { token: 11, name: "getX", descriptor: "([BS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_29: [&str; 4] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PublicKey", "javacard/security/DHKey"];
 const METHODS_A0000000620102_29: [ApiMethod; 12] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -561,6 +615,7 @@ const METHODS_A0000000620102_29: [ApiMethod; 12] = [
     ApiMethod { token: 11, name: "getY", descriptor: "([BS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_7: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PrivateKey"];
 const METHODS_A0000000620102_7: [ApiMethod; 14] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -578,6 +633,7 @@ const METHODS_A0000000620102_7: [ApiMethod; 14] = [
     ApiMethod { token: 13, name: "setQ", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_8: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PrivateKey"];
 const METHODS_A0000000620102_8: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -589,6 +645,7 @@ const METHODS_A0000000620102_8: [ApiMethod; 8] = [
     ApiMethod { token: 7, name: "setModulus", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_9: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/PublicKey"];
 const METHODS_A0000000620102_9: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -600,6 +657,7 @@ const METHODS_A0000000620102_9: [ApiMethod; 8] = [
     ApiMethod { token: 7, name: "setModulus", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_20: [&str; 3] = ["java/lang/Object", "javacard/security/Key", "javacard/security/SecretKey"];
 const METHODS_A0000000620102_20: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "clearKey", descriptor: "()V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getSize", descriptor: "()S", is_static: false, static_token: false },
@@ -609,6 +667,7 @@ const METHODS_A0000000620102_20: [ApiMethod; 6] = [
     ApiMethod { token: 5, name: "getKey", descriptor: "([BS)B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_25: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_25: [ApiMethod; 7] = [
     ApiMethod { token: 0, name: "init", descriptor: "(Ljavacard/security/Key;B)V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "beginVerify", descriptor: "([BSS)S", is_static: false, static_token: false },
@@ -619,6 +678,7 @@ const METHODS_A0000000620102_25: [ApiMethod; 7] = [
     ApiMethod { token: 6, name: "update", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_11: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_11: [ApiMethod; 9] = [
     ApiMethod { token: 0, name: "getInstance", descriptor: "(BZ)Ljavacard/security/MessageDigest;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -631,6 +691,7 @@ const METHODS_A0000000620102_11: [ApiMethod; 9] = [
     ApiMethod { token: 5, name: "update", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_30: [&str; 2] = ["java/lang/Object", "javacard/security/MessageDigest"];
 const METHODS_A0000000620102_30: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "open", descriptor: "(B)Ljavacard/security/MessageDigest$OneShot;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -642,6 +703,7 @@ const METHODS_A0000000620102_30: [ApiMethod; 8] = [
     ApiMethod { token: 6, name: "close", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_26: [&str; 2] = ["java/lang/Object", "javacard/security/MessageDigest"];
 const METHODS_A0000000620102_26: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -653,6 +715,7 @@ const METHODS_A0000000620102_26: [ApiMethod; 8] = [
     ApiMethod { token: 6, name: "setInitialDigest", descriptor: "([BSS[BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_31: [&str; 3] = ["java/lang/Object", "javacard/security/MessageDigest", "javacard/security/InitializedMessageDigest"];
 const METHODS_A0000000620102_31: [ApiMethod; 9] = [
     ApiMethod { token: 0, name: "open", descriptor: "(B)Ljavacard/security/InitializedMessageDigest$OneShot;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -665,6 +728,7 @@ const METHODS_A0000000620102_31: [ApiMethod; 9] = [
     ApiMethod { token: 7, name: "close", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_12: [&str; 5] = ["java/lang/Object", "java/lang/Throwable", "java/lang/Exception", "java/lang/RuntimeException", "javacard/framework/CardRuntimeException"];
 const METHODS_A0000000620102_12: [ApiMethod; 5] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(S)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -673,6 +737,7 @@ const METHODS_A0000000620102_12: [ApiMethod; 5] = [
     ApiMethod { token: 2, name: "setReason", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_22: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_22: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "getInstance", descriptor: "(BZ)Ljavacard/security/KeyAgreement;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -682,6 +747,7 @@ const METHODS_A0000000620102_22: [ApiMethod; 6] = [
     ApiMethod { token: 3, name: "generateSecret", descriptor: "([BSS[BS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_13: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_13: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "buildKey", descriptor: "(BSZ)Ljavacard/security/Key;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -689,6 +755,7 @@ const METHODS_A0000000620102_13: [ApiMethod; 4] = [
     ApiMethod { token: 2, name: "buildKeyWithSharedDomain", descriptor: "(BBLjavacard/security/Key;Z)Ljavacard/security/Key;", is_static: true, static_token: true },
 ];
 
+const SUPERS_A0000000620102_14: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_14: [ApiMethod; 7] = [
     ApiMethod { token: 0, name: "getInstance", descriptor: "(B)Ljavacard/security/RandomData;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -699,6 +766,7 @@ const METHODS_A0000000620102_14: [ApiMethod; 7] = [
     ApiMethod { token: 4, name: "getAlgorithm", descriptor: "()B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_32: [&str; 2] = ["java/lang/Object", "javacard/security/RandomData"];
 const METHODS_A0000000620102_32: [ApiMethod; 7] = [
     ApiMethod { token: 0, name: "open", descriptor: "(B)Ljavacard/security/RandomData$OneShot;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -709,6 +777,7 @@ const METHODS_A0000000620102_32: [ApiMethod; 7] = [
     ApiMethod { token: 5, name: "close", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_16: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_16: [ApiMethod; 6] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "(BS)V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -718,6 +787,7 @@ const METHODS_A0000000620102_16: [ApiMethod; 6] = [
     ApiMethod { token: 3, name: "getPublic", descriptor: "()Ljavacard/security/PublicKey;", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_15: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_15: [ApiMethod; 17] = [
     ApiMethod { token: 0, name: "getInstance", descriptor: "(BZ)Ljavacard/security/Signature;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -738,6 +808,7 @@ const METHODS_A0000000620102_15: [ApiMethod; 17] = [
     ApiMethod { token: 13, name: "getPaddingAlgorithm", descriptor: "()B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_33: [&str; 2] = ["java/lang/Object", "javacard/security/Signature"];
 const METHODS_A0000000620102_33: [ApiMethod; 16] = [
     ApiMethod { token: 0, name: "open", descriptor: "(BBB)Ljavacard/security/Signature$OneShot;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -757,6 +828,7 @@ const METHODS_A0000000620102_33: [ApiMethod; 16] = [
     ApiMethod { token: 14, name: "close", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620102_21: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620102_21: [ApiMethod; 7] = [
     ApiMethod { token: 0, name: "getInstance", descriptor: "(BZ)Ljavacard/security/Checksum;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -768,47 +840,49 @@ const METHODS_A0000000620102_21: [ApiMethod; 7] = [
 ];
 
 const CLASSES_A0000000620102: [ApiClass; 34] = [
-    ApiClass { token: 0, name: "javacard/security/Key", is_interface: true, methods: &METHODS_A0000000620102_0 },
-    ApiClass { token: 1, name: "javacard/security/DSAKey", is_interface: true, methods: &METHODS_A0000000620102_1 },
-    ApiClass { token: 2, name: "javacard/security/PrivateKey", is_interface: true, methods: &METHODS_A0000000620102_2 },
-    ApiClass { token: 3, name: "javacard/security/PublicKey", is_interface: true, methods: &METHODS_A0000000620102_3 },
-    ApiClass { token: 4, name: "javacard/security/SecretKey", is_interface: true, methods: &METHODS_A0000000620102_4 },
-    ApiClass { token: 5, name: "javacard/security/DSAPrivateKey", is_interface: true, methods: &METHODS_A0000000620102_5 },
-    ApiClass { token: 6, name: "javacard/security/DSAPublicKey", is_interface: true, methods: &METHODS_A0000000620102_6 },
-    ApiClass { token: 7, name: "javacard/security/RSAPrivateCrtKey", is_interface: true, methods: &METHODS_A0000000620102_7 },
-    ApiClass { token: 8, name: "javacard/security/RSAPrivateKey", is_interface: true, methods: &METHODS_A0000000620102_8 },
-    ApiClass { token: 9, name: "javacard/security/RSAPublicKey", is_interface: true, methods: &METHODS_A0000000620102_9 },
-    ApiClass { token: 10, name: "javacard/security/DESKey", is_interface: true, methods: &METHODS_A0000000620102_10 },
-    ApiClass { token: 11, name: "javacard/security/MessageDigest", is_interface: false, methods: &METHODS_A0000000620102_11 },
-    ApiClass { token: 12, name: "javacard/security/CryptoException", is_interface: false, methods: &METHODS_A0000000620102_12 },
-    ApiClass { token: 13, name: "javacard/security/KeyBuilder", is_interface: false, methods: &METHODS_A0000000620102_13 },
-    ApiClass { token: 14, name: "javacard/security/RandomData", is_interface: false, methods: &METHODS_A0000000620102_14 },
-    ApiClass { token: 15, name: "javacard/security/Signature", is_interface: false, methods: &METHODS_A0000000620102_15 },
-    ApiClass { token: 16, name: "javacard/security/KeyPair", is_interface: false, methods: &METHODS_A0000000620102_16 },
-    ApiClass { token: 17, name: "javacard/security/ECKey", is_interface: true, methods: &METHODS_A0000000620102_17 },
-    ApiClass { token: 18, name: "javacard/security/ECPrivateKey", is_interface: true, methods: &METHODS_A0000000620102_18 },
-    ApiClass { token: 19, name: "javacard/security/ECPublicKey", is_interface: true, methods: &METHODS_A0000000620102_19 },
-    ApiClass { token: 20, name: "javacard/security/AESKey", is_interface: true, methods: &METHODS_A0000000620102_20 },
-    ApiClass { token: 21, name: "javacard/security/Checksum", is_interface: false, methods: &METHODS_A0000000620102_21 },
-    ApiClass { token: 22, name: "javacard/security/KeyAgreement", is_interface: false, methods: &METHODS_A0000000620102_22 },
-    ApiClass { token: 23, name: "javacard/security/HMACKey", is_interface: true, methods: &METHODS_A0000000620102_23 },
-    ApiClass { token: 24, name: "javacard/security/KoreanSEEDKey", is_interface: true, methods: &METHODS_A0000000620102_24 },
-    ApiClass { token: 25, name: "javacard/security/SignatureMessageRecovery", is_interface: true, methods: &METHODS_A0000000620102_25 },
-    ApiClass { token: 26, name: "javacard/security/InitializedMessageDigest", is_interface: false, methods: &METHODS_A0000000620102_26 },
-    ApiClass { token: 27, name: "javacard/security/DHKey", is_interface: true, methods: &METHODS_A0000000620102_27 },
-    ApiClass { token: 28, name: "javacard/security/DHPrivateKey", is_interface: true, methods: &METHODS_A0000000620102_28 },
-    ApiClass { token: 29, name: "javacard/security/DHPublicKey", is_interface: true, methods: &METHODS_A0000000620102_29 },
-    ApiClass { token: 30, name: "javacard/security/MessageDigest$OneShot", is_interface: false, methods: &METHODS_A0000000620102_30 },
-    ApiClass { token: 31, name: "javacard/security/InitializedMessageDigest$OneShot", is_interface: false, methods: &METHODS_A0000000620102_31 },
-    ApiClass { token: 32, name: "javacard/security/RandomData$OneShot", is_interface: false, methods: &METHODS_A0000000620102_32 },
-    ApiClass { token: 33, name: "javacard/security/Signature$OneShot", is_interface: false, methods: &METHODS_A0000000620102_33 },
+    ApiClass { token: 0, name: "javacard/security/Key", is_interface: true, supers: &SUPERS_A0000000620102_0, methods: &METHODS_A0000000620102_0 },
+    ApiClass { token: 1, name: "javacard/security/DSAKey", is_interface: true, supers: &SUPERS_A0000000620102_1, methods: &METHODS_A0000000620102_1 },
+    ApiClass { token: 2, name: "javacard/security/PrivateKey", is_interface: true, supers: &SUPERS_A0000000620102_2, methods: &METHODS_A0000000620102_2 },
+    ApiClass { token: 3, name: "javacard/security/PublicKey", is_interface: true, supers: &SUPERS_A0000000620102_3, methods: &METHODS_A0000000620102_3 },
+    ApiClass { token: 4, name: "javacard/security/SecretKey", is_interface: true, supers: &SUPERS_A0000000620102_4, methods: &METHODS_A0000000620102_4 },
+    ApiClass { token: 5, name: "javacard/security/DSAPrivateKey", is_interface: true, supers: &SUPERS_A0000000620102_5, methods: &METHODS_A0000000620102_5 },
+    ApiClass { token: 6, name: "javacard/security/DSAPublicKey", is_interface: true, supers: &SUPERS_A0000000620102_6, methods: &METHODS_A0000000620102_6 },
+    ApiClass { token: 7, name: "javacard/security/RSAPrivateCrtKey", is_interface: true, supers: &SUPERS_A0000000620102_7, methods: &METHODS_A0000000620102_7 },
+    ApiClass { token: 8, name: "javacard/security/RSAPrivateKey", is_interface: true, supers: &SUPERS_A0000000620102_8, methods: &METHODS_A0000000620102_8 },
+    ApiClass { token: 9, name: "javacard/security/RSAPublicKey", is_interface: true, supers: &SUPERS_A0000000620102_9, methods: &METHODS_A0000000620102_9 },
+    ApiClass { token: 10, name: "javacard/security/DESKey", is_interface: true, supers: &SUPERS_A0000000620102_10, methods: &METHODS_A0000000620102_10 },
+    ApiClass { token: 11, name: "javacard/security/MessageDigest", is_interface: false, supers: &SUPERS_A0000000620102_11, methods: &METHODS_A0000000620102_11 },
+    ApiClass { token: 12, name: "javacard/security/CryptoException", is_interface: false, supers: &SUPERS_A0000000620102_12, methods: &METHODS_A0000000620102_12 },
+    ApiClass { token: 13, name: "javacard/security/KeyBuilder", is_interface: false, supers: &SUPERS_A0000000620102_13, methods: &METHODS_A0000000620102_13 },
+    ApiClass { token: 14, name: "javacard/security/RandomData", is_interface: false, supers: &SUPERS_A0000000620102_14, methods: &METHODS_A0000000620102_14 },
+    ApiClass { token: 15, name: "javacard/security/Signature", is_interface: false, supers: &SUPERS_A0000000620102_15, methods: &METHODS_A0000000620102_15 },
+    ApiClass { token: 16, name: "javacard/security/KeyPair", is_interface: false, supers: &SUPERS_A0000000620102_16, methods: &METHODS_A0000000620102_16 },
+    ApiClass { token: 17, name: "javacard/security/ECKey", is_interface: true, supers: &SUPERS_A0000000620102_17, methods: &METHODS_A0000000620102_17 },
+    ApiClass { token: 18, name: "javacard/security/ECPrivateKey", is_interface: true, supers: &SUPERS_A0000000620102_18, methods: &METHODS_A0000000620102_18 },
+    ApiClass { token: 19, name: "javacard/security/ECPublicKey", is_interface: true, supers: &SUPERS_A0000000620102_19, methods: &METHODS_A0000000620102_19 },
+    ApiClass { token: 20, name: "javacard/security/AESKey", is_interface: true, supers: &SUPERS_A0000000620102_20, methods: &METHODS_A0000000620102_20 },
+    ApiClass { token: 21, name: "javacard/security/Checksum", is_interface: false, supers: &SUPERS_A0000000620102_21, methods: &METHODS_A0000000620102_21 },
+    ApiClass { token: 22, name: "javacard/security/KeyAgreement", is_interface: false, supers: &SUPERS_A0000000620102_22, methods: &METHODS_A0000000620102_22 },
+    ApiClass { token: 23, name: "javacard/security/HMACKey", is_interface: true, supers: &SUPERS_A0000000620102_23, methods: &METHODS_A0000000620102_23 },
+    ApiClass { token: 24, name: "javacard/security/KoreanSEEDKey", is_interface: true, supers: &SUPERS_A0000000620102_24, methods: &METHODS_A0000000620102_24 },
+    ApiClass { token: 25, name: "javacard/security/SignatureMessageRecovery", is_interface: true, supers: &SUPERS_A0000000620102_25, methods: &METHODS_A0000000620102_25 },
+    ApiClass { token: 26, name: "javacard/security/InitializedMessageDigest", is_interface: false, supers: &SUPERS_A0000000620102_26, methods: &METHODS_A0000000620102_26 },
+    ApiClass { token: 27, name: "javacard/security/DHKey", is_interface: true, supers: &SUPERS_A0000000620102_27, methods: &METHODS_A0000000620102_27 },
+    ApiClass { token: 28, name: "javacard/security/DHPrivateKey", is_interface: true, supers: &SUPERS_A0000000620102_28, methods: &METHODS_A0000000620102_28 },
+    ApiClass { token: 29, name: "javacard/security/DHPublicKey", is_interface: true, supers: &SUPERS_A0000000620102_29, methods: &METHODS_A0000000620102_29 },
+    ApiClass { token: 30, name: "javacard/security/MessageDigest$OneShot", is_interface: false, supers: &SUPERS_A0000000620102_30, methods: &METHODS_A0000000620102_30 },
+    ApiClass { token: 31, name: "javacard/security/InitializedMessageDigest$OneShot", is_interface: false, supers: &SUPERS_A0000000620102_31, methods: &METHODS_A0000000620102_31 },
+    ApiClass { token: 32, name: "javacard/security/RandomData$OneShot", is_interface: false, supers: &SUPERS_A0000000620102_32, methods: &METHODS_A0000000620102_32 },
+    ApiClass { token: 33, name: "javacard/security/Signature$OneShot", is_interface: false, supers: &SUPERS_A0000000620102_33, methods: &METHODS_A0000000620102_33 },
 ];
 
+const SUPERS_A0000000620201_0: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620201_0: [ApiMethod; 2] = [
     ApiMethod { token: 0, name: "getKeyCipher", descriptor: "()Ljavacardx/crypto/Cipher;", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "setKeyCipher", descriptor: "(Ljavacardx/crypto/Cipher;)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620201_1: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620201_1: [ApiMethod; 11] = [
     ApiMethod { token: 0, name: "getInstance", descriptor: "(BZ)Ljavacardx/crypto/Cipher;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -823,6 +897,7 @@ const METHODS_A0000000620201_1: [ApiMethod; 11] = [
     ApiMethod { token: 7, name: "getPaddingAlgorithm", descriptor: "()B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620201_2: [&str; 2] = ["java/lang/Object", "javacardx/crypto/Cipher"];
 const METHODS_A0000000620201_2: [ApiMethod; 10] = [
     ApiMethod { token: 0, name: "open", descriptor: "(BB)Ljavacardx/crypto/Cipher$OneShot;", is_static: true, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -836,6 +911,7 @@ const METHODS_A0000000620201_2: [ApiMethod; 10] = [
     ApiMethod { token: 8, name: "close", descriptor: "()V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A0000000620201_3: [&str; 2] = ["java/lang/Object", "javacardx/crypto/Cipher"];
 const METHODS_A0000000620201_3: [ApiMethod; 13] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -853,23 +929,26 @@ const METHODS_A0000000620201_3: [ApiMethod; 13] = [
 ];
 
 const CLASSES_A0000000620201: [ApiClass; 4] = [
-    ApiClass { token: 0, name: "javacardx/crypto/KeyEncryption", is_interface: true, methods: &METHODS_A0000000620201_0 },
-    ApiClass { token: 1, name: "javacardx/crypto/Cipher", is_interface: false, methods: &METHODS_A0000000620201_1 },
-    ApiClass { token: 2, name: "javacardx/crypto/Cipher$OneShot", is_interface: false, methods: &METHODS_A0000000620201_2 },
-    ApiClass { token: 3, name: "javacardx/crypto/AEADCipher", is_interface: false, methods: &METHODS_A0000000620201_3 },
+    ApiClass { token: 0, name: "javacardx/crypto/KeyEncryption", is_interface: true, supers: &SUPERS_A0000000620201_0, methods: &METHODS_A0000000620201_0 },
+    ApiClass { token: 1, name: "javacardx/crypto/Cipher", is_interface: false, supers: &SUPERS_A0000000620201_1, methods: &METHODS_A0000000620201_1 },
+    ApiClass { token: 2, name: "javacardx/crypto/Cipher$OneShot", is_interface: false, supers: &SUPERS_A0000000620201_2, methods: &METHODS_A0000000620201_2 },
+    ApiClass { token: 3, name: "javacardx/crypto/AEADCipher", is_interface: false, supers: &SUPERS_A0000000620201_3, methods: &METHODS_A0000000620201_3 },
 ];
 
+const SUPERS_A0000000620209_0: [&str; 1] = ["java/lang/Object"];
 const METHODS_A0000000620209_0: [ApiMethod; 0] = [
 ];
 
 const CLASSES_A0000000620209: [ApiClass; 1] = [
-    ApiClass { token: 0, name: "javacardx/apdu/ExtendedLength", is_interface: true, methods: &METHODS_A0000000620209_0 },
+    ApiClass { token: 0, name: "javacardx/apdu/ExtendedLength", is_interface: true, supers: &SUPERS_A0000000620209_0, methods: &METHODS_A0000000620209_0 },
 ];
 
+const SUPERS_A00000015100_0: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_0: [ApiMethod; 1] = [
     ApiMethod { token: 0, name: "processData", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_7: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_7: [ApiMethod; 4] = [
     ApiMethod { token: 0, name: "init", descriptor: "(B)V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "sign", descriptor: "([BSS[BS)S", is_static: false, static_token: false },
@@ -877,6 +956,7 @@ const METHODS_A00000015100_7: [ApiMethod; 4] = [
     ApiMethod { token: 3, name: "recoverKey", descriptor: "([BSS[BS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_1: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_1: [ApiMethod; 11] = [
     ApiMethod { token: 0, name: "isActive", descriptor: "()Z", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "isSubmitted", descriptor: "()Z", is_static: false, static_token: false },
@@ -891,6 +971,7 @@ const METHODS_A00000015100_1: [ApiMethod; 11] = [
     ApiMethod { token: 10, name: "verify", descriptor: "([BSBB)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_4: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_4: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "deregisterService", descriptor: "(S)V", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "getAID", descriptor: "()Ljavacard/framework/AID;", is_static: false, static_token: false },
@@ -902,22 +983,27 @@ const METHODS_A00000015100_4: [ApiMethod; 8] = [
     ApiMethod { token: 7, name: "setState", descriptor: "(B)Z", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_5: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_5: [ApiMethod; 1] = [
     ApiMethod { token: 0, name: "getServiceInterface", descriptor: "(Lorg/globalplatform/GPRegistryEntry;S[BSS)Ljavacard/framework/Shareable;", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_9: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_9: [ApiMethod; 1] = [
     ApiMethod { token: 0, name: "requestHTTPAdministrationSession", descriptor: "([BSS)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_10: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_10: [ApiMethod; 1] = [
     ApiMethod { token: 0, name: "httpAdministationSessionReport", descriptor: "(S)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_8: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_8: [ApiMethod; 1] = [
     ApiMethod { token: 0, name: "processData", descriptor: "([BSS[BS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_2: [&str; 2] = ["java/lang/Object", "javacard/framework/Shareable"];
 const METHODS_A00000015100_2: [ApiMethod; 7] = [
     ApiMethod { token: 0, name: "processSecurity", descriptor: "(Ljavacard/framework/APDU;)S", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "wrap", descriptor: "([BSS)S", is_static: false, static_token: false },
@@ -928,6 +1014,7 @@ const METHODS_A00000015100_2: [ApiMethod; 7] = [
     ApiMethod { token: 6, name: "getSecurityLevel", descriptor: "()B", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_6: [&str; 3] = ["java/lang/Object", "javacard/framework/Shareable", "org/globalplatform/SecureChannel"];
 const METHODS_A00000015100_6: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "processSecurity", descriptor: "(Ljavacard/framework/APDU;)S", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "wrap", descriptor: "([BSS)S", is_static: false, static_token: false },
@@ -939,6 +1026,7 @@ const METHODS_A00000015100_6: [ApiMethod; 8] = [
     ApiMethod { token: 7, name: "setSecurityLevel", descriptor: "(B)V", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_11: [&str; 3] = ["java/lang/Object", "javacard/framework/Shareable", "org/globalplatform/SecureChannel"];
 const METHODS_A00000015100_11: [ApiMethod; 8] = [
     ApiMethod { token: 0, name: "processSecurity", descriptor: "(Ljavacard/framework/APDU;)S", is_static: false, static_token: false },
     ApiMethod { token: 1, name: "wrap", descriptor: "([BSS)S", is_static: false, static_token: false },
@@ -950,6 +1038,7 @@ const METHODS_A00000015100_11: [ApiMethod; 8] = [
     ApiMethod { token: 7, name: "processSecurity", descriptor: "([BSSS)S", is_static: false, static_token: false },
 ];
 
+const SUPERS_A00000015100_3: [&str; 1] = ["java/lang/Object"];
 const METHODS_A00000015100_3: [ApiMethod; 12] = [
     ApiMethod { token: 0, name: "<init>", descriptor: "()V", is_static: false, static_token: true },
     ApiMethod { token: 0, name: "equals", descriptor: "(Ljava/lang/Object;)Z", is_static: false, static_token: false },
@@ -966,18 +1055,18 @@ const METHODS_A00000015100_3: [ApiMethod; 12] = [
 ];
 
 const CLASSES_A00000015100: [ApiClass; 12] = [
-    ApiClass { token: 0, name: "org/globalplatform/Application", is_interface: true, methods: &METHODS_A00000015100_0 },
-    ApiClass { token: 1, name: "org/globalplatform/CVM", is_interface: true, methods: &METHODS_A00000015100_1 },
-    ApiClass { token: 2, name: "org/globalplatform/SecureChannel", is_interface: true, methods: &METHODS_A00000015100_2 },
-    ApiClass { token: 3, name: "org/globalplatform/GPSystem", is_interface: false, methods: &METHODS_A00000015100_3 },
-    ApiClass { token: 4, name: "org/globalplatform/GPRegistryEntry", is_interface: true, methods: &METHODS_A00000015100_4 },
-    ApiClass { token: 5, name: "org/globalplatform/GlobalService", is_interface: true, methods: &METHODS_A00000015100_5 },
-    ApiClass { token: 6, name: "org/globalplatform/SecureChannelx", is_interface: true, methods: &METHODS_A00000015100_6 },
-    ApiClass { token: 7, name: "org/globalplatform/Authority", is_interface: true, methods: &METHODS_A00000015100_7 },
-    ApiClass { token: 8, name: "org/globalplatform/Personalization", is_interface: true, methods: &METHODS_A00000015100_8 },
-    ApiClass { token: 9, name: "org/globalplatform/HTTPAdministration", is_interface: true, methods: &METHODS_A00000015100_9 },
-    ApiClass { token: 10, name: "org/globalplatform/HTTPReportListener", is_interface: true, methods: &METHODS_A00000015100_10 },
-    ApiClass { token: 11, name: "org/globalplatform/SecureChannelx2", is_interface: true, methods: &METHODS_A00000015100_11 },
+    ApiClass { token: 0, name: "org/globalplatform/Application", is_interface: true, supers: &SUPERS_A00000015100_0, methods: &METHODS_A00000015100_0 },
+    ApiClass { token: 1, name: "org/globalplatform/CVM", is_interface: true, supers: &SUPERS_A00000015100_1, methods: &METHODS_A00000015100_1 },
+    ApiClass { token: 2, name: "org/globalplatform/SecureChannel", is_interface: true, supers: &SUPERS_A00000015100_2, methods: &METHODS_A00000015100_2 },
+    ApiClass { token: 3, name: "org/globalplatform/GPSystem", is_interface: false, supers: &SUPERS_A00000015100_3, methods: &METHODS_A00000015100_3 },
+    ApiClass { token: 4, name: "org/globalplatform/GPRegistryEntry", is_interface: true, supers: &SUPERS_A00000015100_4, methods: &METHODS_A00000015100_4 },
+    ApiClass { token: 5, name: "org/globalplatform/GlobalService", is_interface: true, supers: &SUPERS_A00000015100_5, methods: &METHODS_A00000015100_5 },
+    ApiClass { token: 6, name: "org/globalplatform/SecureChannelx", is_interface: true, supers: &SUPERS_A00000015100_6, methods: &METHODS_A00000015100_6 },
+    ApiClass { token: 7, name: "org/globalplatform/Authority", is_interface: true, supers: &SUPERS_A00000015100_7, methods: &METHODS_A00000015100_7 },
+    ApiClass { token: 8, name: "org/globalplatform/Personalization", is_interface: true, supers: &SUPERS_A00000015100_8, methods: &METHODS_A00000015100_8 },
+    ApiClass { token: 9, name: "org/globalplatform/HTTPAdministration", is_interface: true, supers: &SUPERS_A00000015100_9, methods: &METHODS_A00000015100_9 },
+    ApiClass { token: 10, name: "org/globalplatform/HTTPReportListener", is_interface: true, supers: &SUPERS_A00000015100_10, methods: &METHODS_A00000015100_10 },
+    ApiClass { token: 11, name: "org/globalplatform/SecureChannelx2", is_interface: true, supers: &SUPERS_A00000015100_11, methods: &METHODS_A00000015100_11 },
 ];
 
 /// Every package this engine knows how to resolve an import against.

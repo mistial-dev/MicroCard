@@ -220,6 +220,9 @@ def rust(schema: dict) -> str:
         "    pub token: u8,",
         "    pub name: &'static str,",
         "    pub is_interface: bool,",
+        "    /// Names of the classes and interfaces this one extends, nearest first. A",
+        "    /// catch clause matches any of them, which is how catching a supertype works.",
+        "    pub supers: &'static [&'static str],",
         "    pub methods: &'static [ApiMethod],",
         "}",
         "",
@@ -238,6 +241,8 @@ def rust(schema: dict) -> str:
     for package in schema["packages"]:
         for klass in package["classes"]:
             symbol = f"{package['aid']}_{klass['token']}"
+            supers = ", ".join(f'"{name}"' for name in klass["supers"] + klass["interfaces"])
+            lines.append(f"const SUPERS_{symbol}: [&str; {len(klass['supers']) + len(klass['interfaces'])}] = [{supers}];")
             lines.append(f"const METHODS_{symbol}: [ApiMethod; {len(klass['methods'])}] = [")
             for method in sorted(klass["methods"], key=lambda entry: entry["token"]):
                 lines.append(
@@ -251,7 +256,8 @@ def rust(schema: dict) -> str:
             symbol = f"{package['aid']}_{klass['token']}"
             lines.append(
                 f"    ApiClass {{ token: {klass['token']}, name: \"{klass['name']}\", "
-                f"is_interface: {str(klass['interface']).lower()}, methods: &METHODS_{symbol} }},"
+                f"is_interface: {str(klass['interface']).lower()}, supers: &SUPERS_{symbol}, "
+                f"methods: &METHODS_{symbol} }},"
             )
         lines += ["];", ""]
     lines.append(f"/// Every package this engine knows how to resolve an import against.")
