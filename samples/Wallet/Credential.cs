@@ -32,7 +32,9 @@ public static class Credential
     [Process]
     public static void Process()
     {
-        if (SecureChannel.SecurityLevel != 0x13)
+        // Require command confidentiality, command integrity and response integrity.
+        // A channel offering more than that still satisfies them.
+        if ((SecureChannel.SecurityLevel & 0x13) != 0x13)
         {
             ResponseApdu.SetStatus(0x6982);
             return;

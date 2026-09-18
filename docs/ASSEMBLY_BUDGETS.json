@@ -68,13 +68,13 @@
     {
       "assembly": "Counter",
       "source_pe_bytes": 6656,
-      "mc04_bytes": 2510,
+      "mc04_bytes": 2513,
       "sections": {
         "header": 56,
         "tables": 727,
         "strings": 692,
         "blob": 224,
-        "code": 811
+        "code": 814
       },
       "table_rows": {
         "Module": 1,
@@ -93,7 +93,7 @@
       "debug_map_bytes": 1533,
       "representative_manifest_bytes": 730,
       "package_fixed_bytes": 136,
-      "representative_package_bytes": 3376,
+      "representative_package_bytes": 3379,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096

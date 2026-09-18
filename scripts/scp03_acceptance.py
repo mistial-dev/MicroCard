@@ -44,10 +44,9 @@ class Client:
   sequence=3 if i&0x10 else 0
   assert len(r)==10+3+2*self.width+sequence+2,(len(r),r.hex())
   self.i=i
+  # Without an explicit request, take every protection the card announces.
   self.supported=0x03|(0x10 if i&0x20 else 0)|(0x20 if i&0x40 else 0)
-  # Without an explicit request, take the level the sample readers ask for, dropping
-  # response integrity when the build does not offer it.
-  if level is None: level=0x13&self.supported|0x03
+  if level is None: level=self.supported
   bits=128 if self.s16 else 64
   if sequence:
    # A derived challenge is reproducible from the counter, so recompute it here.
@@ -184,6 +183,11 @@ def main():
   # exercises response integrity and confidentiality wherever the build offers them.
   for level in [l for l in (1,3,0x11,0x13,0x33) if l&~c.supported==0]:
    c.connect(level);assert c.command(0xe3,b'team')==allowed[:1]+allowed[6:],hex(level)
+   # The sample reader asks for command confidentiality with integrity both ways. Every
+   # level carrying those must serve it, including the ones that protect more.
+   c.command(0xa4,bytes.fromhex('F04D430004'))
+   expected=0x9000 if level&0x13==0x13 else 0x6982
+   assert c.command(0x10,status=expected)==(hashlib.sha256(b'a').digest()[:1] if expected==0x9000 else b''),hex(level)
   # Level 0 carries no MAC, so it authorizes nothing.
   c.connect(0);c.command(0xe0,b'forbidden',0x6985)
   c.connect();bad=bytearray(c.encode(0xe0,b'bad'));bad[-1]^=1;assert c.raw(bad)==b'\x69\x82'

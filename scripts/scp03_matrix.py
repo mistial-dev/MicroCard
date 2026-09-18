@@ -28,8 +28,9 @@ def combinations():
 def oracle(features):
     """Replay the independent host implementation against a card built this way.
 
-    Only builds offering R-MAC are replayed, because the sample reader the acceptance
-    script executes demands security level 0x13 and a card without R-MAC cannot reach it.
+    Builds without R-MAC are skipped. The sample reader the acceptance script executes
+    requires response integrity, so a card that cannot offer it refuses the reader by
+    design, which says nothing about the secure channel.
     """
     arguments = ["--no-default-features"]
     if features:
