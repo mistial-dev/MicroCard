@@ -188,8 +188,7 @@ impl Card {
 
         let mut jcre = Jcre::new(self.apdu, self.buffer);
         jcre.selecting = selecting;
-        // Everything after a short APDU header is command data, JCRE §4.
-        jcre.incoming = command.len().saturating_sub(5) as u16;
+        jcre.incoming = incoming_length(command)?;
         jcre.data_offset = 5;
 
         let mut budget = self.sizes.budget;
@@ -253,6 +252,27 @@ impl Card {
 ///
 /// An `ISOException` carries the word the applet chose. Anything else is a failure the
 /// applet did not describe, so the card answers with the one that says exactly that.
+/// How many bytes of command data a short APDU carries, ISO 7816-4 §5.1.
+///
+/// Byte four is Lc when the command carries data and Le when it carries none, so the
+/// overall length is what says which case this is. A case 4 command carries both, and
+/// reading its trailing Le byte as a further data byte is what makes an applet reject a
+/// well formed command. Every real PIV GET DATA is case 4.
+fn incoming_length(command: &[u8]) -> Result<u16> {
+    // Case 1 has no Lc and no Le. Case 2 has Le alone, which byte four holds.
+    if command.len() <= 5 {
+        return Ok(0);
+    }
+    let declared = command[4] as usize;
+    // Case 3 ends with the data. Case 4 appends one Le byte. Any other length disagrees
+    // with its own Lc, so the command is refused rather than truncated to fit.
+    if command.len() == 5 + declared || command.len() == 6 + declared {
+        Ok(declared as u16)
+    } else {
+        Err(Error::Bounds)
+    }
+}
+
 fn status_word(heap: &Heap, exception: Reference) -> u16 {
     let Ok(info) = heap.info(exception) else {
         return SW_UNKNOWN;
@@ -483,6 +503,29 @@ mod tests {
         // that rather than inventing a plausible one.
         assert_eq!(response.sw, SW_UNKNOWN);
         assert!(response.data.is_empty());
+    }
+
+    #[test]
+    fn the_trailing_expected_length_byte_is_not_command_data() {
+        // Case 1, a header alone.
+        assert_eq!(incoming_length(&[0, 0xa4, 4, 0]), Ok(0));
+        // Case 2, where byte four is Le.
+        assert_eq!(incoming_length(&[0, 0xca, 0x7f, 0x61, 0]), Ok(0));
+        // Case 3, a GET DATA with no expected length.
+        let case3 = [0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 7];
+        assert_eq!(incoming_length(&case3), Ok(5));
+        // Case 4, the same command as a host actually sends it. The answer has to stay 5,
+        // because the applet parses the data field as a TLV and a sixth byte breaks it.
+        let case4 = [0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 7, 0];
+        assert_eq!(incoming_length(&case4), Ok(5));
+    }
+
+    #[test]
+    fn a_command_that_disagrees_with_its_own_length_byte_is_refused() {
+        // Lc claims five bytes and two follow.
+        assert_eq!(incoming_length(&[0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3]), Err(Error::Bounds));
+        // Lc claims one byte and four follow, which is past a case 4 trailer.
+        assert_eq!(incoming_length(&[0, 0xcb, 0x3f, 0xff, 1, 1, 2, 3, 4]), Err(Error::Bounds));
     }
 
     #[test]
