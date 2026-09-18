@@ -6,6 +6,7 @@
 extern crate alloc;
 pub mod cap;
 pub mod code;
+pub mod link;
 #[allow(dead_code)]
 mod jcvm_opcodes;
 pub mod verify;
@@ -38,6 +39,8 @@ pub enum Error {
     Null,
     /// One context reached for another context's object.
     Firewall,
+    /// A name resolved to nothing, such as a method token no class in the chain defines.
+    Missing,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

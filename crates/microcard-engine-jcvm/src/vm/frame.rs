@@ -105,6 +105,44 @@ impl<'a> Frame<'a> {
         Ok(self.words[index])
     }
 
+    /// Move one word off the stack keeping its tag, for passing an argument to a callee.
+    pub fn pop_raw(&mut self) -> Result<(u16, bool)> {
+        if self.depth == 0 {
+            return Err(Error::Bounds);
+        }
+        let index = self.locals + self.depth - 1;
+        self.depth -= 1;
+        Ok((self.words[index], self.tag(index)))
+    }
+
+    /// Look at a reference `below` words down from the top, without taking it.
+    ///
+    /// This is how an instance invocation finds its receiver, which sits under the
+    /// arguments the caller pushed after it.
+    pub fn peek_reference(&self, below: usize) -> Result<Reference> {
+        if below >= self.depth {
+            return Err(Error::Bounds);
+        }
+        let index = self.locals + self.depth - 1 - below;
+        if !self.tag(index) {
+            return Err(Error::Type);
+        }
+        Ok(self.words[index])
+    }
+
+    /// Put one word on the stack with the tag it already had.
+    pub fn push_raw(&mut self, value: (u16, bool)) -> Result<()> {
+        self.push_word(value.0, value.1)
+    }
+
+    /// Write a local with the tag it already had, for receiving an argument.
+    pub fn store_raw(&mut self, index: usize, value: (u16, bool)) -> Result<()> {
+        self.local(index)?;
+        self.words[index] = value.0;
+        self.set_tag(index, value.1);
+        Ok(())
+    }
+
     pub fn push_short(&mut self, value: i16) -> Result<()> {
         self.push_word(value as u16, false)
     }

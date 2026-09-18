@@ -62,6 +62,16 @@ pub struct ClassInfo<'a> {
 }
 
 impl<'a> ClassInfo<'a> {
+    /// The public virtual method table, two bytes per entry in token order.
+    pub fn public_methods(&self) -> &'a [u8] {
+        self.public_methods
+    }
+
+    /// The package-visible virtual method table, which is a separate namespace.
+    pub fn package_methods(&self) -> &'a [u8] {
+        self.package_methods
+    }
+
     pub fn is_interface(&self) -> bool {
         self.flags & ACC_INTERFACE != 0
     }

@@ -12,6 +12,29 @@ pub const PACKAGE_AID: [u8; 5] = [0xf0, 1, 2, 3, 4];
 /// The applet AID the builder uses.
 pub const APPLET_AID: [u8; 6] = [0xf0, 1, 2, 3, 4, 1];
 
+/// One class in the built package.
+pub struct ClassSpec {
+    /// A class reference, or `0xffff` for no superclass.
+    pub super_class: u16,
+    /// Words of field this class declares on its own account.
+    pub declared_size: u8,
+    /// Method component offsets of the public virtual methods, in token order.
+    pub public: Vec<u16>,
+    /// The same for the package-visible namespace.
+    pub package: Vec<u16>,
+}
+
+impl Default for ClassSpec {
+    fn default() -> Self {
+        Self {
+            super_class: 0xffff,
+            declared_size: 0,
+            public: Vec::new(),
+            package: Vec::new(),
+        }
+    }
+}
+
 /// A package that verifies, which tests then take apart one field at a time.
 pub struct Package {
     /// Header flags. `0x04` is an applet package.
@@ -20,10 +43,20 @@ pub struct Package {
     pub code: Vec<u8>,
     /// Operand stack words the method asks for.
     pub max_stack: u8,
+    /// Argument words the method takes.
+    pub nargs: u8,
+    /// Local words the method declares on top of its arguments.
+    pub max_locals: u8,
+    /// Extra methods, appended after the first, each a header pair and its bytecode.
+    pub extra: Vec<(u8, u8, Vec<u8>)>,
+    /// Bytes of static field image, all starting at zero.
+    pub static_bytes: u16,
     /// Constant pool entries, each already four bytes.
     pub constants: Vec<[u8; 4]>,
     /// Exception handlers, each already eight bytes.
     pub handlers: Vec<[u8; 8]>,
+    /// The classes, laid out in the order given.
+    pub classes: Vec<ClassSpec>,
 }
 
 impl Default for Package {
@@ -33,8 +66,13 @@ impl Default for Package {
             // return, which is all an install method has to do to be well formed.
             code: vec![0x7a],
             max_stack: 2,
+            nargs: 3,
+            max_locals: 0,
+            extra: Vec::new(),
+            static_bytes: 0,
             constants: Vec::new(),
             handlers: Vec::new(),
+            classes: vec![ClassSpec::default()],
         }
     }
 }
@@ -47,6 +85,33 @@ fn component(tag: Tag, info: &[u8]) -> Vec<u8> {
 }
 
 impl Package {
+    /// Where the first method's bytecode starts in the Method component.
+    pub fn install_offset(&self) -> u16 {
+        1 + self.handlers.len() as u16 * 8
+    }
+
+    /// Where each method after the first starts.
+    pub fn extra_offsets(&self) -> Vec<u16> {
+        let mut offsets = Vec::new();
+        let mut at = self.install_offset() + 2 + self.code.len() as u16;
+        for (_, _, code) in &self.extra {
+            offsets.push(at);
+            at += 2 + code.len() as u16;
+        }
+        offsets
+    }
+
+    /// Where each class lands in the Class component, which is what a class reference is.
+    pub fn class_offsets(&self) -> Vec<u16> {
+        let mut offsets = Vec::new();
+        let mut at = 0u16;
+        for spec in &self.classes {
+            offsets.push(at);
+            at += 10 + 2 * (spec.public.len() + spec.package.len()) as u16;
+        }
+        offsets
+    }
+
     /// Assemble the block, filling in every size and count so it agrees with itself.
     pub fn build(&self) -> Vec<u8> {
         let mut header = Vec::from([0xde, 0xca, 0xff, 0xed, 1, 2, self.flags, 0, 1]);
@@ -60,8 +125,13 @@ impl Package {
         }
         let install = method.len() as u16;
         method.push(self.max_stack & 0x0f);
-        method.push(0x30);
+        method.push((self.nargs << 4) | (self.max_locals & 0x0f));
         method.extend_from_slice(&self.code);
+        for (nargs, locals, code) in &self.extra {
+            method.push(self.max_stack & 0x0f);
+            method.push((nargs << 4) | (locals & 0x0f));
+            method.extend_from_slice(code);
+        }
 
         let mut applet = vec![1u8, APPLET_AID.len() as u8];
         applet.extend_from_slice(&APPLET_AID);
@@ -72,10 +142,24 @@ impl Package {
             constants.extend_from_slice(entry);
         }
 
-        // One class with no superclass and no methods of its own.
-        let class = vec![0x00, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0];
+        let mut class = Vec::new();
+        for spec in &self.classes {
+            class.push(0x00);
+            class.extend_from_slice(&spec.super_class.to_be_bytes());
+            class.extend_from_slice(&[spec.declared_size, 0, 0, 0]);
+            class.push(spec.public.len() as u8);
+            class.push(0);
+            class.push(spec.package.len() as u8);
+            for offset in spec.public.iter().chain(&spec.package) {
+                class.extend_from_slice(&offset.to_be_bytes());
+            }
+        }
         let imports = vec![0u8];
-        let statics = vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        // An image of only default value fields, which start at zero.
+        let mut statics = Vec::from(self.static_bytes.to_be_bytes());
+        statics.extend_from_slice(&[0, 0, 0, 0]);
+        statics.extend_from_slice(&self.static_bytes.to_be_bytes());
+        statics.extend_from_slice(&[0, 0]);
         let ref_location = vec![0, 0, 0, 0];
 
         let parts = [
@@ -103,7 +187,9 @@ impl Package {
         }
         // Image size, array initialiser count and bytes, then the import, applet and
         // custom component counts.
-        directory.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 1, 0]);
+        let mut tail = Vec::from(self.static_bytes.to_be_bytes());
+        tail.extend_from_slice(&[0, 0, 0, 0, 0, 1, 0]);
+        directory.extend_from_slice(&tail);
 
         let mut block = component(Tag::Header, &header);
         block.extend_from_slice(&component(Tag::Directory, &directory));

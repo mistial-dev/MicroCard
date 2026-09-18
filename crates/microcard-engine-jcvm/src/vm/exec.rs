@@ -10,7 +10,9 @@
 //! logical and an arithmetic shift on a value held in a wider register.
 use super::frame::{Frame, NULL, Reference};
 use super::heap::{self, Context, Heap};
-use crate::code::{Limits, instruction_length};
+use crate::cap::Method;
+use crate::code::{Limits, constant_pool_index, instruction_length};
+use crate::link::Linked;
 use crate::{Error, Result};
 
 /// How an invocation ended.
@@ -22,12 +24,52 @@ pub enum Outcome {
     Reference(Reference),
 }
 
+/// How deep one command may nest invocations.
+///
+/// Each level costs a native stack frame, so the bound is what keeps a recursive method
+/// from reaching past the card's own stack instead of failing.
+pub const MAX_DEPTH: u8 = 16;
+
 /// What a running method is allowed to touch.
-pub struct Machine<'a, 'h> {
+pub struct Machine<'a, 'h, 'p> {
     pub heap: &'a mut Heap<'h>,
+    /// The package, for resolving what an instruction names.
+    pub linked: &'a Linked<'p>,
+    /// The Method component, which every method offset counts from.
+    pub methods: Method<'p>,
+    /// The static field image, indexed in bytes.
+    pub statics: &'a mut [u8],
     /// The context this code runs in, which the firewall compares against every object.
     pub context: Context,
     pub limits: Limits,
+    depth: u8,
+}
+
+impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
+    pub fn new(
+        heap: &'a mut Heap<'h>,
+        linked: &'a Linked<'p>,
+        methods: Method<'p>,
+        statics: &'a mut [u8],
+        context: Context,
+        limits: Limits,
+    ) -> Self {
+        Self {
+            heap,
+            linked,
+            methods,
+            statics,
+            context,
+            limits,
+            depth: 0,
+        }
+    }
+}
+
+/// Words and tags one command's frames are carved out of.
+pub struct Arena<'a> {
+    pub words: &'a mut [u16],
+    pub tags: &'a mut [u8],
 }
 
 /// Opcodes this loop understands by name rather than by table.
@@ -132,8 +174,20 @@ mod op {
     pub const IF_ACMPNE_W: u8 = 161;
     pub const IF_SCMPEQ_W: u8 = 162;
     pub const IF_SCMPLE_W: u8 = 167;
+    pub const GETSTATIC_A: u8 = 123;
+    pub const PUTSTATIC_A: u8 = 127;
+    pub const GETFIELD_A: u8 = 131;
+    pub const PUTFIELD_A: u8 = 135;
+    pub const INVOKEVIRTUAL: u8 = 139;
+    pub const INVOKESPECIAL: u8 = 140;
+    pub const INVOKESTATIC: u8 = 141;
+    pub const NEW: u8 = 143;
     pub const NEWARRAY: u8 = 144;
     pub const ARRAYLENGTH: u8 = 146;
+    pub const GETFIELD_A_THIS: u8 = 169;
+    pub const PUTFIELD_A_THIS: u8 = 173;
+    pub const GETFIELD_A_W: u8 = 177;
+    pub const PUTFIELD_A_W: u8 = 181;
     pub const GOTO_W: u8 = 168;
 }
 
@@ -168,10 +222,83 @@ fn byte(code: &[u8], at: usize) -> Result<u8> {
 /// `budget` counts instructions and is what stops a loop in the bytecode from holding the
 /// card. It is decremented per instruction and running out is an error rather than a
 /// silent stop, so a caller can tell a finished method from an abandoned one.
+/// Call a method by its Method component offset, taking its arguments from `caller`.
+///
+/// The callee's frame comes out of what is left of the arena, so the depth a command can
+/// reach is bounded by memory the caller set aside rather than by anything the bytecode
+/// says. Its result goes back on the caller's stack with the right tag.
+pub fn invoke(
+    machine: &mut Machine,
+    method: u16,
+    caller: &mut Frame,
+    arena: &mut Arena,
+    budget: &mut u32,
+) -> Result<()> {
+    if machine.depth >= MAX_DEPTH {
+        return Err(Error::Quota);
+    }
+    let bytes = machine.methods.bytes();
+    let at = method as usize;
+    if at < machine.methods.methods_start() {
+        return Err(Error::Bounds);
+    }
+    let header = crate::cap::MethodHeader::parse(bytes, at)?;
+    if header.abstract_method() {
+        // An abstract method has no body, so reaching one means the dispatch was wrong.
+        return Err(Error::Missing);
+    }
+    let locals = header.frame_words() as usize;
+    let stack = header.max_stack as usize;
+    let words_needed = Frame::words_for(locals, stack);
+    let tags_needed = Frame::tag_bytes_for(locals, stack);
+    if arena.words.len() < words_needed || arena.tags.len() < tags_needed {
+        return Err(Error::Quota);
+    }
+    let (words, rest_words) = arena.words.split_at_mut(words_needed);
+    let (tags, rest_tags) = arena.tags.split_at_mut(tags_needed);
+    let mut callee = Frame::new(words, tags, locals, stack)?;
+    // Arguments come off the caller's stack in reverse, keeping their tags, so a reference
+    // stays a reference across the call.
+    for index in (0..header.nargs as usize).rev() {
+        let value = caller.pop_raw()?;
+        callee.store_raw(index, value)?;
+    }
+    let code = bytes.get(at + header.length..).ok_or(Error::Bounds)?;
+    let mut inner = Arena {
+        words: rest_words,
+        tags: rest_tags,
+    };
+    machine.depth += 1;
+    let outcome = run_with(machine, code, &mut callee, &mut inner, budget);
+    machine.depth -= 1;
+    match outcome? {
+        Outcome::Void => Ok(()),
+        Outcome::Short(value) => caller.push_short(value),
+        Outcome::Int(value) => caller.push_int(value),
+        Outcome::Reference(value) => caller.push_reference(value),
+    }
+}
+
+/// Run a method body with no arena, which refuses any invocation it meets.
 pub fn run(
     machine: &mut Machine,
     code: &[u8],
     frame: &mut Frame,
+    budget: &mut u32,
+) -> Result<Outcome> {
+    let mut arena = Arena {
+        words: &mut [],
+        tags: &mut [],
+    };
+    run_with(machine, code, frame, &mut arena, budget)
+}
+
+/// Run a method body, using `arena` for anything it calls.
+pub fn run_with(
+    machine: &mut Machine,
+    code: &[u8],
+    frame: &mut Frame,
+    arena: &mut Arena,
     budget: &mut u32,
 ) -> Result<Outcome> {
     let mut pc = 0usize;
@@ -561,6 +688,102 @@ pub fn run(
                     .array_put_int(array, bounded_index(index)?, value)?
             }
 
+            op::NEW => {
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                let class = machine.linked.class_ref(index)?;
+                let words = machine.linked.instance_words(class)?;
+                let object = machine.heap.new_object(class, words, machine.context)?;
+                frame.push_reference(object)?
+            }
+
+            op::GETSTATIC_A..=126 => {
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                let at = machine.linked.static_field(index)? as usize;
+                read_static(machine, frame, at, opcode - op::GETSTATIC_A)?
+            }
+            op::PUTSTATIC_A..=130 => {
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                let at = machine.linked.static_field(index)? as usize;
+                let kind = opcode - op::PUTSTATIC_A;
+                let value = take_field_value(frame, kind)?;
+                write_static(machine, at, kind, value)?
+            }
+
+            // The three field families differ only in where the receiver and the index
+            // come from. The type is the position within each family.
+            op::GETFIELD_A..=134 => {
+                let index = field_index(code, pc, machine)?;
+                let object = frame.pop_reference()?;
+                read_field(machine, frame, object, index, opcode - op::GETFIELD_A)?
+            }
+            op::PUTFIELD_A..=138 => {
+                let index = field_index(code, pc, machine)?;
+                let kind = opcode - op::PUTFIELD_A;
+                let value = take_field_value(frame, kind)?;
+                let object = frame.pop_reference()?;
+                put_field_value(machine, object, index, kind, value)?
+            }
+            op::GETFIELD_A_THIS..=172 => {
+                let index = field_index(code, pc, machine)?;
+                // The receiver is local zero, which is what makes these the shortest way
+                // for a method to reach its own fields.
+                let object = frame.load_reference(0)?;
+                read_field(machine, frame, object, index, opcode - op::GETFIELD_A_THIS)?
+            }
+            op::PUTFIELD_A_THIS..=176 => {
+                let index = field_index(code, pc, machine)?;
+                let kind = opcode - op::PUTFIELD_A_THIS;
+                let value = take_field_value(frame, kind)?;
+                let object = frame.load_reference(0)?;
+                put_field_value(machine, object, index, kind, value)?
+            }
+            op::GETFIELD_A_W..=180 => {
+                let index = field_index(code, pc, machine)?;
+                let object = frame.pop_reference()?;
+                read_field(machine, frame, object, index, opcode - op::GETFIELD_A_W)?
+            }
+            op::PUTFIELD_A_W..=184 => {
+                let index = field_index(code, pc, machine)?;
+                let kind = opcode - op::PUTFIELD_A_W;
+                let value = take_field_value(frame, kind)?;
+                let object = frame.pop_reference()?;
+                put_field_value(machine, object, index, kind, value)?
+            }
+
+            op::INVOKESTATIC | op::INVOKESPECIAL => {
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                // invokespecial reaches a constructor or a private method through the same
+                // constant type as invokestatic, and a superclass method through its own.
+                let method = match machine.linked.static_method(index) {
+                    Ok(method) => method,
+                    Err(Error::Type) if opcode == op::INVOKESPECIAL => {
+                        machine.linked.virtual_method(index, 0)?
+                    }
+                    Err(error) => return Err(error),
+                };
+                invoke(machine, method, frame, arena, budget)?
+            }
+            op::INVOKEVIRTUAL => {
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                // The receiver sits under the arguments, and its class decides which body
+                // runs, which is the whole of dynamic dispatch.
+                let (declared, token) = machine.linked.virtual_ref(index)?;
+                // The class the compiler saw gives the signature, so the argument count
+                // comes from there. An override has the same signature by definition.
+                let signature = machine.linked.lookup(declared, token)?;
+                let header = crate::cap::MethodHeader::parse(
+                    machine.methods.bytes(),
+                    signature as usize,
+                )?;
+                // An instance method takes its receiver as the first argument, so a count
+                // of zero means the resolution landed somewhere that is not one.
+                let below = (header.nargs as usize).checked_sub(1).ok_or(Error::Type)?;
+                let receiver = frame.peek_reference(below)?;
+                let info = machine.heap.check_access(receiver, machine.context)?;
+                let method = machine.linked.lookup(info.class, token)?;
+                invoke(machine, method, frame, arena, budget)?
+            }
+
             op::RETURN => return Ok(Outcome::Void),
             op::SRETURN => return Ok(Outcome::Short(frame.pop_short()?)),
             op::IRETURN => return Ok(Outcome::Int(frame.pop_int()?)),
@@ -571,6 +794,94 @@ pub fn run(
             _ => return Err(Error::Unsupported),
         }
         pc = next;
+    }
+}
+
+/// The constant pool index a field instruction names.
+fn field_index(code: &[u8], pc: usize, machine: &Machine) -> Result<u16> {
+    let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+    machine.linked.instance_field(index)
+}
+
+/// Which of the four field types an instruction in a family names.
+const KIND_REF: u8 = 0;
+const KIND_BYTE: u8 = 1;
+const KIND_SHORT: u8 = 2;
+
+fn read_field(
+    machine: &mut Machine,
+    frame: &mut Frame,
+    object: Reference,
+    index: u16,
+    kind: u8,
+) -> Result<()> {
+    machine.heap.check_access(object, machine.context)?;
+    let word = machine.heap.get_word(object, index as usize)?;
+    match kind {
+        KIND_REF => frame.push_reference(word),
+        KIND_BYTE => frame.push_short(word as i8 as i16),
+        KIND_SHORT => frame.push_short(word as i16),
+        _ => {
+            let low = machine.heap.get_word(object, index as usize + 1)?;
+            frame.push_int((((word as u32) << 16) | low as u32) as i32)
+        }
+    }
+}
+
+fn take_field_value(frame: &mut Frame, kind: u8) -> Result<i32> {
+    Ok(match kind {
+        KIND_REF => frame.pop_reference()? as i32,
+        KIND_BYTE | KIND_SHORT => frame.pop_short()? as i32,
+        _ => frame.pop_int()?,
+    })
+}
+
+fn put_field_value(
+    machine: &mut Machine,
+    object: Reference,
+    index: u16,
+    kind: u8,
+    value: i32,
+) -> Result<()> {
+    machine.heap.check_access(object, machine.context)?;
+    match kind {
+        // A byte field keeps only the low byte, so reading it back sign extends.
+        KIND_BYTE => machine
+            .heap
+            .put_word(object, index as usize, value as i8 as i16 as u16),
+        KIND_REF | KIND_SHORT => machine.heap.put_word(object, index as usize, value as u16),
+        _ => {
+            machine
+                .heap
+                .put_word(object, index as usize, (value >> 16) as u16)?;
+            machine.heap.put_word(object, index as usize + 1, value as u16)
+        }
+    }
+}
+
+fn write_static(machine: &mut Machine, at: usize, kind: u8, value: i32) -> Result<()> {
+    let width = if kind == 3 { 4 } else { 2 };
+    let bytes = machine.statics.get_mut(at..at + width).ok_or(Error::Bounds)?;
+    match kind {
+        // A byte field keeps only the low byte, so reading it back sign extends.
+        KIND_BYTE => bytes.copy_from_slice(&(value as i8 as i16).to_be_bytes()),
+        KIND_REF | KIND_SHORT => bytes.copy_from_slice(&(value as i16).to_be_bytes()),
+        _ => bytes.copy_from_slice(&value.to_be_bytes()),
+    }
+    Ok(())
+}
+
+fn read_static(machine: &mut Machine, frame: &mut Frame, at: usize, kind: u8) -> Result<()> {
+    let width = if kind == 3 { 4 } else { 2 };
+    let bytes = machine
+        .statics
+        .get(at..at + width)
+        .ok_or(Error::Bounds)?;
+    match kind {
+        KIND_REF => frame.push_reference(u16::from_be_bytes([bytes[0], bytes[1]])),
+        KIND_BYTE => frame.push_short(bytes[1] as i8 as i16),
+        KIND_SHORT => frame.push_short(i16::from_be_bytes([bytes[0], bytes[1]])),
+        _ => frame.push_int(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
     }
 }
 
@@ -607,19 +918,67 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    fn execute(code: &[u8], locals: usize) -> Result<Outcome> {
-        let mut slab = vec![0u8; 512];
+    use crate::cap::LoadFile;
+    use crate::link::Linked;
+    use crate::test_support::Package;
+
+    /// Run one package's first method, which is what the applet entry point is.
+    fn execute_package(package: &Package) -> Result<Outcome> {
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes)?;
+        let linked = Linked::new(&file)?;
+        let methods = file.methods()?;
+        let mut slab = vec![0u8; 1024];
         let mut heap = Heap::new(&mut slab)?;
-        let mut machine = Machine {
-            heap: &mut heap,
-            context: 1,
-            limits: Limits::IMPLEMENTED,
+        let mut statics = vec![0u8; package.static_bytes as usize + 8];
+        let mut machine = Machine::new(
+            &mut heap,
+            &linked,
+            methods,
+            &mut statics,
+            1,
+            Limits::IMPLEMENTED,
+        );
+        let mut words = vec![0u16; 256];
+        let mut tags = vec![0u8; 32];
+        let mut arena = Arena {
+            words: &mut words,
+            tags: &mut tags,
         };
-        let mut words = vec![0u16; Frame::words_for(locals, 16)];
-        let mut tags = vec![0u8; Frame::tag_bytes_for(locals, 16)];
-        let mut frame = Frame::new(&mut words, &mut tags, locals, 16)?;
-        let mut budget = 1000;
-        run(&mut machine, code, &mut frame, &mut budget)
+        let mut budget = 10_000;
+        // A frame with nothing in it, so the entry point is invoked like any other method.
+        let mut outer_words = [0u16; 8];
+        let mut outer_tags = [0u8; 1];
+        let mut outer = Frame::new(&mut outer_words, &mut outer_tags, 0, 8)?;
+        invoke(
+            &mut machine,
+            package.install_offset(),
+            &mut outer,
+            &mut arena,
+            &mut budget,
+        )?;
+        // What the method returned, read back off the frame that called it.
+        Ok(match outer.depth() {
+            0 => Outcome::Void,
+            _ => {
+                let (value, reference) = outer.pop_raw()?;
+                if reference {
+                    Outcome::Reference(value)
+                } else {
+                    Outcome::Short(value as i16)
+                }
+            }
+        })
+    }
+
+    fn execute(code: &[u8], locals: usize) -> Result<Outcome> {
+        execute_package(&Package {
+            code: Vec::from(code),
+            max_stack: 15,
+            nargs: 0,
+            max_locals: locals as u8,
+            ..Package::default()
+        })
     }
 
     fn short(code: &[u8]) -> i16 {
@@ -630,7 +989,34 @@ mod tests {
     }
 
     fn integer(code: &[u8]) -> i32 {
-        match execute(code, 8).unwrap() {
+        let package = Package {
+            code: Vec::from(code),
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 8,
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        let linked = Linked::new(&file).unwrap();
+        let methods = file.methods().unwrap();
+        let mut slab = vec![0u8; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut statics = vec![0u8; 8];
+        let mut machine = Machine::new(
+            &mut heap,
+            &linked,
+            methods,
+            &mut statics,
+            1,
+            Limits::IMPLEMENTED,
+        );
+        let mut words = vec![0u16; 64];
+        let mut tags = vec![0u8; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 8, 15).unwrap();
+        let mut budget = 10_000;
+        let code = &methods.bytes()[package.install_offset() as usize + 2..];
+        match run(&mut machine, code, &mut frame, &mut budget).unwrap() {
             Outcome::Int(value) => value,
             other => panic!("{other:?}"),
         }
@@ -780,8 +1166,11 @@ mod tests {
 
     #[test]
     fn an_instruction_this_loop_cannot_run_yet_says_so() {
-        // getfield_a, which needs the constant pool resolved to a field offset.
-        assert_eq!(execute(&[0x83, 0x00, op::SRETURN], 1), Err(Error::Unsupported));
+        // athrow, which needs the handler search that is not built yet.
+        assert_eq!(
+            execute(&[op::ACONST_NULL, 0x93, op::SRETURN], 1),
+            Err(Error::Unsupported)
+        );
     }
 
     #[test]
@@ -851,6 +1240,139 @@ mod tests {
     fn a_negative_length_array_is_refused() {
         let code = [op::SCONST_M1, op::NEWARRAY, heap::KIND_BYTE, op::ARETURN];
         assert_eq!(execute(&code, 0), Err(Error::Bounds));
+    }
+
+    #[test]
+    fn an_object_field_round_trips_through_new_and_putfield() {
+        use crate::cap::CONSTANT_INSTANCE_FIELDREF;
+        use crate::test_support::ClassSpec;
+        // A class with two field words. new it, put 9 in field 1, read it back.
+        let package = Package {
+            classes: vec![ClassSpec {
+                declared_size: 2,
+                ..ClassSpec::default()
+            }],
+            constants: vec![
+                [crate::cap::CONSTANT_CLASSREF, 0x00, 0x00, 0],
+                [CONSTANT_INSTANCE_FIELDREF, 0x00, 0x00, 1],
+            ],
+            code: vec![
+                op::NEW, 0x00, 0x00, op::ASTORE_0,
+                op::ALOAD_0, op::BSPUSH, 9, 0x89, 0x01,
+                op::ALOAD_0, 0x85, 0x01, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 2,
+            ..Package::default()
+        };
+        assert_eq!(execute_package(&package).unwrap(), Outcome::Short(9));
+    }
+
+    #[test]
+    fn a_static_field_round_trips_through_the_image() {
+        use crate::cap::CONSTANT_STATIC_FIELDREF;
+        let package = Package {
+            static_bytes: 4,
+            constants: vec![[CONSTANT_STATIC_FIELDREF, 0x00, 0x00, 0x02]],
+            // putstatic_s then getstatic_s, at image offset 2.
+            code: vec![
+                op::SSPUSH, 0x12, 0x34, 0x81, 0x00, 0x00,
+                0x7d, 0x00, 0x00, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        assert_eq!(execute_package(&package).unwrap(), Outcome::Short(0x1234));
+    }
+
+    #[test]
+    fn a_static_call_runs_the_callee_and_brings_its_answer_back() {
+        use crate::cap::CONSTANT_STATIC_METHODREF;
+        let mut package = Package {
+            // The callee doubles its argument.
+            extra: vec![(1, 0, vec![op::SLOAD_0, op::SLOAD_0, op::SADD, op::SRETURN])],
+            code: vec![op::BSPUSH, 21, 0x8d, 0x00, 0x00, op::SRETURN],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        // The offsets follow the first method's bytecode, so the code has to be final
+        // before they are asked for.
+        let callee = package.extra_offsets()[0];
+        package.constants = vec![[
+            CONSTANT_STATIC_METHODREF,
+            0x00,
+            (callee >> 8) as u8,
+            callee as u8,
+        ]];
+        assert_eq!(execute_package(&package).unwrap(), Outcome::Short(42));
+    }
+
+    #[test]
+    fn a_virtual_call_runs_the_body_the_receiver_class_names() {
+        use crate::cap::{CONSTANT_CLASSREF, CONSTANT_VIRTUAL_METHODREF};
+        use crate::test_support::ClassSpec;
+        // Two classes, the subclass overriding token 0. Calling through the superclass
+        // reference has to reach the subclass body.
+        let mut package = Package {
+            extra: vec![
+                (1, 0, vec![op::BSPUSH, 1, op::SRETURN]),
+                (1, 0, vec![op::BSPUSH, 2, op::SRETURN]),
+            ],
+            // new the subclass, then invokevirtual the token the superclass declares.
+            code: vec![
+                op::NEW, 0x00, 0x00, op::ASTORE_0,
+                op::ALOAD_0, 0x8b, 0x00, 0x01, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 2,
+            ..Package::default()
+        };
+        let bodies = package.extra_offsets();
+        package.classes = vec![
+            ClassSpec {
+                public: vec![bodies[0]],
+                ..ClassSpec::default()
+            },
+            ClassSpec {
+                super_class: 0,
+                public: vec![bodies[1]],
+                ..ClassSpec::default()
+            },
+        ];
+        let subclass = package.class_offsets()[1];
+        package.constants = vec![
+            [CONSTANT_CLASSREF, (subclass >> 8) as u8, subclass as u8, 0],
+            [CONSTANT_VIRTUAL_METHODREF, 0x00, 0x00, 0],
+        ];
+        assert_eq!(execute_package(&package).unwrap(), Outcome::Short(2));
+    }
+
+    #[test]
+    fn a_call_deeper_than_the_arena_allows_is_refused() {
+        use crate::cap::CONSTANT_STATIC_METHODREF;
+        // A method that calls itself, which without a bound would recurse until the card
+        // ran out of native stack.
+        let mut package = Package {
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        package.code = vec![0x8d, 0x00, 0x00, op::RETURN];
+        let here = package.install_offset();
+        package.constants = vec![[
+            CONSTANT_STATIC_METHODREF,
+            0x00,
+            (here >> 8) as u8,
+            here as u8,
+        ]];
+        assert_eq!(execute_package(&package), Err(Error::Quota));
     }
 
     #[test]
