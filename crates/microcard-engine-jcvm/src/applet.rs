@@ -11,6 +11,7 @@ use crate::cap::LoadFile;
 use crate::code::Limits;
 use crate::jcvm_api::PACKAGES;
 use crate::link::Linked;
+use crate::host::Host;
 use crate::natives::{self, Jcre};
 use crate::vm::exec::{Arena, Machine, invoke};
 use crate::vm::frame::{Frame, Reference};
@@ -103,7 +104,12 @@ impl Card {
     ///
     /// The parameters are the bytes GlobalPlatform delivered, and the applet reads them
     /// from a byte array like any other.
-    pub fn install(&mut self, file: &LoadFile, parameters: &[u8]) -> Result<()> {
+    pub fn install(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        parameters: &[u8],
+    ) -> Result<()> {
         let applets = file.applets()?;
         let entry = applets.iter().next().ok_or(Error::Missing)?;
         let install = entry.install_method_offset;
@@ -117,6 +123,7 @@ impl Card {
         let outcome = {
             let mut machine = Machine::new(
                 &mut heap,
+                host,
                 &linked,
                 file.methods()?,
                 &mut self.statics,
@@ -156,7 +163,13 @@ impl Card {
     }
 
     /// Hand the applet one command, as a selection or as ordinary processing.
-    pub fn process(&mut self, file: &LoadFile, command: &[u8], selecting: bool) -> Result<Response> {
+    pub fn process(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        command: &[u8],
+        selecting: bool,
+    ) -> Result<Response> {
         let instance = self.instance.ok_or(Error::Missing)?;
         let linked = Linked::new(file)?;
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
@@ -183,6 +196,7 @@ impl Card {
         let (outcome, outgoing) = {
             let mut machine = Machine::new(
                 &mut heap,
+                host,
                 &linked,
                 file.methods()?,
                 &mut self.statics,
@@ -413,18 +427,18 @@ mod tests {
         let file = LoadFile::parse(&bytes).unwrap();
 
         let mut card = Card::new(&file, Sizes::default()).unwrap();
-        card.install(&file, &[]).unwrap();
+        card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
         assert!(card.installed());
 
         // SELECT, which the applet accepts.
         let response = card
-            .process(&file, &[0x00, 0xa4, 0x04, 0x00, 0x00], true)
+            .process(&file, &mut crate::host::NoHost, &[0x00, 0xa4, 0x04, 0x00, 0x00], true)
             .unwrap();
         assert_eq!(response.sw, SW_SUCCESS);
 
         // Then an ordinary command, whose answer the applet wrote into the buffer.
         let response = card
-            .process(&file, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
+            .process(&file, &mut crate::host::NoHost, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
             .unwrap();
         assert_eq!(response.sw, SW_SUCCESS);
         assert_eq!(response.data, [0x12, 0x34]);
@@ -441,9 +455,9 @@ mod tests {
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
         let mut card = Card::new(&file, Sizes::default()).unwrap();
-        card.install(&file, &[]).unwrap();
+        card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
         let response = card
-            .process(&file, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
+            .process(&file, &mut crate::host::NoHost, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
             .unwrap();
         // The word the applet chose, not a generic failure.
         assert_eq!(response.sw, 0x6a82);
@@ -461,9 +475,9 @@ mod tests {
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
         let mut card = Card::new(&file, Sizes::default()).unwrap();
-        card.install(&file, &[]).unwrap();
+        card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
         let response = card
-            .process(&file, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
+            .process(&file, &mut crate::host::NoHost, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
             .unwrap();
         // Not a word the applet chose, so the card answers with the one that says exactly
         // that rather than inventing a plausible one.
@@ -479,7 +493,7 @@ mod tests {
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
         let mut card = Card::new(&file, Sizes::default()).unwrap();
-        assert_eq!(card.install(&file, &[]), Err(Error::Missing));
+        assert_eq!(card.install(&file, &mut crate::host::NoHost, &[]), Err(Error::Missing));
         assert!(!card.installed());
     }
 }

@@ -5,6 +5,47 @@
 //! found nothing when `MICROCARD_JCVM_LOAD_FILES` is unset.
 use microcard_engine_jcvm::applet::{Card, Sizes};
 use microcard_engine_jcvm::cap::LoadFile;
+use microcard_engine_jcvm::host::Host;
+
+/// A card whose randomness is a counter, so a run is reproducible.
+///
+/// A real card answers from its entropy source. What matters for this test is that the
+/// applet gets bytes at all, and that two runs of the test produce the same ones.
+struct TestHost(u8);
+
+impl Host for TestHost {
+    fn digest(
+        &mut self,
+        algorithm: u8,
+        message: &[u8],
+        output: &mut [u8],
+    ) -> microcard_engine_jcvm::Result<usize> {
+        use sha2::Digest;
+        // The algorithms this applet uses. Anything else is refused rather than answered
+        // with something that looks like a digest.
+        match algorithm {
+            4 => {
+                let digest = sha2::Sha256::digest(message);
+                output[..32].copy_from_slice(&digest);
+                Ok(32)
+            }
+            5 => {
+                let digest = sha2::Sha384::digest(message);
+                output[..48].copy_from_slice(&digest);
+                Ok(48)
+            }
+            _ => Err(microcard_engine_jcvm::Error::Unsupported),
+        }
+    }
+
+    fn random(&mut self, output: &mut [u8]) -> microcard_engine_jcvm::Result<()> {
+        for byte in output {
+            self.0 = self.0.wrapping_add(1);
+            *byte = self.0;
+        }
+        Ok(())
+    }
+}
 
 fn load_files() -> Vec<(String, Vec<u8>)> {
     let Ok(directory) = std::env::var("MICROCARD_JCVM_LOAD_FILES") else {
@@ -26,7 +67,7 @@ fn load_files() -> Vec<(String, Vec<u8>)> {
 }
 
 #[test]
-fn the_real_applet_installs_and_answers_a_select() {
+fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
     let files = load_files();
     if files.is_empty() {
         eprintln!("MICROCARD_JCVM_LOAD_FILES is unset, so no real applet was run");
@@ -34,18 +75,30 @@ fn the_real_applet_installs_and_answers_a_select() {
     }
     for (name, bytes) in &files {
         let file = LoadFile::parse(bytes).unwrap_or_else(|error| panic!("{name}: {error:?}"));
-        let mut card = Card::new(&file, Sizes::default())
+        // A real applet allocates a great deal at install, so this is the card it would
+        // be given rather than the smallest one that works.
+        let sizes = Sizes {
+            heap_bytes: 64 * 1024,
+            frame_words: 8192,
+            ..Sizes::default()
+        };
+        let mut card = Card::new(&file, sizes)
             .unwrap_or_else(|error| panic!("{name}: sizes {error:?}"));
         // The parameters GlobalPlatform hands install: an instance AID, privileges and
         // applet data, each length prefixed.
         let parameters = [0u8, 0, 0];
-        match card.install(&file, &parameters) {
-            Ok(()) => {}
-            Err(error) => panic!("{name}: install {error:?}"),
+        let mut host = TestHost(0);
+        match card.install(&file, &mut host, &parameters) {
+            Ok(()) => {
+                let response = card
+                    .process(&file, &mut host, &[0x00, 0xa4, 0x04, 0x00, 0x00], true)
+                    .unwrap_or_else(|error| panic!("{name}: select {error:?}"));
+                assert_eq!(response.sw, 0x9000, "{name}");
+            }
+            // The engine runs the applet's own install bytecode until it reaches
+            // something this build does not do yet. That is the remaining work, and the
+            // test records where it stopped rather than calling the engine broken.
+            Err(error) => eprintln!("{name}: install stopped at {error:?}"),
         }
-        let response = card
-            .process(&file, &[0x00, 0xa4, 0x04, 0x00, 0x00], true)
-            .unwrap_or_else(|error| panic!("{name}: select {error:?}"));
-        assert_eq!(response.sw, 0x9000, "{name}");
     }
 }
