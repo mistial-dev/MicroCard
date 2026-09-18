@@ -1613,10 +1613,25 @@ fn main() -> ! {
     // resolves.
     core::hint::black_box(&raw const _microcard_flash_origin);
     let key = unsafe { core::slice::from_raw_parts(KEYS_BASE as *const u8, 32) };
-    if key.iter().all(|b| *b == 255) || key.iter().all(|b| *b == 0) {
+    let unprovisioned = key.iter().all(|b| *b == 255) || key.iter().all(|b| *b == 0);
+    // A development board with no debug probe cannot be handed a key page, because its only
+    // transport is the one the keys protect. Such a build answers the GlobalPlatform
+    // well-known test keys instead, which is what ordinary tooling tries first. The board is
+    // then claimable by anyone until its first signed assembly takes ownership, exactly as a
+    // stock development card is.
+    #[cfg(feature = "gp-test-keys")]
+    const DEFAULT_KEY: [u8; 32] = [
+        0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e,
+        0x4f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d,
+        0x4e, 0x4f,
+    ];
+    #[cfg(feature = "gp-test-keys")]
+    let key: &[u8] = if unprovisioned { &DEFAULT_KEY } else { key };
+    #[cfg(not(feature = "gp-test-keys"))]
+    if unprovisioned {
         let deadline = transport.deadline_after(1_000_000);
         let _ = transport.write_raw(
-            b"MicroCard: provision management keys at 0xE0000\r\n",
+            b"MicroCard: provision management keys at the key page\r\n",
             deadline,
         );
         loop {

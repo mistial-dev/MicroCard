@@ -7,9 +7,16 @@ license = "AGPL-3.0-or-later"
 default = ["development-debug"]
 development-debug = []
 usb-ccid = ["dep:nrf52840-hal", "dep:usb-device", "dep:usbd-ccid", "dep:heapless", "dep:interchange"]
-# Makerdiary nRF52840 MDK USB Dongle. Links above the bootloader and SoftDevice, and has
-# no debug probe or serial port, so it carries USB CCID as its only management transport.
-dongle = ["usb-ccid"]
+# The Makerdiary nRF52840 MDK USB Dongle flash map, which links above that board's
+# bootloader and SoftDevice. It carries USB CCID as its only management transport, because
+# the board has no debug probe and no serial port.
+dongle-layout = ["usb-ccid"]
+# Fall back to the GlobalPlatform well-known test keys when the key page is erased, so a
+# freshly flashed board answers ordinary tooling with no probe. A board built this way is
+# claimable by anyone until its first signed assembly takes ownership. Never for a product.
+gp-test-keys = []
+# The convenience build for a development dongle, which is both of the above.
+dongle = ["dongle-layout", "gp-test-keys"]
 cc310-sha256 = []
 cc310-entropy = ["cc310-sha256"]
 cc310-cmac = ["cc310-entropy"]

@@ -2,7 +2,7 @@ fn main() {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     // The dongle keeps a bootloader and a SoftDevice it must not overwrite, so it links at
     // a different origin with a different region layout.
-    let layout = if std::env::var_os("CARGO_FEATURE_DONGLE").is_some() {
+    let layout = if std::env::var_os("CARGO_FEATURE_DONGLE_LAYOUT").is_some() {
         "memory-dongle.x"
     } else {
         "memory-dk.x"
