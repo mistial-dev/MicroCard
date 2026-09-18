@@ -48,6 +48,8 @@ This is the authoritative public work list. Checked items have repeatable reposi
 - [x] Implement interface dispatch and the applet lifecycle.
 - [x] Implement the native API classes an applet needs to install, select and process.
 - [x] Run a real applet in the simulator. OpenFIPS201 installs, selects and answers PIV commands through `serve-jcvm`.
+- [x] Commit a load file and a PIV command corpus, and check the applet's answers in the gate and in CI.
 - [ ] Answer the cipher, signature and key agreement operations through the card.
 - [ ] Deliver a package to the engine through GlobalPlatform loading rather than a file path.
+- [ ] Compile the engine into the board image and back it with dedicated code and heap regions.
 - [ ] Add independent conformance and cross-engine isolation tests.

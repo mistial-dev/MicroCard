@@ -22,6 +22,16 @@ What this adds up to: four of the eight OpenFIPS201 release variants install, re
 
 The four fips variants run power-up self tests during install and stop at a cipher operation. What is missing to finish them, and to make the others do more than answer from an empty card: the cipher, signature and key agreement operations through the host, the rest of the APDU methods, and the GlobalPlatform secure channel.
 
+Two delivery paths are also absent. A GlobalPlatform LOAD does not reach the engine, so a load file arrives only as a file path given to `microcard-sim serve-jcvm`. The engine is also absent from the board image.
+
+## What holds this claim up
+
+One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, with its MIT notice, the applet revision it was built from and the digests of both the CAP and the block. Twelve PIV commands and their expected status words are committed beside it. `scripts/piv_vector_acceptance.py` replays them with no argument, and the checkpoint gate and CI both run it.
+
+Half of those commands are authentic encodings taken from NIST Special Database 33 contact captures. The captured responses are deliberately absent, because that card was personalised and the card under test is blank, so a captured response would disagree for a correct reason. What carries over is the command encoding. Every entry is the case 4 form a real host sends, carrying a trailing expected-length byte.
+
+That form is worth the trouble. Reading the expected-length byte as a further byte of command data made the applet answer 6A80 to a GET DATA it should answer 6A82 to, and only the authentic encoding exposed it. A hand-written case 3 command passed throughout.
+
 ## Version and container
 
 | Item | Value |
