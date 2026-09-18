@@ -151,6 +151,11 @@ def read_export(path: pathlib.Path) -> dict:
                 "name": method_name,
                 "descriptor": descriptor,
                 "static": bool(method_flags & ACC_STATIC),
+                # Static methods, constructors and private virtual methods share one token
+                # namespace, JCVM section 4.3.7.4, and a constructor is reached by the same
+                # constant type as a static call. The export file marks a constructor as an
+                # instance method, so the namespace has to be worked out here.
+                "static_namespace": bool(method_flags & ACC_STATIC) or method_name == "<init>",
             })
         if (major, minor) >= (2, 3):
             reader.u1()
@@ -204,6 +209,9 @@ def rust(schema: dict) -> str:
         "    pub name: &'static str,",
         "    pub descriptor: &'static str,",
         "    pub is_static: bool,",
+        "    /// Whether the token belongs to the static namespace, which constructors",
+        "    /// share with static methods even though they are instance methods.",
+        "    pub static_token: bool,",
         "}",
         "",
         "/// One class an imported package declares.",
@@ -234,7 +242,8 @@ def rust(schema: dict) -> str:
             for method in sorted(klass["methods"], key=lambda entry: entry["token"]):
                 lines.append(
                     f"    ApiMethod {{ token: {method['token']}, name: \"{method['name']}\", "
-                    f"descriptor: \"{method['descriptor']}\", is_static: {str(method['static']).lower()} }},"
+                    f"descriptor: \"{method['descriptor']}\", is_static: {str(method['static']).lower()}, "
+                    f"static_token: {str(method['static_namespace']).lower()} }},"
                 )
             lines += ["];", ""]
         lines.append(f"const CLASSES_{package['aid']}: [ApiClass; {len(package['classes'])}] = [")

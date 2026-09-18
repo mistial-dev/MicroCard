@@ -9,6 +9,7 @@
 //! Produce the blocks with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
 use microcard_engine_jcvm::cap::{LoadFile, MethodHeader, Tag};
 use microcard_engine_jcvm::code::instruction_length;
+use microcard_engine_jcvm::link::Linked;
 use microcard_engine_jcvm::verify::verify;
 use std::collections::BTreeSet;
 use microcard_engine_jcvm::code::{Boundaries, Limits, constant_pool_index, verify_targets};
@@ -211,6 +212,39 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
             walked += 1;
         }
         assert!(walked > 100, "{}: walked {walked}", path.display());
+
+        // Every package the applet imports has to be one the engine provides, at a
+        // version that satisfies the import. This is what the export file tables are for,
+        // and it is the check that decides whether the target version is real.
+        let linked = Linked::new(&file).expect("link");
+        linked
+            .imports_resolve()
+            .unwrap_or_else(|error| panic!("{}: imports {error:?}", path.display()));
+
+        // Every external method the applet calls has to name something those tables hold.
+        // An unresolved one means the engine could never run this applet, whatever else
+        // works.
+        let constants = file.constants().expect("constants");
+        let mut external = 0;
+        for index in 0..constants.count() as u16 {
+            if constants.get(index).expect("entry").tag
+                != microcard_engine_jcvm::cap::CONSTANT_STATIC_METHODREF
+            {
+                continue;
+            }
+            if let Some((package, class, method)) = linked
+                .external_static_method(index)
+                .expect("static reference")
+            {
+                linked
+                    .api_method(package, class, method, true)
+                    .unwrap_or_else(|error| {
+                        panic!("{}: static {package}.{class}.{method} {error:?}", path.display())
+                    });
+                external += 1;
+            }
+        }
+        assert!(external > 20, "{}: {external} external calls", path.display());
 
         // The same walk through the engine's own entry point, which is what a card runs.
         let mut buffer = vec![0u8; 16384];

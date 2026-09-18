@@ -19,13 +19,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -43,13 +45,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -68,13 +72,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -94,13 +100,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -121,13 +129,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -149,13 +159,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -176,13 +188,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -203,13 +217,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -230,13 +246,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -257,13 +275,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -284,13 +304,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -311,13 +333,15 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         }
@@ -343,7 +367,8 @@
               "token": 0,
               "name": "uninstall",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -618,13 +643,15 @@
               "token": 0,
               "name": "select",
               "descriptor": "(Z)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "deselect",
               "descriptor": "(Z)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -642,25 +669,29 @@
               "token": 0,
               "name": "check",
               "descriptor": "([BSB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getTriesRemaining",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "isValidated",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -680,49 +711,57 @@
               "token": 0,
               "name": "check",
               "descriptor": "([BSB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getTriesRemaining",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "isValidated",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "update",
               "descriptor": "([BSB)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getTryLimit",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setTryLimit",
               "descriptor": "(B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setTriesRemaining",
               "descriptor": "(B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -743,55 +782,64 @@
               "token": 0,
               "name": "check",
               "descriptor": "([BSB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getTriesRemaining",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "isValidated",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "update",
               "descriptor": "([BSB)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getTryLimit",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setTryLimit",
               "descriptor": "(B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setTriesRemaining",
               "descriptor": "(B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "decrementTriesRemaining",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -820,43 +868,50 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "([BSB)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "RIDEquals",
               "descriptor": "(Ljavacard/framework/AID;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "equals",
               "descriptor": "([BSB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getBytes",
               "descriptor": "([BS)B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "partialEquals",
               "descriptor": "([BSB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getPartialBytes",
               "descriptor": "(S[BSB)B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -877,31 +932,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -997,145 +1057,169 @@
               "token": 10,
               "name": "isTransient",
               "descriptor": "(Ljava/lang/Object;)B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 12,
               "name": "makeTransientBooleanArray",
               "descriptor": "(SB)[Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 13,
               "name": "makeTransientByteArray",
               "descriptor": "(SB)[B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 15,
               "name": "makeTransientShortArray",
               "descriptor": "(SB)[S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 14,
               "name": "makeTransientObjectArray",
               "descriptor": "(SB)[Ljava/lang/Object;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 21,
               "name": "makeGlobalArray",
               "descriptor": "(BS)Ljava/lang/Object;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 9,
               "name": "getVersion",
               "descriptor": "()S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 3,
               "name": "getAID",
               "descriptor": "()Ljavacard/framework/AID;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 11,
               "name": "lookupAID",
               "descriptor": "([BSB)Ljavacard/framework/AID;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "beginTransaction",
               "descriptor": "()V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "abortTransaction",
               "descriptor": "()V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "commitTransaction",
               "descriptor": "()V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 7,
               "name": "getTransactionDepth",
               "descriptor": "()B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 8,
               "name": "getUnusedCommitCapacity",
               "descriptor": "()S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 5,
               "name": "getMaxCommitCapacity",
               "descriptor": "()S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 6,
               "name": "getPreviousContextAID",
               "descriptor": "()Ljavacard/framework/AID;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 16,
               "name": "getAvailableMemory",
               "descriptor": "(B)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 22,
               "name": "getAvailableMemory",
               "descriptor": "([SSB)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 4,
               "name": "getAppletShareableInterfaceObject",
               "descriptor": "(Ljavacard/framework/AID;B)Ljavacard/framework/Shareable;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 17,
               "name": "isObjectDeletionSupported",
               "descriptor": "()Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 18,
               "name": "requestObjectDeletion",
               "descriptor": "()V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 19,
               "name": "getAssignedChannel",
               "descriptor": "()B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 20,
               "name": "isAppletActive",
               "descriptor": "(Ljavacard/framework/AID;)Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1207,31 +1291,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1251,61 +1340,71 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(BB)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "check",
               "descriptor": "([BSB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getTriesRemaining",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getValidatedFlag",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "isValidated",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "resetAndUnblock",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setValidatedFlag",
               "descriptor": "(Z)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "update",
               "descriptor": "([BSB)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1345,13 +1444,15 @@
               "token": 0,
               "name": "buildOwnerPIN",
               "descriptor": "(BBB)Ljavacard/framework/PIN;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1369,67 +1470,78 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "install",
               "descriptor": "([BSB)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "reSelectingApplet",
               "descriptor": "()Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "register",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "register",
               "descriptor": "([BSB)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "selectingApplet",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "deselect",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getShareableInterfaceObject",
               "descriptor": "(Ljavacard/framework/AID;B)Ljavacard/framework/Shareable;",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "select",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "process",
               "descriptor": "(Ljavacard/framework/APDU;)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1595,151 +1707,176 @@
               "token": 0,
               "name": "getInBlockSize",
               "descriptor": "()S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "getOutBlockSize",
               "descriptor": "()S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "getProtocol",
               "descriptor": "()B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 4,
               "name": "getCurrentAPDU",
               "descriptor": "()Ljavacard/framework/APDU;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 5,
               "name": "getCurrentAPDUBuffer",
               "descriptor": "()[B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 6,
               "name": "getCLAChannel",
               "descriptor": "()B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 3,
               "name": "waitExtension",
               "descriptor": "()V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getBuffer",
               "descriptor": "()[B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getNAD",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "receiveBytes",
               "descriptor": "(S)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "sendBytes",
               "descriptor": "(SS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "sendBytesLong",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setIncomingAndReceive",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setOutgoing",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setOutgoingAndSend",
               "descriptor": "(SS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setOutgoingLength",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "setOutgoingNoChaining",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "getCurrentState",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "isCommandChainingCLA",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "isSecureMessagingCLA",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 14,
               "name": "isISOInterindustryCLA",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 15,
               "name": "getIncomingLength",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 16,
               "name": "getOffsetCdata",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 17,
               "name": "isValidCLA",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1759,31 +1896,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1820,31 +1962,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1862,37 +2009,43 @@
               "token": 0,
               "name": "assertIntegrity",
               "descriptor": "(Ljava/lang/Object;)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "isIntegritySensitive",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "isIntegritySensitiveArraysSupported",
               "descriptor": "()Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 3,
               "name": "makeIntegritySensitiveArray",
               "descriptor": "(BBS)Ljava/lang/Object;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 4,
               "name": "clearArray",
               "descriptor": "(Ljava/lang/Object;)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -1914,31 +2067,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2003,31 +2161,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2085,31 +2248,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2130,37 +2298,43 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2178,55 +2352,64 @@
               "token": 1,
               "name": "arrayCopy",
               "descriptor": "([BS[BSS)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "arrayCopyNonAtomic",
               "descriptor": "([BS[BSS)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 7,
               "name": "arrayFill",
               "descriptor": "([BSSB)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 3,
               "name": "arrayFillNonAtomic",
               "descriptor": "([BSSB)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "arrayCompare",
               "descriptor": "([BS[BSS)B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 5,
               "name": "makeShort",
               "descriptor": "(BB)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 4,
               "name": "getShort",
               "descriptor": "([BS)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 6,
               "name": "setShort",
               "descriptor": "([BSS)S",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         }
@@ -2252,25 +2435,29 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2290,25 +2477,29 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2326,37 +2517,43 @@
               "token": 0,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2376,25 +2573,29 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2414,25 +2615,29 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2450,37 +2655,43 @@
               "token": 0,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2502,73 +2713,85 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "getX",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "setX",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2590,73 +2813,85 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "getY",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "setY",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2674,91 +2909,106 @@
               "token": 0,
               "name": "setFieldFP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "setFieldF2M",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setFieldF2M",
               "descriptor": "(SSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "setA",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setB",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setR",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setK",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "getField",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "getA",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "getB",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "getR",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "getK",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 14,
               "name": "copyDomainParametersFrom",
               "descriptor": "(Ljavacard/security/ECKey;)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2780,127 +3030,148 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setFieldFP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setFieldF2M",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setFieldF2M",
               "descriptor": "(SSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setA",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setB",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "setR",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "setK",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "getField",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "getA",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 14,
               "name": "getB",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 15,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 16,
               "name": "getR",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 17,
               "name": "getK",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 18,
               "name": "setS",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 19,
               "name": "getS",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 20,
               "name": "copyDomainParametersFrom",
               "descriptor": "(Ljavacard/security/ECKey;)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -2922,127 +3193,148 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setFieldFP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setFieldF2M",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setFieldF2M",
               "descriptor": "(SSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setA",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setB",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "setR",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "setK",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "getField",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "getA",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 14,
               "name": "getB",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 15,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 16,
               "name": "getR",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 17,
               "name": "getK",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 18,
               "name": "setW",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 19,
               "name": "getW",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 20,
               "name": "copyDomainParametersFrom",
               "descriptor": "(Ljavacard/security/ECKey;)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3063,37 +3355,43 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setKey",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getKey",
               "descriptor": "([BS)B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3114,37 +3412,43 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getKey",
               "descriptor": "([BS)B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setKey",
               "descriptor": "([BS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3165,37 +3469,43 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setKey",
               "descriptor": "([BS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getKey",
               "descriptor": "([BS)B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3217,73 +3527,85 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "setX",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "getX",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3305,73 +3627,85 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setG",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "getG",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "setY",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "getY",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3392,85 +3726,99 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getDP1",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getDQ1",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getP",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "getPQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "getQ",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setDP1",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "setDQ1",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "setP",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "setPQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "setQ",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3491,49 +3839,57 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getExponent",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getModulus",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setExponent",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setModulus",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3554,49 +3910,57 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getExponent",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getModulus",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setExponent",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setModulus",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3617,37 +3981,43 @@
               "token": 0,
               "name": "clearKey",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getSize",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getType",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isInitialized",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "setKey",
               "descriptor": "([BS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getKey",
               "descriptor": "([BS)B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3665,43 +4035,50 @@
               "token": 0,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "beginVerify",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "sign",
               "descriptor": "([BSS[BS[SS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "verify",
               "descriptor": "([BSS)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "getLength",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3881,55 +4258,64 @@
               "token": 0,
               "name": "getInstance",
               "descriptor": "(BZ)Ljavacard/security/MessageDigest;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "getInitializedMessageDigestInstance",
               "descriptor": "(BZ)Ljavacard/security/InitializedMessageDigest;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getLength",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -3948,49 +4334,57 @@
               "token": 0,
               "name": "open",
               "descriptor": "(B)Ljavacard/security/MessageDigest$OneShot;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getLength",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "close",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -4009,49 +4403,57 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getLength",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setInitialDigest",
               "descriptor": "([BSS[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -4071,55 +4473,64 @@
               "token": 0,
               "name": "open",
               "descriptor": "(B)Ljavacard/security/InitializedMessageDigest$OneShot;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getLength",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "reset",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "setInitialDigest",
               "descriptor": "([BSS[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "close",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -4177,31 +4588,36 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "throwIt",
               "descriptor": "(S)V",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getReason",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setReason",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -4283,37 +4699,43 @@
               "token": 0,
               "name": "getInstance",
               "descriptor": "(BZ)Ljavacard/security/KeyAgreement;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "init",
               "descriptor": "(Ljavacard/security/PrivateKey;)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "generateSecret",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -4997,25 +5419,29 @@
               "token": 0,
               "name": "buildKey",
               "descriptor": "(BSZ)Ljavacard/security/Key;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "buildKey",
               "descriptor": "(BBSZ)Ljavacard/security/Key;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "buildKeyWithSharedDomain",
               "descriptor": "(BBLjavacard/security/Key;Z)Ljavacard/security/Key;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -5076,43 +5502,50 @@
               "token": 0,
               "name": "getInstance",
               "descriptor": "(B)Ljavacard/security/RandomData;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "generateData",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setSeed",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "nextBytes",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -5131,43 +5564,50 @@
               "token": 0,
               "name": "open",
               "descriptor": "(B)Ljavacard/security/RandomData$OneShot;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "generateData",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "setSeed",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "nextBytes",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "close",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -5228,37 +5668,43 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "(BS)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "(Ljavacard/security/PublicKey;Ljavacard/security/PrivateKey;)V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "genKeyPair",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getPrivate",
               "descriptor": "()Ljavacard/security/PrivateKey;",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getPublic",
               "descriptor": "()Ljavacard/security/PublicKey;",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -5704,103 +6150,120 @@
               "token": 0,
               "name": "getInstance",
               "descriptor": "(BZ)Ljavacard/security/Signature;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "getInstance",
               "descriptor": "(BBBZ)Ljavacard/security/Signature;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getLength",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "sign",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "verify",
               "descriptor": "([BSS[BSS)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setInitialDigest",
               "descriptor": "([BSS[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "signPreComputedHash",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "verifyPreComputedHash",
               "descriptor": "([BSS[BSS)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "getMessageDigestAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "getCipherAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "getPaddingAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -5819,97 +6282,113 @@
               "token": 0,
               "name": "open",
               "descriptor": "(BBB)Ljavacard/security/Signature$OneShot;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getLength",
               "descriptor": "()S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "sign",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "verify",
               "descriptor": "([BSS[BSS)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "setInitialDigest",
               "descriptor": "([BSS[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "signPreComputedHash",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "verifyPreComputedHash",
               "descriptor": "([BSS[BSS)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "getMessageDigestAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 12,
               "name": "getCipherAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 13,
               "name": "getPaddingAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 14,
               "name": "close",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -5942,43 +6421,50 @@
               "token": 0,
               "name": "getInstance",
               "descriptor": "(BZ)Ljavacard/security/Checksum;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "init",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         }
@@ -6004,13 +6490,15 @@
               "token": 0,
               "name": "getKeyCipher",
               "descriptor": "()Ljavacardx/crypto/Cipher;",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "setKeyCipher",
               "descriptor": "(Ljavacardx/crypto/Cipher;)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -6435,67 +6923,78 @@
               "token": 0,
               "name": "getInstance",
               "descriptor": "(BZ)Ljavacardx/crypto/Cipher;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "getInstance",
               "descriptor": "(BBZ)Ljavacardx/crypto/Cipher;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getCipherAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "getPaddingAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -6514,61 +7013,71 @@
               "token": 0,
               "name": "open",
               "descriptor": "(BB)Ljavacardx/crypto/Cipher$OneShot;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getCipherAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "getPaddingAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "close",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -6616,79 +7125,92 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "doFinal",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B[BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getCipherAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "getPaddingAlgorithm",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "init",
               "descriptor": "(Ljavacard/security/Key;B[BSSSSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "updateAAD",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "retrieveTag",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 11,
               "name": "verifyTag",
               "descriptor": "([BSSS)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         }
@@ -6735,7 +7257,8 @@
               "token": 0,
               "name": "processData",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -6770,25 +7293,29 @@
               "token": 0,
               "name": "init",
               "descriptor": "(B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "sign",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "update",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "recoverKey",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -6844,67 +7371,78 @@
               "token": 0,
               "name": "isActive",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "isSubmitted",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "isVerified",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "isBlocked",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "getTriesRemaining",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "update",
               "descriptor": "([BSBB)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "resetState",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "blockState",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 8,
               "name": "resetAndUnblockState",
               "descriptor": "()Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 9,
               "name": "setTryLimit",
               "descriptor": "(B)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 10,
               "name": "verify",
               "descriptor": "([BSBB)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7051,49 +7589,57 @@
               "token": 0,
               "name": "deregisterService",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "getAID",
               "descriptor": "()Ljavacard/framework/AID;",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "getPrivileges",
               "descriptor": "([BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "getState",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "isAssociated",
               "descriptor": "(Ljavacard/framework/AID;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "isPrivileged",
               "descriptor": "(B)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "registerService",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setState",
               "descriptor": "(B)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7317,7 +7863,8 @@
               "token": 0,
               "name": "getServiceInterface",
               "descriptor": "(Lorg/globalplatform/GPRegistryEntry;S[BSS)Ljavacard/framework/Shareable;",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7337,7 +7884,8 @@
               "token": 0,
               "name": "requestHTTPAdministrationSession",
               "descriptor": "([BSS)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7372,7 +7920,8 @@
               "token": 0,
               "name": "httpAdministationSessionReport",
               "descriptor": "(S)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7392,7 +7941,8 @@
               "token": 0,
               "name": "processData",
               "descriptor": "([BSS[BS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7462,43 +8012,50 @@
               "token": 0,
               "name": "processSecurity",
               "descriptor": "(Ljavacard/framework/APDU;)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "wrap",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "unwrap",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "decryptData",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "encryptData",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "resetSecurity",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getSecurityLevel",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7519,49 +8076,57 @@
               "token": 0,
               "name": "processSecurity",
               "descriptor": "(Ljavacard/framework/APDU;)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "wrap",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "unwrap",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "decryptData",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "encryptData",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "resetSecurity",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getSecurityLevel",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "setSecurityLevel",
               "descriptor": "(B)V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7582,49 +8147,57 @@
               "token": 0,
               "name": "processSecurity",
               "descriptor": "(Ljavacard/framework/APDU;)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 1,
               "name": "wrap",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 2,
               "name": "unwrap",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 3,
               "name": "decryptData",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 4,
               "name": "encryptData",
               "descriptor": "([BSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 5,
               "name": "resetSecurity",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 6,
               "name": "getSecurityLevel",
               "descriptor": "()B",
-              "static": false
+              "static": false,
+              "static_namespace": false
             },
             {
               "token": 7,
               "name": "processSecurity",
               "descriptor": "([BSSS)S",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         },
@@ -7825,73 +8398,85 @@
               "token": 0,
               "name": "<init>",
               "descriptor": "()V",
-              "static": false
+              "static": false,
+              "static_namespace": true
             },
             {
               "token": 1,
               "name": "getCardContentState",
               "descriptor": "()B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 2,
               "name": "getCardState",
               "descriptor": "()B",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 3,
               "name": "getCVM",
               "descriptor": "(B)Lorg/globalplatform/CVM;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 4,
               "name": "getSecureChannel",
               "descriptor": "()Lorg/globalplatform/SecureChannel;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 5,
               "name": "lockCard",
               "descriptor": "()Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 6,
               "name": "terminateCard",
               "descriptor": "()Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 7,
               "name": "setATRHistBytes",
               "descriptor": "([BSB)Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 8,
               "name": "setCardContentState",
               "descriptor": "(B)Z",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 9,
               "name": "getRegistryEntry",
               "descriptor": "(Ljavacard/framework/AID;)Lorg/globalplatform/GPRegistryEntry;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 10,
               "name": "getService",
               "descriptor": "(Ljavacard/framework/AID;S)Lorg/globalplatform/GlobalService;",
-              "static": true
+              "static": true,
+              "static_namespace": true
             },
             {
               "token": 0,
               "name": "equals",
               "descriptor": "(Ljava/lang/Object;)Z",
-              "static": false
+              "static": false,
+              "static_namespace": false
             }
           ]
         }

@@ -64,6 +64,8 @@ pub struct Package {
     pub handlers: Vec<[u8; 8]>,
     /// The classes, laid out in the order given.
     pub classes: Vec<ClassSpec>,
+    /// Imported packages in token order, each an AID and the version asked for.
+    pub imports: Vec<(Vec<u8>, u8, u8)>,
 }
 
 impl Default for Package {
@@ -80,6 +82,7 @@ impl Default for Package {
             constants: Vec::new(),
             handlers: Vec::new(),
             classes: vec![ClassSpec::default()],
+            imports: Vec::new(),
         }
     }
 }
@@ -180,7 +183,11 @@ impl Package {
                 class.extend_from_slice(tokens);
             }
         }
-        let imports = vec![0u8];
+        let mut imports = vec![self.imports.len() as u8];
+        for (aid, major, minor) in &self.imports {
+            imports.extend_from_slice(&[*minor, *major, aid.len() as u8]);
+            imports.extend_from_slice(aid);
+        }
         // An image of only default value fields, which start at zero.
         let mut statics = Vec::from(self.static_bytes.to_be_bytes());
         statics.extend_from_slice(&[0, 0, 0, 0]);
@@ -214,7 +221,7 @@ impl Package {
         // Image size, array initialiser count and bytes, then the import, applet and
         // custom component counts.
         let mut tail = Vec::from(self.static_bytes.to_be_bytes());
-        tail.extend_from_slice(&[0, 0, 0, 0, 0, 1, 0]);
+        tail.extend_from_slice(&[0, 0, 0, 0, self.imports.len() as u8, 1, 0]);
         directory.extend_from_slice(&tail);
 
         let mut block = component(Tag::Header, &header);

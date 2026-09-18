@@ -12,10 +12,23 @@ use crate::cap::{
     CONSTANT_INSTANCE_FIELDREF, CONSTANT_STATIC_FIELDREF, CONSTANT_STATIC_METHODREF,
     CONSTANT_SUPER_METHODREF, CONSTANT_VIRTUAL_METHODREF, Class, ClassInfo, ClassRef, LoadFile,
 };
+use crate::jcvm_api::{ApiClass, ApiMethod, ApiPackage, PACKAGES};
 use crate::{Error, Result};
 
 /// The high bit of a virtual method token marks the package-visible namespace, §4.3.7.6.
 const PRIVATE_TOKEN: u8 = 0x80;
+
+/// A method in an imported package, named the way its export file names it.
+///
+/// This is what an external reference resolves to. The engine implements a method by
+/// matching on these names, so an applet calling something unimplemented fails with the
+/// name in hand rather than as an unexplained refusal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiTarget {
+    pub package: &'static ApiPackage,
+    pub class: &'static ApiClass,
+    pub method: &'static ApiMethod,
+}
 
 /// A package, with the resolutions its bytecode needs.
 pub struct Linked<'a> {
@@ -105,6 +118,28 @@ impl<'a> Linked<'a> {
         Ok(u16::from_be_bytes([info[1], info[2]]))
     }
 
+    /// The external reference a static method constant names, if it is one.
+    ///
+    /// Returns the package, class and method tokens. An internal reference has none of
+    /// those, because it names an offset instead.
+    pub fn external_static_method(&self, index: u16) -> Result<Option<(u8, u8, u8)>> {
+        let info = self.entry(index, CONSTANT_STATIC_METHODREF)?;
+        if info[0] & 0x80 == 0 {
+            return Ok(None);
+        }
+        Ok(Some((info[0] & 0x7f, info[1], info[2])))
+    }
+
+    /// The external reference a virtual or interface method constant names.
+    pub fn external_class_method(&self, index: u16) -> Result<Option<(u8, u8, u8)>> {
+        let entry = self.file.constants()?.get(index)?;
+        let value = u16::from_be_bytes([entry.info[0], entry.info[1]]);
+        match ClassRef::decode(value) {
+            ClassRef::External { package, class } => Ok(Some((package, class, entry.info[2]))),
+            _ => Ok(None),
+        }
+    }
+
     /// The Method component offset of a statically resolved method.
     ///
     /// This covers `invokestatic` and the `invokespecial` that calls a constructor or a
@@ -120,6 +155,87 @@ impl<'a> Linked<'a> {
             return Err(Error::Unsupported);
         }
         Ok(u16::from_be_bytes([info[1], info[2]]))
+    }
+
+    /// The AID a package token names, through the Import component, JCVM §4.3.7.1.
+    ///
+    /// Package tokens are assigned per CAP file and the Import component lists them in
+    /// token order, so the token is an index into that table and means nothing outside
+    /// this package.
+    pub fn import_aid(&self, package_token: u8) -> Result<&'a [u8]> {
+        Ok(self.file.imports()?.get(package_token)?.aid)
+    }
+
+    /// The API method an external reference names.
+    ///
+    /// Three tokens, each in a different scope: the package token is this package's own
+    /// numbering, the class and method tokens belong to the imported package and come from
+    /// its export file.
+    ///
+    /// Static and virtual methods are numbered in separate namespaces, JCVM §4.3.7.4, so
+    /// the same token in one class names two different methods and the kind of reference
+    /// is what tells them apart. On `javacard.framework.ISOException`, token 1 is both the
+    /// static `throwIt` and the virtual `getReason`.
+    ///
+    /// Constructors sit in the static namespace even though they are instance methods,
+    /// which is why the caller passes which namespace it is reading rather than whether
+    /// the method it wants is static.
+    pub fn api_method(
+        &self,
+        package_token: u8,
+        class: u8,
+        method: u8,
+        static_token: bool,
+    ) -> Result<ApiTarget> {
+        let aid = self.import_aid(package_token)?;
+        let package = PACKAGES
+            .iter()
+            .find(|entry| entry.aid == aid)
+            .ok_or(Error::Unsupported)?;
+        let class = package
+            .classes
+            .iter()
+            .find(|entry| entry.token == class)
+            .ok_or(Error::Missing)?;
+        let method = class
+            .methods
+            .iter()
+            .find(|entry| entry.token == method && entry.static_token == static_token)
+            .ok_or(Error::Missing)?;
+        Ok(ApiTarget {
+            package,
+            class,
+            method,
+        })
+    }
+
+    /// An imported class, for a cast or an array of one.
+    pub fn api_class(&self, package_token: u8, class: u8) -> Result<&'static ApiClass> {
+        let aid = self.import_aid(package_token)?;
+        let package = PACKAGES
+            .iter()
+            .find(|entry| entry.aid == aid)
+            .ok_or(Error::Unsupported)?;
+        package
+            .classes
+            .iter()
+            .find(|entry| entry.token == class)
+            .ok_or(Error::Missing)
+    }
+
+    /// Whether every package this one imports is one the engine provides, at a version it
+    /// can satisfy, JCVM §4.5.2.
+    pub fn imports_resolve(&self) -> Result<()> {
+        for import in self.file.imports()?.iter() {
+            let package = PACKAGES
+                .iter()
+                .find(|entry| entry.aid == import.aid)
+                .ok_or(Error::Unsupported)?;
+            if !import.satisfied_by(package.major, package.minor) {
+                return Err(Error::Unsupported);
+            }
+        }
+        Ok(())
     }
 
     /// The class a `CONSTANT_Classref` names, when it names one in this package.
@@ -341,6 +457,77 @@ mod tests {
         assert_eq!(linked.lookup(0, 1).unwrap(), 25);
         // A token no class in the chain defines is missing rather than a wrong answer.
         assert_eq!(linked.lookup(subclass, 7), Err(Error::Missing));
+    }
+
+    #[test]
+    fn an_external_reference_resolves_to_the_method_its_export_file_names() {
+        // Import javacard.framework, then name ISOException.throwIt through it. The class
+        // and method tokens belong to that package, and only its export file says what
+        // they mean.
+        let package = Package {
+            imports: vec![(bytes_of("A0000000620101"), 1, 6)],
+            constants: vec![[CONSTANT_STATIC_METHODREF, 0x80, 7, 1]],
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        let linked = Linked::new(&file).unwrap();
+        assert_eq!(
+            linked.external_static_method(0).unwrap(),
+            Some((0, 7, 1))
+        );
+        let target = linked.api_method(0, 7, 1, true).unwrap();
+        assert_eq!(target.package.name, "javacard.framework");
+        assert_eq!(target.class.name, "javacard/framework/ISOException");
+        assert_eq!(target.method.name, "throwIt");
+        assert!(target.method.is_static);
+        // The same token, resolved as a virtual method, is a different method entirely.
+        // Static and virtual methods are numbered in separate namespaces.
+        let virtual_target = linked.api_method(0, 7, 1, false).unwrap();
+        assert_eq!(virtual_target.method.name, "getReason");
+        // An internal reference names an offset and has no tokens at all.
+        assert_eq!(linked.static_method(0), Err(Error::Unsupported));
+    }
+
+    #[test]
+    fn an_import_the_engine_cannot_satisfy_is_refused() {
+        // A package the engine does not provide.
+        let package = Package {
+            imports: vec![(bytes_of("A0000000620009"), 1, 0)],
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        assert_eq!(
+            Linked::new(&file).unwrap().imports_resolve(),
+            Err(Error::Unsupported)
+        );
+        // A version newer than the engine exports, which would renumber nothing but still
+        // promises methods that are not there.
+        let package = Package {
+            imports: vec![(bytes_of("A0000000620101"), 1, 9)],
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        assert_eq!(
+            Linked::new(&file).unwrap().imports_resolve(),
+            Err(Error::Unsupported)
+        );
+        // The version the target applet asks for is satisfied.
+        let package = Package {
+            imports: vec![(bytes_of("A0000000620101"), 1, 6)],
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        Linked::new(&file).unwrap().imports_resolve().unwrap();
+    }
+
+    fn bytes_of(hex: &str) -> alloc::vec::Vec<u8> {
+        (0..hex.len() / 2)
+            .map(|at| u8::from_str_radix(&hex[at * 2..at * 2 + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]
