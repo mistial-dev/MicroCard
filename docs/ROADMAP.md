@@ -43,5 +43,9 @@ This is the authoritative public work list. Checked items have repeatable reposi
 
 - [x] Select a Java Card version, CAP subset, and API profile. See [JCVM_PROFILE.md](JCVM_PROFILE.md).
 - [ ] Specify persistent objects, firewall contexts, transactions, lifecycle, and domain mapping.
-- [ ] Implement host CAP validation and a Rust loader, verifier, and bytecode interpreter.
+- [x] Read the CAP container and verify a package structurally, checked against real applet packages.
+- [x] Interpret the instruction set below the API layer, including fields, arrays, invocation and exceptions.
+- [ ] Implement interface dispatch, the static field image and the applet lifecycle.
+- [ ] Implement the native API classes for the imported packages.
+- [ ] Deliver a package to the engine through the loader and dispatch APDUs to it.
 - [ ] Add independent conformance and cross-engine isolation tests.

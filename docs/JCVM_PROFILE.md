@@ -4,7 +4,18 @@ The target is a complete Java Card virtual machine. This document records what t
 
 OpenFIPS201 is the first applet the engine has to run, and its measurements pin the first milestone. It is a test vehicle rather than the boundary of the work. Where a number below was measured from it, the text says so, and where a feature is absent from it the engine still implements the feature.
 
-Implemented so far: the CAP container, the bytecode decoder and structural verification in `crates/microcard-engine-jcvm`. The container reads a Load File Data Block in place and refuses one that disagrees with itself. The decoder measures every instruction the specification defines and builds the instruction-boundary map. Verification puts the two together and refuses a package in one pass at load. The interpreter runs the arithmetic, the local variables, the operand stack and the control flow. What it does not have yet is the object heap, so fields, arrays, objects and invocation are refused by name. Nothing on the card reaches that crate.
+Implemented so far, in `crates/microcard-engine-jcvm`:
+
+| Part | State |
+| --- | --- |
+| CAP container | reads a Load File Data Block in place and refuses one that disagrees with itself |
+| Bytecode decoder | measures every instruction the specification defines and builds the instruction-boundary map |
+| Structural verification | one pass at load, over a whole package |
+| Object heap | objects and arrays, with the owner context checked on every access |
+| Linking | constant pool entries resolved to field offsets and method bodies as each instruction runs |
+| Interpreter | arithmetic, locals, the operand stack, control flow, arrays, fields, statics, invocation, throw and catch |
+
+What is missing before an applet runs: interface dispatch, the static field image initialisers, the applet lifecycle, the native API classes, and the path that delivers a package to this engine. Nothing on the card reaches the crate yet.
 
 ## Version and container
 
