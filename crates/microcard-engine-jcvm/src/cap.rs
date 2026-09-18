@@ -10,11 +10,13 @@ mod applet;
 mod directory;
 mod header;
 mod import;
+mod method;
 
 pub use applet::{Applet, AppletRef};
 pub use directory::Directory;
 pub use header::Header;
 pub use import::{Import, PackageRef};
+pub use method::{Handler, Method, MethodHeader};
 
 /// Component tags, JCVM §6.2. The tag doubles as the position in the Directory table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -162,6 +164,11 @@ impl<'a> LoadFile<'a> {
     /// The applets this package declares. An applet package always has one.
     pub fn applets(&self) -> Result<Applet<'a>> {
         Applet::parse(self.component(Tag::Applet).ok_or(Error::Format)?.info)
+    }
+
+    /// The Method component, which holds every method body and the handler table.
+    pub fn methods(&self) -> Result<Method<'a>> {
+        Method::parse(self.component(Tag::Method).ok_or(Error::Format)?.info)
     }
 
     /// The imports, or an empty table when the package borrows nothing.

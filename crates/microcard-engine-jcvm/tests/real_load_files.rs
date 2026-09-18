@@ -7,7 +7,7 @@
 //! found nothing when the variable is unset.
 //!
 //! Produce the blocks with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
-use microcard_engine_jcvm::cap::{LoadFile, Tag};
+use microcard_engine_jcvm::cap::{LoadFile, MethodHeader, Tag};
 
 /// The six packages docs/JCVM_PROFILE.md commits to, with the versions it names.
 const PROFILE: [(&[u8], u8, u8); 6] = [
@@ -50,6 +50,25 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
         let applet = applets.iter().next().expect("one applet");
         assert_eq!(applet.aid, &[0xa0, 0, 0, 3, 8, 0, 0, 0x10, 0, 1, 0]);
         assert!(applets.find(applet.aid).is_some());
+
+        // The install offset has to land on a real method header inside the method area,
+        // because a card calls it at instantiation with nothing else to check it against.
+        let methods = file.methods().expect("methods");
+        let offset = applet.install_method_offset as usize;
+        assert!(offset >= methods.methods_start(), "{}: {offset}", path.display());
+        let header = MethodHeader::parse(methods.bytes(), offset)
+            .unwrap_or_else(|error| panic!("{}: install header {error:?}", path.display()));
+        assert!(!header.abstract_method(), "{}", path.display());
+        // install is static and takes the byte array, its offset and its length, so three
+        // words of parameter. max_locals counts only what the method declares on top.
+        assert_eq!(header.nargs, 3, "{}", path.display());
+        assert!(header.frame_words() >= header.nargs as u16, "{}", path.display());
+
+        // Every handler in the package points inside the component, which Method::parse
+        // established, and the table is small enough to walk here.
+        for handler in methods.handlers() {
+            assert!(handler.handler_offset as usize >= methods.methods_start());
+        }
         assert_eq!(directory.import_count, 6);
         assert!(file.component(Tag::Method).is_some());
 
