@@ -311,8 +311,10 @@ impl<'a> Linked<'a> {
     /// The search then proceeds as any virtual call does.
     ///
     /// A class inherits the interfaces its superclasses implement, so the mapping is
-    /// looked for up the chain rather than on the receiver's class alone.
-    pub fn interface_method(&self, interface: u16, token: u8, class: u16) -> Result<u16> {
+    /// looked for up the chain rather than on the receiver's class alone. The interface
+    /// itself may be in another package, which is how an applet implements one the card
+    /// declares.
+    pub fn interface_method(&self, interface: ClassRef, token: u8, class: u16) -> Result<u16> {
         let mut at = ClassRef::Internal(class);
         for _ in 0..=u8::MAX {
             let ClassRef::Internal(offset) = at else {
@@ -320,7 +322,7 @@ impl<'a> Linked<'a> {
             };
             let info = self.classes.at(offset)?;
             for (implemented, tokens) in info.interfaces() {
-                if implemented != ClassRef::Internal(interface) {
+                if implemented != interface {
                     continue;
                 }
                 let virtual_token = *tokens.get(token as usize).ok_or(Error::Bounds)?;

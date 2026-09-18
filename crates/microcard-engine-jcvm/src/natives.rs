@@ -80,6 +80,9 @@ pub struct Jcre {
     pub transaction_depth: u8,
     /// The applet's lifecycle byte, which GlobalPlatform keeps rather than the applet.
     pub lifecycle: u8,
+    /// The AID the applet registered under, if it chose one.
+    pub aid: [u8; 16],
+    pub aid_length: u8,
 }
 
 impl Jcre {
@@ -95,6 +98,8 @@ impl Jcre {
             transaction_depth: 0,
             // Selectable, GP 2.3 Table 11-4. An applet moves itself on from here.
             lifecycle: 0x07,
+            aid: [0; 16],
+            aid_length: 0,
         }
     }
 }
@@ -157,8 +162,22 @@ pub fn call(
             jcsystem(name, heap, frame, context, jcre)
         }
         ("javacard.framework", "javacard/framework/Applet", "register") => {
-            // The applet hands itself to the runtime, JCRE §3.1. Everything after this
-            // command can select it.
+            // Two forms, JCRE §3.1. One registers under the AID the installer gave, the
+            // other under an AID the applet chose out of a byte array it holds.
+            if target.method.descriptor != "()V" {
+                let length = frame.pop_short()?;
+                let offset = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                heap.check_access(array, context)?;
+                if length < 0 || offset < 0 || length as usize > jcre.aid.len() {
+                    return Err(Error::Bounds);
+                }
+                let bytes = heap.byte_slice(array, offset as usize, length as usize)?;
+                jcre.aid[..length as usize].copy_from_slice(bytes);
+                jcre.aid_length = length as u8;
+            }
+            // The applet hands itself to the runtime. Everything after this command can
+            // select it.
             let instance = frame.pop_reference()?;
             jcre.instance = Some(instance);
             Ok(Native::Returned)
@@ -173,7 +192,16 @@ pub fn call(
             Ok(Native::Returned)
         }
         _ => {
-            let handled = security::call(class, method, heap, host, frame, context, jcre)?;
+            let handled = security::call(
+                class,
+                method,
+                target.method.descriptor,
+                heap,
+                host,
+                frame,
+                context,
+                jcre,
+            )?;
             if let Native::Unimplemented = handled {
                 report(class, method);
             }

@@ -64,9 +64,13 @@ pub fn digest_length(algorithm: u8) -> Result<usize> {
     })
 }
 
+/// The pieces are unrelated to each other, which is why they arrive separately rather
+/// than as a struct that would exist only to be passed here.
+#[allow(clippy::too_many_arguments)]
 pub fn call(
     class: &str,
     method: &str,
+    method_descriptor: &str,
     heap: &mut Heap,
     host: &mut dyn crate::host::Host,
     frame: &mut Frame,
@@ -109,6 +113,65 @@ pub fn call(
                 heap.byte_slice_mut(material, 0, length)?.fill(0);
             }
             heap.put_word(key, READY, 0)?;
+        }
+
+        // Symmetric key material, JCRE §5.3. The bytes are copied into the key's own
+        // array, which the applet cannot reach, so a key never sits in a buffer the applet
+        // still holds a reference to.
+        ("javacard/security/AESKey", "setKey")
+        | ("javacard/security/DESKey", "setKey")
+        | ("javacard/security/HMACKey", "setKey") => {
+            let length = if class == "javacard/security/HMACKey" {
+                Some(frame.pop_short()?)
+            } else {
+                None
+            };
+            let offset = frame.pop_short()?;
+            let source = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            heap.check_access(source, context)?;
+            let bits = word_field(heap, this, SIZE)? as usize;
+            let bytes = length.map_or(bits / 8, |value| value.max(0) as usize);
+            if offset < 0 || bytes == 0 || bytes > 64 {
+                return Err(Error::Bounds);
+            }
+            let mut staging = [0u8; 64];
+            staging[..bytes].copy_from_slice(heap.byte_slice(source, offset as usize, bytes)?);
+            let material = match heap.get_word(this, MATERIAL)? {
+                NULL => {
+                    let array = heap.new_array(heap::KIND_BYTE, bytes as u16, context)?;
+                    heap.put_word(this, MATERIAL, array)?;
+                    array
+                }
+                array => array,
+            };
+            heap.byte_slice_mut(material, 0, bytes)?
+                .copy_from_slice(&staging[..bytes]);
+            // The flag goes last, so a failure part way leaves a key that says it holds
+            // nothing rather than one that says it holds a key it does not have.
+            heap.put_word(this, READY, 1)?;
+        }
+        ("javacard/security/AESKey", "getKey")
+        | ("javacard/security/DESKey", "getKey")
+        | ("javacard/security/HMACKey", "getKey") => {
+            let offset = frame.pop_short()?;
+            let destination = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            heap.check_access(destination, context)?;
+            if word_field(heap, this, READY)? == 0 {
+                return Ok(Native::Threw(super::new_exception(
+                    heap,
+                    "javacard/security/CryptoException",
+                    context,
+                )?));
+            }
+            let material = heap.get_word(this, MATERIAL)?;
+            let bytes = heap.info(material)?.length as usize;
+            let mut staging = [0u8; 64];
+            staging[..bytes].copy_from_slice(heap.byte_slice(material, 0, bytes)?);
+            heap.byte_slice_mut(destination, offset.max(0) as usize, bytes)?
+                .copy_from_slice(&staging[..bytes]);
+            frame.push_short(bytes as i16)?;
         }
 
         ("javacard/framework/OwnerPIN", "<init>") => {
@@ -283,6 +346,39 @@ pub fn call(
             let this = frame.pop_reference()?;
             let algorithm = word_field(heap, this, KIND)? as u8;
             frame.push_short(digest_length(algorithm)? as i16)?;
+        }
+        // An algorithm holder remembers the key and the direction it was given, and the
+        // operation itself is the host's to answer.
+        ("javacardx/crypto/Cipher", "init")
+        | ("javacard/security/Signature", "init")
+        | ("javacard/security/KeyAgreement", "init") => {
+            // Both forms end with the mode or the key. The longer one also carries an
+            // initialisation vector, which is taken and held with the key.
+            let descriptor = method_descriptor;
+            if descriptor.contains("[BSS") {
+                let _length = frame.pop_short()?;
+                let _offset = frame.pop_short()?;
+                let _vector = frame.pop_reference()?;
+            }
+            let mode = if descriptor.ends_with("B)V") || descriptor.contains("SB") {
+                frame.pop_short()?
+            } else {
+                0
+            };
+            let key = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            if word_field(heap, key, READY)? == 0 {
+                // Initialising with a key that holds nothing would leave an instance that
+                // looks ready and is not.
+                return Ok(Native::Threw(super::new_exception(
+                    heap,
+                    "javacard/security/CryptoException",
+                    context,
+                )?));
+            }
+            heap.put_word(this, MATERIAL, key)?;
+            heap.put_word(this, COUNTER, mode as u16)?;
+            heap.put_word(this, READY, 1)?;
         }
         ("javacard/security/RandomData", "generateData")
         | ("javacard/security/RandomData", "nextBytes") => {

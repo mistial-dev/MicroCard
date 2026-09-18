@@ -73,6 +73,7 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
         eprintln!("MICROCARD_JCVM_LOAD_FILES is unset, so no real applet was run");
         return;
     }
+    let mut selected = 0;
     for (name, bytes) in &files {
         let file = LoadFile::parse(bytes).unwrap_or_else(|error| panic!("{name}: {error:?}"));
         // A real applet allocates a great deal at install, so this is the card it would
@@ -94,6 +95,8 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
                     .process(&file, &mut host, &[0x00, 0xa4, 0x04, 0x00, 0x00], true)
                     .unwrap_or_else(|error| panic!("{name}: select {error:?}"));
                 assert_eq!(response.sw, 0x9000, "{name}");
+                eprintln!("{name}: installed, registered and selected");
+                selected += 1;
             }
             // The engine runs the applet's own install bytecode until it reaches
             // something this build does not do yet. That is the remaining work, and the
@@ -101,4 +104,7 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
             Err(error) => eprintln!("{name}: install stopped at {error:?}"),
         }
     }
+    // At least one real package has to get all the way through, or the engine has
+    // regressed from where it was when this was written.
+    assert!(selected > 0, "no package installed and selected");
 }

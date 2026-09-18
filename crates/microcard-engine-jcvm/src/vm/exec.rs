@@ -1092,10 +1092,42 @@ pub fn run_body(
                 let nargs = byte(code, pc + 1)?;
                 let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
                 let token = byte(code, pc + 4)?;
-                let interface = machine.linked.class_ref(index)?;
+                let entry = machine.linked.constants()?.get(index)?;
+                let interface =
+                    crate::cap::ClassRef::decode(u16::from_be_bytes([entry.info[0], entry.info[1]]));
                 let below = (nargs as usize).checked_sub(1).ok_or(Error::Type)?;
                 let receiver = frame.peek_reference(below)?;
                 let info = machine.heap.check_access(receiver, machine.context)?;
+                // An object of a class the card provides answers the interface itself,
+                // because the card is what implements it.
+                if natives::is_native_class(info.class) {
+                    let crate::cap::ClassRef::External { package, class } = interface else {
+                        return Err(Error::Type);
+                    };
+                    let target = machine.linked.api_method(package, class, token, false)?;
+                    match natives::call(
+                        target,
+                        machine.heap,
+                        machine.host,
+                        frame,
+                        machine.context,
+                        &mut machine.jcre,
+                    )? {
+                        Native::Returned => {}
+                        Native::Unimplemented => return Err(Error::Unsupported),
+                        Native::Threw(exception) => {
+                            match find_handler(machine, body, code.len(), pc, exception)? {
+                                Some(target) => {
+                                    enter_handler(frame, exception)?;
+                                    next = target;
+                                }
+                                None => return Ok(Outcome::Thrown(exception)),
+                            }
+                        }
+                    }
+                    pc = next;
+                    continue;
+                }
                 let method = machine
                     .linked
                     .interface_method(interface, token, info.class)?;
