@@ -10,10 +10,11 @@
 //! logical and an arithmetic shift on a value held in a wider register.
 use super::frame::{Frame, NULL, Reference};
 use super::heap::{self, Context, Heap};
+
 use crate::cap::Method;
 use crate::code::{Limits, constant_pool_index, instruction_length};
 use crate::link::Linked;
-use crate::natives::{self, Native};
+use crate::natives::{self, Jcre, Native};
 use crate::{Error, Result};
 
 /// How an invocation ended.
@@ -45,6 +46,8 @@ pub struct Machine<'a, 'h, 'p> {
     /// The context this code runs in, which the firewall compares against every object.
     pub context: Context,
     pub limits: Limits,
+    /// What the runtime environment knows while this command runs.
+    pub jcre: Jcre,
     depth: u8,
 }
 
@@ -56,6 +59,7 @@ impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
         statics: &'a mut [u8],
         context: Context,
         limits: Limits,
+        jcre: Jcre,
     ) -> Self {
         Self {
             heap,
@@ -64,6 +68,7 @@ impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
             statics,
             context,
             limits,
+            jcre,
             depth: 0,
         }
     }
@@ -868,6 +873,7 @@ pub fn run_body(
                             machine.heap,
                             frame,
                             machine.context,
+                            &mut machine.jcre,
                         )?)
                     }
                     _ => None,
@@ -916,7 +922,13 @@ pub fn run_body(
                     machine.linked.external_class_method(index)?
                 {
                     let target = machine.linked.api_method(package, class, method, false)?;
-                    match natives::call(target, machine.heap, frame, machine.context)? {
+                    match natives::call(
+                        target,
+                        machine.heap,
+                        frame,
+                        machine.context,
+                        &mut machine.jcre,
+                    )? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
                         Native::Threw(exception) => {
@@ -1157,6 +1169,7 @@ mod tests {
             &mut statics,
             1,
             Limits::IMPLEMENTED,
+            Jcre::new(0, 0),
         );
         let mut words = vec![0u16; 256];
         let mut tags = vec![0u8; 32];
@@ -1232,6 +1245,7 @@ mod tests {
             &mut statics,
             1,
             Limits::IMPLEMENTED,
+            Jcre::new(0, 0),
         );
         let mut words = vec![0u16; 64];
         let mut tags = vec![0u8; 8];
@@ -1807,12 +1821,13 @@ mod tests {
     #[test]
     fn an_api_method_the_card_does_not_provide_is_refused_by_name() {
         use crate::cap::CONSTANT_STATIC_METHODREF;
-        // JCSystem.beginTransaction, which resolves to a real API method that this build
-        // has not implemented. The refusal is unsupported rather than missing.
+        // A method that resolves to a real API entry this build has not implemented. The
+        // refusal is unsupported rather than missing.
         let package = Package {
             imports: vec![(vec![0xa0, 0x00, 0x00, 0x00, 0x62, 0x01, 0x01], 1, 6)],
-            // JCSystem is class token 8, and beginTransaction is its static token 1.
-            constants: vec![[CONSTANT_STATIC_METHODREF, 0x80, 8, 1]],
+            // JCSystem token 8, static token 4 is getAppletShareableInterfaceObject,
+            // which is a real API entry this build has nothing behind.
+            constants: vec![[CONSTANT_STATIC_METHODREF, 0x80, 8, 4]],
             code: vec![0x8d, 0x00, 0x00, op::RETURN],
             max_stack: 15,
             nargs: 0,

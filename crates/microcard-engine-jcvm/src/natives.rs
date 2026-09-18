@@ -54,6 +54,45 @@ pub fn native_is_a(thrown: u16, caught: u16) -> bool {
 /// Field zero of an `ISOException`, which carries the status word to report.
 pub const REASON_FIELD: usize = 0;
 
+/// What the runtime environment knows while a command is being processed, JCRE §4.
+///
+/// An applet sees this through the APDU object it is handed and through the static methods
+/// of `JCSystem`. It is held here rather than on the heap, because an applet must not be
+/// able to reach it with a field access.
+pub struct Jcre {
+    /// The `APDU` object handed to `process`.
+    pub apdu: Reference,
+    /// The byte array that object wraps, which `getBuffer` answers.
+    pub buffer: Reference,
+    /// The applet instance, once it has registered itself.
+    pub instance: Option<Reference>,
+    /// Bytes of command data in the buffer, after the header.
+    pub incoming: u16,
+    /// Bytes of response the applet has asked to send.
+    pub outgoing: u16,
+    /// Where the command data starts in the buffer. Five for a short APDU, JCRE §4.
+    pub data_offset: u16,
+    /// Whether this command is the one that selected the applet.
+    pub selecting: bool,
+    /// Transactions are counted rather than nested. A second begin is an error, JCRE §7.
+    pub transaction_depth: u8,
+}
+
+impl Jcre {
+    pub fn new(apdu: Reference, buffer: Reference) -> Self {
+        Self {
+            apdu,
+            buffer,
+            instance: None,
+            incoming: 0,
+            outgoing: 0,
+            data_offset: 5,
+            selecting: false,
+            transaction_depth: 0,
+        }
+    }
+}
+
 /// What a native call did.
 pub enum Native {
     /// It returned, and anything it produced is already on the stack.
@@ -73,6 +112,7 @@ pub fn call(
     heap: &mut Heap,
     frame: &mut Frame,
     context: heap::Context,
+    jcre: &mut Jcre,
 ) -> Result<Native> {
     let package = target.package.name;
     let class = target.class.name;
@@ -103,8 +143,155 @@ pub fn call(
             Ok(Native::Returned)
         }
         ("javacard.framework", "javacard/framework/Util", name) => util(name, heap, frame, context),
+        ("javacard.framework", "javacard/framework/APDU", name) => {
+            apdu(name, heap, frame, jcre)
+        }
+        ("javacard.framework", "javacard/framework/JCSystem", name) => {
+            jcsystem(name, heap, frame, context, jcre)
+        }
+        ("javacard.framework", "javacard/framework/Applet", "register") => {
+            // The applet hands itself to the runtime, JCRE §3.1. Everything after this
+            // command can select it.
+            let instance = frame.pop_reference()?;
+            jcre.instance = Some(instance);
+            Ok(Native::Returned)
+        }
+        ("javacard.framework", "javacard/framework/Applet", "selectingApplet") => {
+            frame.pop_reference()?;
+            frame.push_short(jcre.selecting as i16)?;
+            Ok(Native::Returned)
+        }
+        ("javacard.framework", "javacard/framework/Applet", "<init>") => {
+            frame.pop_reference()?;
+            Ok(Native::Returned)
+        }
         _ => Ok(Native::Unimplemented),
     }
+}
+
+/// `javacard.framework.APDU`, JCRE §4. The buffer is an ordinary byte array on the heap,
+/// so an applet reading it goes through the same bounds and firewall checks as any array.
+fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre) -> Result<Native> {
+    match name {
+        "getBuffer" => {
+            frame.pop_reference()?;
+            frame.push_reference(jcre.buffer)?;
+        }
+        "getIncomingLength" => {
+            frame.pop_reference()?;
+            frame.push_short(jcre.incoming as i16)?;
+        }
+        "getOffsetCdata" => {
+            frame.pop_reference()?;
+            frame.push_short(jcre.data_offset as i16)?;
+        }
+        "setIncomingAndReceive" => {
+            frame.pop_reference()?;
+            // The whole command is already in the buffer, so there is nothing to wait for
+            // and the answer is everything that arrived.
+            frame.push_short(jcre.incoming as i16)?;
+        }
+        "setOutgoing" => {
+            frame.pop_reference()?;
+            frame.push_short(0)?;
+        }
+        "setOutgoingLength" => {
+            let length = frame.pop_short()?;
+            frame.pop_reference()?;
+            jcre.outgoing = length.max(0) as u16;
+        }
+        "setOutgoingAndSend" => {
+            let length = frame.pop_short()?;
+            let offset = frame.pop_short()?;
+            frame.pop_reference()?;
+            if offset < 0 || length < 0 {
+                return Err(Error::Bounds);
+            }
+            // The response has to start at the front of the buffer, which is what the
+            // transport sends. Anything else is moved there now.
+            if offset != 0 && length != 0 {
+                let mut staging = [0u8; 256];
+                let step = (length as usize).min(staging.len());
+                staging[..step]
+                    .copy_from_slice(heap.byte_slice(jcre.buffer, offset as usize, step)?);
+                heap.byte_slice_mut(jcre.buffer, 0, step)?
+                    .copy_from_slice(&staging[..step]);
+            }
+            jcre.outgoing = length as u16;
+        }
+        "isCommandChainingCLA" | "isSecureMessagingCLA" => {
+            frame.pop_reference()?;
+            let cla = heap.byte_slice(jcre.buffer, 0, 1)?[0];
+            let bit = if name == "isCommandChainingCLA" { 0x10 } else { 0x0c };
+            frame.push_short((cla & bit != 0) as i16)?;
+        }
+        "getProtocol" => {
+            // A contacted card. An applet that refuses contactless selection reads this,
+            // so answering with a contactless value would make it refuse every session.
+            frame.push_short(0x01)?;
+        }
+        _ => return Ok(Native::Unimplemented),
+    }
+    Ok(Native::Returned)
+}
+
+/// `javacard.framework.JCSystem`, JCRE §7.
+fn jcsystem(
+    name: &str,
+    heap: &mut Heap,
+    frame: &mut Frame,
+    context: heap::Context,
+    jcre: &mut Jcre,
+) -> Result<Native> {
+    match name {
+        "makeTransientByteArray" | "makeTransientBooleanArray" | "makeTransientShortArray"
+        | "makeTransientObjectArray" => {
+            // The clear event is taken and ignored. Nothing here survives a reset yet, so
+            // both events are honoured by the heap being rebuilt rather than by tracking.
+            let _event = frame.pop_short()?;
+            let length = frame.pop_short()?;
+            if length < 0 {
+                return Err(Error::Bounds);
+            }
+            let kind = match name {
+                "makeTransientByteArray" => heap::KIND_BYTE,
+                "makeTransientBooleanArray" => heap::KIND_BOOLEAN,
+                "makeTransientShortArray" => heap::KIND_SHORT,
+                _ => heap::KIND_REFERENCE,
+            };
+            let array = heap.new_array(kind, length as u16, context)?;
+            frame.push_reference(array)?;
+        }
+        "isObjectDeletionSupported" => frame.push_short(0)?,
+        "requestObjectDeletion" => {
+            // Legal to do nothing, JCRE §7.4. An applet that depends on it asks first.
+        }
+        "getTransactionDepth" => frame.push_short(jcre.transaction_depth as i16)?,
+        "beginTransaction" => {
+            // Transactions do not nest, JCRE §7.6, so a second begin is an error rather
+            // than a deeper level.
+            if jcre.transaction_depth != 0 {
+                return Ok(Native::Threw(new_exception(
+                    heap,
+                    "javacard/framework/TransactionException",
+                    context,
+                )?));
+            }
+            jcre.transaction_depth = 1;
+        }
+        "commitTransaction" | "abortTransaction" => {
+            if jcre.transaction_depth == 0 {
+                return Ok(Native::Threw(new_exception(
+                    heap,
+                    "javacard/framework/TransactionException",
+                    context,
+                )?));
+            }
+            jcre.transaction_depth = 0;
+        }
+        _ => return Ok(Native::Unimplemented),
+    }
+    Ok(Native::Returned)
 }
 
 /// Allocate an instance of a class the card provides.
@@ -245,6 +432,11 @@ mod tests {
         (vec![0; 1024], vec![0; words + 16], vec![0; 8])
     }
 
+    /// A runtime with no command in flight, for the methods that do not read one.
+    fn idle() -> Jcre {
+        Jcre::new(0, 0)
+    }
+
     #[test]
     fn throw_it_produces_an_exception_carrying_its_status_word() {
         let (mut slab, mut words, mut tags) = setup(0);
@@ -252,7 +444,7 @@ mod tests {
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
         frame.push_short(0x6a80u16 as i16).unwrap();
         let target = framework("javacard/framework/ISOException", "throwIt", true);
-        let Native::Threw(exception) = call(target, &mut heap, &mut frame, 1).unwrap() else {
+        let Native::Threw(exception) = call(target, &mut heap, &mut frame, 1, &mut idle()).unwrap() else {
             panic!("throwIt has to throw");
         };
         assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 0x6a80);
@@ -310,15 +502,27 @@ mod tests {
         frame.push_reference(array).unwrap();
         frame.push_short(2).unwrap();
         frame.push_short(0x1234).unwrap();
-        call(framework("javacard/framework/Util", "setShort", true), &mut heap, &mut frame, 1)
-            .unwrap();
+        call(
+            framework("javacard/framework/Util", "setShort", true),
+            &mut heap,
+            &mut frame,
+            1,
+            &mut idle(),
+        )
+        .unwrap();
         // It answers the offset one past what it wrote, which is what makes these chain.
         assert_eq!(frame.pop_short().unwrap(), 4);
 
         frame.push_reference(array).unwrap();
         frame.push_short(2).unwrap();
-        call(framework("javacard/framework/Util", "getShort", true), &mut heap, &mut frame, 1)
-            .unwrap();
+        call(
+            framework("javacard/framework/Util", "getShort", true),
+            &mut heap,
+            &mut frame,
+            1,
+            &mut idle(),
+        )
+        .unwrap();
         assert_eq!(frame.pop_short().unwrap(), 0x1234);
     }
 
@@ -343,6 +547,7 @@ mod tests {
             &mut heap,
             &mut frame,
             1,
+            &mut idle(),
         )
         .unwrap();
         assert_eq!(frame.pop_short().unwrap(), 4);
@@ -366,6 +571,7 @@ mod tests {
                 &mut heap,
                 &mut frame,
                 1,
+                &mut idle(),
             )
             .unwrap();
             frame.pop_short().unwrap();
@@ -377,7 +583,7 @@ mod tests {
             frame.push_reference(right).unwrap();
             frame.push_short(0).unwrap();
             frame.push_short(4).unwrap();
-            call(compare, heap, frame, 1).unwrap();
+            call(compare, heap, frame, 1, &mut idle()).unwrap();
             frame.pop_short().unwrap()
         };
         assert_eq!(run(&mut heap, &mut frame), 0);
@@ -393,9 +599,15 @@ mod tests {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
-        let target = framework("javacard/framework/JCSystem", "beginTransaction", true);
+        // Shareable interfaces are not built, so this is a real API entry with nothing
+        // behind it.
+        let target = framework(
+            "javacard/framework/JCSystem",
+            "getAppletShareableInterfaceObject",
+            true,
+        );
         assert!(matches!(
-            call(target, &mut heap, &mut frame, 1).unwrap(),
+            call(target, &mut heap, &mut frame, 1, &mut idle()).unwrap(),
             Native::Unimplemented
         ));
     }
