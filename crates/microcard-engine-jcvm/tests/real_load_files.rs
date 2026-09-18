@@ -9,6 +9,7 @@
 //! Produce the blocks with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
 use microcard_engine_jcvm::cap::{LoadFile, MethodHeader, Tag};
 use microcard_engine_jcvm::code::instruction_length;
+use microcard_engine_jcvm::verify::verify;
 use std::collections::BTreeSet;
 use microcard_engine_jcvm::code::{Boundaries, Limits, constant_pool_index, verify_targets};
 
@@ -210,6 +211,15 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
             walked += 1;
         }
         assert!(walked > 100, "{}: walked {walked}", path.display());
+
+        // The same walk through the engine's own entry point, which is what a card runs.
+        let mut buffer = vec![0u8; 16384];
+        let report = verify(&file, &mut buffer)
+            .unwrap_or_else(|error| panic!("{}: verify {error:?}", path.display()));
+        assert_eq!(report.methods, walked, "{}", path.display());
+        assert_eq!(report.static_image_bytes, directory.image_size, "{}", path.display());
+        // A frame of this package's deepest method, in words, and its deepest stack.
+        assert!(report.max_frame_words > 0 && report.max_stack_words > 0);
 
         // The Reference Location component lists every constant pool index in the bytecode.
         // Nothing here rewrites those indices, so the lists are read as a claim and checked

@@ -45,6 +45,12 @@ impl<'a> Header<'a> {
         })
     }
 
+    /// Whether the package declares 32-bit integers, which decides what its methods may
+    /// contain, JCVM §6.4.
+    pub fn int(&self) -> bool {
+        self.flags & ACC_INT != 0
+    }
+
     /// Whether this build can run the package, per docs/JCVM_PROFILE.md.
     ///
     /// Every rejection here is a capability this engine does not have. A package needing one
@@ -57,7 +63,7 @@ impl<'a> Header<'a> {
         if self.flags & ACC_APPLET == 0 {
             return Err(Error::Unsupported);
         }
-        if self.flags & (ACC_INT | ACC_EXPORT | ACC_EXTENDED) != 0 {
+        if self.flags & (ACC_EXPORT | ACC_EXTENDED) != 0 {
             return Err(Error::Unsupported);
         }
         Ok(())
@@ -119,9 +125,17 @@ mod tests {
 
     #[test]
     fn capabilities_this_engine_lacks_are_refused_at_load() {
+        // 32-bit integers are implemented, so a package declaring them is supported. The
+        // flag decides what its methods may contain rather than whether it can run.
+        let with_int = info(ACC_APPLET | ACC_INT, &AID);
+        let header = Header::parse(&with_int).unwrap();
+        header.supported().unwrap();
+        assert!(header.int());
+        assert!(!Header::parse(&info(ACC_APPLET, &AID)).unwrap().int());
+
         // Each of these parses cleanly and still cannot run here, which is the distinction
         // the profile draws between a malformed package and an unsupported one.
-        for flag in [ACC_INT, ACC_EXPORT, ACC_EXTENDED] {
+        for flag in [ACC_EXPORT, ACC_EXTENDED] {
             let bytes = info(ACC_APPLET | flag, &AID);
             let header = Header::parse(&bytes).unwrap();
             assert_eq!(header.supported(), Err(Error::Unsupported), "{flag:#04x}");

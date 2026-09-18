@@ -3,10 +3,14 @@
 //! The CAP container and the bytecode decoder are implemented. There is no linker or
 //! interpreter yet, and nothing on the card reaches this crate.
 #![no_std]
+extern crate alloc;
 pub mod cap;
 pub mod code;
 #[allow(dead_code)]
 mod jcvm_opcodes;
+pub mod verify;
+#[cfg(test)]
+mod test_support;
 
 /// Why a Java Card structure was refused.
 ///
@@ -22,6 +26,8 @@ pub enum Error {
     Inconsistent,
     /// The structure is well formed and this build does not implement it.
     Unsupported,
+    /// Verifying it needs more memory than the card offered.
+    Quota,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
