@@ -4,8 +4,20 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [features]
+default = ["scp03-rmac", "scp03-renc"]
 fuzzing = []
 hal-conformance = []
+# Optional SCP03 capabilities. The advertised i parameter and the accepted security
+# levels are derived from this set, so a build cannot offer a mode it does not implement.
+scp03-rmac = []
+# Table 5-1 encodes b7 b6 as 00, 01 or 11 and reserves 10, so response encryption always
+# carries response integrity with it.
+scp03-renc = ["scp03-rmac"]
+# Declared so the derived i parameter and widths are already wired for them. Selecting
+# either one fails the build until its wire format lands, because a half-implemented
+# mode would advertise protection the card cannot actually apply.
+scp03-s16 = []
+scp03-pseudo-random = []
 [dependencies]
 base64ct.workspace = true
 serde.workspace = true

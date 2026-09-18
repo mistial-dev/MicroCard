@@ -5349,7 +5349,7 @@ mod tests {
             &[0xa0, 0, 0, 1, 0x51, 0x53, 0x50, 0x41],
             &requested,
             &[0x80],
-            &[0xc9, 4, 0x81, 2, 3, 0x20],
+            &[0xc9, 4, 0x81, 2, 3, crate::scp03::SCP03_I],
         ] {
             install_data.push(value.len() as u8);
             install_data.extend_from_slice(value);

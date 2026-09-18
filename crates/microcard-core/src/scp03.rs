@@ -8,11 +8,46 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
-/// Security level bits this implementation honours in EXTERNAL AUTHENTICATE P1:
-/// C-MAC, C-DECRYPTION and R-MAC. The SCP03 `i` parameter advertises R-ENCRYPTION as
-/// unsupported, so a session that asks for it is refused rather than served without the
-/// response encryption it requested.
-pub const SUPPORTED_SECURITY_LEVEL: u8 = 0x13;
+#[cfg(feature = "scp03-s16")]
+compile_error!(
+    "scp03-s16 is not implemented yet: the command MAC and challenge widths are still S8"
+);
+#[cfg(feature = "scp03-pseudo-random")]
+compile_error!(
+    "scp03-pseudo-random is not implemented yet: the sequence counter has no durable store"
+);
+
+/// The SCP03 `i` parameter this build advertises, SCP03 1.1.2.6 Table 5-1.
+///
+/// Derived from the enabled capabilities rather than written down, so the value reported
+/// in the INITIALIZE UPDATE key information, the card recognition data and the SSD
+/// install parameters can never claim a mode the build does not implement.
+pub const SCP03_I: u8 = (if cfg!(feature = "scp03-s16") { 0x01 } else { 0 })
+    | (if cfg!(feature = "scp03-pseudo-random") { 0x10 } else { 0 })
+    | (if cfg!(feature = "scp03-rmac") { 0x20 } else { 0 })
+    | (if cfg!(feature = "scp03-renc") { 0x40 } else { 0 });
+
+/// Security level bits this build honours in EXTERNAL AUTHENTICATE P1, Table 7-6.
+///
+/// Command integrity and command confidentiality are always available. Response
+/// integrity and response confidentiality follow the advertised capabilities, so a
+/// session asking for protection this build cannot apply is refused rather than served
+/// with less protection than it requested.
+pub const SUPPORTED_SECURITY_LEVEL: u8 = 0x03
+    | (if cfg!(feature = "scp03-rmac") { 0x10 } else { 0 })
+    | (if cfg!(feature = "scp03-renc") { 0x20 } else { 0 });
+
+/// S16 doubles every challenge, cryptogram and MAC, SCP03 1.1.2.6 §6.2.2 and §6.2.4.
+pub const S16: bool = cfg!(feature = "scp03-s16");
+
+/// Challenge and cryptogram width in bytes.
+pub const CHALLENGE_BYTES: usize = if S16 { 16 } else { 8 };
+
+/// Transmitted C-MAC and R-MAC width in bytes.
+pub const MAC_BYTES: usize = if S16 { 16 } else { 8 };
+
+/// The KDF `L` parameter for challenges and cryptograms, in bits.
+pub const CRYPTOGRAM_BITS: u16 = if S16 { 128 } else { 64 };
 
 /// Management commands require at least command integrity. Package signatures authorize
 /// the code itself, so command encryption stays the caller's choice.
@@ -113,7 +148,6 @@ impl Session {
                 || c.cla != 0x84
                 || c.ins != 0x82
                 || c.p2 != 0
-                || !matches!(c.p1, 1 | 3 | 0x11 | 0x13)
                 || c.data.len() != 16
             {
                 return Err(Error::Authentication);
@@ -122,6 +156,9 @@ impl Session {
             if !bool::from(c.data[..payload_len].ct_eq(&self.host)) {
                 return Err(Error::Authentication);
             }
+            // The security level is policy rather than authenticity, so it is checked
+            // after the host cryptogram. An unauthenticated caller then learns nothing
+            // about which modes this build offers.
             if c.p1 & !SUPPORTED_SECURITY_LEVEL != 0 {
                 return Err(Error::Unsupported);
             }
@@ -215,25 +252,59 @@ impl Session {
             if !self.active {
                 return Err(Error::Unauthorized);
             }
-            if data.len() > 248 {
+            // An error status word carries neither a MAC nor encryption, SCP03 §6.2.5.
+            let protected = sw == 0x9000 || sw >> 8 == 0x62 || sw >> 8 == 0x63;
+            let rmac = protected && self.level & 0x10 != 0;
+            // A response with no data field is never encrypted, SCP03 §6.2.7.
+            let renc = protected && self.level & 0x20 != 0 && !data.is_empty();
+            let mac_len = if rmac { MAC_BYTES } else { 0 };
+            let body_len = if renc {
+                crate::crypto::cbc_encrypted_len(data.len())?
+            } else if protected {
+                data.len()
+            } else {
+                0
+            };
+            // Two bytes of the budget belong to the status word.
+            if body_len + mac_len + 2 > crate::hal::MAX_SHORT_RESPONSE_BYTES {
                 return Err(Error::Bounds);
             }
-            let protected = sw == 0x9000 || sw >> 8 == 0x62 || sw >> 8 == 0x63;
+            // The response ICV reuses the counter block of the command being answered,
+            // with the most significant byte set so it can never collide with the
+            // command ICV, SCP03 §6.2.7.
+            let ciphertext = if renc {
+                let mut iv = [0; 16];
+                iv[0] = 0x80;
+                iv[12..].copy_from_slice(&self.counter.to_be_bytes());
+                provider.aes128_encrypt_block_in_place(&self.enc, &mut iv)?;
+                let mut buffer = crate::crypto::zeroizing_buffer(body_len)?;
+                let written = provider.aes_cbc_encrypt(&self.enc, iv, data, &mut buffer)?;
+                buffer.truncate(written);
+                Some(buffer)
+            } else {
+                None
+            };
+            let body: &[u8] = match ciphertext.as_deref() {
+                Some(encrypted) => encrypted,
+                None if protected => data,
+                None => &[],
+            };
             let mut out = Vec::new();
-            let capacity = 2 + if protected { data.len() } else { 0 }
-                + if protected && self.level & 0x10 != 0 { 8 } else { 0 };
-            out.try_reserve_exact(capacity).map_err(|_| Error::Quota)?;
+            out.try_reserve_exact(2 + body.len() + mac_len)
+                .map_err(|_| Error::Quota)?;
             if protected {
-                out.extend_from_slice(data);
-                if self.level & 0x10 != 0 {
+                out.extend_from_slice(body);
+                if rmac {
+                    // The R-MAC covers the ciphered data field, so it is computed after
+                    // encryption, SCP03 §6.2.7.
                     let status = sw.to_be_bytes();
                     let mut mac = [0; 16];
                     provider.aes_cmac_parts_into(
                         &self.rmac,
-                        &[&self.chain, data, &status],
+                        &[&self.chain, body, &status],
                         &mut mac,
                     )?;
-                    out.extend_from_slice(&mac[..8]);
+                    out.extend_from_slice(&mac[..MAC_BYTES]);
                 }
             }
             out.extend_from_slice(&sw.to_be_bytes());
@@ -420,6 +491,8 @@ mod tests {
         assert_eq!(verified.command().le, Some(256));
     }
 
+    // Security level 0x11 needs response integrity, so this build must offer it.
+    #[cfg(feature = "scp03-rmac")]
     #[test]
     fn globalplatformpro_trace_emits_first_level11_response_mac() {
         let keys = Keys {
@@ -510,6 +583,110 @@ mod tests {
             session.response(&[0xa1, 0xa2, 0xa3], 0x9000).unwrap(),
             hex::<13>(&vector.secured_response)
         );
+    }
+
+    #[cfg(feature = "scp03-renc")]
+    #[test]
+    fn level33_encrypts_response_data_and_macs_the_ciphertext() {
+        let keys = Keys {
+            enc: [0x11; 16],
+            mac: [0x22; 16],
+        };
+        let (mut session, _) = Session::initiate(&keys, [0x31; 8], [0x42; 8]);
+        session.active = true;
+        session.level = 0x33;
+        session.counter = 7;
+        let plaintext = b"secret response";
+
+        let response = session.response(plaintext, 0x9000).unwrap();
+
+        // Ciphered data, then the R-MAC, then the status word.
+        let body_len = crate::crypto::cbc_encrypted_len(plaintext.len()).unwrap();
+        assert_eq!(response.len(), body_len + MAC_BYTES + 2);
+        let body = &response[..body_len];
+        assert_eq!(&response[response.len() - 2..], &[0x90, 0x00]);
+        assert_ne!(body, &plaintext[..], "response data must not travel in clear");
+        assert_eq!(body_len % 16, 0, "ciphertext is whole blocks");
+
+        // The R-MAC covers the ciphertext, not the plaintext, SCP03 §6.2.7.
+        let expected = crate::crypto::cmac_parts(
+            &session.rmac,
+            &[&session.chain, body, &0x9000u16.to_be_bytes()],
+        );
+        assert_eq!(
+            &response[body_len..body_len + MAC_BYTES],
+            &expected[..MAC_BYTES]
+        );
+
+        // The response ICV is the command counter block with the top byte set, so
+        // decrypting with that recipe recovers the plaintext.
+        let mut iv = [0; 16];
+        iv[0] = 0x80;
+        iv[12..].copy_from_slice(&7u32.to_be_bytes());
+        let iv = crate::crypto::block(&session.enc, iv);
+        let mut recovered = alloc::vec![0; body_len];
+        let written =
+            crate::crypto::decrypt_into(&session.enc, iv, body, &mut recovered).unwrap();
+        assert_eq!(&recovered[..written], plaintext);
+
+        // A command ICV would use a zero top byte, so it must not decrypt this.
+        let mut command_iv = [0; 16];
+        command_iv[12..].copy_from_slice(&7u32.to_be_bytes());
+        let command_iv = crate::crypto::block(&session.enc, command_iv);
+        assert_ne!(command_iv, iv, "response and command ICVs differ");
+    }
+
+    #[cfg(feature = "scp03-renc")]
+    #[test]
+    fn level33_leaves_empty_and_error_responses_unencrypted() {
+        let keys = Keys {
+            enc: [0x11; 16],
+            mac: [0x22; 16],
+        };
+        let (mut session, _) = Session::initiate(&keys, [0x31; 8], [0x42; 8]);
+        session.active = true;
+        session.level = 0x33;
+
+        // No data field means no encryption, only integrity, SCP03 §6.2.7.
+        let empty = session.response(&[], 0x9000).unwrap();
+        assert_eq!(empty.len(), MAC_BYTES + 2);
+        assert_eq!(&empty[empty.len() - 2..], &[0x90, 0x00]);
+
+        // An error status word carries neither a MAC nor encryption, SCP03 §6.2.5.
+        let error = session.response(&[], 0x6a88).unwrap();
+        assert_eq!(error, alloc::vec![0x6a, 0x88]);
+        let error_with_data = session.response(b"ignored", 0x6982).unwrap();
+        assert_eq!(error_with_data, alloc::vec![0x69, 0x82]);
+    }
+
+    #[test]
+    fn advertised_modes_match_the_capabilities_this_build_has() {
+        // The i parameter and the accepted security levels are both derived from the
+        // feature set. This pins the two together so a build can never advertise a mode
+        // it cannot apply, which would leave a host protected less than it asked for.
+        let rmac = cfg!(feature = "scp03-rmac");
+        let renc = cfg!(feature = "scp03-renc");
+        assert_eq!(SCP03_I & 0x20 != 0, rmac, "i R-MAC bit tracks the feature");
+        assert_eq!(SCP03_I & 0x40 != 0, renc, "i R-ENCRYPTION bit tracks the feature");
+        assert_eq!(SCP03_I & 0x01 != 0, S16, "i S16 bit tracks the feature");
+        assert_eq!(
+            SCP03_I & 0x10 != 0,
+            cfg!(feature = "scp03-pseudo-random"),
+            "i pseudo-random bit tracks the feature"
+        );
+        assert_eq!(SUPPORTED_SECURITY_LEVEL & 0x10 != 0, rmac);
+        assert_eq!(SUPPORTED_SECURITY_LEVEL & 0x20 != 0, renc);
+        // Command integrity and confidentiality are not optional.
+        assert_eq!(SUPPORTED_SECURITY_LEVEL & 0x03, 0x03);
+        // Table 5-1 reserves b7 b6 = 10, so response encryption always carries R-MAC.
+        assert!(!renc || rmac, "R-ENCRYPTION without R-MAC is a reserved encoding");
+        const { assert!(SCP03_I & 0x40 == 0 || SCP03_I & 0x20 != 0) };
+        // Widths follow S16 together, never independently.
+        assert_eq!(CHALLENGE_BYTES, if S16 { 16 } else { 8 });
+        assert_eq!(MAC_BYTES, if S16 { 16 } else { 8 });
+        assert_eq!(CRYPTOGRAM_BITS, if S16 { 128 } else { 64 });
+        // Every RFU bit stays clear.
+        assert_eq!(SCP03_I & 0x8e, 0, "RFU and reserved i bits stay zero");
     }
 
     #[test]

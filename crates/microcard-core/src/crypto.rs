@@ -269,7 +269,7 @@ pub fn block(key: &[u8; 16], mut b: [u8; 16]) -> [u8; 16] {
     Aes128::new(key.into()).encrypt_block((&mut b).into());
     b
 }
-fn cbc_encrypted_len(input_len: usize) -> Result<usize> {
+pub(crate) fn cbc_encrypted_len(input_len: usize) -> Result<usize> {
     input_len
         .checked_div(16)
         .and_then(|blocks| blocks.checked_add(1))

@@ -108,7 +108,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
             r.try_reserve_exact(31).map_err(|_| Error::Quota)?;
             r.resize(10, 0);
             // SCP03 1.1.2 Table 5-1: random challenge, R-MAC, no R-ENC.
-            r.extend([1, 3, 0x20]);
+            r.extend([1, 3, crate::scp03::SCP03_I]);
             r.extend(challenge);
             r.extend(crypt);
             r.extend([0x90, 0]);

@@ -9,12 +9,12 @@ pub const ISD_AID: [u8; 8] = [0xa0, 0x00, 0x00, 0x01, 0x51, 0x00, 0x00, 0x00];
 pub const MAX_AID_BYTES: usize = 16;
 const SSD_PACKAGE_AID: &[u8] = &[0xa0, 0x00, 0x00, 0x01, 0x51, 0x53, 0x50];
 const SSD_MODULE_AID: &[u8] = &[0xa0, 0x00, 0x00, 0x01, 0x51, 0x53, 0x50, 0x41];
-// GP 2.3.1 Appendix H, format 1. The final OID announces SCP03 i=20:
-// random S8 challenge, R-MAC support, and no response encryption.
+// GP 2.3.1 Appendix H, format 1. The final OID announces the SCP03 i parameter this
+// build implements, so the advertisement follows the enabled capabilities.
 const RECOGNITION_DATA: [u8; 38] = [
     0x73, 0x24, 0x06, 0x07, 0x2a, 0x86, 0x48, 0x86, 0xfc, 0x6b, 0x01, 0x60, 0x0c, 0x06, 0x0a, 0x2a,
     0x86, 0x48, 0x86, 0xfc, 0x6b, 0x02, 0x02, 0x03, 0x01, 0x64, 0x0b, 0x06, 0x09, 0x2a, 0x86, 0x48,
-    0x86, 0xfc, 0x6b, 0x04, 0x03, 0x20,
+    0x86, 0xfc, 0x6b, 0x04, 0x03, crate::scp03::SCP03_I,
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,7 +135,7 @@ pub(crate) fn ssd_install_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Resu
         || privileges.len() > 3
         || privileges[0] != 0x80
         || privileges[1..].iter().any(|byte| *byte != 0)
-        || !matches!(parameters, [0xc9, 0] | [0xc9, 4, 0x81, 2, 3, 0x20])
+        || !matches!(parameters, [0xc9, 0] | [0xc9, 4, 0x81, 2, 3, crate::scp03::SCP03_I])
         || !install_token.is_empty()
     {
         return Err(Error::Format);
@@ -338,13 +338,26 @@ mod tests {
     }
 
     #[test]
-    fn recognition_data_announces_gp_231_and_scp03_i20() {
+    fn recognition_data_announces_gp_231_and_the_implemented_scp03_modes() {
         let data = card_recognition_data().unwrap();
         assert_eq!(&data[..4], &[0x66, 38, 0x73, 36]);
         assert!(data.windows(12).any(|value| {
             value == [0x06, 0x0a, 0x2a, 0x86, 0x48, 0x86, 0xfc, 0x6b, 2, 2, 3, 1]
         }));
-        assert!(data.ends_with(&[0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xfc, 0x6b, 4, 3, 0x20]));
+        // The announced i parameter follows the capabilities this build implements.
+        assert!(data.ends_with(&[
+            0x06,
+            0x09,
+            0x2a,
+            0x86,
+            0x48,
+            0x86,
+            0xfc,
+            0x6b,
+            4,
+            3,
+            crate::scp03::SCP03_I
+        ]));
     }
 
     #[test]
@@ -365,7 +378,7 @@ mod tests {
             SSD_MODULE_AID,
             &aid,
             &[0x80],
-            &[0xc9, 4, 0x81, 2, 3, 0x20],
+            &[0xc9, 4, 0x81, 2, 3, crate::scp03::SCP03_I],
         ] {
             data.push(value.len() as u8);
             data.extend_from_slice(value);
