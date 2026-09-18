@@ -37,6 +37,10 @@ jobs:
         run: python scripts/check.py
       - name: Wallet acceptance
         run: python scripts/wallet_acceptance.py
+      - name: Java Card applet acceptance
+        run: |
+          cargo build --locked
+          python scripts/piv_vector_acceptance.py
       - name: Rust lint
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: nRF52840 release link
