@@ -1,0 +1,91 @@
+{
+  "description": "PIV commands answered by OpenFIPS201 on a blank card, replayed through the Java Card engine.",
+  "load_file": "openfips201-standard-cs2.lfdb",
+  "note": "These run as one ordered session against one freshly installed card. The VERIFY cases depend on the retry counter left by the case before them, so the order is part of the fixture.",
+  "exchanges": [
+    {
+      "description": "SELECT the PIV application by its full applet AID",
+      "command": "00A404000BA00000030800001000010000",
+      "sw": "9000",
+      "source": "NIST SD33 card 02 capture, contact interface",
+      "why": "The applet registered this AID during install and its own select method agreed to become current."
+    },
+    {
+      "description": "GET DATA for the Discovery Object",
+      "command": "00CB3FFF035C017E00",
+      "sw": "6A82",
+      "source": "NIST SD33 card 02 capture, contact interface",
+      "why": "SP 800-73-4 part 2. A card holding no such object answers referenced data not found. The captured card answered 9000 because it was personalised."
+    },
+    {
+      "description": "GET DATA for the Card Capability Container",
+      "command": "00CB3FFF055C035FC10700",
+      "sw": "6A82",
+      "source": "SP 800-73-4 part 1 table 3, object 5FC107",
+      "why": "Absent on a blank card."
+    },
+    {
+      "description": "GET DATA for the Card Holder Unique Identifier",
+      "command": "00CB3FFF055C035FC10200",
+      "sw": "6A82",
+      "source": "SP 800-73-4 part 1 table 3, object 5FC102",
+      "why": "Absent on a blank card."
+    },
+    {
+      "description": "GET DATA for the PIV Authentication Certificate",
+      "command": "00CB3FFF055C035FC10500",
+      "sw": "6A82",
+      "source": "SP 800-73-4 part 1 table 3, object 5FC105",
+      "why": "Absent on a blank card."
+    },
+    {
+      "description": "GET DATA for the Secure Messaging Certificate Signer",
+      "command": "00CB3FFF055C035FC12200",
+      "sw": "6A82",
+      "source": "NIST SD33 card 02 capture, contact interface",
+      "why": "Absent on a blank card. The captured card answered 9000."
+    },
+    {
+      "description": "GET DATA naming an object the card does not define",
+      "command": "00CB3FFF055C035FC1FF00",
+      "sw": "6A82",
+      "source": "original, SP 800-73-4 part 2 section 3.1.2",
+      "why": "An unknown object identifier is still a well formed request for something absent."
+    },
+    {
+      "description": "GET DATA whose data field is not a 5C tag list",
+      "command": "00CB3FFF03FF017E00",
+      "sw": "6A80",
+      "source": "original, SP 800-73-4 part 2 section 3.1.2",
+      "why": "The data field must be a 5C tag list, so a different tag is an incorrect parameter in the data field. This case separates a malformed request from an absent object."
+    },
+    {
+      "description": "VERIFY the PIV application PIN with a wrong value",
+      "command": "0020008008313233343536FFFF",
+      "sw": "63C9",
+      "source": "SP 800-73-4 part 2 section 3.2.1, padded to eight bytes",
+      "why": "A wrong PIN answers with the number of tries that remain. Nine remain after one failure."
+    },
+    {
+      "description": "VERIFY the PIV application PIN with a second wrong value",
+      "command": "0020008008393939393939FFFF",
+      "sw": "63C8",
+      "source": "SP 800-73-4 part 2 section 3.2.1, padded to eight bytes",
+      "why": "The counter goes down again and stays down, which is the applet's own OwnerPIN state surviving from one command to the next."
+    },
+    {
+      "description": "VERIFY naming a key reference the card does not hold",
+      "command": "002000FF08313233343536FFFF",
+      "sw": "6A88",
+      "source": "original, SP 800-73-4 part 2 section 3.2.1",
+      "why": "Referenced data or reference data not found, for a key reference outside the set the applet defines."
+    },
+    {
+      "description": "A command the applet does not implement",
+      "command": "00FE000000",
+      "sw": "6D00",
+      "source": "original, ISO 7816-4",
+      "why": "Instruction not supported or invalid, which proves the applet reached its own dispatch rather than the engine failing first."
+    }
+  ]
+}

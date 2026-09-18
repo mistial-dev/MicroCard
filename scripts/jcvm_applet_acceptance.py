@@ -4,9 +4,10 @@
 This is the acceptance run for the Java Card engine. It installs a package, selects it and
 sends PIV commands, and checks the applet's own answers rather than the engine's.
 
-A Load File Data Block is a third-party build output and stays out of this repository, so
-the path is given on the command line and the script refuses to guess one. Produce a block
-with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
+One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, and
+this runs against it when no path is given. Its provenance and license are recorded in the
+README beside it. Pass a path to drive a different build. Produce one with
+`scripts/jcvm_cap_inventory.py <cap> --load-file <out>`.
 """
 import argparse
 import pathlib
@@ -14,6 +15,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SIM = ROOT / "target/debug/microcard-sim"
+COMMITTED = ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
 
 # The PIV applet AID, NIST SP 800-73-4.
 SELECT = "00a4040009a00000030800001000"
@@ -37,8 +39,8 @@ def exchange(load_file: pathlib.Path, commands: list[str]) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("load_file", type=pathlib.Path,
-                        help="a Load File Data Block, as delivered by GlobalPlatform")
+    parser.add_argument("load_file", type=pathlib.Path, nargs="?", default=COMMITTED,
+                        help="a Load File Data Block, defaulting to the committed one")
     arguments = parser.parse_args()
     if not arguments.load_file.is_file():
         raise SystemExit(f"No load file at {arguments.load_file}")
