@@ -22,6 +22,11 @@ pub struct ClassSpec {
     pub public: Vec<u16>,
     /// The same for the package-visible namespace.
     pub package: Vec<u16>,
+    /// Build an interface rather than a class. An interface carries no method table.
+    pub interface: bool,
+    /// Interfaces this class implements, each a class offset and the virtual method token
+    /// its interface tokens map to, in interface token order.
+    pub implements: Vec<(u16, Vec<u8>)>,
 }
 
 impl Default for ClassSpec {
@@ -31,6 +36,8 @@ impl Default for ClassSpec {
             declared_size: 0,
             public: Vec::new(),
             package: Vec::new(),
+            interface: false,
+            implements: Vec::new(),
         }
     }
 }
@@ -107,7 +114,16 @@ impl Package {
         let mut at = 0u16;
         for spec in &self.classes {
             offsets.push(at);
-            at += 10 + 2 * (spec.public.len() + spec.package.len()) as u16;
+            at += if spec.interface {
+                1
+            } else {
+                10 + 2 * (spec.public.len() + spec.package.len()) as u16
+                    + spec
+                        .implements
+                        .iter()
+                        .map(|(_, tokens)| 3 + tokens.len() as u16)
+                        .sum::<u16>()
+            };
         }
         offsets
     }
@@ -144,7 +160,12 @@ impl Package {
 
         let mut class = Vec::new();
         for spec in &self.classes {
-            class.push(0x00);
+            if spec.interface {
+                // ACC_INTERFACE with no superinterfaces.
+                class.push(0x80);
+                continue;
+            }
+            class.push(spec.implements.len() as u8);
             class.extend_from_slice(&spec.super_class.to_be_bytes());
             class.extend_from_slice(&[spec.declared_size, 0, 0, 0]);
             class.push(spec.public.len() as u8);
@@ -152,6 +173,11 @@ impl Package {
             class.push(spec.package.len() as u8);
             for offset in spec.public.iter().chain(&spec.package) {
                 class.extend_from_slice(&offset.to_be_bytes());
+            }
+            for (interface, tokens) in &spec.implements {
+                class.extend_from_slice(&interface.to_be_bytes());
+                class.push(tokens.len() as u8);
+                class.extend_from_slice(tokens);
             }
         }
         let imports = vec![0u8];

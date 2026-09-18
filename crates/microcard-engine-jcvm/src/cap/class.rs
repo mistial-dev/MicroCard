@@ -57,6 +57,10 @@ pub struct ClassInfo<'a> {
     public_methods: &'a [u8],
     /// Method component offsets of the package virtual methods, in token order.
     package_methods: &'a [u8],
+    /// The implemented interface table, each entry a class reference, a count and that
+    /// many virtual method tokens.
+    interfaces: &'a [u8],
+    interface_count: u8,
     /// Total size of this entry, which is where the next one starts.
     length: usize,
 }
@@ -70,6 +74,26 @@ impl<'a> ClassInfo<'a> {
     /// The package-visible virtual method table, which is a separate namespace.
     pub fn package_methods(&self) -> &'a [u8] {
         self.package_methods
+    }
+
+    /// The interfaces this class implements, with the mapping each one needs.
+    ///
+    /// An interface method token indexes the mapping, and what it finds is a virtual
+    /// method token in this class's own hierarchy, JCVM §6.9.2.5. That is the whole of
+    /// interface dispatch: one table lookup to change namespace, then an ordinary virtual
+    /// method search.
+    pub fn interfaces(&self) -> impl Iterator<Item = (ClassRef, &'a [u8])> + use<'a> {
+        let mut rest = self.interfaces;
+        (0..self.interface_count).filter_map(move |_| {
+            let head = rest.get(..3)?;
+            let count = head[2] as usize;
+            let tokens = rest.get(3..3 + count)?;
+            rest = &rest[3 + count..];
+            Some((
+                ClassRef::decode(u16::from_be_bytes([head[0], head[1]])),
+                tokens,
+            ))
+        })
     }
 
     pub fn is_interface(&self) -> bool {
@@ -176,6 +200,8 @@ impl<'a> Class<'a> {
                 package_method_table_base: 0,
                 public_methods: &[],
                 package_methods: &[],
+                interfaces: &[],
+                interface_count: 0,
                 length: end - at,
             });
         }
@@ -214,6 +240,8 @@ impl<'a> Class<'a> {
             package_method_table_base: fixed[8],
             public_methods,
             package_methods,
+            interfaces: info.get(interfaces_start..end).ok_or(Error::Bounds)?,
+            interface_count: interface_count as u8,
             length: end - at,
         })
     }

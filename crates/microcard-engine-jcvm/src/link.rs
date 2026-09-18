@@ -177,6 +177,34 @@ impl<'a> Linked<'a> {
         }
     }
 
+    /// Resolve an interface method on a receiver's class, JCVM §7.5.54.1.
+    ///
+    /// An interface method token is numbered within the interface, so it means nothing in
+    /// the class. The class carries one mapping per interface it implements, and the token
+    /// indexes that mapping to get a virtual method token in the class's own hierarchy.
+    /// The search then proceeds as any virtual call does.
+    ///
+    /// A class inherits the interfaces its superclasses implement, so the mapping is
+    /// looked for up the chain rather than on the receiver's class alone.
+    pub fn interface_method(&self, interface: u16, token: u8, class: u16) -> Result<u16> {
+        let mut at = ClassRef::Internal(class);
+        for _ in 0..=u8::MAX {
+            let ClassRef::Internal(offset) = at else {
+                return Err(Error::Missing);
+            };
+            let info = self.classes.at(offset)?;
+            for (implemented, tokens) in info.interfaces() {
+                if implemented != ClassRef::Internal(interface) {
+                    continue;
+                }
+                let virtual_token = *tokens.get(token as usize).ok_or(Error::Bounds)?;
+                return self.lookup(class, virtual_token);
+            }
+            at = info.super_class;
+        }
+        Err(Error::Missing)
+    }
+
     /// Walk the class chain for the body of a virtual method token.
     pub fn lookup(&self, class: u16, token: u8) -> Result<u16> {
         let private = token & PRIVATE_TOKEN != 0;

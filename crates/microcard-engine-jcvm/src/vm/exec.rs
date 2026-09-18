@@ -183,6 +183,7 @@ mod op {
     pub const INVOKEVIRTUAL: u8 = 139;
     pub const INVOKESPECIAL: u8 = 140;
     pub const INVOKESTATIC: u8 = 141;
+    pub const INVOKEINTERFACE: u8 = 142;
     pub const NEW: u8 = 143;
     pub const NEWARRAY: u8 = 144;
     pub const ATHROW: u8 = 147;
@@ -883,6 +884,29 @@ pub fn run_body(
                     }
                 }
             }
+            op::INVOKEINTERFACE => {
+                // The argument count is an operand here rather than something to look up,
+                // because the interface says nothing about which class will answer.
+                let nargs = byte(code, pc + 1)?;
+                let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
+                let token = byte(code, pc + 4)?;
+                let interface = machine.linked.class_ref(index)?;
+                let below = (nargs as usize).checked_sub(1).ok_or(Error::Type)?;
+                let receiver = frame.peek_reference(below)?;
+                let info = machine.heap.check_access(receiver, machine.context)?;
+                let method = machine
+                    .linked
+                    .interface_method(interface, token, info.class)?;
+                if let Some(exception) = invoke(machine, method, frame, arena, budget)? {
+                    match find_handler(machine, body, code.len(), pc, exception)? {
+                        Some(target) => {
+                            enter_handler(frame, exception)?;
+                            next = target;
+                        }
+                        None => return Ok(Outcome::Thrown(exception)),
+                    }
+                }
+            }
             op::ATHROW => {
                 let exception = frame.pop_reference()?;
                 // Throwing null is itself a null dereference, JCVM §7.5.
@@ -1290,11 +1314,59 @@ mod tests {
 
     #[test]
     fn an_instruction_this_loop_cannot_run_yet_says_so() {
-        // invokeinterface, which needs the interface method tables.
+        // checkcast, which needs the class hierarchy walk the cast rules describe.
         assert_eq!(
-            execute(&[op::ACONST_NULL, 0x8e, 1, 0, 0, 0, op::SRETURN], 1),
+            execute(&[op::ACONST_NULL, 0x94, 0, 0, 0, op::SRETURN], 1),
             Err(Error::Unsupported)
         );
+    }
+
+    #[test]
+    fn an_interface_call_changes_namespace_and_then_dispatches() {
+        use crate::cap::{CONSTANT_CLASSREF, CONSTANT_VIRTUAL_METHODREF};
+        use crate::test_support::ClassSpec;
+        // An interface with one method, and a class implementing it. The interface token
+        // is zero, and the class maps it to its own virtual token one, so a mapping that
+        // was ignored would call the wrong body.
+        let mut package = Package {
+            extra: vec![
+                (1, 0, vec![op::BSPUSH, 1, op::SRETURN]),
+                (1, 0, vec![op::BSPUSH, 2, op::SRETURN]),
+            ],
+            code: vec![
+                op::NEW, 0x00, 0x01, op::ASTORE_0,
+                op::ALOAD_0, op::INVOKEINTERFACE, 1, 0x00, 0x00, 0x00, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 2,
+            ..Package::default()
+        };
+        let bodies = package.extra_offsets();
+        package.classes = vec![
+            // The interface itself, which carries no method table.
+            ClassSpec {
+                interface: true,
+                ..ClassSpec::default()
+            },
+            ClassSpec {
+                public: vec![bodies[0], bodies[1]],
+                implements: vec![(0, vec![1])],
+                ..ClassSpec::default()
+            },
+        ];
+        let offsets = package.class_offsets();
+        package.constants = vec![
+            [CONSTANT_CLASSREF, 0x00, offsets[0] as u8, 0],
+            [
+                CONSTANT_CLASSREF,
+                (offsets[1] >> 8) as u8,
+                offsets[1] as u8,
+                0,
+            ],
+            [CONSTANT_VIRTUAL_METHODREF, 0x00, offsets[1] as u8, 0],
+        ];
+        assert_eq!(execute_package(&package).unwrap(), Outcome::Short(2));
     }
 
     #[test]
