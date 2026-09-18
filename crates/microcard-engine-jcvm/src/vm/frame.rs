@@ -213,6 +213,11 @@ impl<'a> Frame<'a> {
         Ok(())
     }
 
+    /// Drop everything on the operand stack, which is what entering a handler does.
+    pub fn clear_stack(&mut self) {
+        self.depth = 0;
+    }
+
     /// Discard the top `count` words.
     pub fn pop_words(&mut self, count: usize) -> Result<()> {
         if count > self.depth {

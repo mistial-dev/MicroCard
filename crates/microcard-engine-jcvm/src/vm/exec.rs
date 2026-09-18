@@ -22,6 +22,8 @@ pub enum Outcome {
     Short(i16),
     Int(i32),
     Reference(Reference),
+    /// It threw, and no handler in that method caught it. The caller searches next.
+    Thrown(Reference),
 }
 
 /// How deep one command may nest invocations.
@@ -183,6 +185,7 @@ mod op {
     pub const INVOKESTATIC: u8 = 141;
     pub const NEW: u8 = 143;
     pub const NEWARRAY: u8 = 144;
+    pub const ATHROW: u8 = 147;
     pub const ARRAYLENGTH: u8 = 146;
     pub const GETFIELD_A_THIS: u8 = 169;
     pub const PUTFIELD_A_THIS: u8 = 173;
@@ -233,7 +236,7 @@ pub fn invoke(
     caller: &mut Frame,
     arena: &mut Arena,
     budget: &mut u32,
-) -> Result<()> {
+) -> Result<Option<Reference>> {
     if machine.depth >= MAX_DEPTH {
         return Err(Error::Quota);
     }
@@ -263,20 +266,86 @@ pub fn invoke(
         let value = caller.pop_raw()?;
         callee.store_raw(index, value)?;
     }
-    let code = bytes.get(at + header.length..).ok_or(Error::Bounds)?;
+    let body = at + header.length;
+    let code = bytes.get(body..).ok_or(Error::Bounds)?;
     let mut inner = Arena {
         words: rest_words,
         tags: rest_tags,
     };
     machine.depth += 1;
-    let outcome = run_with(machine, code, &mut callee, &mut inner, budget);
+    // The handler table records absolute offsets, so the callee has to know where its own
+    // body sits before it can find its own handlers.
+    let outcome = run_body(machine, code, body, &mut callee, &mut inner, budget);
     machine.depth -= 1;
     match outcome? {
-        Outcome::Void => Ok(()),
-        Outcome::Short(value) => caller.push_short(value),
-        Outcome::Int(value) => caller.push_int(value),
-        Outcome::Reference(value) => caller.push_reference(value),
+        Outcome::Void => Ok(None),
+        Outcome::Short(value) => caller.push_short(value).map(|()| None),
+        Outcome::Int(value) => caller.push_int(value).map(|()| None),
+        Outcome::Reference(value) => caller.push_reference(value).map(|()| None),
+        // Nothing in the callee caught it, so the caller searches its own handlers from
+        // wherever the call was made.
+        Outcome::Thrown(exception) => Ok(Some(exception)),
     }
+}
+
+/// Find the handler for an exception thrown at `pc`, JCVM §3.6 and §6.10.3.
+///
+/// Handlers are one flat table for the whole package, in order, and each carries a stop
+/// bit marking the last handler applicable to an active range. Honouring that bit is what
+/// makes the flat table behave like nested try blocks. Ignoring it lets an exception
+/// escape one scope too far and be caught by the wrong block, which is hard to see later.
+fn find_handler(
+    machine: &Machine,
+    body: usize,
+    code_len: usize,
+    pc: usize,
+    exception: Reference,
+) -> Result<Option<usize>> {
+    let at = (body + pc) as u16;
+    let class = machine.heap.info(exception)?.class;
+    for handler in machine.methods.handlers() {
+        if handler.covers(at) {
+            if catches(machine, handler.catch_type_index, class)? {
+                let target = handler.handler_offset as usize;
+                // A handler outside this method would run on the wrong frame.
+                if target < body || target - body >= code_len {
+                    return Err(Error::Bounds);
+                }
+                return Ok(Some(target - body));
+            }
+            // The last handler of this range. Nothing after it covers the same code, so
+            // the search stops here and the exception leaves the method.
+            if handler.stop {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Whether a handler's catch type matches the thrown class, following the chain up.
+fn catches(machine: &Machine, catch_type: u16, thrown: u16) -> Result<bool> {
+    // Zero catches everything, which is what a finally block compiles to.
+    if catch_type == 0 {
+        return Ok(true);
+    }
+    let wanted = match machine.linked.class_ref(catch_type) {
+        Ok(class) => class,
+        // A catch type in another package needs its export file to compare against.
+        Err(_) => return Ok(false),
+    };
+    let classes = machine.linked.classes();
+    let mut at = crate::cap::ClassRef::Internal(thrown);
+    for _ in 0..=u8::MAX {
+        let crate::cap::ClassRef::Internal(offset) = at else {
+            return Ok(false);
+        };
+        if offset == wanted {
+            return Ok(true);
+        }
+        at = classes.at(offset)?.super_class;
+    }
+    Ok(false)
 }
 
 /// Run a method body with no arena, which refuses any invocation it meets.
@@ -297,6 +366,21 @@ pub fn run(
 pub fn run_with(
     machine: &mut Machine,
     code: &[u8],
+    frame: &mut Frame,
+    arena: &mut Arena,
+    budget: &mut u32,
+) -> Result<Outcome> {
+    run_body(machine, code, 0, frame, arena, budget)
+}
+
+/// Run a method body that starts at `body` in the Method component.
+///
+/// The absolute offset is what the handler table records, so a method needs to know where
+/// it sits before it can find its own handlers.
+pub fn run_body(
+    machine: &mut Machine,
+    code: &[u8],
+    body: usize,
     frame: &mut Frame,
     arena: &mut Arena,
     budget: &mut u32,
@@ -761,7 +845,15 @@ pub fn run_with(
                     }
                     Err(error) => return Err(error),
                 };
-                invoke(machine, method, frame, arena, budget)?
+                if let Some(exception) = invoke(machine, method, frame, arena, budget)? {
+                    match find_handler(machine, body, code.len(), pc, exception)? {
+                        Some(target) => {
+                            enter_handler(frame, exception)?;
+                            next = target;
+                        }
+                        None => return Ok(Outcome::Thrown(exception)),
+                    }
+                }
             }
             op::INVOKEVIRTUAL => {
                 let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
@@ -781,7 +873,27 @@ pub fn run_with(
                 let receiver = frame.peek_reference(below)?;
                 let info = machine.heap.check_access(receiver, machine.context)?;
                 let method = machine.linked.lookup(info.class, token)?;
-                invoke(machine, method, frame, arena, budget)?
+                if let Some(exception) = invoke(machine, method, frame, arena, budget)? {
+                    match find_handler(machine, body, code.len(), pc, exception)? {
+                        Some(target) => {
+                            enter_handler(frame, exception)?;
+                            next = target;
+                        }
+                        None => return Ok(Outcome::Thrown(exception)),
+                    }
+                }
+            }
+            op::ATHROW => {
+                let exception = frame.pop_reference()?;
+                // Throwing null is itself a null dereference, JCVM §7.5.
+                machine.heap.info(exception)?;
+                match find_handler(machine, body, code.len(), pc, exception)? {
+                    Some(target) => {
+                        enter_handler(frame, exception)?;
+                        next = target;
+                    }
+                    None => return Ok(Outcome::Thrown(exception)),
+                }
             }
 
             op::RETURN => return Ok(Outcome::Void),
@@ -795,6 +907,15 @@ pub fn run_with(
         }
         pc = next;
     }
+}
+
+/// A handler starts with an empty stack holding only the exception, JCVM §3.6.
+///
+/// Whatever the try block had pushed is gone, which is why a handler cannot be entered by
+/// an ordinary branch and why the boundary map alone does not make one reachable.
+fn enter_handler(frame: &mut Frame, exception: Reference) -> Result<()> {
+    frame.clear_stack();
+    frame.push_reference(exception)
 }
 
 /// The constant pool index a field instruction names.
@@ -950,13 +1071,16 @@ mod tests {
         let mut outer_words = [0u16; 8];
         let mut outer_tags = [0u8; 1];
         let mut outer = Frame::new(&mut outer_words, &mut outer_tags, 0, 8)?;
-        invoke(
+        if let Some(exception) = invoke(
             &mut machine,
             package.install_offset(),
             &mut outer,
             &mut arena,
             &mut budget,
-        )?;
+        )? {
+            // Nothing caught it, which is what the runtime environment would see.
+            return Ok(Outcome::Thrown(exception));
+        }
         // What the method returned, read back off the frame that called it.
         Ok(match outer.depth() {
             0 => Outcome::Void,
@@ -1166,10 +1290,18 @@ mod tests {
 
     #[test]
     fn an_instruction_this_loop_cannot_run_yet_says_so() {
-        // athrow, which needs the handler search that is not built yet.
+        // invokeinterface, which needs the interface method tables.
         assert_eq!(
-            execute(&[op::ACONST_NULL, 0x93, op::SRETURN], 1),
+            execute(&[op::ACONST_NULL, 0x8e, 1, 0, 0, 0, op::SRETURN], 1),
             Err(Error::Unsupported)
+        );
+    }
+
+    #[test]
+    fn throwing_null_is_a_null_dereference_rather_than_a_throw() {
+        assert_eq!(
+            execute(&[op::ACONST_NULL, op::ATHROW, op::SRETURN], 1),
+            Err(Error::Null)
         );
     }
 
@@ -1373,6 +1505,119 @@ mod tests {
             here as u8,
         ]];
         assert_eq!(execute_package(&package), Err(Error::Quota));
+    }
+
+    /// A handler entry, with the offsets a built package puts things at.
+    fn handler(start: u16, length: u16, target: u16, catch: u16, stop: bool) -> [u8; 8] {
+        let bits = length | if stop { 0x8000 } else { 0 };
+        [
+            (start >> 8) as u8, start as u8,
+            (bits >> 8) as u8, bits as u8,
+            (target >> 8) as u8, target as u8,
+            (catch >> 8) as u8, catch as u8,
+        ]
+    }
+
+    #[test]
+    fn a_thrown_exception_lands_in_the_handler_that_covers_it() {
+        use crate::cap::{CONSTANT_CLASSREF, CONSTANT_STATIC_METHODREF};
+        use crate::test_support::ClassSpec;
+        // The callee throws. The caller has a handler over the call, so control arrives at
+        // the handler with the exception on an otherwise empty stack.
+        let mut package = Package {
+            classes: vec![ClassSpec::default()],
+            extra: vec![(0, 1, vec![op::NEW, 0x00, 0x00, op::ATHROW])],
+            code: vec![
+                // The call, then the handler at the end returning 7.
+                op::BSPUSH, 1, 0x8d, 0x00, 0x01, op::SRETURN,
+                op::POP, op::BSPUSH, 7, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 1,
+            ..Package::default()
+        };
+        let callee = package.extra_offsets()[0];
+        package.constants = vec![
+            [CONSTANT_CLASSREF, 0x00, 0x00, 0],
+            [CONSTANT_STATIC_METHODREF, 0x00, (callee >> 8) as u8, callee as u8],
+        ];
+        // Adding a handler moves every method along, so the try range and the call target
+        // are both computed after the table is in place.
+        package.handlers = vec![[0; 8]];
+        let callee = package.extra_offsets()[0];
+        package.constants[1] =
+            [CONSTANT_STATIC_METHODREF, 0x00, (callee >> 8) as u8, callee as u8];
+        // The try range covers the call, and the handler sits after the normal return.
+        let body = package.install_offset() + 2;
+        package.handlers = vec![handler(body, 6, body + 6, 0, true)];
+        assert_eq!(execute_package(&package).unwrap(), Outcome::Short(7));
+    }
+
+    #[test]
+    fn an_exception_no_handler_covers_leaves_the_method() {
+        use crate::cap::CONSTANT_CLASSREF;
+        use crate::test_support::ClassSpec;
+        let package = Package {
+            classes: vec![ClassSpec::default()],
+            constants: vec![[CONSTANT_CLASSREF, 0x00, 0x00, 0]],
+            code: vec![op::NEW, 0x00, 0x00, op::ATHROW],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        // It reaches the caller, which here is the test itself.
+        assert!(matches!(
+            execute_package(&package).unwrap(),
+            Outcome::Thrown(_)
+        ));
+    }
+
+    #[test]
+    fn the_stop_bit_keeps_an_exception_from_escaping_one_scope_too_far() {
+        use crate::cap::CONSTANT_CLASSREF;
+        use crate::test_support::ClassSpec;
+        // Two handlers over the same range. The first catches a class the exception is
+        // not, and carries the stop bit, so the second must never be reached even though
+        // it covers the same code and catches everything.
+        let other = 10u16;
+        let mut package = Package {
+            classes: vec![
+                ClassSpec::default(),
+                ClassSpec {
+                    super_class: 0xffff,
+                    ..ClassSpec::default()
+                },
+            ],
+            code: vec![
+                op::NEW, 0x00, 0x00, op::ATHROW,
+                op::POP, op::BSPUSH, 7, op::SRETURN,
+            ],
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 0,
+            ..Package::default()
+        };
+        // Two handlers in the table, so the method sits after both of them.
+        package.handlers = vec![[0; 8]; 2];
+        let body = package.install_offset() + 2;
+        // The first catches constant pool entry one, which names the other class, and
+        // carries the stop bit. The second catches everything and must stay unreachable.
+        package.handlers = vec![
+            handler(body, 4, body + 4, 1, true),
+            handler(body, 4, body + 4, 0, true),
+        ];
+        let second = package.class_offsets()[1];
+        assert_eq!(second, other);
+        package.constants = vec![
+            [CONSTANT_CLASSREF, 0x00, 0x00, 0],
+            [CONSTANT_CLASSREF, (second >> 8) as u8, second as u8, 0],
+        ];
+        assert!(matches!(
+            execute_package(&package).unwrap(),
+            Outcome::Thrown(_)
+        ));
     }
 
     #[test]
