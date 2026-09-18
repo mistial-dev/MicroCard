@@ -29,15 +29,18 @@ final class CardConnection implements AutoCloseable {
             session = GPSession.connect(new APDUBIBO(transport), new AID("A000000151000000"));
             var cardKeys = PlaintextKeys.fromKeys(Arrays.copyOfRange(keys, 0, 16),
                 Arrays.copyOfRange(keys, 16, 32), Arrays.copyOfRange(keys, 0, 16));
-            session.openSecureChannel(cardKeys, GPSecureChannelVersion.valueOf(3, 0x20), null,
-                EnumSet.of(GPSession.APDUMode.MAC, GPSession.APDUMode.ENC, GPSession.APDUMode.RMAC));
+            // The card advertises i=71, so open in S16 directly and take every protection
+            // it offers, including response encryption.
+            session.openSecureChannel(cardKeys, GPSecureChannelVersion.valueOf(3, 0x71), null,
+                EnumSet.of(GPSession.APDUMode.MAC, GPSession.APDUMode.ENC,
+                    GPSession.APDUMode.RMAC, GPSession.APDUMode.RENC));
         } catch (Exception error) { transport.close(); throw error; }
     }
 
     ResponseAPDU exchange(int ins, byte[] data) throws Exception {
         if (data.length > 200) throw new IllegalArgumentException("Command exceeds the wallet short-APDU bound");
         ResponseAPDU response = session.transmit(new CommandAPDU(0x80, ins, 0, 0, data));
-        if (trace) System.err.printf("SCP03/13 INS=%02X input=%d bytes [redacted] output=%d bytes SW=%04X%n",
+        if (trace) System.err.printf("SCP03/33 INS=%02X input=%d bytes [redacted] output=%d bytes SW=%04X%n",
             ins, data.length, response.getData().length, response.getSW());
         return response;
     }
