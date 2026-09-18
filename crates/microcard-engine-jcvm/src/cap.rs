@@ -6,10 +6,12 @@
 //! component is ever copied and a malformed length costs a refusal instead of an allocation.
 use crate::{Error, Result};
 
+mod applet;
 mod directory;
 mod header;
 mod import;
 
+pub use applet::{Applet, AppletRef};
 pub use directory::Directory;
 pub use header::Header;
 pub use import::{Import, PackageRef};
@@ -155,6 +157,11 @@ impl<'a> LoadFile<'a> {
 
     pub fn directory(&self) -> Result<Directory<'a>> {
         Directory::parse(self.directory.ok_or(Error::Format)?.info)
+    }
+
+    /// The applets this package declares. An applet package always has one.
+    pub fn applets(&self) -> Result<Applet<'a>> {
+        Applet::parse(self.component(Tag::Applet).ok_or(Error::Format)?.info)
     }
 
     /// The imports, or an empty table when the package borrows nothing.

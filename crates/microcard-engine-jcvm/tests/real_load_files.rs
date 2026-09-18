@@ -43,6 +43,13 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
         assert_eq!(header.package_aid.len(), 9);
         let directory = file.directory().expect("directory");
         assert_eq!(directory.applet_count, 1);
+        // The Directory count and the Applet component have to agree, and the AID is the
+        // one a PIV host selects.
+        let applets = file.applets().expect("applets");
+        assert_eq!(applets.count(), directory.applet_count as usize);
+        let applet = applets.iter().next().expect("one applet");
+        assert_eq!(applet.aid, &[0xa0, 0, 0, 3, 8, 0, 0, 0x10, 0, 1, 0]);
+        assert!(applets.find(applet.aid).is_some());
         assert_eq!(directory.import_count, 6);
         assert!(file.component(Tag::Method).is_some());
 
