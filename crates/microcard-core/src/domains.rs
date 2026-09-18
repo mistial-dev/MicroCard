@@ -2334,6 +2334,8 @@ struct GlobalPlatformLoad {
     hash: [u8; 32],
     total: Option<usize>,
     next_block: u16,
+    /// Which engine the block is for, decided from the first block's own bytes.
+    payload: Option<crate::globalplatform::Payload>,
 }
 
 pub struct Card<F: Flash, P: Platform, S: PackageStaging = RamStaging> {
@@ -2768,6 +2770,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 hash: request.hash,
                 total: None,
                 next_block: 0,
+                payload: None,
             });
             return fallible_filled(1, 0);
         }
@@ -2905,6 +2908,16 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         let chunk = if load.next_block == 0 {
             let (total, value) = crate::globalplatform::load_file_data(&command.data)?;
             load.total = Some(total);
+            // The first block is where a load file says which engine it belongs to, so the
+            // card decides once and from the bytes themselves.
+            let payload = crate::globalplatform::payload_kind(value)?;
+            if payload == crate::globalplatform::Payload::JavaCard {
+                // The Java Card engine runs a load file the simulator hands it directly.
+                // Nothing delivers one through GlobalPlatform yet, so refusing here keeps
+                // the card from staging bytes it has no way to activate.
+                return Err(Error::Unsupported);
+            }
+            load.payload = Some(payload);
             value
         } else {
             &command.data
@@ -5448,6 +5461,7 @@ mod tests {
             hash: [7; 32],
             total: Some(1),
             next_block: 1,
+            payload: Some(crate::globalplatform::Payload::Mp03),
         });
         reopened.staging.bytes.push(0xaa);
         let delete = Verified {
@@ -5590,6 +5604,64 @@ mod tests {
             owned.state.domains["payments"].instances["F04D430001"].as_ref(),
             "Wallet"
         );
+    }
+
+    #[test]
+    fn a_java_card_load_file_is_recognised_and_refused_before_anything_is_staged() {
+        let mut owned = card();
+        create(&mut owned, "payments");
+        // The first bytes of a Java Card load file, JCVM §6.3. The Header component leads,
+        // carrying the magic that tells the two payload formats apart.
+        let mut package = alloc::vec![0x01, 0x00, 0x13, 0xde, 0xca, 0xff, 0xed];
+        package.extend_from_slice(&[0x01, 0x02, 0x04, 0x0a, 0x01, 0x09]);
+        let hash = owned.platform.sha256(&package).unwrap();
+        let load_aid = RegistryAid::synthetic(0x4c, &hash);
+        let domain_aid = owned.state.domains["payments"].registry_aid;
+        let mut request = Vec::new();
+        for value in [
+            load_aid.as_slice(),
+            domain_aid.as_slice(),
+            &hash[..],
+            &[] as &[u8],
+            &[],
+        ] {
+            request.push(value.len() as u8);
+            request.extend_from_slice(value);
+        }
+        owned
+            .manage_globalplatform(Verified {
+                level: 0x13,
+                command: Command {
+                    cla: 0x80,
+                    ins: 0xe6,
+                    p1: 0x02,
+                    p2: 0,
+                    data: request.into(),
+                    le: None,
+                },
+            })
+            .unwrap();
+
+        // A short definite length, because this block is the whole load file.
+        let mut load_file = alloc::vec![0xc4, package.len() as u8];
+        load_file.extend_from_slice(&package);
+        assert_eq!(
+            owned.manage_globalplatform(Verified {
+                level: 0x13,
+                command: Command {
+                    cla: 0x80,
+                    ins: 0xe8,
+                    p1: 0x80,
+                    p2: 0,
+                    data: load_file.into(),
+                    le: None,
+                },
+            }),
+            Err(Error::Unsupported)
+        );
+        // The card refused before keeping any of it, so a later load starts clean.
+        assert!(owned.staging.is_empty());
+        assert!(owned.globalplatform_load.is_none());
     }
     // Explicit test-only signing seeds; never deployment keys.
     fn package(

@@ -247,6 +247,33 @@ pub(crate) fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
     Ok((length, &data[header..]))
 }
 
+/// Which engine a load file is for.
+///
+/// GlobalPlatform carries both kinds in the same `C4` block, so the card decides from the
+/// bytes rather than from anything the host declared. Both formats begin with a fixed
+/// magic, and the two cannot collide.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Payload {
+    /// A signed MP03 package for the CIL engine.
+    Mp03,
+    /// A Java Card package, whose load file leads with the Header component.
+    JavaCard,
+}
+
+/// Decide from the first bytes of a Load File Data Block which engine it belongs to.
+///
+/// A Java Card load file begins with the Header component, JCVM §6.3, which is the tag
+/// `0x01`, a two byte size and then the magic `DECAFFED`.
+pub(crate) fn payload_kind(value: &[u8]) -> Result<Payload> {
+    if value.starts_with(b"MP03") {
+        return Ok(Payload::Mp03);
+    }
+    if value.len() >= 7 && value[0] == 0x01 && value[3..7] == [0xde, 0xca, 0xff, 0xed] {
+        return Ok(Payload::JavaCard);
+    }
+    Err(Error::Format)
+}
+
 pub(crate) fn delete_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Result<&'a [u8]> {
     if command.ins != 0xe4 || command.p1 != 0 || !matches!(command.p2, 0 | 0x80) {
         return Err(Error::Format);
@@ -453,5 +480,20 @@ mod tests {
         assert_eq!(load_file_data(&[0xc4, 0x7f]).unwrap(), (127, &[][..]));
         assert_eq!(load_file_data(&[0xc4, 0x81, 0x7f]), Err(Error::Format));
         assert_eq!(load_file_data(&[0xd4, 0]), Err(Error::Format));
+    }
+
+    #[test]
+    fn a_load_file_says_which_engine_it_is_for() {
+        assert_eq!(payload_kind(b"MP03rest"), Ok(Payload::Mp03));
+        // The first bytes of the committed OpenFIPS201 load file.
+        let header = [0x01, 0x00, 0x13, 0xde, 0xca, 0xff, 0xed, 0x01, 0x02];
+        assert_eq!(payload_kind(&header), Ok(Payload::JavaCard));
+        // A Header component tag carrying the wrong magic is neither.
+        let wrong = [0x01, 0x00, 0x13, 0xde, 0xad, 0xbe, 0xef];
+        assert_eq!(payload_kind(&wrong), Err(Error::Format));
+        // Too short to tell, so the card refuses rather than guessing.
+        assert_eq!(payload_kind(&[0x01, 0x00, 0x13, 0xde]), Err(Error::Format));
+        assert_eq!(payload_kind(b"MP0"), Err(Error::Format));
+        assert_eq!(payload_kind(&[]), Err(Error::Format));
     }
 }
