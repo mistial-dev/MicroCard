@@ -8,6 +8,8 @@ pub mod cap;
 pub mod code;
 pub mod link;
 #[allow(dead_code)]
+mod jcvm_api;
+#[allow(dead_code)]
 mod jcvm_opcodes;
 pub mod verify;
 pub mod vm;

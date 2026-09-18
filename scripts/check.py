@@ -21,6 +21,7 @@ def main():
  run('python3','scripts/generate_mc04_schema.py','--check')
  run('python3','scripts/generate_mc04_opcodes.py','--check')
  run('python3','scripts/generate_jcvm_opcodes.py','--check')
+ run('python3','scripts/generate_jcvm_api.py','--check')
  run('python3','scripts/jcvm_cap_inventory_test.py')
  run('python3','scripts/copy_audit.py')
  run('python3','scripts/profile_enforcement_audit.py')
