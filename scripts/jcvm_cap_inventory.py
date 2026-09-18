@@ -144,6 +144,9 @@ def main() -> None:
     parser.add_argument("paths", nargs="+", type=pathlib.Path,
                         help="CAP files, or directories searched for them")
     parser.add_argument("--json", action="store_true", help="emit the records as JSON")
+    parser.add_argument("--load-file", type=pathlib.Path,
+                        help="write each Load File Data Block into this directory, which is "
+                             "what GlobalPlatform delivers to the card")
     arguments = parser.parse_args()
     files = []
     for path in arguments.paths:
@@ -151,6 +154,14 @@ def main() -> None:
     if not files:
         raise SystemExit("No CAP file found at the given paths")
     records = [inventory(path) for path in files]
+    if arguments.load_file:
+        arguments.load_file.mkdir(parents=True, exist_ok=True)
+        for path, record in zip(files, records):
+            with zipfile.ZipFile(path) as archive:
+                found = components(archive)
+            block = b"".join(found[name] for name in LOAD_FILE_ORDER if name in found)
+            (arguments.load_file / f"{path.stem}.lfdb").write_bytes(block)
+            record["load_file"] = str(arguments.load_file / f"{path.stem}.lfdb")
     if arguments.json:
         json.dump(records, sys.stdout, indent=2)
         print()

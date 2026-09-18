@@ -356,6 +356,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "microcard-engine-jcvm"
+version = "0.1.0-wip"
+
+[[package]]
 name = "microcard-sim"
 version = "0.1.0-wip"
 dependencies = [

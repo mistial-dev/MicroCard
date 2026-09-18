@@ -1,6 +1,8 @@
 # Java Card profile
 
-The Java Card execution target this project commits to. Nothing here is implemented yet. The profile exists first so the loader, the verifier and the interpreter can each be judged against a written target instead of against each other.
+The Java Card execution target this project commits to. The profile exists first so the loader, the verifier and the interpreter can each be judged against a written target instead of against each other.
+
+Implemented so far: the CAP container in `crates/microcard-engine-jcvm`, which reads a Load File Data Block in place and refuses one that disagrees with itself. There is no verifier, linker or interpreter, and nothing on the card reaches that crate.
 
 Every number below was measured from the eight release variants of the OpenPhysical fork of OpenFIPS201, which is the applet this engine has to run. Where a limit comes from that applet rather than from the specification, the table says so.
 
@@ -63,7 +65,9 @@ The Load File Data Block is the components in the order of JCVM section 6.3, exc
 | fips CS2 with attestation | 50,054 | 40,112 |
 | fips CS7 with attestation | 50,313 | 40,224 |
 
-The first row is where the engine work starts. Reproduce this table with `scripts/jcvm_cap_inventory.py` against a directory of built CAP files.
+The first row is where the engine work starts. Reproduce this table with `scripts/jcvm_cap_inventory.py` against a directory of built CAP files. Adding `--load-file` to that command writes the blocks themselves, which is what the container parser is tested against through `MICROCARD_JCVM_LOAD_FILES`.
+
+One detail that only real packages show. The Directory records a size for the Descriptor component, and a Load File Data Block leaves that component behind, so the two disagree by design. A loader comparing the whole table against the block refuses every genuine package.
 
 ## Memory placement
 
