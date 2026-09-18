@@ -4,6 +4,8 @@
 //! a card bounds what one invocation can use before it starts rather than after.
 pub mod exec;
 pub mod frame;
+pub mod heap;
 
 pub use exec::{Outcome, run};
 pub use frame::{Frame, NULL, Reference};
+pub use heap::{Context, Heap, Info};

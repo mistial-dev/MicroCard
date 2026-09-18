@@ -34,6 +34,10 @@ pub enum Error {
     /// An arithmetic operation the language defines as a thrown exception, such as a
     /// division by zero.
     Arithmetic,
+    /// A null reference was used where an object was needed.
+    Null,
+    /// One context reached for another context's object.
+    Firewall,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
