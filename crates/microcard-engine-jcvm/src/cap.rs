@@ -13,6 +13,8 @@ mod directory;
 mod header;
 mod import;
 mod method;
+mod ref_location;
+mod static_field;
 
 pub use applet::{Applet, AppletRef};
 pub use class::{ACC_INTERFACE, ACC_REMOTE, ACC_SHAREABLE, Class, ClassInfo, ClassRef};
@@ -25,6 +27,10 @@ pub use directory::Directory;
 pub use header::{Header, MAGIC};
 pub use import::{Import, PackageRef};
 pub use method::{ACC_ABSTRACT, ACC_EXTENDED, Handler, Method, MethodHeader};
+pub use ref_location::RefLocation;
+pub use static_field::{
+    ArrayInit, StaticField, TYPE_BOOLEAN, TYPE_BYTE, TYPE_INT, TYPE_SHORT,
+};
 
 /// Component tags, JCVM §6.2. The tag doubles as the position in the Directory table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -180,6 +186,19 @@ impl<'a> LoadFile<'a> {
             self.component(Tag::Class).ok_or(Error::Format)?.info,
             &self.header()?,
         )
+    }
+
+    /// Where every constant pool index sits in the bytecode, or an empty pair of lists.
+    pub fn ref_locations(&self) -> Result<RefLocation<'a>> {
+        match self.component(Tag::RefLocation) {
+            Some(component) => RefLocation::parse(component.info),
+            None => RefLocation::parse(&[0, 0, 0, 0]),
+        }
+    }
+
+    /// The static field image description, which every static access indexes into.
+    pub fn static_fields(&self) -> Result<StaticField<'a>> {
+        StaticField::parse(self.component(Tag::StaticField).ok_or(Error::Format)?.info)
     }
 
     /// The constant pool, or an empty one when the package references nothing.

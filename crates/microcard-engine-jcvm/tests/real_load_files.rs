@@ -8,7 +8,9 @@
 //!
 //! Produce the blocks with `scripts/jcvm_cap_inventory.py <cap directory> --load-file <out>`.
 use microcard_engine_jcvm::cap::{LoadFile, MethodHeader, Tag};
-use microcard_engine_jcvm::code::{Boundaries, Limits, verify_targets};
+use microcard_engine_jcvm::code::instruction_length;
+use std::collections::BTreeSet;
+use microcard_engine_jcvm::code::{Boundaries, Limits, constant_pool_index, verify_targets};
 
 /// The six packages docs/JCVM_PROFILE.md commits to, with the versions it names.
 const PROFILE: [(&[u8], u8, u8); 6] = [
@@ -96,6 +98,19 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
         // is why the block is a third of the archive that carried it.
         assert!(file.component(Tag::Descriptor).is_none());
         assert!(file.component(Tag::Debug).is_none());
+        // The Directory and the Static Field component describe the same image, so they
+        // have to agree before anything allocates it.
+        let statics = file.static_fields().expect("static fields");
+        assert_eq!(statics.image_size, directory.image_size, "{}", path.display());
+        assert_eq!(
+            statics.array_init_count(),
+            directory.array_init_count as usize,
+            "{}",
+            path.display()
+        );
+        let initialised: usize = statics.array_inits().map(|array| array.values.len()).sum();
+        assert_eq!(initialised, directory.array_init_size as usize, "{}", path.display());
+
         // Every method the package declares, from the class method tables and the applet
         // install offsets. A method records no length, so the next offset is its bound.
         let classes = file.classes().expect("classes");
@@ -127,6 +142,25 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
         };
         let mut scratch = vec![0u8; 4096];
         let mut walked = 0;
+        let constants = file.constants().expect("constants");
+        // Offsets into the Method component where this walk found a constant pool index.
+        let mut named: BTreeSet<usize> = BTreeSet::new();
+        // A handler's catch type is a constant pool index too, and it sits in the handler
+        // table rather than in any method, so the lists cover it as well.
+        for (index, handler) in methods.handlers().enumerate() {
+            assert!(
+                (handler.catch_type_index as usize) < constants.count()
+                    || handler.catch_type_index == 0,
+                "{}: catch type {}",
+                path.display(),
+                handler.catch_type_index
+            );
+            // A zero catch type is a finally block, which names no class and so appears
+            // in no list.
+            if handler.catch_type_index != 0 {
+                named.insert(1 + index * 8 + 6);
+            }
+        }
         for (index, &offset) in offsets.iter().enumerate() {
             let end = offsets.get(index + 1).copied().unwrap_or(methods.bytes().len());
             let (method_header, code) = methods
@@ -152,9 +186,62 @@ fn every_supplied_load_file_parses_as_a_supported_package() {
                 .unwrap_or_else(|error| panic!("{}: decode at {offset} {error:?}", path.display()));
             verify_targets(code, &boundaries)
                 .unwrap_or_else(|error| panic!("{}: targets at {offset} {error:?}", path.display()));
+            // Every constant pool index this method names has to be in range, and every
+            // one has to be listed in the Reference Location component. Both directions are
+            // collected here and checked against that component once the walk is done.
+            let mut at = 0;
+            while at < code.len() {
+                if !boundaries.is_boundary(at) {
+                    at += 1;
+                    continue;
+                }
+                if let Some((operand, index)) = constant_pool_index(code, at).expect("index") {
+                    assert!(
+                        (index as usize) < constants.count(),
+                        "{}: pool index {index} of {}",
+                        path.display(),
+                        constants.count()
+                    );
+                    named.insert(body + operand);
+                }
+                at += instruction_length(code, at).expect("length");
+            }
+
             walked += 1;
         }
         assert!(walked > 100, "{}: walked {walked}", path.display());
+
+        // The Reference Location component lists every constant pool index in the bytecode.
+        // Nothing here rewrites those indices, so the lists are read as a claim and checked
+        // against what the decode found. A listed offset that is not the operand of an
+        // instruction taking a pool index means the two disagree about where the code is.
+        let locations = file.ref_locations().expect("ref locations");
+        let listed: BTreeSet<usize> = locations
+            .one_byte_indices()
+            .chain(locations.two_byte_indices())
+            .map(|offset| offset.expect("offset"))
+            .collect();
+        // The lists cover the whole component, including the methods nothing references
+        // and this walk therefore never decodes, so they hold offsets the decode does not
+        // account for. What has to hold is the other direction.
+        // Anything the decode reads as a pool index has to appear in the lists. A
+        // disagreement here means the decode and the component disagree about where the
+        // instructions are, which is the whole reason to check the lists rather than
+        // follow them.
+        let extra: Vec<usize> = named.difference(&listed).copied().take(5).collect();
+        assert!(
+            extra.is_empty(),
+            "{}: decoded pool indices not listed: {extra:?}",
+            path.display()
+        );
+        assert!(
+            listed.len() > named.len(),
+            "{}: {} listed against {} decoded",
+            path.display(),
+            listed.len(),
+            named.len()
+        );
+        assert!(listed.len() > 500, "{}: {} listed", path.display(), listed.len());
 
         parsed += 1;
     }

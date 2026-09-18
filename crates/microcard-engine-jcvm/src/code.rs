@@ -4,13 +4,24 @@
 //! every branch, switch and handler target against that map removes the entire class of
 //! attacks that jump into the middle of an instruction, where the operand bytes of one
 //! instruction become the opcode of another. It costs one pass and a bitmap.
-use crate::jcvm_opcodes::{BRANCH_WIDTH, DEFINED, FALLS_THROUGH, FIXED_LENGTH, INT_ONLY};
+use crate::jcvm_opcodes::{
+    BRANCH_WIDTH, CP_INDEX_OFFSET, CP_INDEX_WIDTH, DEFINED, FALLS_THROUGH, FIXED_LENGTH, INT_ONLY,
+};
 use crate::{Error, Result};
 
 /// `jsr` and `ret`, JCVM §7.5. Subroutines need their own dataflow analysis to verify, so
 /// they are measured like any other instruction and refused by policy until that lands.
 const JSR: u8 = 113;
 const RET: u8 = 114;
+
+/// `checkcast` and `instanceof`, whose first operand says whether the two bytes after it
+/// are a constant pool index at all.
+const CHECKCAST: u8 = 148;
+const INSTANCEOF: u8 = 149;
+
+/// Array type codes, JCVM Table 7-2. A primitive array is named by the code alone.
+const T_BOOLEAN: u8 = 10;
+const T_INT: u8 = 13;
 
 const STABLESWITCH: u8 = 115;
 const ITABLESWITCH: u8 = 116;
@@ -312,6 +323,38 @@ impl<'a> Boundaries<'a> {
     }
 }
 
+/// The constant pool entry the instruction at `at` names, if it names one.
+///
+/// The width and the position come from the instruction, so a local variable index is
+/// never mistaken for a pool index, and the two forms of the field instructions are told
+/// apart by their opcode instead of by their length.
+pub fn constant_pool_index(code: &[u8], at: usize) -> Result<Option<(usize, u16)>> {
+    let opcode = *code.get(at).ok_or(Error::Bounds)?;
+    let width = CP_INDEX_WIDTH[opcode as usize] as usize;
+    if width == 0 {
+        return Ok(None);
+    }
+    let offset = at + CP_INDEX_OFFSET[opcode as usize] as usize;
+    if opcode == CHECKCAST || opcode == INSTANCEOF {
+        // The type code decides whether these name a class at all, JCVM §7.5. For a
+        // primitive array the code is the whole type and the index bytes must be zero, so
+        // treating them as a pool index would resolve whatever entry zero happens to be.
+        let atype = *code.get(at + 1).ok_or(Error::Bounds)?;
+        if (T_BOOLEAN..=T_INT).contains(&atype) {
+            if word(code, offset)? != 0 {
+                return Err(Error::Format);
+            }
+            return Ok(None);
+        }
+    }
+    let index = if width == 1 {
+        *code.get(offset).ok_or(Error::Bounds)? as u16
+    } else {
+        word(code, offset)? as u16
+    };
+    Ok(Some((offset, index)))
+}
+
 /// An absolute target, checked against the method it has to stay inside.
 fn bounded(target: i64, length: usize) -> Result<usize> {
     if target < 0 || target as u64 >= length as u64 {
@@ -425,6 +468,50 @@ mod tests {
         // The short form of the same operation is available to every package.
         let sadd = opcode("sadd");
         assert_eq!(NO_INT.allows(sadd), Ok(()));
+    }
+
+    #[test]
+    fn a_primitive_array_cast_names_no_class() {
+        let checkcast = opcode("checkcast");
+        // atype zero is a plain class cast, so the two bytes are a pool index.
+        assert_eq!(
+            constant_pool_index(&[checkcast, 0, 0x01, 0x23], 0),
+            Ok(Some((2, 0x0123)))
+        );
+        // atype 14 is an array of references, which still names the element class.
+        assert_eq!(
+            constant_pool_index(&[checkcast, 14, 0x01, 0x23], 0),
+            Ok(Some((2, 0x0123)))
+        );
+        // atype 10 to 13 name a primitive array outright, and the index bytes are required
+        // to be zero. Reading them as an index would resolve whatever entry zero holds.
+        for atype in 10..=13u8 {
+            assert_eq!(constant_pool_index(&[checkcast, atype, 0, 0], 0), Ok(None));
+            assert_eq!(
+                constant_pool_index(&[checkcast, atype, 0, 1], 0),
+                Err(Error::Format),
+                "{atype}"
+            );
+        }
+        // instanceof carries the same operand and the same rule.
+        let instanceof = opcode("instanceof");
+        assert_eq!(constant_pool_index(&[instanceof, 11, 0, 0], 0), Ok(None));
+        assert_eq!(
+            constant_pool_index(&[instanceof, 0, 0, 7], 0),
+            Ok(Some((2, 7)))
+        );
+    }
+
+    #[test]
+    fn a_local_variable_index_is_not_a_constant_pool_index() {
+        // aload and getfield_a both carry one byte after the opcode. Only one of them is a
+        // pool index, and the opcode is what says which.
+        assert_eq!(constant_pool_index(&[opcode("aload"), 4], 0), Ok(None));
+        assert_eq!(
+            constant_pool_index(&[opcode("getfield_a"), 4], 0),
+            Ok(Some((1, 4)))
+        );
+        assert_eq!(constant_pool_index(&[opcode("nop")], 0), Ok(None));
     }
 
     #[test]

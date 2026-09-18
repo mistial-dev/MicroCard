@@ -65,6 +65,19 @@ def rust(schema: dict) -> str:
         *table(schema, lambda op: "true" if op["int_only"] else "false", "false", width=8),
         "];",
         "",
+        "/// Width in bytes of the constant pool index the instruction carries, or zero.",
+        "///",
+        "/// A local variable index is not one of these. Only the entries below name a",
+        "/// constant pool entry, which is what the Reference Location component lists.",
+        "pub const CP_INDEX_WIDTH: [u8; 256] = [",
+        *table(schema, lambda op: (op["constant_pool_index"] or {}).get("width", 0), 0),
+        "];",
+        "",
+        "/// Byte offset of that index inside the instruction.",
+        "pub const CP_INDEX_OFFSET: [u8; 256] = [",
+        *table(schema, lambda op: (op["constant_pool_index"] or {}).get("offset", 0), 0),
+        "];",
+        "",
         "/// Whether control continues to the instruction that follows this one.",
         "///",
         "/// False for the returns, athrow, the unconditional jumps and the switches. A",
@@ -107,8 +120,8 @@ def markdown(schema: dict) -> str:
         "appear in a CAP file. A variable-length entry has no size here because its size "
         "depends on its operands.",
         "",
-        "| Opcode | Mnemonic | Operands | Bytes | Needs int | Branch width | Falls through |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Opcode | Mnemonic | Operands | Bytes | Needs int | Branch width | Falls through | Pool index |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for opcode in schema["opcodes"]:
         operands = ", ".join(opcode["operands"]) or "none"
@@ -116,7 +129,9 @@ def markdown(schema: dict) -> str:
         needs = "yes" if opcode["int_only"] else "no"
         branch = branch_width(opcode) or ""
         through = "yes" if opcode["falls_through"] else "no"
-        lines.append(f"| `{opcode['value']:#04x}` | `{opcode['name']}` | {operands} | {length} | {needs} | {branch} | {through} |")
+        pool = opcode["constant_pool_index"]
+        pool = f"{pool['width']} at {pool['offset']}" if pool else ""
+        lines.append(f"| `{opcode['value']:#04x}` | `{opcode['name']}` | {operands} | {length} | {needs} | {branch} | {through} | {pool} |")
     lines += ["", "| Opcode | Reserved mnemonic |", "| --- | --- |"]
     for reserved in schema["reserved"]:
         lines.append(f"| `{reserved['value']:#04x}` | `{reserved['name']}` |")
