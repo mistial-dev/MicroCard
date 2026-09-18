@@ -45,8 +45,24 @@ const UART: usize = 0x40002000;
 const RNG: usize = 0x4000D000;
 const TIMER: usize = 0x40008000;
 const NVMC: usize = 0x4001E000;
-const KEYS_BASE: usize = 0xE0000;
-const KEYS_BYTES: usize = 4 * 1024;
+// The flash region map the linker used, so the firmware and the linker cannot disagree.
+mod layout {
+    // Generated for every region. A given build reads the ones its configuration needs.
+    #![allow(dead_code)]
+    include!(concat!(env!("OUT_DIR"), "/flash_layout.rs"));
+}
+
+unsafe extern "C" {
+    /// Defined by a MicroCard memory map alone. Referencing it makes a build that picked up
+    /// another crate's `memory.x` fail to link, rather than run against a flash layout the
+    /// firmware's own constants disagree with.
+    ///
+    /// The reference has to be opaque to the optimizer. Comparing this address against a
+    /// generated base folds away when that base is zero, because a symbol address is never
+    /// null, and the whole image behind the comparison folds with it.
+    static _microcard_flash_origin: u8;
+}
+use layout::{KEYS_BASE, KEYS_BYTES};
 const OWNERSHIP_MARKER_OFFSET: usize = 32;
 
 #[cfg(feature = "usb-ccid")]
@@ -1185,14 +1201,14 @@ impl LogicalGpio for Hardware {
 }
 struct Nvm;
 impl Nvm {
-    const MONOTONIC_BASE: usize = 0xE1000;
-    const MONOTONIC_BYTES: usize = 4 * 1024;
+    const MONOTONIC_BASE: usize = crate::layout::MONOTONIC_BASE;
+    const MONOTONIC_BYTES: usize = crate::layout::MONOTONIC_BYTES;
 
     fn base(slot: usize) -> Result<usize> {
         match slot {
-            0 => Ok(0xC0000),
-            1 => Ok(0xD0000),
-            2 => Ok(0xE2000),
+            0 => Ok(crate::layout::JOURNAL0_BASE),
+            1 => Ok(crate::layout::JOURNAL1_BASE),
+            2 => Ok(crate::layout::JOURNAL2_BASE),
             _ => Err(Error::Bounds),
         }
     }
@@ -1290,7 +1306,7 @@ struct StagingNvm {
     next_bank: usize,
 }
 impl StagingNvm {
-    const BASE: usize = 0xB0000;
+    const BASE: usize = crate::layout::STAGING_BASE;
     const BANK_BYTES: usize = 16 * 1024;
     const BANKS: usize = 4;
 
@@ -1592,6 +1608,10 @@ fn main() -> ! {
     let _reset_reason = BoardResetReport::capture().reset_reason();
     let mut device_identity = [0; 8];
     let _ = BoardIdentity.read_identity(&mut device_identity);
+    // Ties the image to a MicroCard memory map at link time. The generated region constants
+    // come from the same file the linker consumed, so they agree by construction once this
+    // resolves.
+    core::hint::black_box(&raw const _microcard_flash_origin);
     let key = unsafe { core::slice::from_raw_parts(KEYS_BASE as *const u8, 32) };
     if key.iter().all(|b| *b == 255) || key.iter().all(|b| *b == 0) {
         let deadline = transport.deadline_after(1_000_000);
@@ -1676,7 +1696,7 @@ fn main() -> ! {
         for (slot, start, size, perm) in [
             (0, 0, 0x80000, 2),
             (1, 0x80000, 0x30000, 2),
-            (2, 0xE0000, 4096, 6),
+            (2, KEYS_BASE as u32, KEYS_BYTES as u32, 6),
         ] {
             let base = NVMC + 0x800 + slot * 16;
             write(base, start);

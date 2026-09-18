@@ -40,6 +40,7 @@ def main():
         "production": measure(["--no-default-features"]),
         "development_debug": measure([]),
         "usb_ccid": measure(["--features", "usb-ccid"]),
+ "dongle": measure(["--features", "dongle"]),
     }
     for name, result in variants.items():
         for field, ceiling in CEILINGS.items():
@@ -55,9 +56,10 @@ def main():
     else:
         DESTINATION.write_text(output)
     print(
-        "PASS: nRF52840 production, development-debug and USB CCID flash/RAM budgets "
+        "PASS: nRF52840 production, development-debug, USB CCID and dongle flash/RAM budgets "
         f"({variants['development_debug']['text_bytes']} text bytes development, "
-        f"{variants['usb_ccid']['text_bytes']} with USB CCID)"
+        f"{variants['usb_ccid']['text_bytes']} with USB CCID, "
+ f"{variants['dongle']['text_bytes']} on the dongle)"
     )
 
 

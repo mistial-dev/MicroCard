@@ -9,3 +9,8 @@ MEMORY {
  JOURNAL2 : ORIGIN = 0x000E2000, LENGTH = 64K
  RAM : ORIGIN = 0x20000000, LENGTH = 256K
 }
+
+/* Defined only by a MicroCard memory map. The firmware references it, so a build that
+ * picked up some other crate's memory.x fails to link instead of quietly using the
+ * wrong flash layout. */
+_microcard_flash_origin = ORIGIN(FLASH);
