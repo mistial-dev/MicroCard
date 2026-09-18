@@ -8,7 +8,7 @@ This document explains responsibilities and trust boundaries. Start with the [RE
 
 The .NET build pipeline, reduced CIL interpreter, signed loading, security domains, native services, simulator, and Java release wallet are implemented. The nRF52840 backend has development hardware evidence, with additional acceptance work outstanding.
 
-**Java Card VM (JCVM) implementation is future work.** The sections below define its intended place in the architecture. They make no availability or Java Card compliance claim. The Java wallet runs on a desktop JVM, while device execution currently supports MC04 assemblies.
+**The Java Card VM is implemented in `crates/microcard-engine-jcvm` and runs a real applet in the simulator.** It reads a CAP container, verifies a whole package structurally at load, and interprets Java Card bytecode against an object heap with firewall checks. OpenFIPS201 installs, registers, accepts a SELECT and answers PIV commands. This is a working engine with named gaps rather than a compliant Java Card implementation, and it makes no Java Card compliance claim. [The Java Card profile](JCVM_PROFILE.md) records what each part does, what the target is, and what is still missing. The engine is absent from the device image so far, so device execution currently supports MC04 assemblies.
 
 ## Four responsibilities
 
@@ -98,22 +98,24 @@ These rules define the **MicroCard security-domain profile**. Full GlobalPlatfor
 
 A signature authorizes an assembly's identity. SCP03 authorizes management traffic. Neither replaces the other.
 
-## Where the future JCVM fits
+## Where the JCVM fits
 
-The intended JCVM is a **second Rust execution engine** beside the CIL interpreter. Java Card source would be compiled and converted on the host. A format-specific loader and verifier would validate Java Card executable content before activation. The device would interpret Java Card bytecodes rather than running a desktop JVM.
+The JCVM is a **second Rust execution engine** beside the CIL interpreter. Java Card source is compiled and converted on the host with the ordinary Java Card tooling. A format-specific loader and verifier validate Java Card executable content before activation. The device interprets Java Card bytecodes and never runs a desktop JVM.
 
-The proposed common services are transport, authenticated management, cryptographic providers, ownership-checked keys, persistent storage, quotas and the HAL. Java Card API adapters would translate VM operations into those services. They must preserve Java Card object, firewall, transaction and lifecycle semantics. Compatibility cannot be achieved merely by renaming the .NET APIs.
+The common services are transport, authenticated management, cryptographic providers, ownership-checked keys, persistent storage, quotas and the HAL. Java Card API adapters translate VM operations into those services. They must preserve Java Card object, firewall, transaction and lifecycle semantics. Compatibility cannot be achieved merely by renaming the .NET APIs.
 
 ```mermaid
 flowchart TB
     Management[Shared Rust management] --> CIL[Implemented: MC04 verifier + CIL interpreter]
-    Management -.-> JCVM[Planned: Java Card loader, verifier + bytecode interpreter]
+    Management -.-> JCVM[Implemented in the simulator: Java Card loader, verifier + bytecode interpreter]
     CIL --> Services[Native services with trusted execution identity]
     JCVM -.-> Services
     Services --> HAL[Simulator or device HAL]
 ```
 
-Before JCVM implementation, a separate design must choose the Java Card version and CAP profile, runtime/API subset, object persistence model and mapping between Java Card contexts and MicroCard domains. It must also define transaction compatibility and conformance tests. Direct managed references or calls across the two engines are not part of the current design.
+[The Java Card profile](JCVM_PROFILE.md) records the chosen Java Card version and CAP profile, the runtime and API subset, and the verification strategy. Three things it leaves open are the object persistence model on flash, the mapping between Java Card contexts and MicroCard domains, and transaction compatibility between `JCSystem.beginTransaction` and MicroCard's cross-command journal. Those are settled when the engine reaches the device. Direct managed references or calls across the two engines are not part of the current design.
+
+Two paths remain unbuilt. A GlobalPlatform LOAD does not yet deliver a CAP to the engine, so a load file reaches it only as a file path given to `microcard-sim serve-jcvm`. The engine is also not compiled into the board image.
 
 ## Design references
 
