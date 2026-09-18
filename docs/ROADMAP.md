@@ -20,6 +20,8 @@ This is the authoritative public work list. Checked items have repeatable reposi
 - [x] Reboot recovery and persistent-key continuity evidence.
 - [ ] Run the complete signed-loading adversarial suite after hardware reboot.
 - [x] USB CCID enumeration and GlobalPlatformPro interoperability on physical hardware, at every security level carrying a command MAC.
+- [x] Build and package an image for a bootloader-equipped USB dongle, with its own flash map and UF2 output.
+- [ ] Boot that dongle image. One flash attempt left the board silent and it has not been retried.
 - [ ] Complete USB CCID abort timing, disconnect, suspend and sustained throughput on physical hardware.
 - [ ] Capture deterministic GlobalPlatformPro SCP03 regression vectors from the physical reader path.
 - [ ] Validate optional CryptoCell known-answer tests, forced failures, copy counts, latency, energy, and stack use.

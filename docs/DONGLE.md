@@ -53,3 +53,17 @@ Those addresses were read from the bootloader's own `CURRENT.UF2` readback rathe
 ## If the DK is what you have
 
 The nRF52840 DK takes the same firmware through a debug probe instead. [First flash](FIRST_FLASH.md) covers that route, which also lets you provision a real key page and use the UART management transport.
+
+## Known state
+
+The image builds, links at the right origin, fits the region with room to spare, and packages as UF2 whose header matches the one this bootloader writes for itself. **It has not been seen to boot.**
+
+One flash attempt ended with the copy reporting an input and output error, the `UF2BOOT` volume disappearing, and the board never re-enumerating. That error is ambiguous on its own, because a UF2 bootloader reboots the moment it has every block and severs the copy, which produces the same message as a write that stopped early.
+
+Two things are worth separating before flashing again.
+
+Copy the file with a tool that reports a short write rather than `cp`, so a truncated transfer is visible instead of being guessed at. The image is over thirteen hundred blocks and `cp` shows no progress.
+
+Then rule out the handover. This board's bootloader starts an application through the SoftDevice's master boot record, and a bare image linked at the application origin may need forwarding that a SoftDevice-based application arranges for itself. That would be a property of the image rather than of the transfer, and it needs the reset path checked rather than another copy.
+
+Recovery is expected to work, because only the application region is ever targeted. The bootloader above `0xEA000` and the SoftDevice below `0x27000` are named in no block of the file.
