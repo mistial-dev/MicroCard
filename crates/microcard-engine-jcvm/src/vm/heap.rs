@@ -129,7 +129,7 @@ impl<'a> Heap<'a> {
         if reference == NULL {
             return Err(Error::Null);
         }
-        if at % 2 != 0 || at + HEADER > self.next {
+        if !at.is_multiple_of(2) || at + HEADER > self.next {
             return Err(Error::Bounds);
         }
         Ok(Info {

@@ -7,7 +7,7 @@
 //! What this pass does not do is track types across the dataflow. That is deferred, and
 //! the runtime carries a reference tag per stack and local slot in its place, per
 //! docs/JCVM_PROFILE.md.
-use crate::cap::{LoadFile, MethodHeader, Tag};
+use crate::cap::{LoadFile, Tag};
 use crate::code::{Boundaries, Limits, constant_pool_index, instruction_length, verify_targets};
 use crate::{Error, Result};
 use alloc::vec::Vec;
@@ -34,7 +34,7 @@ pub struct Report {
 /// rather than swept from one named offset to the next.
 fn method_offsets(file: &LoadFile) -> Result<Vec<usize>> {
     let mut offsets = Vec::new();
-    let mut push = |offset: usize, offsets: &mut Vec<usize>| -> Result<()> {
+    let push = |offset: usize, offsets: &mut Vec<usize>| -> Result<()> {
         offsets.try_reserve(1).map_err(|_| Error::Quota)?;
         offsets.push(offset);
         Ok(())

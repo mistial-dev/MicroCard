@@ -191,9 +191,9 @@ impl<'a> Frame<'a> {
             return Err(Error::Bounds);
         }
         let mut copied = [(0u16, false); 4];
-        for slot in 0..total {
+        for (slot, item) in copied.iter_mut().take(total).enumerate() {
             let index = self.locals + self.depth - total + slot;
-            copied[slot] = (self.words[index], self.tag(index));
+            *item = (self.words[index], self.tag(index));
         }
         for slot in 0..total {
             // The top words move down to where the lower ones were, and back again.
