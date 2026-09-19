@@ -6,6 +6,14 @@ fn main() {
         mc04 != jcvm,
         "select exactly one firmware engine: engine-mc04 or engine-jcvm"
     );
+    let full_hardware = std::env::var_os("CARGO_FEATURE_CC310").is_some();
+    let software_enabled = ["CRYPTO", "SHA256", "HMAC", "AES", "P256"]
+        .iter()
+        .any(|name| std::env::var_os(format!("CARGO_FEATURE_SOFTWARE_{name}")).is_some());
+    assert!(
+        !full_hardware || !software_enabled,
+        "cc310 excludes software providers; use --no-default-features for a software reference build"
+    );
     let dongle = std::env::var_os("CARGO_FEATURE_DONGLE_LAYOUT").is_some();
     let layout = match (dongle, jcvm) {
         (false, false) => "memory-dk.x",

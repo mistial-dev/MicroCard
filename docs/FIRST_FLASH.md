@@ -4,6 +4,8 @@ The requested stopping point is **before flashing**. No command in `prepare_firs
 
 ## Prepare and verify
 
+Complete the [pinned compiler and vendor setup](CRYPTO_PROVIDERS.md#reproducible-build-inputs) first. Both engine builds now default to CC310; physical provider acceptance remains pending.
+
 ```sh
 python3 scripts/prepare_first_flash.py --engine mc04
 ```

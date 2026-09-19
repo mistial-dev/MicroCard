@@ -6,11 +6,11 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+from firmware_link import SOFTWARE, inspect_link
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BOARD = ROOT / "board" / "nrf52840"
 DESTINATION = ROOT / "docs" / "BOARD_BUDGETS.json"
-CEILINGS = {"text_bytes": 350_000, "data_bytes": 0, "bss_bytes": 200_000}
 
 
 def measure(extra_arguments, engine, target):
@@ -51,13 +51,20 @@ def measure(extra_arguments, engine, target):
         "text_bytes": int(values[0]),
         "data_bytes": int(values[1]),
         "bss_bytes": int(values[2]),
-        "ceilings": CEILINGS,
     }
 
 
-def artifact(name, arguments, engine="mc04"):
+def artifact(name, arguments, engine="mc04", hardware=True):
     # Different profiles must never overwrite the ELF between linking and inspection.
     binary, link_map, result = measure(arguments, engine, BOARD / "target" / "profiles" / name)
+    inspect_link(binary, link_map, hardware)
+    if hardware:
+        tree = subprocess.run(["cargo", "tree", "--locked", "--edges", "normal", "--prefix", "none",
+            "--features", f"engine-{engine}", *arguments], cwd=BOARD,
+            check=True, capture_output=True, text=True).stdout
+        software = {line.split()[0] for line in tree.splitlines()} & SOFTWARE
+        if software:
+            raise SystemExit(f"{name}: hardware firmware includes software crypto: {sorted(software)}")
     destination = ROOT / "artifacts" / "firmware" / name
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, destination / f"microcard-{engine}.elf")
@@ -75,16 +82,31 @@ def main():
             cwd=BOARD, capture_output=True, text=True)
         if result.returncode == 0 or "select exactly one firmware engine" not in result.stderr:
             raise SystemExit("board accepted an invalid engine selection or failed for an unrelated reason")
+    result = subprocess.run(["cargo", "check", "--locked", "--features", "engine-mc04,software-crypto"],
+        cwd=BOARD, capture_output=True, text=True)
+    if result.returncode == 0 or "cc310 excludes software providers" not in result.stderr:
+        raise SystemExit("board failed to reject mixed hardware/reference providers")
     variants = {
-        "production": artifact("mc04-reference", ["--no-default-features", "--features", "software-crypto"]),
+        "software_reference": artifact("mc04-reference", ["--no-default-features", "--features", "software-crypto"], hardware=False),
+        "hardware_release": artifact("mc04-release", ["--no-default-features", "--features", "cc310"]),
         "development_debug": artifact("mc04-dk", []),
         "usb_ccid": artifact("mc04-dk-usb", ["--features", "usb-ccid"]),
         "dongle": artifact("mc04-dongle", ["--features", "dongle"]),
         "jcvm_development_debug": artifact("jcvm-dk", [], "jcvm"),
         "jcvm_dongle": artifact("jcvm-dongle", ["--features", "dongle"], "jcvm"),
     }
+    # Small profile-specific headroom above measured links, not a shared 350 KiB cap.
+    text_limits = {
+        "software_reference": 186_000, "hardware_release": 212_000,
+        "development_debug": 212_000, "usb_ccid": 224_000,
+        "dongle": 224_000, "jcvm_development_debug": 165_000,
+        "jcvm_dongle": 175_000,
+    }
     for name, result in variants.items():
-        for field, ceiling in CEILINGS.items():
+        result["ceilings"] = {"text_bytes": text_limits[name],
+            "data_bytes": 0 if name == "software_reference" else 160,
+            "bss_bytes": 199_000}
+        for field, ceiling in result["ceilings"].items():
             if result[field] > ceiling:
                 raise SystemExit(f"{name} {field} {result[field]} exceeds {ceiling}")
     output = json.dumps(

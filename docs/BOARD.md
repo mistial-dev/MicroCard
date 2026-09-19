@@ -6,7 +6,7 @@ Target PCA10056 / Cortex-M4F. Bare-metal Rust, no RTOS. The same `Endpoint`, `Ca
 
 - UART: P0.06 TX / P0.08 RX, 115200 8N1, no flow control. Binary framing is a two-byte little-endian length followed by a short APDU. Replies use the same framing.
 - TIMER0: 1 MHz free-running clock. Hardware operations have bounded waits and UART partial frames expire after one second.
-- RNG: the default image uses the hardware RNG peripheral with digital error correction enabled. Entropy failures reject requests. The experimental `cc310-entropy` feature instead uses CryptoCell's documented TRNG path.
+- RNG: the default image uses CryptoCell's documented TRNG path. The explicit software-reference profile uses the hardware RNG peripheral with digital error correction enabled. Entropy failures reject requests.
 - NVMC: three AES-CCM encrypted/authenticated MJ03 journal slots plus separate append-only generation and nonce regions. One nonce bit is reserved before encryption; journal commit closes before its generation bit is consumed. No generic arbitrary-address native API.
 - WDT: ten-second reset deadline. Loops feed it. VM fuel and native work limits independently bound managed work.
 - Logical GPIO resource 0: active-low DK LED1 on P0.13. Other resources are rejected.
@@ -14,7 +14,7 @@ Target PCA10056 / Cortex-M4F. Bare-metal Rust, no RTOS. The same `Endpoint`, `Ca
 - ACL: firmware region write/erase protection after initialization, and read/write blocking of the provisioning page after management keys enter framework RAM. The write-protected range ends at the selected linker layout’s firmware boundary, leaving image, staging, and journal regions writable. Each protected region obeys the half-flash maximum. Registers are reset-scoped. Debug recovery remains enabled.
 - Ownership marker: one word immediately after the 32 management-key bytes shares their 4 KiB erase page. Any programmed bit means the keys have owned persistent state. Boot accepts only an erased marker with completely erased durable state, or a programmed marker with present durable state.
 
-ACL behavior and register offsets follow Nordic's [ACL specification](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/acl.html). It prevents the configured flash accesses until reset. It does not provide secure-element isolation or a complete verified boot chain. CryptoCell validation, MPU hardening, firmware signing and production APPROTECT policy remain work items. Software RustCrypto implementations perform cryptography in the default image.
+ACL behavior and register offsets follow Nordic's [ACL specification](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/acl.html). It prevents the configured flash accesses until reset. It does not provide secure-element isolation or a complete verified boot chain. CryptoCell validation, MPU hardening, firmware signing and production APPROTECT policy remain work items. CC310 performs cryptography in default firmware; RustCrypto is confined to explicit reference builds.
 
 ## Flash layout
 
@@ -58,15 +58,20 @@ MICROCARD_USB_VID=0x1234 MICROCARD_USB_PID=0x5678 cargo build --release --locked
 
 The values above are compile-only examples. Assign identifiers authorized for the finished product before distributing firmware.
 
-Experimental CryptoCell providers are opt-in:
+CC310 is the default provider suite. Run the [pinned build setup](CRYPTO_PROVIDERS.md#reproducible-build-inputs)
+from the repository root before building. For an explicit software reference, use
+`--no-default-features --features engine-mc04,software-crypto` (or `engine-jcvm`).
+The aggregate `cc310` feature rejects software-provider features. Partial replacement
+profiles remain available to measure SHA-256, P-256, then symmetric providers separately.
 
-```sh
-python3 scripts/nrf_cc310_platform_spike.py --check
-```
-
-The script verifies the pinned Nordic source, archives, headers and licenses before building `cc310-sha256`, `cc310-entropy`, `cc310-cmac`, `cc310-hmac`, `cc310-aes`, `cc310-cbc`, `cc310-ccm` and `cc310-p256`. The PSA builds compile the pinned driver wrapper with a minimal configuration. P-256 also compiles two exact sdk-nrf CC3XX driver sources. Build-time pins cover the 35-file MAC, 36-file cipher, 37-file AEAD and 48/49/50-file P-256 dependency closures. The script records each isolated variant plus the combined provider image, exact symbols, C-allocation absence and bridge-stack evidence in [NRF52840_CC310_PLATFORM_SPIKE.json](NRF52840_CC310_PLATFORM_SPIKE.json). All eight features are compile/link evidence only and must remain disabled in deployable images until their physical test lists pass.
-
-[BOARD_BUDGETS.json](BOARD_BUDGETS.json) records exact software-reference link measurements and the current flash/static-RAM ceilings. [Crypto provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) separately record staged hardware-provider replacement; the vendor path still needs size reduction and physical validation. Test-only measurement counters are absent from firmware. `scripts/board_budgets.py --check` builds from the board directory so Cargo applies `.cargo/config.toml`. Building with only `--manifest-path` from the repository root does not apply that linker configuration.
+[BOARD_BUDGETS.json](BOARD_BUDGETS.json) records default hardware and explicit reference
+links with profile-specific flash/static-RAM ceilings. The gate checks interpreter and
+crypto-provider isolation. [Crypto provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
+record staged replacement and vendor archive contributions. Vendor dispatch still costs
+more flash than the reference implementation; physical validation remains outstanding.
+The older [add-on experiment](NRF52840_CC310_PLATFORM_SPIKE.json) is historical evidence.
+Test-only measurement counters are absent from firmware. Build from the board directory
+so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
 BSS includes a 192 KiB heap reservation. These link-time sizes provide no measured peaks. Stack margin, allocator exhaustion, maximum-domain workloads and command latency require board testing.
 

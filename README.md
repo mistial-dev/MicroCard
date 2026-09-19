@@ -99,3 +99,5 @@ The USB dongle requires no debug probe, but its boot acceptance remains unresolv
 ## License
 
 MicroCard is licensed under [AGPL-3.0-or-later](LICENSE). Dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Firmware defaults use CC310. Run the [pinned compiler and vendor setup](docs/CRYPTO_PROVIDERS.md#reproducible-build-inputs) before board builds. Software reference builds require `--no-default-features --features engine-mc04,software-crypto` (or `engine-jcvm`).

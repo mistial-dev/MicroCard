@@ -2,64 +2,74 @@
   "format": 1,
   "target": "thumbv7em-none-eabihf",
   "variants": {
-    "production": {
+    "software_reference": {
       "text_bytes": 185672,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
-        "text_bytes": 350000,
+        "text_bytes": 186000,
         "data_bytes": 0,
-        "bss_bytes": 200000
+        "bss_bytes": 199000
+      }
+    },
+    "hardware_release": {
+      "text_bytes": 211592,
+      "data_bytes": 148,
+      "bss_bytes": 197692,
+      "ceilings": {
+        "text_bytes": 212000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
       }
     },
     "development_debug": {
-      "text_bytes": 185704,
-      "data_bytes": 0,
-      "bss_bytes": 196636,
+      "text_bytes": 211608,
+      "data_bytes": 148,
+      "bss_bytes": 197692,
       "ceilings": {
-        "text_bytes": 350000,
-        "data_bytes": 0,
-        "bss_bytes": 200000
+        "text_bytes": 212000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
       }
     },
     "usb_ccid": {
-      "text_bytes": 197700,
-      "data_bytes": 0,
-      "bss_bytes": 197224,
+      "text_bytes": 223156,
+      "data_bytes": 148,
+      "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 350000,
-        "data_bytes": 0,
-        "bss_bytes": 200000
+        "text_bytes": 224000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
       }
     },
     "dongle": {
-      "text_bytes": 197348,
-      "data_bytes": 0,
-      "bss_bytes": 197224,
+      "text_bytes": 222952,
+      "data_bytes": 148,
+      "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 350000,
-        "data_bytes": 0,
-        "bss_bytes": 200000
+        "text_bytes": 224000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 132912,
-      "data_bytes": 0,
-      "bss_bytes": 196636,
+      "text_bytes": 164360,
+      "data_bytes": 148,
+      "bss_bytes": 197692,
       "ceilings": {
-        "text_bytes": 350000,
-        "data_bytes": 0,
-        "bss_bytes": 200000
+        "text_bytes": 165000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 142780,
-      "data_bytes": 0,
-      "bss_bytes": 197224,
+      "text_bytes": 174228,
+      "data_bytes": 148,
+      "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 350000,
-        "data_bytes": 0,
-        "bss_bytes": 200000
+        "text_bytes": 175000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
       }
     }
   }

@@ -51,10 +51,9 @@ board's reserved heap.
 
 - Complete JCVM P-256/AES applet bindings through shared providers, with explicit
   errors for unsupported algorithms and no software fallback.
-- Select hardware-only firmware defaults and make the pinned vendor toolchain
-  reproducible in the normal build and CI paths. Keep software as an explicit reference
-  profile and continue reducing vendor dispatch overhead. The explicit hardware profile
-  excludes RustCrypto, but the current default remains the software reference. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
+- Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
+  software is an explicit reference profile. Pinned compiler and vendor setup is wired
+  into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
   record the current MC04 DK comparison: 185,708 software text bytes versus 211,608
   with all hardware providers. Vendor dispatch also links non-profile ChaCha20/Poly1305
   symbols despite the absence of RustCrypto. Remeasure the final tree; this is not an achieved optimization.
@@ -78,11 +77,11 @@ not a prerequisite for finishing these implementation tasks.
 
 ## Measurements and validation
 
-[Board budgets](BOARD_BUDGETS.json) record current software-reference links: MC04
-185,704 text bytes on the development DK and 197,348 on the dongle; JCVM 132,912 and
-142,780 respectively. Static RAM includes the reserved heap. The existing ceilings
-are provisional and still need tightening. [Assembly budgets](ASSEMBLY_BUDGETS.json)
-record managed image sizes; [runtime budgets](RUNTIME_BUDGETS.md) record logical work.
+[Board budgets](BOARD_BUDGETS.json) record hardware-default links and explicit software
+reference builds, with profile-specific ceilings and engine/provider isolation checks.
+[Assembly budgets](ASSEMBLY_BUDGETS.json) record managed image sizes;
+[runtime budgets](RUNTIME_BUDGETS.md) record logical work. Final-tree measurements remain
+required. Static RAM includes the reserved heap.
 
 CBOR and image separation reduced the credential metadata snapshot to 1,408 bytes,
 with 5,792 bytes of separately stored packages. The measured credential workload's
