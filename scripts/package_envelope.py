@@ -7,25 +7,25 @@ OVERHEAD = HEADER + 32 + 65 + 64
 MAX_PACKAGE = 16384
 
 
-def signing_prefix(manifest, image, key):
+def signing_prefix(manifest, image, key, maximum=MAX_PACKAGE):
     if len(key) != 65 or key[0] != 4:
         raise ValueError("uncompressed SEC1 key required")
-    if OVERHEAD + len(manifest) + len(image) > MAX_PACKAGE:
+    if OVERHEAD + len(manifest) + len(image) > maximum:
         raise ValueError("package exceeds quota")
     return (PREFIX + len(manifest).to_bytes(4, "little") + len(image).to_bytes(4, "little")
             + manifest + hashlib.sha256(image).digest() + key)
 
 
-def create(manifest, image, key, sign):
-    prefix = signing_prefix(manifest, image, key)
+def create(manifest, image, key, sign, maximum=MAX_PACKAGE):
+    prefix = signing_prefix(manifest, image, key, maximum)
     signature = sign(prefix)
     if len(signature) != 64:
         raise ValueError("P1363 signature required")
     return prefix + signature + image
 
 
-def verify(raw, verify_signature):
-    if not OVERHEAD <= len(raw) <= MAX_PACKAGE or not raw.startswith(PREFIX):
+def verify(raw, verify_signature, maximum=MAX_PACKAGE):
+    if not OVERHEAD <= len(raw) <= maximum or not raw.startswith(PREFIX):
         raise ValueError("invalid MP05 envelope")
     manifest_length = int.from_bytes(raw[len(PREFIX):len(PREFIX) + 4], "little")
     image_length = int.from_bytes(raw[len(PREFIX) + 4:HEADER], "little")

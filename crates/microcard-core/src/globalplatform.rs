@@ -292,15 +292,12 @@ pub fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
     Ok((length, &data[header..]))
 }
 
-/// Which engine a load file is for.
-///
-/// GlobalPlatform carries both kinds in the same `C4` block, so the card decides from the
-/// bytes rather than from anything the host declared. Both formats begin with a fixed
-/// magic, and the two cannot collide.
+/// The outer container carried by a C4 load. The authenticated manifest selects
+/// the engine inside a signed package; raw CAP files are used by host tooling.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Payload {
-    /// A signed MP05 package for the CIL engine.
-    Mp04,
+    /// A signed MP05 envelope with an engine-specific manifest.
+    SignedPackage,
     /// A Java Card package, whose load file leads with the Header component.
     JavaCard,
 }
@@ -308,7 +305,7 @@ pub enum Payload {
 /// Ordered, bounded C4 reception shared by firmware engines. Authentication and
 /// activation belong to the caller; completion alone does not authorize code.
 pub struct LoadReceiver {
-    engine: Payload,
+    payload: Payload,
     maximum: usize,
     total: Option<usize>,
     received: usize,
@@ -317,8 +314,8 @@ pub struct LoadReceiver {
 }
 
 impl LoadReceiver {
-    pub fn new(engine: Payload, maximum: usize) -> Self {
-        Self { engine, maximum, total: None, received: 0, next_block: 0, closed: false }
+    pub fn new(payload: Payload, maximum: usize) -> Self {
+        Self { payload, maximum, total: None, received: 0, next_block: 0, closed: false }
     }
 
     /// Returns true only for a complete load. Any error invalidates this receiver
@@ -350,7 +347,7 @@ impl LoadReceiver {
         let (total, chunk) = if self.next_block == 0 {
             let (total, chunk) = load_file_data(&command.data)?;
             if total > self.maximum { return Err(Error::Quota); }
-            if payload_kind(chunk)? != self.engine { return Err(Error::Unsupported); }
+            if payload_kind(chunk)? != self.payload { return Err(Error::Unsupported); }
             (total, chunk)
         } else {
             (self.total.ok_or(Error::Format)?, command.data.as_ref())
@@ -370,13 +367,13 @@ impl LoadReceiver {
     }
 }
 
-/// Decide from the first bytes of a Load File Data Block which engine it belongs to.
+/// Identify the outer container from the first bytes of a Load File Data Block.
 ///
 /// A Java Card load file begins with the Header component, JCVM §6.3, which is the tag
 /// `0x01`, a two byte size and then the magic `DECAFFED`.
 pub fn payload_kind(value: &[u8]) -> Result<Payload> {
     if value.starts_with(b"MP05") {
-        return Ok(Payload::Mp04);
+        return Ok(Payload::SignedPackage);
     }
     if value.len() >= 7 && value[0] == 0x01 && value[3..7] == [0xde, 0xca, 0xff, 0xed] {
         return Ok(Payload::JavaCard);
@@ -639,8 +636,8 @@ mod tests {
     }
 
     #[test]
-    fn a_load_file_says_which_engine_it_is_for() {
-        assert_eq!(payload_kind(b"MP05rest"), Ok(Payload::Mp04));
+    fn a_load_file_declares_its_container() {
+        assert_eq!(payload_kind(b"MP05rest"), Ok(Payload::SignedPackage));
         // The first bytes of the committed OpenFIPS201 load file.
         let header = [0x01, 0x00, 0x13, 0xde, 0xca, 0xff, 0xed, 0x01, 0x02];
         assert_eq!(payload_kind(&header), Ok(Payload::JavaCard));
@@ -669,7 +666,7 @@ mod tests {
         for (engine, maximum, expected) in [
             (Payload::JavaCard, image.len(), Ok(false)),
             (Payload::JavaCard, image.len() - 1, Err(Error::Quota)),
-            (Payload::Mp04, image.len(), Err(Error::Unsupported)),
+            (Payload::SignedPackage, image.len(), Err(Error::Unsupported)),
         ] {
             let mut receiver = LoadReceiver::new(engine, maximum);
             let mut staging = BoundedRamStaging::<65535>::default();
@@ -698,7 +695,7 @@ mod tests {
             (0, 1, &b"xy"[..], Error::Format), // missing last marker
             (0x80, 1, &b"xyz"[..], Error::Quota), // exceeds declared total
         ] {
-            let mut receiver = LoadReceiver::new(Payload::Mp04, 6);
+            let mut receiver = LoadReceiver::new(Payload::SignedPackage, 6);
             let mut staging = BoundedRamStaging::<6>::default();
             assert_eq!(receiver.receive(&command(0, 0, b"\xc4\x06MP05".to_vec()), &mut staging), Ok(false));
             assert_eq!(receiver.receive(&command(p1, p2, bytes.to_vec()), &mut staging), Err(error));

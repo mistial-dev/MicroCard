@@ -1,8 +1,7 @@
 //! Structural verification of a whole package, in one pass at load.
 //!
-//! With no signature on a Java Card package, this and the secure channel are the whole
-//! safety boundary. Everything checked here is something a later pass is then allowed to
-//! assume, so each check is stated once and relied on everywhere.
+//! Package authentication belongs to the platform. This pass checks the structures
+//! later execution relies on, independently of who signed the image.
 //!
 //! What this pass does not do is track types across the dataflow. That is deferred, and
 //! the runtime carries a reference tag per stack and local slot in its place, per

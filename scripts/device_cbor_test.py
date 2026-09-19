@@ -19,6 +19,19 @@ for vector in json.loads((Path(__file__).resolve().parents[1] / "format/manifest
     assert decode_manifest(bytes.fromhex(vector["hex"])) == vector["manifest"]
 print("PASS: manifest CBOR shared vectors")
 
+from device_cbor import jcvm_manifest, decode_jcvm_manifest
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-manifest-cbor-v1.json").read_text())
+wire = bytes.fromhex(vector["hex"])
+assert jcvm_manifest(vector["manifest"]) == wire
+assert decode_jcvm_manifest(wire) == vector["manifest"]
+for invalid in (wire + b"\0", b"\x89" + wire[1:], wire[:1] + b"\x02" + wire[2:], wire[:2] + b"\0" + wire[3:]):
+    try:
+        decode_jcvm_manifest(invalid)
+    except ValueError:
+        continue
+    raise AssertionError("accepted invalid JCVM manifest")
+print("PASS: JCVM manifest CBOR shared vector and version/shape rejection")
+
 from device_cbor import encode, decode
 policy = [bytes([*range(2, 14), 20, *range(22, 53)]), 8, 8, 512, 64, 8192, 8, 16384]
 domain = [bytes([1] * 16), bytes.fromhex("a000000151000000"), bytes([2] * 32), policy,

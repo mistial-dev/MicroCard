@@ -1,5 +1,5 @@
 mod manifest_cbor;
-pub mod envelope;
+pub use crate::envelope;
 use crate::{Error, Result, crypto::CryptoProvider};
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};

@@ -37,9 +37,31 @@ manifest_length:u32le | image_length:u32le |
 manifest_cbor | image_sha256:32 | signer_sec1:65 | signature_p1363:64 | image
 ```
 
-The P-256 signature covers every byte from the magic through the signer key, inclusive. SHA-256 of the trailing image must match the signed digest. This keeps the signed descriptor contiguous without copying the image into a separate signing buffer. The total package is bounded to 16 KiB. The signer key must be uncompressed SEC1; signature scalars must have valid ranges and low S. Trailing bytes, inconsistent lengths, provider failures, and old magic are errors. Package identity remains SHA-256 of the entire envelope, including the image.
+The P-256 signature covers every byte from the magic through the signer key, inclusive. SHA-256 of the trailing image must match the signed digest. This keeps the signed descriptor contiguous without copying the image into a separate signing buffer. MC04 packages are bounded to 16 KiB; JCVM packages to 60 KiB. The signer key must be uncompressed SEC1; signature scalars must have valid ranges and low S. Trailing bytes, inconsistent lengths, provider failures, and old magic are errors. Package identity remains SHA-256 of the entire envelope, including the image.
 
 Envelope authentication does not establish that a manifest or image is supported. The selected engine must then decode and validate both before installation. [The shared MP05 vector](../format/package-envelope-v5.json) deliberately uses a synthetic image to test that boundary; it is not an installable application. Its private scalar is public test data. Independent Python/OpenSSL signing produces exactly the same deterministic envelope as Rust, .NET, and Java.
+
+## JCVM manifest, version 1
+
+The signed JCVM manifest is an eight-field array, distinct from the twelve-field MC04 record:
+
+```
+[1, 1, domain_aid:bytes, incarnation:bytes16, package_aid:bytes,
+ [package_major:u8, package_minor:u8], rollback_version:u32,
+ [heap_bytes, frame_words, buffer_bytes, instruction_budget]]
+```
+
+Both AIDs are 5–16 bytes. The second field identifies JCVM. The manifest is at most
+128 bytes, rollback version is nonzero, and package AID/version must equal the CAP
+Header. Heap size is even and 512–65,536 bytes; frame storage is 8–8,192 words; the
+APDU buffer is 261 bytes; instruction budget is 1–1,000,000. These are upper profile
+bounds, not a promise that every permitted combination fits a board.
+
+The verifier authenticates MP05, validates this record, resolves imports, and runs
+structural bytecode verification. The management layer must additionally authorize
+the signer, match the current domain/incarnation, enforce rollback and storage quotas,
+and activate atomically. The [JCVM manifest vector](../format/jcvm-manifest-cbor-v1.json)
+is checked by Rust and Python. This contract does not yet connect JCVM to board loading.
 
 ## Internal state snapshot, version 2
 

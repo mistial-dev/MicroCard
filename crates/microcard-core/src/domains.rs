@@ -2227,7 +2227,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 load_aid,
                 hash: request.hash,
                 receiver: crate::globalplatform::LoadReceiver::new(
-                    crate::globalplatform::Payload::Mp04, MAX_PACKAGE_BYTES,
+                    crate::globalplatform::Payload::SignedPackage, MAX_PACKAGE_BYTES,
                 ),
             });
             return fallible_filled(1, 0);

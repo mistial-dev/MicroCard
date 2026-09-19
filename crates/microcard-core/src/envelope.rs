@@ -23,8 +23,16 @@ pub struct Envelope<'a> {
 
 impl<'a> Envelope<'a> {
     pub fn verify(raw: &'a [u8], provider: &mut impl CryptoProvider) -> Result<Self> {
+        Self::verify_bounded(raw, crate::staging::MAX_PACKAGE_BYTES, provider)
+    }
+
+    pub fn verify_bounded(
+        raw: &'a [u8],
+        maximum: usize,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<Self> {
         if raw.len() < OVERHEAD_BYTES
-            || raw.len() > super::MAX_PACKAGE_BYTES
+            || raw.len() > maximum
             || &raw[..4] != MAGIC
             || &raw[4..4 + CONTEXT.len()] != CONTEXT
         {
@@ -80,11 +88,29 @@ pub fn signing_prefix(
     image_digest: &[u8; 32],
     key: &[u8; KEY_BYTES],
 ) -> Result<Vec<u8>> {
+    signing_prefix_bounded(
+        manifest,
+        image_length,
+        image_digest,
+        key,
+        crate::staging::MAX_PACKAGE_BYTES,
+    )
+}
+
+pub fn signing_prefix_bounded(
+    manifest: &[u8],
+    image_length: usize,
+    image_digest: &[u8; 32],
+    key: &[u8; KEY_BYTES],
+    maximum: usize,
+) -> Result<Vec<u8>> {
+    let manifest_length = u32::try_from(manifest.len()).map_err(|_| Error::Quota)?;
+    let image_length_wire = u32::try_from(image_length).map_err(|_| Error::Quota)?;
     let total = OVERHEAD_BYTES
         .checked_add(manifest.len())
         .and_then(|n| n.checked_add(image_length))
         .ok_or(Error::Quota)?;
-    if total > super::MAX_PACKAGE_BYTES {
+    if total > maximum {
         return Err(Error::Quota);
     }
     if key[0] != 4 {
@@ -97,15 +123,15 @@ pub fn signing_prefix(
         .map_err(|_| Error::Quota)?;
     output.extend_from_slice(MAGIC);
     output.extend_from_slice(CONTEXT);
-    output.extend_from_slice(&(manifest.len() as u32).to_le_bytes());
-    output.extend_from_slice(&(image_length as u32).to_le_bytes());
+    output.extend_from_slice(&manifest_length.to_le_bytes());
+    output.extend_from_slice(&image_length_wire.to_le_bytes());
     output.extend_from_slice(manifest);
     output.extend_from_slice(image_digest);
     output.extend_from_slice(key);
     Ok(output)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "software-crypto"))]
 mod tests {
     use super::*;
     use crate::crypto::{self, SoftwareCrypto};
@@ -125,10 +151,14 @@ mod tests {
 
     #[test]
     fn independent_python_vector_matches_rust_signing_and_verification() {
-        let vector: serde_json::Value = serde_json::from_str(include_str!("../../../../format/package-envelope-v5.json")).unwrap();
+        let vector: serde_json::Value =
+            serde_json::from_str(include_str!("../../../format/package-envelope-v5.json")).unwrap();
         let field = |name: &str| -> Vec<u8> {
             let text = vector[name].as_str().unwrap();
-            (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i+2], 16).unwrap()).collect()
+            (0..text.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+                .collect()
         };
         let raw = field("package");
         let envelope = Envelope::verify(&raw, &mut SoftwareCrypto).unwrap();
@@ -136,9 +166,16 @@ mod tests {
         assert_eq!(envelope.image, field("image"));
         let key: [u8; KEY_BYTES] = field("key").try_into().unwrap();
         let seed: [u8; 32] = field("seed").try_into().unwrap();
-        let mut expected = signing_prefix(envelope.manifest, envelope.image.len(), &crypto::sha256(envelope.image), &key).unwrap();
+        let mut expected = signing_prefix(
+            envelope.manifest,
+            envelope.image.len(),
+            &crypto::sha256(envelope.image),
+            &key,
+        )
+        .unwrap();
         let signature = crypto::p256_ecdsa_sign_package(&seed, &expected).unwrap();
-        expected.extend(signature); expected.extend(envelope.image);
+        expected.extend(signature);
+        expected.extend(envelope.image);
         assert_eq!(raw, expected);
     }
 
@@ -200,7 +237,7 @@ mod tests {
         assert_eq!(
             signing_prefix(
                 &[],
-                super::super::MAX_PACKAGE_BYTES,
+                crate::staging::MAX_PACKAGE_BYTES,
                 &[0; 32],
                 &[4; KEY_BYTES]
             ),

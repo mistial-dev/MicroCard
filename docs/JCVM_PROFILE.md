@@ -25,11 +25,13 @@ signature, and key-agreement requests now fail at their factories.
 
 Two delivery paths are also absent. A GlobalPlatform LOAD does not reach the engine, so a load file arrives only as a file path given to `microcard-sim serve-jcvm`. The engine is also absent from the board image.
 
-The shared C4 receiver now enforces engine identity, an engine-specific size limit,
+The shared C4 receiver now enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
 staging. MC04 uses this receiver today; JCVM still needs authenticated activation and
 the durable management adapter. RAM and flash staging accept compile-time limits,
-so the MC04 16 KiB bound does not constrain a future JCVM profile.
+so the MC04 16 KiB bound does not constrain a future JCVM profile. The JCVM package
+verifier uses MP05 and its own [bounded signed manifest](DEVICE_CBOR.md#jcvm-manifest-version-1),
+with a 60 KiB package limit. Raw CAP input remains a simulator convenience, not a signed package.
 
 Installation, selection, and processing expose cancellation callbacks, checked before
 execution and at each instruction boundary. Cancellation escapes as an engine error;

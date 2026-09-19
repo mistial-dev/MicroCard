@@ -354,7 +354,7 @@ fn globalplatform_ssd_creation_and_deletion_are_durable_and_aid_addressed() {
         load_aid: RegistryAid::synthetic(0x4c, &[7; 32]),
         hash: Some([7; 32]),
         receiver: crate::globalplatform::LoadReceiver::new(
-            crate::globalplatform::Payload::Mp04, MAX_PACKAGE_BYTES,
+            crate::globalplatform::Payload::SignedPackage, MAX_PACKAGE_BYTES,
         ),
     });
     reopened.staging.bytes.push(0xaa);

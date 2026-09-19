@@ -56,10 +56,13 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 pub mod transport;
 pub mod engine;
+pub mod envelope;
 #[cfg(feature = "jcvm")]
 pub mod jcvm_services;
 #[cfg(feature = "jcvm")]
 pub mod jcvm_storage;
+#[cfg(feature = "jcvm")]
+pub mod jcvm_package;
 
 pub mod key_store;
 

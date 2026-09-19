@@ -119,3 +119,48 @@ def decode_manifest(data):
     if manifest(result) != data:
         raise ValueError("manifest record shape mismatch")
     return result
+
+
+def jcvm_manifest(value):
+    """Encode the JCVM version-1 signed manifest (engine discriminator 1)."""
+    if set(value) != {"domain", "incarnation", "package", "package_version", "version", "limits"}:
+        raise ValueError("invalid JCVM manifest fields")
+    def binary(name, minimum, maximum):
+        text = value[name]
+        if not isinstance(text, str) or re.fullmatch(r"(?:[0-9a-fA-F]{2})+", text) is None:
+            raise ValueError("invalid binary field")
+        raw = bytes.fromhex(text)
+        if not minimum <= len(raw) <= maximum:
+            raise ValueError("binary field length")
+        return raw
+    version = value["version"]
+    package_version = value["package_version"]
+    if type(version) is not int or not 1 <= version <= 0xffffffff:
+        raise ValueError("invalid rollback version")
+    if not isinstance(package_version, list) or len(package_version) != 2 or any(type(v) is not int or not 0 <= v <= 255 for v in package_version):
+        raise ValueError("invalid package version")
+    names = ("heap_bytes", "frame_words", "buffer_bytes", "budget")
+    limits = value["limits"]
+    if set(limits) != set(names) or any(type(limits[n]) is not int for n in names):
+        raise ValueError("invalid limits")
+    heap, frames, buffer, budget = [limits[n] for n in names]
+    if not (512 <= heap <= 65536 and heap % 2 == 0 and 8 <= frames <= 8192 and buffer == 261 and 1 <= budget <= 1_000_000):
+        raise ValueError("limits exceed JCVM profile")
+    return encode([1, 1, binary("domain", 5, 16), binary("incarnation", 16, 16),
+                   binary("package", 5, 16), package_version, version, [heap, frames, buffer, budget]])
+
+
+def decode_jcvm_manifest(data):
+    if len(data) > 128:
+        raise ValueError("JCVM manifest quota exceeded")
+    r = decode(data)
+    if not isinstance(r, list) or len(r) != 8 or r[:2] != [1, 1]:
+        raise ValueError("unsupported JCVM manifest")
+    if any(not isinstance(r[i], bytes) for i in (2, 3, 4)) or not isinstance(r[7], list) or len(r[7]) != 4:
+        raise ValueError("invalid JCVM manifest shape")
+    value = dict(domain=r[2].hex(), incarnation=r[3].hex(), package=r[4].hex(),
+                 package_version=r[5], version=r[6],
+                 limits=dict(zip(("heap_bytes", "frame_words", "buffer_bytes", "budget"), r[7])))
+    if jcvm_manifest(value) != data:
+        raise ValueError("invalid JCVM manifest encoding")
+    return value
