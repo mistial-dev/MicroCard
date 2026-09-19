@@ -1,10 +1,10 @@
 //! Shared basic-channel dispatcher for UART and simulator.
 use crate::{
-    Error, Result,
     apdu::Command,
     engine::CardEngine,
     globalplatform::{self, StatusCursor},
     scp03::{Keys, Session},
+    Error, Result,
 };
 use alloc::vec::Vec;
 
@@ -104,7 +104,9 @@ impl<C: CardEngine> Endpoint<C> {
                 // assumed the other challenge width learns which one to use, and
                 // GlobalPlatformPro retries in S16 on exactly this status word.
                 let mut wrong_length = Vec::new();
-                wrong_length.try_reserve_exact(2).map_err(|_| Error::Quota)?;
+                wrong_length
+                    .try_reserve_exact(2)
+                    .map_err(|_| Error::Quota)?;
                 wrong_length.extend([0x67, 0x00]);
                 return Ok(wrong_length);
             }
@@ -158,20 +160,26 @@ impl<C: CardEngine> Endpoint<C> {
             return Ok(r);
         }
         let s = self.session.as_mut().ok_or(Error::Unauthorized)?;
-        if c.ins == 0x82 {
+        if c.cla == 0x84 && c.ins == 0x82 {
             s.authenticate_with(&c, self.card.crypto_provider())?;
             self.status_cursor = None;
             return fixed_response(&[0x90, 0]);
         }
+        if c.cla == 0x04 && !C::DIRECT_APDUS {
+            return Err(Error::Authentication);
+        }
         let verified = s.unwrap_with(c, self.card.crypto_provider())?;
-        if self.card.globalplatform_load_active() && verified.command().ins != 0xe8 {
+        let management_class = verified.command().cla == 0x80;
+        if self.card.globalplatform_load_active()
+            && !(management_class && verified.command().ins == 0xe8)
+        {
             self.card.abort_staging();
         }
-        let gp_management = verified.command().ins == 0xe6
-            && matches!(verified.command().p1, 0x02 | 0x0c)
-            || verified.command().ins == 0xe8 && self.card.globalplatform_load_active()
-            || verified.command().ins == 0xe4
-                && verified.command().data.first().copied() == Some(0x4f);
+        let gp_management = management_class
+            && (verified.command().ins == 0xe6 && matches!(verified.command().p1, 0x02 | 0x0c)
+                || verified.command().ins == 0xe8 && self.card.globalplatform_load_active()
+                || verified.command().ins == 0xe4
+                    && verified.command().data.first().copied() == Some(0x4f));
         if gp_management {
             self.status_cursor = None;
             return match self
@@ -186,7 +194,7 @@ impl<C: CardEngine> Endpoint<C> {
                 ),
             };
         }
-        if verified.command().ins == 0xca {
+        if management_class && verified.command().ins == 0xca {
             self.status_cursor = None;
             let data = globalplatform::get_data(verified.command())?;
             return s.response_with(
@@ -195,7 +203,7 @@ impl<C: CardEngine> Endpoint<C> {
                 self.card.crypto_provider(),
             );
         }
-        if verified.command().ins == 0xf2 {
+        if management_class && verified.command().ins == 0xf2 {
             let command = verified.command();
             if verified.level() & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
                 return s.response_with(&[], 0x6985, self.card.crypto_provider());
@@ -243,26 +251,30 @@ impl<C: CardEngine> Endpoint<C> {
             }
         }
         self.status_cursor = None;
-        let result = match verified.command().ins {
-            0xa4 | 0x10 => {
-                let r = if verified.command().ins == 0xa4 {
-                    match self.card.select_verified_with_cancel(verified, should_cancel) {
-                        Ok(response) => response,
-                        Err(_) => return s.response_with(&[], 0x6985, self.card.crypto_provider()),
-                    }
-                } else {
-                    self.card.process_verified_with_cancel(verified, should_cancel)?
-                };
-                let n = r.len();
-                if n < 2 { return Err(Error::Format); }
-                return s.response_with(
-                    &r[..n - 2],
-                    u16::from_be_bytes([r[n - 2], r[n - 1]]),
-                    self.card.crypto_provider(),
-                );
+        if self.card.is_application_command(verified.command()) {
+            let r = if verified.command().ins == 0xa4 {
+                match self
+                    .card
+                    .select_verified_with_cancel(verified, should_cancel)
+                {
+                    Ok(response) => response,
+                    Err(_) => return s.response_with(&[], 0x6985, self.card.crypto_provider()),
+                }
+            } else {
+                self.card
+                    .process_verified_with_cancel(verified, should_cancel)?
+            };
+            let n = r.len();
+            if n < 2 {
+                return Err(Error::Format);
             }
-            _ => self.card.manage_with_cancel(verified, should_cancel),
-        };
+            return s.response_with(
+                &r[..n - 2],
+                u16::from_be_bytes([r[n - 2], r[n - 1]]),
+                self.card.crypto_provider(),
+            );
+        }
+        let result = self.card.manage_with_cancel(verified, should_cancel);
         match result {
             Ok(data) => s.response_with(&data, 0x9000, self.card.crypto_provider()),
             Err(_) => s.response_with(&[], 0x6985, self.card.crypto_provider()),
@@ -283,8 +295,8 @@ fn globalplatform_management_status(error: &Error) -> u16 {
 #[cfg(all(test, feature = "mc04"))]
 mod tests {
     use super::*;
+    use crate::{domains::Card, journal::MemoryFlash};
     use alloc::vec;
-    use crate::{journal::MemoryFlash, domains::Card};
 
     struct TestPlatform;
     impl crate::crypto::CryptoProvider for TestPlatform {}
@@ -319,7 +331,10 @@ mod tests {
         );
         let mut command = vec![0x00, 0xa4, 0x04, 0x00, 8];
         command.extend_from_slice(&globalplatform::ISD_AID);
-        assert_eq!(endpoint.exchange(&command), globalplatform::isd_fci().unwrap());
+        assert_eq!(
+            endpoint.exchange(&command),
+            globalplatform::isd_fci().unwrap()
+        );
 
         let mut card_data = globalplatform::card_recognition_data().unwrap();
         card_data.extend_from_slice(&[0x90, 0x00]);
@@ -369,7 +384,10 @@ mod tests {
                 let (sequence, challenge) = initialize_update(&mut endpoint);
                 // Every counter value is new, and the challenge moves with it even though
                 // the platform entropy source is a constant.
-                assert!(!seen.iter().any(|(s, _)| s == &sequence), "counter repeated");
+                assert!(
+                    !seen.iter().any(|(s, _)| s == &sequence),
+                    "counter repeated"
+                );
                 assert!(
                     !seen.iter().any(|(_, c)| c == &challenge),
                     "challenge repeated"

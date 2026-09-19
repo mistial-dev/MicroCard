@@ -1,9 +1,15 @@
 //! Contract between the authenticated transport and an engine's durable card state.
-use crate::{Result, crypto::CryptoProvider, scp03::Verified};
+use crate::{apdu::Command, crypto::CryptoProvider, scp03::Verified, Result};
 use alloc::vec::Vec;
 
 pub trait CardEngine {
     type Provider: CryptoProvider;
+    /// Native applet commands can use the interindustry class inside SCP03.
+    const DIRECT_APDUS: bool = false;
+
+    fn is_application_command(&self, command: &Command<'_>) -> bool {
+        matches!(command.ins, 0xa4 | 0x10)
+    }
 
     fn crypto_provider(&mut self) -> &mut Self::Provider;
     fn random(&mut self, output: &mut [u8]) -> Result<()>;
@@ -13,7 +19,12 @@ pub trait CardEngine {
     fn abort_staging(&mut self);
     fn abort_transaction(&mut self);
     fn globalplatform_load_active(&self) -> bool;
-    fn get_status_record(&mut self, kind: u8, index: usize, filter: &[u8]) -> Result<(Vec<u8>, bool)>;
+    fn get_status_record(
+        &mut self,
+        kind: u8,
+        index: usize,
+        filter: &[u8],
+    ) -> Result<(Vec<u8>, bool)>;
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()>;
     /// Return the SELECT response data followed by its status word.
     fn select_verified_with_cancel(

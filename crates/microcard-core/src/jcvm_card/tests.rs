@@ -53,7 +53,8 @@ impl Host {
     }
 
     fn command(&mut self, ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
-        let header = [0x84, ins, p1, p2, (data.len() + MAC_BYTES) as u8];
+        let class = if ins == 0x20 { 0x04 } else { 0x84 };
+        let header = [class, ins, p1, p2, (data.len() + MAC_BYTES) as u8];
         self.chain = crypto::cmac_parts(&self.key, &[&self.chain, &header, data]);
         let mut raw = header.to_vec();
         raw.extend_from_slice(data);
@@ -219,7 +220,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let pin = [
         0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 255, 255,
     ];
-    let response = host.send(&mut endpoint, 0x10, 0, 0, &pin);
+    let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
     let before = u16::from_be_bytes(response.try_into().unwrap());
     assert_eq!(before & 0xfff0, 0x63c0);
     #[cfg(feature = "scp03-pseudo-random")]
@@ -240,15 +241,15 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     assert_ne!(host.key, previous_session_key);
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
-    let response = host.send(&mut endpoint, 0x10, 0, 0, &pin);
+    let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
     assert_eq!(u16::from_be_bytes(response.try_into().unwrap()) + 1, before);
 
     // A MAC failure discards selection, so a new channel must select again.
-    let mut corrupted = host.command(0x10, 0, 0, &pin);
+    let mut corrupted = host.command(0x20, 0, 0x80, &pin[5..]);
     *corrupted.last_mut().unwrap() ^= 1;
     assert_eq!(endpoint.exchange(&corrupted), [0x69, 0x82]);
     let mut host = Host::connect(&mut endpoint, 1);
-    assert_eq!(host.send(&mut endpoint, 0x10, 0, 0, &pin), [0x69, 0x82]);
+    assert_eq!(host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]), [0x69, 0x82]);
     let mut host = Host::connect(&mut endpoint, 1);
     let delete = |aid: &[u8]| {
         let mut wire = vec![0x4f, aid.len() as u8];

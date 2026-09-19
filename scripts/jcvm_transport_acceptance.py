@@ -51,22 +51,30 @@ def main():
             client.command(0xe8, block, p1=0x80 if index + 1 == len(blocks) else 0, p2=index)
         install = lv(package, module, instance, b"\0", b"\xc9\0", b"")
         client.command(0xe6, install, p1=0x0c)
-        selected = client.command(0xa4, instance, p1=4)
+        selected = client.command(0xa4, instance, p1=4, cla=0x04)
         assert selected[:3] == bytes.fromhex("618192") and len(selected) == 149
+        # The interindustry class belongs to the applet, even for a GP instruction number.
+        client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance,
+                       cla=0x04, status=0x6d00)
         pin = bytes.fromhex("0020008008313233343536FFFF")
-        client.command(0x10, pin, status=0x63c5)
+        client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c5)
         client.close()
 
         client = Client(keys, state, mode)
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]
         assert client.command(0xa4, instance, p1=4) == selected
-        client.command(0x10, pin, status=0x63c4)
+        client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c4)
+        # Direct command routing must not admit a command without its SCP03 MAC.
+        assert client.raw(pin) == bytes.fromhex("6982")
+        client.connect()
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c3)
         # Reclaiming an explicitly deleted instance must establish a fresh heap identity.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance)
         client.command(0xe6, install, p1=0x0c)
         client.command(0xa4, instance, p1=4)
-        client.command(0x10, pin, status=0x63c5)
+        client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c5)
         client.close()
 
         damaged = state / "heap0/slot0.bin"

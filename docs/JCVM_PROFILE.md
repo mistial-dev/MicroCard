@@ -62,8 +62,12 @@ the old image through write failures and cancellation. Package reads verify both
 and the current registry binding. Installation now commits a dedicated heap before
 publishing its instance, using a fresh derived key even after an interrupted attempt.
 Reopening verifies every committed image and heap without reinstalling. The adapter
-serves GP status records, domain discovery, and the existing authenticated SELECT and
-INS 10 application tunnel. SELECT calls `select()` and then `process()` with the
+serves GP status records, domain discovery, and authenticated applet APDUs with their
+original instruction, parameters, and data. Protected class `04` becomes applet class
+`00`; protected class `84` becomes proprietary class `80`. GP management commands
+are dispatched only in class `80`. Application commands still require SCP03; plain
+APDUs cannot invoke an applet. The former JCVM INS 10 tunnel is no longer decoded.
+SELECT calls `select()` and then `process()` with the
 selection flag, returning the applet's data and status. A refusal leaves no selection;
 a status from the subsequent `process()` does not undo accepted selection.
 
@@ -71,7 +75,7 @@ Selection changes call and commit `deselect()` before switching. Applet exceptio
 not prevent deselection; engine errors or failed commits trigger authenticated recovery.
 Reset discards the live session without calling deselect. Reselecting the same instance
 reuses its heap, but switching to another instance currently drops reset-scoped volatile
-data. Preserving that data until reset and direct applet APDUs remain incomplete.
+data. Preserving that data until reset remains incomplete.
 
 ## What holds this claim up
 
@@ -177,7 +181,7 @@ recorded below; allocator internals, stack use, and device latency are excluded.
 | --- | ---: | ---: |
 | Baseline (`ed0d5f2`) | 174,663 | 155,397 |
 | Direct CBOR snapshot (`3831e3e`) | 165,285 | 155,397 |
-| Retained image handle | 160,806 | 110,651 |
+| Retained image handle (`e62fdc5`) | 160,806 | 110,651 |
 
 The direct CBOR writer adds 120 bytes of JCVM firmware text. Retained image handles
 add 3,696 bytes versus `3831e3e`, trading flash for 44,746 bytes less retained host

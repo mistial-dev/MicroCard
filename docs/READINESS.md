@@ -24,8 +24,9 @@ The independent `jcvm` core feature exposes SHA-256 and entropy through the shar
 provider adapter, now used by the simulator. Unsupported JCVM crypto factories raise
 explicit Java Card exceptions. Its durable registry and dedicated applet journals
 are integrated in core. Full SELECT responses and durable deselection callbacks now
-run through the adapter. P-256/AES applet bindings, direct applet APDUs, and retention
-of inactive-instance volatile state still need integration before board delivery.
+run through the adapter. Authenticated applet APDUs preserve their original command
+fields without a nested tunnel. P-256/AES applet bindings and retention of
+inactive-instance volatile state still need integration before board delivery.
 
 MC04 stores immutable packages in separate image slots and commits only descriptors
 in its version-2 metadata snapshot. Recovery verifies image hashes and package

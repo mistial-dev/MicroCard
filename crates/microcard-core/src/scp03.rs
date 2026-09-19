@@ -185,7 +185,7 @@ impl Session {
         c: &Command<'_>,
         provider: &mut impl CryptoProvider,
     ) -> Result<usize> {
-        if c.cla != 0x84 || c.data.len() < MAC_BYTES || c.data.len() > 255 {
+        if !matches!(c.cla, 0x04 | 0x84) || c.data.len() < MAC_BYTES || c.data.len() > 255 {
             return Err(Error::Authentication);
         }
         let n = c.data.len() - MAC_BYTES;
@@ -237,7 +237,7 @@ impl Session {
                 plaintext.truncate(written);
                 c.data = Cow::Owned(core::mem::take(&mut *plaintext));
             }
-            c.cla = 0x80;
+            c.cla &= !0x04;
             Ok(Verified {
                 command: c,
                 level: self.level,

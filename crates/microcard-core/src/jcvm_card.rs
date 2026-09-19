@@ -197,6 +197,10 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     CardEngine for Card<F, I, H, P, S>
 {
     type Provider = P;
+    const DIRECT_APDUS: bool = true;
+    fn is_application_command(&self, command: &Command<'_>) -> bool {
+        command.cla == 0 || command.ins == 0xa4 || self.selected.is_some() && command.ins != 0xe2
+    }
     fn crypto_provider(&mut self) -> &mut P {
         &mut self.provider
     }
@@ -439,7 +443,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         let result = self.selected.as_mut().ok_or(Error::Missing)?.1.process(
-            &verified.command().data,
+            &verified.command().encode()?,
             false,
             &mut self.provider,
             cancel,
