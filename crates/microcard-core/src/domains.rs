@@ -16,6 +16,8 @@ use zeroize::{Zeroize, Zeroizing};
 pub use crate::hal::RuntimePlatform as Platform;
 mod snapshot;
 mod engine;
+mod application;
+use application::{ApplicationView, StagedApplication};
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
 const MAX_SSDS: usize = 8;
@@ -374,12 +376,12 @@ impl BlobStore {
         &self,
         context: &mut crate::fallible_clone::CloneContext,
     ) -> Result<Self> {
-        let mut values = Vec::new();
-        context.reserve_exact(&mut values, self.0.len())?;
+        let mut values = Self::new();
+        context.reserve_exact(&mut values.0, self.0.len())?;
         for (key, value) in &self.0 {
-            values.push((*key, context.clone_vec(value)?));
+            values.0.push((*key, context.clone_vec(value)?));
         }
-        Ok(Self(values))
+        Ok(values)
     }
 
     fn position(&self, key: i32) -> core::result::Result<usize, usize> {
@@ -1775,7 +1777,7 @@ pub struct Card<F: Flash + crate::image_store::ImageFlash, P: Platform, S: Packa
 
 struct PendingTransaction {
     owner: (RegistryAid, [u8; 16], String),
-    state: State,
+    state: StagedApplication,
     commands_left: u8,
 }
 
@@ -3152,21 +3154,20 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 )
             }
             Some(_) | None => (
-                self.state.try_clone()?,
+                StagedApplication::new(source)?,
                 TransactionDisposition::Inactive,
                 MAX_TRANSACTION_COMMANDS,
                 None,
             ),
         };
-        let d = next.domains.get_mut(domain_id).ok_or(Error::Domain)?;
         let mut retry_floor = CredentialRetryFloors::default();
         let mut control = InvocationControl {
             retry_floor: &mut retry_floor,
             should_cancel,
             transaction: &mut transaction,
         };
-        let execution = run_context_with_metrics_and_retry_floor(
-            d,
+        let execution = run_application_with_metrics_and_retry_floor(
+            next.view(source),
             p,
             Some(&units),
             process,
@@ -3209,7 +3210,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         };
         match transaction {
             TransactionDisposition::Inactive | TransactionDisposition::Commit => {
-                self.commit(next)?;
+                self.commit_application(domain_registry_aid, next)?;
             }
             TransactionDisposition::Begun => {
                 self.transaction = Some(PendingTransaction {
@@ -3229,26 +3230,6 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             TransactionDisposition::Abort => {}
         }
         Ok((out, metrics))
-    }
-
-    fn commit_credential_retry_floor(
-        &mut self,
-        domain_registry_aid: RegistryAid,
-        retry_floor: &CredentialRetryFloors,
-    ) -> Result<()> {
-        let mut failure_state = self.state.try_clone()?;
-        let failure_domain = failure_state
-            .domains
-            .values_mut()
-            .find(|domain| domain.registry_aid == domain_registry_aid)
-            .ok_or(Error::Domain)?;
-        if failure_domain
-            .credentials
-            .apply_retry_floor(failure_domain.incarnation, retry_floor.iter())?
-        {
-            self.commit(failure_state)?;
-        }
-        Ok(())
     }
 }
 #[cfg(test)]
@@ -3334,11 +3315,25 @@ fn run_context_with_metrics_and_retry_floor(
     platform: &mut impl Platform,
     control: &mut InvocationControl<'_>,
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
+    run_application_with_metrics_and_retry_floor(
+        d.application_view(), p, units, entry, input, platform, control,
+    )
+}
+
+fn run_application_with_metrics_and_retry_floor(
+    d: ApplicationView<'_>,
+    p: &impl PackageData,
+    units: Option<&[ExecutionUnit]>,
+    entry: u16,
+    input: InvocationInput<'_>,
+    platform: &mut impl Platform,
+    control: &mut InvocationControl<'_>,
+) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut host = Host {
-        store: &mut d.store,
-        blobs: &mut d.blobs,
-        keys: &mut d.keys,
-        credentials: &mut d.credentials,
+        store: d.store,
+        blobs: d.blobs,
+        keys: d.keys,
+        credentials: d.credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
         owner: d.incarnation,
@@ -3348,7 +3343,7 @@ fn run_context_with_metrics_and_retry_floor(
         platform,
         budget: 1024,
         capabilities: &p.manifest().capabilities,
-        domain_schema: &d.storage_schema,
+        domain_schema: d.storage_schema,
         max_int_records: d.policy.max_int_records as usize,
         max_blob_records: d.policy.max_blob_records as usize,
         max_blob_bytes: d.policy.max_blob_bytes as usize,

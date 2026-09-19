@@ -66,6 +66,14 @@ or the package/token class words stored in applet heaps.
 
 CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,404-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. The JCVM lifecycle now has host allocation measurements in [its profile](JCVM_PROFILE.md#memory-placement). Device heap high-water and latency remain unmeasured.
 
+MC04 invocation and pending transactions now stage only the owning domain's mutable
+records, keys, and credentials. Retry-floor commits stage only credentials. Selection
+and management still need conversion. Against `cadef33`, the same 21-invocation
+credential acceptance workload reduces invocation peak host allocation from 41,310 to
+39,473 bytes and allocation traffic by 44,681 bytes, with unchanged live bytes.
+Overall workload peak falls from 41,310 to 40,496 bytes. Development firmware text
+increases by 1,236 bytes. These measurements do not establish a smaller device heap.
+
 ## Crypto replacement measurements
 
 `python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 187,188 text bytes, SHA-256 replacement 189,876, SHA-256 plus P-256 203,904, and all hardware providers 213,124. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.

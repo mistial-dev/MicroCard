@@ -54,6 +54,7 @@ Reuse an existing acceptance workload with simulator-only allocation counters:
 ```sh
 cargo build -p microcard-sim --locked --features heap-metrics
 python3 scripts/heap_profile.py --output work/jcvm-heap.json -- python3 scripts/jcvm_transport_acceptance.py
+python3 scripts/heap_profile.py --output work/mc04-heap.json -- python3 scripts/credential_acceptance.py
 ```
 
 The report groups startup and APDU operations by instruction. It records live and peak

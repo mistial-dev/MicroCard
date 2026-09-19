@@ -1973,17 +1973,26 @@ fn invocation_commit_boundaries_recover_old_or_new_state() {
     load(&mut card, &counter_package("atomic", incarnation, 1, 7)).unwrap();
     card.manage(command(0xec, &management_names_wire("atomic", "F04D430001").unwrap()))
         .unwrap();
+    let unrelated = create(&mut card, "untouched");
+    load(&mut card, &counter_package("untouched", unrelated, 1, 8)).unwrap();
+    let mut next = card.state.try_clone().unwrap();
+    next.domains.get_mut("untouched").unwrap().store.insert(1, 123).unwrap();
+    card.commit(next).unwrap();
     let previous = card.state.encode_snapshot().unwrap().to_vec();
     let base = card.into_flash();
 
     let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
     complete.invoke("F04D430001", &[]).unwrap();
+    assert_eq!(complete.state.domains["untouched"].store.get(&1), Some(&123));
     let committed = complete.state.encode_snapshot().unwrap().to_vec();
     for cut in commit_cuts(committed.len(), 0) {
         let mut flash = base.clone();
         flash.fail_after = Some(cut);
         let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
-        let _ = interrupted.invoke("F04D430001", &[]);
+        if interrupted.invoke("F04D430001", &[]).is_err() {
+            assert_eq!(interrupted.state.encode_snapshot().unwrap().as_slice(), previous);
+        }
+        assert_eq!(interrupted.state.domains["untouched"].store.get(&1), Some(&123));
         let mut flash = interrupted.into_flash();
         flash.fail_after = None;
         let recovered = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
