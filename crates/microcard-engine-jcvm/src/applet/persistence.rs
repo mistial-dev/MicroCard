@@ -8,7 +8,72 @@ pub struct PersistentState<'a> {
     pub instance: Reference,
 }
 
+/// RAM-only reset-scoped array contents. Bind this to the installation that produced it.
+/// Dropping it wipes all retained payloads; it must never enter persistent storage.
+pub struct VolatileState {
+    bytes: zeroize::Zeroizing<Vec<u8>>,
+    heap_used: usize,
+    instance: Reference,
+}
+
+impl VolatileState {
+    pub fn bytes(&self) -> usize { self.bytes.len() }
+}
+
 impl Card {
+    /// Retain only CLEAR_ON_RESET payloads after deselection, within a caller-owned quota.
+    pub fn retain_volatile(&mut self, maximum: usize) -> Result<VolatileState> {
+        let instance = self.instance.ok_or(Error::Missing)?;
+        let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        let mut size = 0usize;
+        heap.visit_objects(|reference, info, payload| {
+            if reference != self.buffer && info.clear_event == heap::CLEAR_ON_RESET {
+                size = size.checked_add(5 + payload.len()).ok_or(Error::Quota)?;
+            }
+            Ok(())
+        })?;
+        if size > maximum { return Err(Error::Quota); }
+        let mut bytes = zeroize::Zeroizing::new(Vec::new());
+        bytes.try_reserve_exact(size).map_err(|_| Error::Quota)?;
+        heap.visit_objects(|reference, info, payload| {
+            if reference != self.buffer && info.clear_event == heap::CLEAR_ON_RESET {
+                bytes.extend_from_slice(&reference.to_be_bytes());
+                bytes.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+                bytes.push(info.kind);
+                bytes.extend_from_slice(payload);
+            }
+            Ok(())
+        })?;
+        Ok(VolatileState { bytes, heap_used: self.heap_used, instance })
+    }
+
+    /// Apply a RAM snapshot only to the identical recovered heap layout. Validate the
+    /// complete snapshot first so a mismatch cannot partly restore another applet's data.
+    pub fn restore_volatile(&mut self, saved: &VolatileState) -> Result<()> {
+        if self.heap_used != saved.heap_used || self.instance != Some(saved.instance) {
+            return Err(Error::Format);
+        }
+        let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        for apply in [false, true] {
+            let mut at = 0usize;
+            heap.visit_objects(|reference, info, payload| {
+                if reference != self.buffer && info.clear_event == heap::CLEAR_ON_RESET {
+                    let header = saved.bytes.get(at..at + 5).ok_or(Error::Format)?;
+                    if header[..2] != reference.to_be_bytes()
+                        || header[2..4] != (payload.len() as u16).to_be_bytes()
+                        || header[4] != info.kind { return Err(Error::Format); }
+                    at += 5;
+                    let value = saved.bytes.get(at..at + payload.len()).ok_or(Error::Format)?;
+                    if apply { payload.copy_from_slice(value); }
+                    at += payload.len();
+                }
+                Ok(())
+            })?;
+            if at != saved.bytes.len() { return Err(Error::Format); }
+        }
+        Ok(())
+    }
+
     pub fn persistent_heap_bytes(&self) -> usize {
         self.heap_used
     }

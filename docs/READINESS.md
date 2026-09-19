@@ -26,7 +26,13 @@ explicit Java Card exceptions. Its durable registry and dedicated applet journal
 are integrated in core. Full SELECT responses and durable deselection callbacks now
 run through the adapter. Authenticated applet APDUs preserve their original command
 fields without a nested tunnel. P-256/AES applet bindings and retention of
-inactive-instance volatile state still need integration before board delivery.
+inactive-instance volatile state still need integration before board delivery. The engine
+now exposes an opaque, zeroizing snapshot of only CLEAR_ON_RESET array payloads,
+with a caller-supplied byte limit. Restoration validates the full heap layout before
+publishing any bytes. The existing lifecycle test covers quota rejection, stale layouts,
+retained reset-scoped values, and exclusion of deselection-scoped data and PIN validation.
+Card-level cache admission, installation binding, and reset/deletion invalidation remain
+required before this fixes cross-applet selection.
 
 MC04 stores immutable packages in separate image slots and commits only descriptors
 in its version-2 metadata snapshot. Recovery verifies image hashes and package

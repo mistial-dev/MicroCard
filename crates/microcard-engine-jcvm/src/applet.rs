@@ -21,7 +21,7 @@ use crate::{Error, Result};
 use alloc::vec::Vec;
 use zeroize::Zeroize;
 mod persistence;
-pub use persistence::PersistentState;
+pub use persistence::{PersistentState, VolatileState};
 
 /// Status words the runtime environment produces itself, ISO 7816-4.
 pub const SW_SUCCESS: u16 = 0x9000;
@@ -732,6 +732,18 @@ mod tests {
         let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(heap.array_get(on_deselect, 0), Ok(0));
         assert_eq!(heap.array_get(transient, 0), Ok(7));
+        assert!(matches!(card.retain_volatile(5), Err(Error::Quota)));
+        let retained = card.retain_volatile(6).unwrap();
+        assert_eq!(retained.bytes(), 6);
+        // Deselection allocated an exception, so the older committed layout is stale.
+        assert_eq!(restored.restore_volatile(&retained), Err(Error::Format));
+        let mut suspended_heap = vec![0; card.persistent_heap_bytes()];
+        restored = Card::restore(&file, Sizes::default(), card.save_into(&mut suspended_heap).unwrap()).unwrap();
+        restored.restore_volatile(&retained).unwrap();
+        let resumed = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+        assert_eq!(resumed.array_get(transient, 0), Ok(7));
+        assert_eq!(resumed.array_get(on_deselect, 0), Ok(0));
+        assert_eq!(resumed.get_word(pin, 3), Ok(0));
         card.reset().unwrap();
         assert!(card.installed());
         assert!(card.words.iter().all(|word| *word == 0));
