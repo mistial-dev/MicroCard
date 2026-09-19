@@ -9,6 +9,8 @@
 //! costs one load and one compare rather than a table walk.
 use super::frame::{NULL, Reference};
 use crate::{Error, Result};
+mod undo;
+use undo::Undo;
 
 /// Object kinds, which is the element type for an array.
 pub const KIND_OBJECT: u8 = 0;
@@ -35,6 +37,7 @@ pub type Context = u8;
 pub struct Heap<'a> {
     bytes: &'a mut [u8],
     next: usize,
+    transaction: Option<(usize, Undo)>,
 }
 
 /// What an object is, read back from its header.
@@ -72,7 +75,7 @@ impl<'a> Heap<'a> {
         if bytes.len() < HEADER + 2 {
             return Err(Error::Quota);
         }
-        Ok(Self { bytes, next: 2 })
+        Ok(Self { bytes, next: 2, transaction: None })
     }
 
     /// Take a slab that already holds objects, continuing from where it was left.
@@ -83,7 +86,42 @@ impl<'a> Heap<'a> {
         if used < 2 || used > bytes.len() || used > u16::MAX as usize || !used.is_multiple_of(2) {
             return Err(Error::Bounds);
         }
-        Ok(Self { bytes, next: used })
+        Ok(Self { bytes, next: used, transaction: None })
+    }
+
+    /// Start a bounded heap undo log. The caller also owns static-field rollback and
+    /// must end the transaction before releasing this heap view.
+    pub fn begin_transaction(&mut self, capacity: usize) -> Result<()> {
+        if self.transaction.is_some() { return Err(Error::Inconsistent); }
+        self.transaction = Some((self.next, Undo::new(capacity)));
+        Ok(())
+    }
+
+    pub fn transaction_remaining(&self) -> Option<usize> {
+        self.transaction.as_ref().map(|(_, undo)| undo.remaining())
+    }
+
+    pub fn commit_transaction(&mut self) -> Result<()> {
+        self.transaction.take().ok_or(Error::Inconsistent)?;
+        Ok(())
+    }
+
+    /// Restore conditional payload writes. True means objects were allocated after
+    /// begin: the caller must invalidate their references or terminate the session.
+    /// Storage is deliberately not reused while those references may still exist.
+    pub fn abort_transaction(&mut self) -> Result<bool> {
+        let (start, undo) = self.transaction.take().ok_or(Error::Inconsistent)?;
+        undo.restore(self.bytes);
+        Ok(self.next != start)
+    }
+
+    fn remember(&mut self, at: usize, length: usize, info: Info) -> Result<()> {
+        if info.clear_event == 0 {
+            if let Some((_, undo)) = &mut self.transaction {
+                undo.record(at, &self.bytes[at..at + length])?;
+            }
+        }
+        Ok(())
     }
 
     /// Bytes handed out so far, which is what a writeback has to persist.
@@ -153,6 +191,8 @@ impl<'a> Heap<'a> {
 
     /// Visit allocated payloads without exposing their headers or allocating a reference list.
     pub fn visit_objects(&mut self, mut visit: impl FnMut(Reference, Info, &mut [u8]) -> Result<()>) -> Result<()> {
+        // Maintenance visitors may mutate arbitrary payloads and cannot bypass undo.
+        if self.transaction.is_some() { return Err(Error::Inconsistent); }
         let mut at = 2usize;
         while at < self.next {
             let info = self.info(at as Reference)?;
@@ -233,8 +273,18 @@ impl<'a> Heap<'a> {
     }
 
     pub fn put_word(&mut self, reference: Reference, index: usize, value: u16) -> Result<()> {
-        let (at, _) = self.slot(reference, index, false)?;
+        let (at, info) = self.slot(reference, index, false)?;
+        self.remember(at, 2, info)?;
         self.bytes[at..at + 2].copy_from_slice(&value.to_be_bytes());
+        Ok(())
+    }
+
+    /// Runtime state such as a PIN presentation counter is never undone.
+    pub fn put_word_unconditional(&mut self, reference: Reference, index: usize, value: u16) -> Result<()> {
+        let (at, _) = self.slot(reference, index, false)?;
+        let value = value.to_be_bytes();
+        if let Some((_, undo)) = &mut self.transaction { undo.preserve(at, &value); }
+        self.bytes[at..at + 2].copy_from_slice(&value);
         Ok(())
     }
 
@@ -254,6 +304,8 @@ impl<'a> Heap<'a> {
 
     pub fn array_put(&mut self, reference: Reference, index: usize, value: i16) -> Result<()> {
         let (at, info) = self.slot(reference, index, true)?;
+        if info.kind == KIND_INT { return Err(Error::Type); }
+        self.remember(at, info.element_size(), info)?;
         match info.kind {
             KIND_BOOLEAN => self.bytes[at] = (value != 0) as u8,
             KIND_BYTE => self.bytes[at] = value as u8,
@@ -281,6 +333,7 @@ impl<'a> Heap<'a> {
         if info.kind != KIND_INT {
             return Err(Error::Type);
         }
+        self.remember(at, 4, info)?;
         self.bytes[at..at + 4].copy_from_slice(&value.to_be_bytes());
         Ok(())
     }
@@ -310,8 +363,10 @@ impl<'a> Heap<'a> {
     ) -> Result<()> {
         self.byte_slice(source, source_offset, length)?;
         self.byte_slice(destination, destination_offset, length)?;
+        let info = self.info(destination)?;
         let source = source as usize + HEADER + source_offset;
         let destination = destination as usize + HEADER + destination_offset;
+        self.remember(destination, length, info)?;
         microcard_memory::copy_bytes(self.bytes, source, destination, length).ok_or(Error::Bounds)
     }
 
@@ -330,6 +385,7 @@ impl<'a> Heap<'a> {
             return Err(Error::Bounds);
         }
         let at = reference as usize + HEADER + offset;
+        self.remember(at, length, info)?;
         Ok(&mut self.bytes[at..at + length])
     }
 }
@@ -339,6 +395,69 @@ mod tests {
     extern crate alloc;
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn rollback_covers_payload_writes_but_preserves_transients_and_unconditional_state() {
+        let mut bytes = vec![0; 512];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        let object = heap.new_object(1, 2, 1).unwrap();
+        let array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
+        let short = heap.new_array(KIND_SHORT, 2, 1).unwrap();
+        let integer = heap.new_array(KIND_INT, 2, 1).unwrap();
+        let transient = heap.new_transient_array(KIND_BYTE, 1, 1, CLEAR_ON_RESET).unwrap();
+        heap.byte_slice_mut(array, 0, 8).unwrap().copy_from_slice(b"abcdefgh");
+        heap.put_word(object, 1, 3).unwrap();
+        let original = heap.image().to_vec();
+
+        heap.begin_transaction(128).unwrap();
+        assert_eq!(heap.begin_transaction(128), Err(Error::Inconsistent));
+        heap.put_word(object, 0, 9).unwrap();
+        heap.put_word(object, 1, 5).unwrap();
+        heap.array_put(array, 2, 42).unwrap();
+        heap.byte_slice_mut(array, 1, 4).unwrap().fill(7);
+        heap.copy_bytes(array, 0, array, 2, 6).unwrap();
+        heap.array_put(short, 1, -20).unwrap();
+        heap.array_put_int(integer, 0, -70000).unwrap();
+        heap.array_put(transient, 0, 1).unwrap();
+        heap.put_word_unconditional(object, 1, 2).unwrap();
+        // Later conditional writes must restore the unconditional counter, not 3 or 5.
+        heap.put_word(object, 1, 8).unwrap();
+        assert!(!heap.abort_transaction().unwrap());
+        let mut expected = original;
+        expected[object as usize + HEADER + 2..object as usize + HEADER + 4]
+            .copy_from_slice(&2u16.to_be_bytes());
+        expected[transient as usize + HEADER] = 1;
+        assert_eq!(heap.image(), expected);
+        assert_eq!(heap.abort_transaction(), Err(Error::Inconsistent));
+
+        heap.begin_transaction(16).unwrap();
+        heap.put_word(object, 0, 12).unwrap();
+        heap.commit_transaction().unwrap();
+        assert_eq!(heap.get_word(object, 0), Ok(12));
+        assert_eq!(heap.transaction_remaining(), None);
+    }
+
+    #[test]
+    fn undo_exhaustion_precedes_mutation_and_aborted_allocations_are_never_reused() {
+        let mut bytes = vec![0; 256];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        let array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
+        let transient = heap.new_transient_array(KIND_BYTE, 1, 1, CLEAR_ON_DESELECT).unwrap();
+        heap.begin_transaction(8).unwrap(); // Four payload bytes and four metadata bytes.
+        heap.byte_slice_mut(array, 0, 4).unwrap().fill(1);
+        assert_eq!(heap.transaction_remaining(), Some(0));
+        heap.array_put(array, 1, 2).unwrap(); // Already saved, so no extra capacity.
+        heap.array_put(transient, 0, 3).unwrap(); // Transient data consumes no undo.
+        let before = heap.image().to_vec();
+        assert_eq!(heap.copy_bytes(array, 0, array, 2, 4), Err(Error::Quota));
+        assert_eq!(heap.array_put(array, 8, 1), Err(Error::Bounds));
+        assert_eq!(heap.image(), before);
+        let created = heap.new_object(1, 1, 1).unwrap();
+        assert!(heap.abort_transaction().unwrap(), "caller must invalidate new references");
+        assert_eq!(heap.byte_slice(array, 0, 8).unwrap(), &[0; 8]);
+        assert_eq!(heap.array_get(transient, 0), Ok(3));
+        assert_ne!(heap.new_object(1, 1, 1).unwrap(), created);
+    }
 
     #[test]
     fn transient_events_clear_payloads_without_changing_handles_or_persistent_data() {

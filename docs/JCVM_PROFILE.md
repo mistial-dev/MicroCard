@@ -334,10 +334,17 @@ transport. Physical Makerdiary execution and interrupted provisioning remain unv
 
 JCVM `beginTransaction`, `commitTransaction`, and `abortTransaction` currently validate
 nesting through a callback-local depth flag. They do not yet journal and undo heap or
-static-field writes, and the depth does not survive an APDU boundary. The persistent
-session's atomic journal commit is a separate guarantee; it does not implement Java
-Card transaction semantics. Implement bounded undo and interrupted-operation acceptance
-before treating personalized applet state as production ready.
+static-field writes. Java Card transactions must end when control returns from an
+applet callback; an unfinished transaction must be aborted, not carried across APDUs
+([JCRE 3.1, section 7](https://docs.oracle.com/en/java/javacard/3.1/jc-re-spec/F12651_05.pdf)).
+The heap now has bounded before-image primitives covering fields, arrays, mutable
+slices, and overlapping copies. They exclude transient contents, preserve unconditional
+runtime writes, and report allocations made during an aborted transaction without
+reusing their storage. These primitives are not yet connected to the native transaction
+methods. Static-field undo, callback cleanup, new-reference handling, native API
+semantics, and interrupted-operation acceptance remain required. The persistent session's
+atomic journal commit is a separate guarantee; it does not implement Java Card
+transaction semantics.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 

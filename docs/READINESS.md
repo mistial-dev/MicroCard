@@ -59,9 +59,10 @@ board's reserved heap.
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
   reboot does not preserve PIN validation. These do not establish hardware execution.
-- Implement actual JCVM transaction rollback. Native transaction methods currently
-  track nesting only; heap/static writes are not restored on abort, and transaction
-  depth is callback-local. Per-APDU journal atomicity does not replace this guarantee.
+- Connect JCVM transaction rollback. Bounded heap undo primitives are tested, but native
+  transaction methods still track nesting only. Static-field undo, callback-end abort,
+  new-reference handling, and native API exceptions remain required. Per-APDU journal
+  atomicity does not replace this guarantee.
 - Validate the current Makerdiary JCVM image and actual memory use. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
   revision and engine are unknown. The current JCVM dongle links at 192,408 text bytes,

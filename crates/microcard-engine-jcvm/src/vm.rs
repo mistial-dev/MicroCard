@@ -1,7 +1,7 @@
 //! The interpreter.
 //!
-//! Nothing here allocates. Frames are carved out of an arena the caller owns, which is how
-//! a card bounds what one invocation can use before it starts rather than after.
+//! Frames and objects use caller-owned arenas. Heap transactions allocate a bounded
+//! before-image log; admission precedes each conditional payload write.
 pub mod exec;
 pub mod frame;
 pub mod heap;
