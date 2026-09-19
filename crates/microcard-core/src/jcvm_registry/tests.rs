@@ -143,7 +143,7 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
             Err(error.clone())
         );
         assert_eq!(candidate, next);
-        let mut flash = images.into_flash();
+        let mut flash = images.into_flash().unwrap();
         flash.fail_after = Some(0);
         images = crate::image_store::Images::new(flash).unwrap();
         assert_eq!(
@@ -156,7 +156,7 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
             ),
             Err(error)
         );
-        let mut flash = images.into_flash();
+        let mut flash = images.into_flash().unwrap();
         flash.fail_after = None;
         images = crate::image_store::Images::new(flash).unwrap();
     }
@@ -175,7 +175,7 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
         )
         .unwrap();
     for cut in [0, 65536 + 257] {
-        let mut flash = images.into_flash();
+        let mut flash = images.into_flash().unwrap();
         flash.fail_after = Some(cut);
         images = crate::image_store::Images::new(flash).unwrap();
         assert_eq!(
@@ -192,7 +192,7 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
         images
             .with_image(&image, &mut SoftwareCrypto, |_| Ok(()))
             .unwrap();
-        let mut flash = images.into_flash();
+        let mut flash = images.into_flash().unwrap();
         flash.fail_after = None;
         images = crate::image_store::Images::new(flash).unwrap();
     }
@@ -270,7 +270,7 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
 
     // Retrying an already active package verifies flash without consuming writes.
     store.journal.flash_mut().fail_after = Some(0);
-    let mut flash = images.into_flash();
+    let mut flash = images.into_flash().unwrap();
     flash.fail_after = Some(0);
     images = crate::image_store::Images::new(flash).unwrap();
     assert_eq!(
@@ -287,7 +287,7 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
         1
     );
     store.journal.flash_mut().fail_after = None;
-    let mut flash = images.into_flash();
+    let mut flash = images.into_flash().unwrap();
     flash.fail_after = None;
     images = crate::image_store::Images::new(flash).unwrap();
 

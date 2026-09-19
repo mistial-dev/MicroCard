@@ -151,11 +151,28 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
         IMAGE
     }
     fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        self.with_range(index, 0..IMAGE, read)
+    }
+    fn with_range<T>(
+        &self,
+        index: usize,
+        range: std::ops::Range<usize>,
+        read: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        if range.start > range.end || range.end > IMAGE {
+            return Err(Error::Bounds);
+        }
         let mut file = fs::File::open(self.image_path(index)?).map_err(|_| Error::Storage)?;
         if file.metadata().map_err(|_| Error::Storage)?.len() != IMAGE as u64 {
             return Err(Error::Storage);
         }
-        let mut bytes = vec![0; IMAGE];
+        file.seek(SeekFrom::Start(range.start as u64))
+            .map_err(|_| Error::Storage)?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(range.len())
+            .map_err(|_| Error::Quota)?;
+        bytes.resize(range.len(), 0);
         file.read_exact(&mut bytes).map_err(|_| Error::Storage)?;
         read(&bytes)
     }

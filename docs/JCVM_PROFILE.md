@@ -162,15 +162,29 @@ lock prevents simultaneous simulator writers. `scripts/jcvm_transport_acceptance
 exercises this path with the independent Python signer and SCP03 client; checkpoint
 and CI run it. Set `MICROCARD_BINARY=1` to replay the same cases over framed transport.
 
-The [heap profiling command](VALIDATION_CADENCE.md#heap-measurements) reuses that
-lifecycle workload. On the 64-bit macOS host, writing the sanitized heap directly into
-CBOR reduced peak requested allocation from 174,663 to 165,285 bytes. Allocation
-traffic across its three PIN commands fell from 78,346 to 35,530 bytes. The baseline
-is commit `ed0d5f2`; the encoded snapshot contract is unchanged. These figures exclude
-allocator internals and stack use and do not establish a safe board heap size.
-The direct writer adds 120 bytes to the JCVM software-reference firmware while
-removing that heap allocation and copy. The owned code image and retained execution
-buffers still occupy RAM.
+JCVM sessions now retain checked image handles instead of owning a second code
+buffer. A retained handle prevents its slot from being reclaimed, and every borrow
+checks the complete signed package's descriptor hash before exposing its code range.
+Overlapping reads and writes return an error. Board reads borrow memory-mapped flash;
+the host backend reads only the stored package length. Handles never bypass package
+signature and registry-binding verification when a session opens.
+
+The [heap profiling command](VALIDATION_CADENCE.md#heap-measurements) reuses the
+existing lifecycle workload. Host allocation results and their source baselines are
+recorded below; allocator internals, stack use, and device latency are excluded.
+
+| Change | Host peak bytes | Selected live bytes |
+| --- | ---: | ---: |
+| Baseline (`ed0d5f2`) | 174,663 | 155,397 |
+| Direct CBOR snapshot (`3831e3e`) | 165,285 | 155,397 |
+| Retained image handle | 160,806 | 110,651 |
+
+The direct CBOR writer adds 120 bytes of JCVM firmware text. Retained image handles
+add 3,696 bytes versus `3831e3e`, trading flash for 44,746 bytes less retained host
+memory. The host backend allocates a temporary code-read buffer per command, unlike
+the board, so its allocation traffic increases; no latency reduction is claimed.
+Execution frames and applet heaps still occupy RAM. These results do not establish
+a safe board heap size.
 
 ## Verification
 

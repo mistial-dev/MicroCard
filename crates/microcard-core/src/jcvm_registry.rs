@@ -2,7 +2,7 @@
 use crate::{
     cbor::{Decoder, Encoder},
     globalplatform::Aid,
-    image_store::Descriptor,
+    image_store::{Descriptor, PinnedImage},
     jcvm_package::Package,
     Error, Result,
 };
@@ -637,9 +637,8 @@ impl<F: crate::journal::Flash> Store<F> {
         let nonce = self.journal.reserve_identity_nonce()?;
         let mut identity = *b"\0\0\0\0\0\0\0\0JCVMv1\0\0";
         identity[..8].copy_from_slice(&nonce.to_le_bytes());
-        let (image, sizes, digest) = self.with_package(load, images, scratch, provider, |package| {
-            next.register(package, module, aid, identity, bank)?;
-            session_image(package)
+        let (image, sizes, digest) = self.session_image(load, images, scratch, provider, |package| {
+            next.register(package, module, aid, identity, bank).map(|_| ())
         })?;
         let key = crate::jcvm_storage::heap_key(provider, root, bank, &identity, &digest)?;
         if cancel() { return Err(Error::Cancelled); }
@@ -665,16 +664,31 @@ impl<F: crate::journal::Flash> Store<F> {
         root: &crate::journal::JournalKey,
         scratch: &mut [u8],
         provider: &mut impl crate::crypto::CryptoProvider,
-    ) -> Result<crate::jcvm_storage::Session<H::Bank>> {
+    ) -> Result<crate::jcvm_storage::Session<H::Bank, PinnedImage<I>>> {
         let instance = *self.state()?.instances().find(|i| i.aid == aid).ok_or(Error::Missing)?;
         if usize::from(instance.heap_bank) >= heaps.bank_count() { return Err(Error::Storage); }
-        let (image, sizes, digest) = self.with_package(instance.load, images, scratch, provider, |package| {
-            session_image(package)
-        })?;
+        let (image, sizes, digest) = self.session_image(instance.load, images, scratch, provider, |_| Ok(()))?;
         let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &instance.identity, &digest)?;
         let session = crate::jcvm_storage::Session::open(heaps.open(instance.heap_bank)?, key, image, instance.identity, sizes, provider)?;
         if !session.installed()? { return Err(Error::Storage); }
         Ok(session)
+    }
+
+    fn session_image<I: crate::image_store::ImageFlash>(
+        &self, load: Aid, images: &crate::image_store::Images<I>, scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+        validate: impl FnOnce(&Package<'_>) -> Result<()>,
+    ) -> Result<(PinnedImage<I>, microcard_engine_jcvm::applet::Sizes, [u8; 32])> {
+        let (length, sizes, digest) = self.with_package(load, images, scratch, provider, |package| {
+            validate(package)?;
+            Ok((package.envelope.image.len(), package.manifest.sizes, package.envelope.image_digest))
+        })?;
+        let descriptor = self.state()?.loads().find(|item| item.aid == load)
+            .and_then(|item| item.image).ok_or(Error::Storage)?;
+        let end = usize::try_from(descriptor.length).map_err(|_| Error::Bounds)?;
+        let start = end.checked_sub(length).ok_or(Error::Bounds)?;
+        let image = images.pin(&descriptor, start..end, provider)?;
+        Ok((image, sizes, digest))
     }
 
     /// Verify the persisted image and its current registry binding before using it.
@@ -723,13 +737,6 @@ impl<F: crate::journal::Flash> Store<F> {
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }
-}
-
-fn session_image(package: &Package<'_>) -> Result<(Vec<u8>, microcard_engine_jcvm::applet::Sizes, [u8; 32])> {
-    let mut image = Vec::new();
-    image.try_reserve_exact(package.envelope.image.len()).map_err(|_| Error::Quota)?;
-    image.extend_from_slice(package.envelope.image);
-    Ok((image, package.manifest.sizes, package.envelope.image_digest))
 }
 
 #[cfg(all(test, feature = "software-crypto"))]

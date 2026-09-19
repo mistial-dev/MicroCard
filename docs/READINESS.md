@@ -32,7 +32,9 @@ in its version-2 metadata snapshot. Recovery verifies image hashes and package
 signatures. Interrupted activation protects both committed and uncertain candidate
 images. Both board layouts reserve eight 16 KiB image slots; the simulator uses files.
 Runtime package views still occupy RAM. Both JCVM board layouts now reserve separate heap banks;
-its core management adapter commits heaps before publishing instance metadata.
+its core management adapter commits heaps before publishing instance metadata. JCVM
+sessions retain image handles that prevent slot reclamation and authenticate each
+borrow, rather than keeping a second code image in RAM.
 
 MJ03 reserves a durable nonce before each encryption attempt, separately from the
 committed generation. Recovery tests track nonce uniqueness across interrupted writes,

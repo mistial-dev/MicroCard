@@ -1,28 +1,29 @@
 //! One installed applet with durable command boundaries.
 use super::*;
-use crate::{hal::Entropy, jcvm_services::Services};
+use crate::{hal::Entropy, image_store::CodeImage, jcvm_services::Services};
 use microcard_engine_jcvm::applet::Response;
 
-pub struct Session<F: Flash> {
+pub struct Session<F: Flash, I: CodeImage = Vec<u8>> {
     store: Store<F>,
-    image: Vec<u8>,
+    image: I,
     sizes: Sizes,
     card: Option<Card>,
     recovery_required: bool,
 }
 
-impl<F: Flash> Session<F> {
+impl<F: Flash, I: CodeImage> Session<F, I> {
     /// The caller authenticates code before opening; this session binds state to it.
     pub fn open(
         flash: F,
         key: impl Into<JournalKey>,
-        verified_image: Vec<u8>,
+        verified_image: I,
         installation: [u8; 16],
         sizes: Sizes,
         provider: &mut impl CryptoProvider,
     ) -> Result<Self> {
-        let (store, card) =
-            Store::open(flash, key, &verified_image, installation, sizes, provider)?;
+        let (store, card) = verified_image.with_bytes(provider, |image, provider| {
+            Store::open(flash, key, image, installation, sizes, provider)
+        })?;
         Ok(Self {
             store,
             image: verified_image,
@@ -52,13 +53,14 @@ impl<F: Flash> Session<F> {
         if !self.selected()? {
             return Ok(());
         }
-        let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
-        let result = self
-            .card
-            .as_mut()
-            .ok_or(Error::Missing)?
-            .deselect_with_cancel(&file, &mut Services(provider), cancel)
-            .map_err(engine_error);
+        let result = self.image.with_bytes(provider, |image, provider| {
+            let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
+            self.card
+                .as_mut()
+                .ok_or(Error::Missing)?
+                .deselect_with_cancel(&file, &mut Services(provider), cancel)
+                .map_err(engine_error)
+        });
         self.finish(result, provider, cancel)
     }
 
@@ -66,7 +68,9 @@ impl<F: Flash> Session<F> {
     pub fn recover(&mut self, provider: &mut impl CryptoProvider) -> Result<()> {
         self.recovery_required = true;
         self.card = None;
-        self.card = self.store.recover(&self.image, self.sizes, provider)?;
+        self.card = self.image.with_bytes(provider, |image, provider| {
+            self.store.recover(image, self.sizes, provider)
+        })?;
         self.recovery_required = false;
         Ok(())
     }
@@ -87,10 +91,13 @@ impl<F: Flash> Session<F> {
         provider: &mut (impl CryptoProvider + Entropy),
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
-        let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
-        if file.header().map_err(engine_error)?.package_aid != request.load_aid {
-            return Err(Error::Missing);
-        }
+        self.image.with_bytes(provider, |image, _| {
+            let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
+            if file.header().map_err(engine_error)?.package_aid != request.load_aid {
+                return Err(Error::Missing);
+            }
+            Ok(())
+        })?;
         let parameters = request.jcvm_parameters()?;
         self.install_inner(
             request.module_aid,
@@ -115,29 +122,31 @@ impl<F: Flash> Session<F> {
         if cancel() {
             return Err(Error::Cancelled);
         }
-        let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
-        self.card = Some(Card::new(&file, self.sizes).map_err(engine_error)?);
-        let card = self.card.as_mut().unwrap();
-        let result = match instance {
-            Some(instance_aid) => card.install_instance_with_cancel(
-                &file,
-                &mut Services(provider),
-                microcard_engine_jcvm::applet::Installation {
-                    module_aid: module,
-                    instance_aid,
+        let result = self.image.with_bytes(provider, |image, provider| {
+            let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
+            self.card = Some(Card::new(&file, self.sizes).map_err(engine_error)?);
+            let card = self.card.as_mut().unwrap();
+            match instance {
+                Some(instance_aid) => card.install_instance_with_cancel(
+                    &file,
+                    &mut Services(provider),
+                    microcard_engine_jcvm::applet::Installation {
+                        module_aid: module,
+                        instance_aid,
+                        parameters,
+                    },
+                    cancel,
+                ),
+                None => card.install_module_with_cancel(
+                    &file,
+                    &mut Services(provider),
+                    module,
                     parameters,
-                },
-                cancel,
-            ),
-            None => card.install_module_with_cancel(
-                &file,
-                &mut Services(provider),
-                module,
-                parameters,
-                cancel,
-            ),
-        }
-        .map_err(engine_error);
+                    cancel,
+                ),
+            }
+            .map_err(engine_error)
+        });
         self.finish(result, provider, cancel)
     }
 
@@ -154,13 +163,14 @@ impl<F: Flash> Session<F> {
         if cancel() {
             return Err(Error::Cancelled);
         }
-        let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
-        let result = self
-            .card
-            .as_mut()
-            .unwrap()
-            .process_with_cancel(&file, &mut Services(provider), command, selecting, cancel)
-            .map_err(engine_error);
+        let result = self.image.with_bytes(provider, |image, provider| {
+            let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
+            self.card
+                .as_mut()
+                .unwrap()
+                .process_with_cancel(&file, &mut Services(provider), command, selecting, cancel)
+                .map_err(engine_error)
+        });
         self.finish(result, provider, cancel)
     }
 

@@ -5,7 +5,7 @@ use crate::{
     engine::CardEngine,
     globalplatform::{self as gp, Aid, LoadReceiver, Payload},
     hal::Entropy,
-    image_store::{ImageFlash, Images},
+    image_store::{ImageFlash, Images, PinnedImage},
     jcvm_package::MAX_PACKAGE_BYTES,
     jcvm_registry::{Registry, Store},
     jcvm_storage::{HeapBanks, Session},
@@ -30,13 +30,15 @@ struct Upload {
     receiver: LoadReceiver,
 }
 
+type StoredSession<F, I> = Session<F, PinnedImage<I>>;
+
 pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
     storage: Storage<F, I, H>,
     provider: P,
     staging: S,
     scratch: Vec<u8>,
     upload: Option<Upload>,
-    selected: Option<(Aid, Session<H::Bank>)>,
+    selected: Option<(Aid, StoredSession<H::Bank, I>)>,
     #[cfg(feature = "scp03-pseudo-random")]
     sequences: Option<core::ops::RangeInclusive<u32>>,
 }

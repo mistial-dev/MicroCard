@@ -1,5 +1,10 @@
 //! Immutable image slots. Only an authenticated metadata commit activates a descriptor.
 use crate::{crypto::CryptoProvider, Error, Result};
+#[cfg(feature = "jcvm")]
+use alloc::{rc::Rc, vec::Vec};
+#[cfg(feature = "jcvm")]
+use core::cell::{Cell, RefCell};
+use core::ops::Range;
 
 /// A stable set of independently erasable, memory-mapped slots owned by the image store.
 /// Reads must reflect completed writes; programming only clears bits and reports failure.
@@ -7,6 +12,14 @@ pub trait ImageFlash {
     fn slot_count(&self) -> usize;
     fn slot_size(&self) -> usize;
     fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T>;
+    fn with_range<T>(
+        &self,
+        index: usize,
+        range: Range<usize>,
+        read: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        self.with_slot(index, |bytes| read(bytes.get(range).ok_or(Error::Bounds)?))
+    }
     fn erase(&mut self, index: usize) -> Result<()>;
     fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()>;
 }
@@ -71,7 +84,7 @@ mod tests {
         })
         .unwrap();
         let committed = images.stage(b"old", &[], &mut SoftwareCrypto).unwrap();
-        let baseline = images.into_flash();
+        let baseline = images.into_flash().unwrap();
         for interruption in 0..=38 {
             let mut flash = baseline.clone();
             flash.remaining = Some(interruption);
@@ -82,7 +95,7 @@ mod tests {
                 images.read(&committed, &mut SoftwareCrypto).unwrap(),
                 b"old"
             );
-            let mut flash = images.into_flash();
+            let mut flash = images.into_flash().unwrap();
             flash.remaining = None;
             // On reboot only authenticated committed metadata is authoritative.
             let mut images = Images::new(flash).unwrap();
@@ -134,7 +147,7 @@ mod tests {
         })
         .unwrap();
         let committed = images.stage(b"old", &[], &mut SoftwareCrypto).unwrap();
-        let baseline = images.into_flash();
+        let baseline = images.into_flash().unwrap();
         for descriptor in [
             Descriptor {
                 slot: 2,
@@ -154,7 +167,7 @@ mod tests {
                 images.stage(b"new", &[descriptor], &mut SoftwareCrypto),
                 Err(Error::Bounds)
             );
-            assert_eq!(images.into_flash().slots, baseline.slots);
+            assert_eq!(images.into_flash().unwrap().slots, baseline.slots);
         }
         for fail_on in [1, 2] {
             let mut images = Images::new(baseline.clone()).unwrap();
@@ -172,9 +185,52 @@ mod tests {
                 b"old"
             );
             if fail_on == 1 {
-                assert_eq!(images.into_flash().slots, baseline.slots);
+                assert_eq!(images.into_flash().unwrap().slots, baseline.slots);
             }
         }
+    }
+
+    #[cfg(feature = "jcvm")]
+    #[test]
+    fn pinned_code_blocks_reclamation_and_overlapping_writes_and_checks_each_read() {
+        let mut images = Images::new(Memory {
+            slots: [[255; 32]; 2],
+            remaining: None,
+        })
+        .unwrap();
+        let first = images.stage(b"first", &[], &mut SoftwareCrypto).unwrap();
+        let pin = images.pin(&first, 1..4, &mut SoftwareCrypto).unwrap();
+        let second = images.stage(b"second", &[], &mut SoftwareCrypto).unwrap();
+        assert_ne!(first.slot, second.slot);
+        assert_eq!(
+            images.stage(b"third", &[second], &mut SoftwareCrypto),
+            Err(Error::Quota)
+        );
+        pin.with_bytes(&mut SoftwareCrypto, |bytes, provider| {
+            assert_eq!(bytes, b"irs");
+            assert_eq!(images.stage(b"third", &[], provider), Err(Error::Busy));
+            assert_eq!(bytes, b"irs");
+            Ok(())
+        })
+        .unwrap();
+        // Model a storage fault outside the authorized writer, not a new activation.
+        images.shared.flash.borrow_mut().slots[first.slot as usize][0] ^= 1;
+        assert_eq!(
+            pin.with_bytes(&mut SoftwareCrypto, |_, _| panic!("damaged code executed")),
+            Err::<(), _>(Error::Authentication)
+        );
+        drop(pin);
+        let replacement = images
+            .stage(b"third", &[second], &mut SoftwareCrypto)
+            .unwrap();
+        assert_eq!(replacement.slot, first.slot);
+        let pin = images.pin(&replacement, 0..5, &mut SoftwareCrypto).unwrap();
+        assert!(matches!(images.into_flash(), Err(Error::Busy)));
+        pin.with_bytes(&mut SoftwareCrypto, |bytes, _| {
+            assert_eq!(bytes, b"third");
+            Ok(())
+        })
+        .unwrap();
     }
 }
 
@@ -185,19 +241,120 @@ pub struct Descriptor {
     pub digest: [u8; 32],
 }
 
+#[cfg(feature = "jcvm")]
+struct Shared<F> {
+    flash: RefCell<F>,
+    pins: [Cell<u16>; 64],
+}
+
 pub struct Images<F> {
+    #[cfg(feature = "jcvm")]
+    shared: Rc<Shared<F>>,
+    #[cfg(not(feature = "jcvm"))]
     flash: F,
+    slot_count: usize,
+    slot_size: usize,
+}
+
+/// Code can be owned RAM or a checked borrow from immutable storage.
+#[cfg(feature = "jcvm")]
+pub trait CodeImage {
+    fn with_bytes<P: CryptoProvider, T>(
+        &self,
+        provider: &mut P,
+        read: impl FnOnce(&[u8], &mut P) -> Result<T>,
+    ) -> Result<T>;
+}
+#[cfg(feature = "jcvm")]
+impl CodeImage for Vec<u8> {
+    fn with_bytes<P: CryptoProvider, T>(
+        &self,
+        provider: &mut P,
+        read: impl FnOnce(&[u8], &mut P) -> Result<T>,
+    ) -> Result<T> {
+        read(self, provider)
+    }
+}
+
+/// A retained image prevents reclamation, without retaining a copy of its code.
+#[cfg(feature = "jcvm")]
+pub struct PinnedImage<F> {
+    images: Images<F>,
+    descriptor: Descriptor,
+    range: Range<usize>,
+}
+#[cfg(feature = "jcvm")]
+impl<F: ImageFlash> CodeImage for PinnedImage<F> {
+    fn with_bytes<P: CryptoProvider, T>(
+        &self,
+        provider: &mut P,
+        read: impl FnOnce(&[u8], &mut P) -> Result<T>,
+    ) -> Result<T> {
+        self.images
+            .with_verified_image(&self.descriptor, provider, |bytes, provider| {
+                read(
+                    bytes.get(self.range.clone()).ok_or(Error::Bounds)?,
+                    provider,
+                )
+            })
+    }
+}
+#[cfg(feature = "jcvm")]
+impl<F> Drop for PinnedImage<F> {
+    fn drop(&mut self) {
+        let pin = &self.images.shared.pins[usize::from(self.descriptor.slot)];
+        pin.set(pin.get() - 1);
+    }
 }
 
 impl<F: ImageFlash> Images<F> {
     pub fn new(flash: F) -> Result<Self> {
-        if !(2..=64).contains(&flash.slot_count()) {
+        let slot_count = flash.slot_count();
+        let slot_size = flash.slot_size();
+        if !(2..=64).contains(&slot_count) {
             return Err(Error::Storage);
         }
-        Ok(Self { flash })
+        Ok(Self {
+            #[cfg(feature = "jcvm")]
+            shared: Rc::new(Shared {
+                flash: RefCell::new(flash),
+                pins: core::array::from_fn(|_| Cell::new(0)),
+            }),
+            #[cfg(not(feature = "jcvm"))]
+            flash,
+            slot_count,
+            slot_size,
+        })
     }
 
-    /// Borrow verified image bytes for the duration of `read`, without allocating.
+    /// Authenticate before retaining a range. The range normally excludes the package
+    /// envelope; every subsequent read still authenticates the complete descriptor.
+    #[cfg(feature = "jcvm")]
+    pub fn pin(
+        &self,
+        descriptor: &Descriptor,
+        range: Range<usize>,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<PinnedImage<F>> {
+        self.with_verified_image(descriptor, provider, |bytes, _| {
+            if range.is_empty() || bytes.get(range.clone()).is_none() {
+                return Err(Error::Bounds);
+            }
+            let pin = &self.shared.pins[usize::from(descriptor.slot)];
+            pin.set(pin.get().checked_add(1).ok_or(Error::Quota)?);
+            Ok(PinnedImage {
+                images: Self {
+                    shared: Rc::clone(&self.shared),
+                    slot_count: self.slot_count,
+                    slot_size: self.slot_size,
+                },
+                descriptor: *descriptor,
+                range,
+            })
+        })
+    }
+
+    /// Borrow verified bytes; memory-mapped backends need no image allocation.
     pub fn with_image<T>(
         &self,
         descriptor: &Descriptor,
@@ -215,21 +372,52 @@ impl<F: ImageFlash> Images<F> {
         read: impl FnOnce(&[u8], &mut P) -> Result<T>,
     ) -> Result<T> {
         self.validate(descriptor)?;
-        self.flash.with_slot(usize::from(descriptor.slot), |slot| {
-            let bytes = slot
-                .get(..descriptor.length as usize)
-                .ok_or(Error::Bounds)?;
-            if provider.sha256(bytes)? != descriptor.digest {
-                return Err(Error::Authentication);
-            }
-            read(bytes, provider)
+        self.with_flash(|flash| {
+            flash.with_range(
+                usize::from(descriptor.slot),
+                0..descriptor.length as usize,
+                |bytes| {
+                    if provider.sha256(bytes)? != descriptor.digest {
+                        return Err(Error::Authentication);
+                    }
+                    read(bytes, provider)
+                },
+            )
         })
     }
 
+    fn with_flash<T>(&self, read: impl FnOnce(&F) -> Result<T>) -> Result<T> {
+        #[cfg(feature = "jcvm")]
+        {
+            read(&*self.shared.flash.try_borrow().map_err(|_| Error::Busy)?)
+        }
+        #[cfg(not(feature = "jcvm"))]
+        {
+            read(&self.flash)
+        }
+    }
+
+    fn with_flash_mut<T>(&mut self, write: impl FnOnce(&mut F) -> Result<T>) -> Result<T> {
+        #[cfg(feature = "jcvm")]
+        {
+            write(
+                &mut *self
+                    .shared
+                    .flash
+                    .try_borrow_mut()
+                    .map_err(|_| Error::Busy)?,
+            )
+        }
+        #[cfg(not(feature = "jcvm"))]
+        {
+            write(&mut self.flash)
+        }
+    }
+
     fn validate(&self, descriptor: &Descriptor) -> Result<()> {
-        if usize::from(descriptor.slot) >= self.flash.slot_count()
+        if usize::from(descriptor.slot) >= self.slot_count
             || descriptor.length == 0
-            || descriptor.length as usize > self.flash.slot_size()
+            || descriptor.length as usize > self.slot_size
         {
             return Err(Error::Bounds);
         }
@@ -273,6 +461,12 @@ impl<F: ImageFlash> Images<F> {
             return Err(Error::Format);
         }
         let mut occupied = 0u64;
+        #[cfg(feature = "jcvm")]
+        for (slot, pins) in self.shared.pins.iter().enumerate() {
+            if pins.get() != 0 {
+                occupied |= 1u64 << slot;
+            }
+        }
         for descriptor in protected {
             self.validate(descriptor)?;
             occupied |= 1u64 << descriptor.slot;
@@ -291,8 +485,8 @@ impl<F: ImageFlash> Images<F> {
             }
         }
         let mut candidate = None;
-        for slot in 0..self.flash.slot_count() {
-            if occupied & (1u64 << slot) == 0 && self.flash.slot_size() >= image.len() {
+        for slot in 0..self.slot_count {
+            if occupied & (1u64 << slot) == 0 && self.slot_size >= image.len() {
                 candidate = Some(slot);
                 break;
             }
@@ -301,12 +495,12 @@ impl<F: ImageFlash> Images<F> {
         if cancel() {
             return Err(Error::Cancelled);
         }
-        self.flash.erase(slot)?;
+        self.with_flash_mut(|flash| flash.erase(slot))?;
         for (chunk, bytes) in image.chunks(256).enumerate() {
             if cancel() {
                 return Err(Error::Cancelled);
             }
-            self.flash.program(slot, chunk * 256, bytes)?;
+            self.with_flash_mut(|flash| flash.program(slot, chunk * 256, bytes))?;
         }
         let descriptor = Descriptor {
             slot: slot as u8,
@@ -320,8 +514,17 @@ impl<F: ImageFlash> Images<F> {
         Ok(descriptor)
     }
 
-    pub fn into_flash(self) -> F {
-        self.flash
+    pub fn into_flash(self) -> Result<F> {
+        #[cfg(feature = "jcvm")]
+        {
+            Rc::try_unwrap(self.shared)
+                .map(|shared| shared.flash.into_inner())
+                .map_err(|_| Error::Busy)
+        }
+        #[cfg(not(feature = "jcvm"))]
+        {
+            Ok(self.flash)
+        }
     }
 }
 
@@ -334,6 +537,14 @@ impl<F: ImageFlash> ImageFlash for &mut F {
     }
     fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
         F::with_slot(self, index, read)
+    }
+    fn with_range<T>(
+        &self,
+        index: usize,
+        range: Range<usize>,
+        read: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        F::with_range(self, index, range, read)
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         F::erase(self, index)
