@@ -2,7 +2,36 @@
 use crate::{crypto::CryptoProvider, hal::Entropy};
 use microcard_engine_jcvm::{Error, Result, host::Host};
 
+mod ecdsa;
+
 pub struct Services<'a, P>(pub &'a mut P);
+
+// Kept outside the host vtable until the applet signature binding is enabled.
+impl<P: CryptoProvider> Services<'_, P> {
+    /// Sign through the provider and emit minimal DER; failure leaves output zeroed.
+    pub fn p256_sign(&mut self, key: &[u8; 32], message: &[u8], output: &mut [u8; 72]) -> Result<usize> {
+        output.fill(0);
+        if !crate::crypto::p256_private_key_valid(key) { return Err(Error::Bounds); }
+        let mut raw = zeroize::Zeroizing::new([0u8; 64]);
+        self.0.p256_ecdsa_sign_into(key, message, &mut raw).map_err(|_| Error::Unauthorized)?;
+        if !crate::crypto::p256_private_key_valid(raw[..32].try_into().unwrap())
+            || !crate::crypto::p256_private_key_valid(raw[32..].try_into().unwrap()) {
+            return Err(Error::Format);
+        }
+        Ok(ecdsa::encode(&raw, output))
+    }
+
+    /// Reject malformed DER locally and preserve provider failures as errors.
+    pub fn p256_verify(&mut self, key: &[u8; 65], message: &[u8], signature: &[u8]) -> Result<bool> {
+        if key[0] != 4 { return Ok(false); }
+        let Some(raw) = ecdsa::decode(signature) else { return Ok(false); };
+        // Java Card accepts either S form; package canonicalization remains separate.
+        if !crate::crypto::p256_private_key_valid(raw[..32].try_into().unwrap())
+            || !crate::crypto::p256_private_key_valid(raw[32..].try_into().unwrap()) { return Ok(false); }
+        self.0.p256_ecdsa_verify(key, message, &raw).map_err(|_| Error::Unauthorized)
+    }
+
+}
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     fn supports_digest(&self, algorithm: u8) -> bool {
@@ -74,6 +103,16 @@ mod tests {
         fail: bool,
     }
     impl CryptoProvider for Provider {
+        fn p256_ecdsa_sign_into(&mut self, key: &[u8; 32], message: &[u8], output: &mut [u8; 64]) -> crate::Result<()> {
+            self.calls += 1;
+            if self.fail { output.fill(0x42); return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.p256_ecdsa_sign_into(key, message, output)
+        }
+        fn p256_ecdsa_verify(&mut self, key: &[u8], message: &[u8], signature: &[u8]) -> crate::Result<bool> {
+            self.calls += 1;
+            if self.fail { return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.p256_ecdsa_verify(key, message, signature)
+        }
         fn aes_cbc_in_place(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> crate::Result<()> {
             self.calls += 1;
             if self.fail { buffer.fill(0x42); return Err(crate::Error::Native); }
@@ -109,6 +148,34 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    fn p256_der_bridge_uses_provider_and_distinguishes_bad_signatures_from_failures() {
+        let key = [1u8; 32];
+        let public = crate::crypto::p256_public_key(&key).unwrap();
+        let mut provider = Provider::default();
+        let mut host = Services(&mut provider);
+        let mut signature = [0xaa; 72];
+        let written = host.p256_sign(&key, b"message", &mut signature).unwrap();
+        let expected = crate::crypto::p256_ecdsa_sign(&key, b"message").unwrap();
+        assert_eq!(&signature[..written], p256::ecdsa::Signature::from_slice(&expected).unwrap().to_der().as_bytes());
+        assert_eq!(host.p256_verify(&public, b"message", &signature[..written]), Ok(true));
+        assert_eq!(host.p256_verify(&public, b"changed", &signature[..written]), Ok(false));
+        let calls = host.0.calls;
+        assert_eq!(host.p256_verify(&public, b"message", &signature[..written - 1]), Ok(false));
+        let mut compressed = public;
+        compressed[0] = 2;
+        assert_eq!(host.p256_verify(&compressed, b"message", &signature[..written]), Ok(false));
+        let valid_signature = signature;
+        assert_eq!(host.p256_sign(&[0;32], b"message", &mut signature), Err(Error::Bounds));
+        assert_eq!(signature, [0;72]);
+        assert_eq!(host.0.calls, calls);
+        host.0.fail = true;
+        assert_eq!(host.p256_sign(&key, b"message", &mut signature), Err(Error::Unauthorized));
+        assert_eq!(signature, [0;72]);
+        assert_eq!(host.p256_verify(&public, b"message", &valid_signature[..written]), Err(Error::Unauthorized));
+        assert_eq!(host.0.calls, calls + 2);
     }
 
     #[test]
