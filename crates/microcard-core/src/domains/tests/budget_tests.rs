@@ -288,7 +288,7 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
                 peak_evaluation_slots: 19,
                 peak_local_slots: 3,
                 peak_frames: 3,
-                peak_transient_bytes: 176,
+                peak_transient_bytes: 152,
                 peak_transient_objects: 3,
                 native_work_units: 714,
             },
@@ -298,7 +298,7 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
     assert!(peak.peak_evaluation_slots <= 24);
     assert!(peak.peak_local_slots <= 8);
     assert!(peak.peak_frames <= 4);
-    assert!(peak.peak_transient_bytes <= 256);
+    assert!(peak.peak_transient_bytes <= 160);
     assert!(peak.peak_transient_objects <= 8);
     assert!(peak.native_work_units <= 768);
 }

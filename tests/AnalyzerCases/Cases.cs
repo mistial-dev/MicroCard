@@ -362,14 +362,14 @@ public static class ExcessiveAllocation
 #if CASE_ALLOCATION_BOUNDARY
 public static class BoundaryAllocation
 {
-    public static int[] Run() => new int[4092];
+    public static int[] Run() => new int[4094];
 }
 #endif
 
 #if CASE_ALLOCATION_OVERHEAD
 public static class AllocationOverhead
 {
-    public static int[] Run() => new int[4093];
+    public static int[] Run() => new int[4095];
 }
 #endif
 

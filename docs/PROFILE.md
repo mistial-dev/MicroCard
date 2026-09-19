@@ -15,4 +15,4 @@ MC04 assemblies carry ECMA-derived metadata types, CIL method bodies and signed 
 Package authorization and package signatures are independent. Only an authenticated management session may mutate domain or package state.
 
 
-The current framework relies on regular SDK core types while preprocessing their supported semantics. A device-focused `mscorlib` remains planned. Host and device heap allocation charge a fixed 16 bytes per primitive slot plus object overhead, so quota decisions agree across 32-bit and 64-bit platforms. Native cryptography has weighted work costs in addition to VM fuel.
+The framework supplies a device-focused `mscorlib`. Host and device heap allocation charge six header bytes, two handle bytes, and an even-sized payload per object. Byte elements use one byte; Int32 elements and sealed-object fields use four. Quota decisions agree across 32-bit and 64-bit platforms. Native cryptography has weighted work costs in addition to VM fuel.

@@ -446,7 +446,7 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
             count < 0)
             return;
         int elementBytes = ElementBytes(elementType);
-        long bytes = (long)count * elementBytes + 16;
+        long bytes = ObjectBytes((long)count * elementBytes);
         if (elementBytes != 0 && bytes > 16384)
             Report(context, AllocationLimit, operation.Syntax.GetLocation(), bytes);
     }
@@ -487,7 +487,7 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         {
             long fields = type.GetMembers().OfType<IFieldSymbol>()
                 .LongCount(static field => !field.IsStatic);
-            return fields * 16 + 16;
+            return ObjectBytes(fields * 4);
         }
         if (operation.Type is not IArrayTypeSymbol { ElementType.SpecialType: var elementType })
             return null;
@@ -504,8 +504,11 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
                 collection.Elements.Length,
             _ => null
         };
-        return count is int length ? (long)length * elementBytes + 16 : null;
+        return count is int length ? ObjectBytes((long)length * elementBytes) : null;
     }
+
+    // Six-byte header, two-byte handle, and an even-sized payload.
+    private static long ObjectBytes(long payload) => 8 + ((payload + 1) & ~1L);
 
     private static int ElementBytes(SpecialType type) =>
         type == SpecialType.System_Int32 ? 4 : type == SpecialType.System_Byte ? 1 : 0;

@@ -11,7 +11,8 @@ const MAX_TRANSIENT_OBJECTS: usize = 256;
 const MAX_ACTIVE_LOCALS: usize = 32 * 64;
 const MAX_EVALUATION_STACK: usize = 256;
 const MAX_CALL_FRAMES: usize = 32;
-const TRANSIENT_VALUE_BYTES: usize = 16;
+mod heap;
+pub use heap::Heap;
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -74,146 +75,6 @@ pub enum LinkedTarget {
     DomainKeys,
     Native(u8),
     Managed { unit: usize, method: u16 },
-}
-
-enum Object {
-    Bytes(Vec<u8>),
-    Ints(Vec<i32>),
-    Struct {
-        unit: usize,
-        owner: u16,
-        fields: Vec<RuntimeValue>,
-    },
-}
-
-impl Zeroize for Object {
-    fn zeroize(&mut self) {
-        match self {
-            Self::Bytes(values) => values.zeroize(),
-            Self::Ints(values) => values.zeroize(),
-            Self::Struct {
-                unit,
-                owner,
-                fields,
-            } => {
-                unit.zeroize();
-                owner.zeroize();
-                fields.zeroize();
-            }
-        }
-    }
-}
-
-pub struct Heap {
-    objects: Vec<Object>,
-    used: usize,
-}
-
-impl Zeroize for Heap {
-    fn zeroize(&mut self) {
-        self.objects.zeroize();
-        self.used.zeroize();
-    }
-}
-
-impl Heap {
-    pub(crate) fn new() -> Self {
-        Self {
-            objects: Vec::new(),
-            used: 0,
-        }
-    }
-
-    fn allocation_end(&self, count: usize, element_bytes: usize) -> Result<usize> {
-        if self.objects.len() >= MAX_TRANSIENT_OBJECTS {
-            return Err(Error::Quota);
-        }
-        microcard_memory::allocation_range(self.used, 16, count, element_bytes, 1, MAX_TRANSIENT_BYTES)
-            .map(|range| range.end).ok_or(Error::Quota)
-    }
-
-    fn allocate(&mut self, bytes: bool, length: usize) -> Result<RuntimeValue> {
-        let end = self.allocation_end(length, if bytes { 1 } else { 4 })?;
-        self.objects.try_reserve(1).map_err(|_| Error::Quota)?;
-        let object = if bytes {
-            let mut values = Vec::new();
-            values
-                .try_reserve_exact(length)
-                .map_err(|_| Error::Quota)?;
-            values.resize(length, 0u8);
-            Object::Bytes(values)
-        } else {
-            let mut values = Vec::new();
-            values
-                .try_reserve_exact(length)
-                .map_err(|_| Error::Quota)?;
-            values.resize(length, 0i32);
-            Object::Ints(values)
-        };
-        self.objects.push(object);
-        self.used = end;
-        Ok(RuntimeValue::Ref(self.objects.len()))
-    }
-    fn allocate_struct(&mut self, unit: usize, owner: u16, fields: usize) -> Result<RuntimeValue> {
-        let end = self.allocation_end(fields, TRANSIENT_VALUE_BYTES)?;
-        self.objects.try_reserve(1).map_err(|_| Error::Quota)?;
-        let mut values = Vec::new();
-        values
-            .try_reserve_exact(fields)
-            .map_err(|_| Error::Quota)?;
-        values.resize(fields, RuntimeValue::Int(0));
-        self.objects.push(Object::Struct {
-            unit,
-            owner,
-            fields: values,
-        });
-        self.used = end;
-        Ok(RuntimeValue::Ref(self.objects.len()))
-    }
-    pub fn allocate_bytes(&mut self, mut values: Vec<u8>) -> Result<RuntimeValue> {
-        let end = match self.allocation_end(values.len(), 1) {
-            Ok(end) => end,
-            Err(error) => {
-                values.zeroize();
-                return Err(error);
-            }
-        };
-        if self.objects.try_reserve(1).is_err() {
-            values.zeroize();
-            return Err(Error::Quota);
-        }
-        self.objects.push(Object::Bytes(values));
-        self.used = end;
-        Ok(RuntimeValue::Ref(self.objects.len()))
-    }
-    pub fn bytes(&self, value: RuntimeValue) -> Result<&[u8]> {
-        match self.get(value)? {
-            Object::Bytes(values) => Ok(values),
-            _ => Err(Error::Format),
-        }
-    }
-    pub fn bytes_mut(&mut self, value: RuntimeValue) -> Result<&mut [u8]> {
-        match self.get_mut(value)? {
-            Object::Bytes(values) => Ok(values),
-            _ => Err(Error::Format),
-        }
-    }
-    fn get(&self, value: RuntimeValue) -> Result<&Object> {
-        let RuntimeValue::Ref(index) = value else {
-            return Err(Error::Format);
-        };
-        self.objects
-            .get(index.checked_sub(1).ok_or(Error::Bounds)?)
-            .ok_or(Error::Bounds)
-    }
-    fn get_mut(&mut self, value: RuntimeValue) -> Result<&mut Object> {
-        let RuntimeValue::Ref(index) = value else {
-            return Err(Error::Format);
-        };
-        self.objects
-            .get_mut(index.checked_sub(1).ok_or(Error::Bounds)?)
-            .ok_or(Error::Bounds)
-    }
 }
 
 impl Zeroize for RuntimeValue {
@@ -685,19 +546,8 @@ pub(crate) fn execute_program_with_metrics_and_cancel(
                 }
                 let field = u16::from_le_bytes([method.code[pc + 2], method.code[pc + 3]]);
                 let (owner, offset) = assembly.field_layout(field)?;
-                let object = arena.get(pop(&mut stack, floor)?)?;
-                let Object::Struct {
-                    unit: actual_unit,
-                    owner: actual,
-                    fields,
-                } = object
-                else {
-                    return Err(Error::Format);
-                };
-                if *actual_unit != unit || *actual != owner {
-                    return Err(Error::Format);
-                }
-                stack.push(*fields.get(usize::from(offset)).ok_or(Error::Bounds)?);
+                let object = pop(&mut stack, floor)?;
+                stack.push(arena.field_get(object, unit, owner, offset)?);
             }
             0x7d => {
                 if method.code[pc + 1] != 4 {
@@ -707,18 +557,7 @@ pub(crate) fn execute_program_with_metrics_and_cancel(
                 let (owner, offset) = assembly.field_layout(field)?;
                 let value = pop(&mut stack, floor)?;
                 let object = pop(&mut stack, floor)?;
-                let Object::Struct {
-                    unit: actual_unit,
-                    owner: actual,
-                    fields,
-                } = arena.get_mut(object)?
-                else {
-                    return Err(Error::Format);
-                };
-                if *actual_unit != unit || *actual != owner {
-                    return Err(Error::Format);
-                }
-                *fields.get_mut(usize::from(offset)).ok_or(Error::Bounds)? = value;
+                arena.field_set(object, unit, owner, offset, value)?;
             }
             0x2a => {
                 let result = if current.returns {
@@ -897,11 +736,7 @@ pub(crate) fn execute_program_with_metrics_and_cancel(
                 stack.push(arena.allocate(bytes, length)?);
             }
             0x8e => {
-                let length = match arena.get(pop(&mut stack, floor)?)? {
-                    Object::Bytes(values) => values.len(),
-                    Object::Ints(values) => values.len(),
-                    Object::Struct { .. } => return Err(Error::Format),
-                };
+                let length = arena.array_length(pop(&mut stack, floor)?)?;
                 stack.push(RuntimeValue::Int(
                     i32::try_from(length).map_err(|_| Error::Quota)?,
                 ));
@@ -910,13 +745,7 @@ pub(crate) fn execute_program_with_metrics_and_cancel(
                 let index =
                     usize::try_from(pop(&mut stack, floor)?.int()?).map_err(|_| Error::Bounds)?;
                 let array = pop(&mut stack, floor)?;
-                let value = match (opcode, arena.get(array)?) {
-                    (0x91, Object::Bytes(values)) => {
-                        i32::from(*values.get(index).ok_or(Error::Bounds)?)
-                    }
-                    (0x94, Object::Ints(values)) => *values.get(index).ok_or(Error::Bounds)?,
-                    _ => return Err(Error::Format),
-                };
+                let value = arena.array_get(array, index, opcode == 0x91)?;
                 stack.push(RuntimeValue::Int(value));
             }
             0x9c | 0x9e => {
@@ -924,15 +753,7 @@ pub(crate) fn execute_program_with_metrics_and_cancel(
                 let index =
                     usize::try_from(pop(&mut stack, floor)?.int()?).map_err(|_| Error::Bounds)?;
                 let array = pop(&mut stack, floor)?;
-                match (opcode, arena.get_mut(array)?) {
-                    (0x9c, Object::Bytes(values)) => {
-                        *values.get_mut(index).ok_or(Error::Bounds)? = value as u8
-                    }
-                    (0x9e, Object::Ints(values)) => {
-                        *values.get_mut(index).ok_or(Error::Bounds)? = value
-                    }
-                    _ => return Err(Error::Format),
-                }
+                arena.array_set(array, index, opcode == 0x9c, value)?;
             }
             0xfe => {
                 let right = pop(&mut stack, floor)?;
@@ -1064,13 +885,13 @@ mod tests {
         value.zeroize();
         assert_eq!(value, RuntimeValue::Int(0));
 
-        let mut heap = Heap {
-            objects: vec![Object::Bytes(vec![0x5a; 32])],
-            used: 48,
-        };
+        let mut heap = Heap::new();
+        let retired = heap.allocate_bytes(vec![0x5a; 32]).unwrap();
         heap.zeroize();
         assert!(heap.objects.is_empty());
         assert_eq!(heap.used, 0);
+        heap.allocate_bytes(vec![0x11; 32]).unwrap();
+        assert!(matches!(heap.bytes(retired), Err(Error::Bounds)));
 
         let mut frame = Frame {
             unit: 1,
@@ -1102,10 +923,7 @@ mod tests {
 
     #[test]
     fn transient_object_count_is_bounded_without_failed_reservation_drift() {
-        let mut heap = Heap {
-            objects: Vec::new(),
-            used: 0,
-        };
+        let mut heap = Heap::new();
         // Quota rejection must precede backing allocations and leave the heap unchanged.
         for length in [MAX_TRANSIENT_BYTES, usize::MAX] {
             assert_eq!(heap.allocate(true, length), Err(Error::Quota));
@@ -1118,30 +936,36 @@ mod tests {
             heap.allocate(true, 0).unwrap();
         }
         assert_eq!(heap.objects.len(), MAX_TRANSIENT_OBJECTS);
-        assert_eq!(heap.used, MAX_TRANSIENT_OBJECTS * 16);
+        assert_eq!(heap.used, MAX_TRANSIENT_OBJECTS * 8);
         assert_eq!(heap.allocate(true, 0), Err(Error::Quota));
         assert_eq!(heap.objects.len(), MAX_TRANSIENT_OBJECTS);
-        assert_eq!(heap.used, MAX_TRANSIENT_OBJECTS * 16);
+        assert_eq!(heap.used, MAX_TRANSIENT_OBJECTS * 8);
     }
 
     #[test]
     fn sealed_object_fields_use_platform_independent_arena_charges() {
         let mut heap = Heap::new();
-        heap.allocate_struct(0, 0, 3).unwrap();
-        assert_eq!(heap.used, 16 + 3 * TRANSIENT_VALUE_BYTES);
+        let object = heap.allocate_struct(1, 2, 3).unwrap();
+        assert_eq!(heap.used, 8 + 3 * 4);
+        heap.field_set(object, 1, 2, 2, RuntimeValue::Int(i32::MIN)).unwrap();
+        assert_eq!(heap.field_get(object, 1, 2, 2), Ok(RuntimeValue::Int(i32::MIN)));
+        assert_eq!(heap.field_get(object, 0, 2, 2), Err(Error::Format));
+        assert_eq!(heap.field_get(object, 1, 3, 2), Err(Error::Format));
+        assert_eq!(heap.field_get(object, 1, 2, 3), Err(Error::Bounds));
+        assert_eq!(heap.bytes(object), Err(Error::Format));
     }
 
     #[test]
-    fn heap_adopts_native_byte_results_without_copying_the_buffer() {
-        let values = vec![0x5a; 32];
-        let pointer = values.as_ptr();
-        let mut heap = Heap {
-            objects: Vec::new(),
-            used: 0,
-        };
-        let value = heap.allocate_bytes(values).unwrap();
-        assert_eq!(heap.bytes(value).unwrap().as_ptr(), pointer);
-        assert_eq!(heap.bytes(value).unwrap(), &[0x5a; 32]);
+    fn handles_survive_slab_growth_and_native_byte_results() {
+        let mut heap = Heap::new();
+        let value = heap.allocate_bytes(vec![0x5a; 31]).unwrap();
+        assert_eq!(heap.used, 40); // Odd byte payloads include one alignment byte.
+        let integers = heap.allocate(false, 128).unwrap();
+        heap.array_set(integers, 127, false, i32::MIN).unwrap();
+        assert_eq!(heap.array_get(integers, 127, false), Ok(i32::MIN));
+        assert_eq!(heap.array_get(integers, 128, false), Err(Error::Bounds));
+        assert_eq!(heap.array_get(integers, 0, true), Err(Error::Format));
+        assert_eq!(heap.bytes(value).unwrap(), &[0x5a; 31]);
     }
 
     #[test]

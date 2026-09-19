@@ -17,6 +17,14 @@ AUDITED = {
         "stack.extend_from_slice(initial);",
     ],
     "crates/microcard-core/src/mc04_vm.rs": [],
+    "crates/microcard-core/src/mc04_vm/heap.rs": [
+        # Slab growth wipes the old allocation; native results are wiped after transfer.
+        "next.extend_from_slice(&self.data);",
+        "header[2..4].copy_from_slice(&owner.to_le_bytes());",
+        "header[4..6].copy_from_slice(&length_word.to_le_bytes());",
+        "self.bytes_mut(handle)?.copy_from_slice(&values);",
+        "self.data[at..at + 4].copy_from_slice(&value.to_le_bytes());",
+    ],
     "crates/microcard-core/src/domains.rs": [
         "merged.extend_from_slice(&self.storage_schema);",
         "copy.extend_from_slice(value);",
