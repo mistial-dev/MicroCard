@@ -148,6 +148,19 @@ pub trait CryptoProvider {
 
     software_method!(
         "software-aes",
+        fn aes_cbc_in_place(
+            &mut self,
+            key: &[u8; 16],
+            iv: &[u8; 16],
+            buffer: &mut [u8],
+            encrypt: bool,
+        ) -> Result<()> {
+            cbc_in_place(key, iv, buffer, encrypt)
+        }
+    );
+
+    software_method!(
+        "software-aes",
         fn aes_cbc_encrypt(
             &mut self,
             key: &[u8; 16],
@@ -364,70 +377,64 @@ pub fn cbc_unpad_in_place(output: &mut [u8]) -> Result<usize> {
     Ok(index)
 }
 
+/// Transform complete CBC blocks without adding or removing padding.
+#[cfg(feature = "software-aes")]
+fn cbc_in_place(key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> Result<()> {
+    if buffer.is_empty() || !buffer.len().is_multiple_of(16) {
+        buffer.zeroize();
+        return Err(Error::Bounds);
+    }
+    let cipher = Aes128::new(key.into());
+    let mut chain = Zeroizing::new(*iv);
+    for chunk in buffer.chunks_exact_mut(16) {
+        if encrypt {
+            for (byte, previous) in chunk.iter_mut().zip(chain.iter()) { *byte ^= previous; }
+            cipher.encrypt_block((&mut *chunk).into());
+            chain.copy_from_slice(chunk);
+        } else {
+            let mut next = Zeroizing::new([0u8; 16]);
+            next.copy_from_slice(chunk);
+            cipher.decrypt_block((&mut *chunk).into());
+            for (byte, previous) in chunk.iter_mut().zip(chain.iter()) { *byte ^= previous; }
+            *chain = *next;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(feature = "software-aes")]
 pub fn encrypt_into(
     key: &[u8; 16],
-    mut iv: [u8; 16],
+    iv: [u8; 16],
     data: &[u8],
     output: &mut [u8],
 ) -> Result<usize> {
     let required = cbc_pad_into(data, output)?;
-    let out = &mut output[..required];
-    for chunk in out.chunks_exact_mut(16) {
-        for i in 0..16 {
-            chunk[i] ^= iv[i]
-        }
-        iv = block(key, chunk.try_into().unwrap());
-        chunk.copy_from_slice(&iv);
-    }
+    cbc_in_place(key, &iv, &mut output[..required], true)?;
     Ok(required)
 }
 
 #[cfg(feature = "software-aes")]
-pub fn encrypt(key: &[u8; 16], mut iv: [u8; 16], data: &[u8]) -> Result<Vec<u8>> {
-    let padded = data
-        .len()
-        .checked_add(1)
-        .and_then(|length| length.checked_add(15))
-        .map(|length| length / 16 * 16)
-        .ok_or(Error::Bounds)?;
+pub fn encrypt(key: &[u8; 16], iv: [u8; 16], data: &[u8]) -> Result<Vec<u8>> {
+    let padded = data.len().checked_add(16).map(|length| length / 16 * 16).ok_or(Error::Bounds)?;
     let mut out = zeroizing_buffer(padded)?;
-    out[..data.len()].copy_from_slice(data);
-    out[data.len()] = 0x80;
-    for chunk in out.chunks_exact_mut(16) {
-        for i in 0..16 {
-            chunk[i] ^= iv[i];
-        }
-        iv = block(key, chunk.try_into().unwrap());
-        chunk.copy_from_slice(&iv);
-    }
+    encrypt_into(key, iv, data, &mut out)?;
     Ok(core::mem::take(&mut *out))
 }
 
 #[cfg(feature = "software-aes")]
 pub fn decrypt_into(
     key: &[u8; 16],
-    mut iv: [u8; 16],
+    iv: [u8; 16],
     data: &[u8],
     output: &mut [u8],
 ) -> Result<usize> {
     if data.is_empty() || !data.len().is_multiple_of(16) {
         return Err(Error::Authentication);
     }
-    if output.len() < data.len() {
-        return Err(Error::Bounds);
-    }
-    let c = Aes128::new(key.into());
-    let out = &mut output[..data.len()];
+    let out = output.get_mut(..data.len()).ok_or(Error::Bounds)?;
     out.copy_from_slice(data);
-    for chunk in out.chunks_exact_mut(16) {
-        let next: [u8; 16] = chunk.try_into().unwrap();
-        c.decrypt_block(chunk.into());
-        for i in 0..16 {
-            chunk[i] ^= iv[i]
-        }
-        iv = next;
-    }
+    cbc_in_place(key, &iv, out, false)?;
     cbc_unpad_in_place(out)
 }
 

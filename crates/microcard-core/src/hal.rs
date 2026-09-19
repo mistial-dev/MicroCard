@@ -261,6 +261,14 @@ pub mod conformance {
                     0x12, 0xe9, 0x19, 0x7d,
                 ],
         )?;
+        let mut raw = plaintext;
+        provider.aes_cbc_in_place(&key, &iv, &mut raw, true)?;
+        require(raw == ciphertext[..16])?;
+        provider.aes_cbc_in_place(&key, &iv, &mut raw, false)?;
+        require(raw == plaintext)?;
+        let mut partial = [0xa5; 15];
+        require(provider.aes_cbc_in_place(&key, &iv, &mut partial, true) == Err(Error::Bounds))?;
+        require(partial == [0; 15])?;
         let mut recovered = [0; 32];
         let recovered_length = provider.aes_cbc_decrypt(
             &key,

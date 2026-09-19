@@ -991,15 +991,30 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         key: &[u8; 16],
         block: &mut [u8; 16],
     ) -> Result<()> {
-        let ready = self.ensure_cc310();
-        microcard_core::crypto::clear_output_on_error(block, ready)?;
         // One CBC block with a zero IV is raw AES decryption.
-        let result = if cc310::aes128_cbc_in_place(key, &[0; 16], block, false) {
+        self.aes_cbc_in_place(key, &[0; 16], block, false)
+    }
+
+    #[cfg(feature = "cc310-aes")]
+    fn aes_cbc_in_place(
+        &mut self,
+        key: &[u8; 16],
+        iv: &[u8; 16],
+        buffer: &mut [u8],
+        encrypt: bool,
+    ) -> Result<()> {
+        let ready = self.ensure_cc310();
+        microcard_core::crypto::clear_output_on_error(buffer, ready)?;
+        if buffer.is_empty() || !buffer.len().is_multiple_of(16) {
+            buffer.fill(0);
+            return Err(Error::Bounds);
+        }
+        let result = if cc310::aes128_cbc_in_place(key, iv, buffer, encrypt) {
             Ok(())
         } else {
             Err(Error::Native)
         };
-        microcard_core::crypto::clear_output_on_error(block, result)
+        microcard_core::crypto::clear_output_on_error(buffer, result)
     }
 
     #[cfg(feature = "cc310-cbc")]
@@ -1012,14 +1027,9 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         output: &mut [u8],
     ) -> Result<usize> {
         output.fill(0);
-        self.ensure_cc310()?;
         let padded = microcard_core::crypto::cbc_pad_into(data, output);
         let length = microcard_core::crypto::clear_output_on_error(output, padded)?;
-        let result = if cc310::aes128_cbc_in_place(key, &iv, &mut output[..length], true) {
-            Ok(length)
-        } else {
-            Err(Error::Native)
-        };
+        let result = self.aes_cbc_in_place(key, &iv, &mut output[..length], true).map(|()| length);
         microcard_core::crypto::clear_output_on_error(output, result)
     }
 
@@ -1033,7 +1043,6 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         output: &mut [u8],
     ) -> Result<usize> {
         output.fill(0);
-        self.ensure_cc310()?;
         if data.is_empty() || !data.len().is_multiple_of(16) {
             return Err(Error::Authentication);
         }
@@ -1042,9 +1051,9 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         }
         let plaintext = &mut output[..data.len()];
         plaintext.copy_from_slice(data);
-        if !cc310::aes128_cbc_in_place(key, &iv, plaintext, false) {
+        if let Err(error) = self.aes_cbc_in_place(key, &iv, plaintext, false) {
             output.fill(0);
-            return Err(Error::Native);
+            return Err(error);
         }
         let result = microcard_core::crypto::cbc_unpad_in_place(plaintext);
         microcard_core::crypto::clear_output_on_error(output, result)

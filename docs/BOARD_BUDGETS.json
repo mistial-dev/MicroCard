@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 185672,
+      "text_bytes": 185852,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 211696,
+      "text_bytes": 211704,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 211712,
+      "text_bytes": 211720,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 166956,
+      "text_bytes": 166972,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 176808,
+      "text_bytes": 176824,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
