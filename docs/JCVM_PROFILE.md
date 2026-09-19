@@ -261,13 +261,17 @@ are sent to the provider in one call; the interpreter does not implement chainin
 Transient-key clearing prevents further operations until the key is initialized again.
 Cipher input consumes one work unit per byte including pending bytes; output uses one
 bounded staging buffer so provider failure cannot publish partial output.
+P-256 key objects accept the fixed SEC 2 curve parameters and validated private scalars
+or 65-byte uncompressed public points. Parameter flags share the key material's lifetime;
+reset/deselection clears transient parameters and values together. The cofactor is optional
+for initialization. Other curves, key sizes, and encrypted-key interfaces are rejected.
 Signature and KeyAgreement factories still reject requests. The committed PIV acceptance
 still installs, selects, and exercises PIN retry behavior with this restriction.
 
 Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`
 throws `SystemException.NO_RESOURCE`; it never exposes the transport's management channel.
 
-JCVM integration of existing P-256 and AES services remains required. Additional software
+JCVM P-256 key generation, signature, and agreement bindings remain required. Additional software
 implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
 ## Authorization

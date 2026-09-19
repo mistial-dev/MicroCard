@@ -209,6 +209,12 @@ impl Card {
                             }
                         }
                         let pin = class.id == ClassId::OwnerPIN;
+                        let ec = matches!(class.id, ClassId::ECPublicKey | ClassId::ECPrivateKey);
+                        if ec && (!natives::ec_key_kind(word(0)) || word(1) != 256
+                            || word(3) != 0
+                            || (class.id == ClassId::ECPublicKey) != (word(0) == 11)) {
+                            return Err(Error::Format);
+                        }
                         if material != 0 && (pin || class.id.is_key()) {
                             let header =
                                 &saved.heap[material as usize..material as usize + heap::HEADER];
@@ -222,6 +228,16 @@ impl Card {
                                     || word(1) > length
                                     || word(1) > 32
                                 {
+                                    return Err(Error::Format);
+                                }
+                            } else if ec {
+                                let event = natives::ec_key_clear_event(word(0));
+                                if header[4] >> 4 != event
+                                    || length != if word(0) == 11 { 66 } else { 33 } {
+                                    return Err(Error::Format);
+                                }
+                                let flags = saved.heap[material as usize + heap::HEADER];
+                                if flags & 0x80 != 0 {
                                     return Err(Error::Format);
                                 }
                             } else {

@@ -3,7 +3,7 @@
 //! Algorithms are not the virtual machine's business. A card has accelerators, key storage
 //! and an entropy source, and which of those exist differs between one card and the next.
 //! The engine asks through this trait so a platform can supply hardware implementations.
-//! This boundary covers digest, entropy and raw AES block services.
+//! This boundary covers digest, entropy, AES, and P-256 key validation.
 use crate::{Error, Result};
 
 /// The services an applet's cryptography needs.
@@ -21,6 +21,13 @@ pub trait Host {
     /// Transform nonempty, complete AES-128 CBC blocks without padding.
     fn aes128_cbc(&mut self, _key: &[u8; 16], _iv: &[u8; 16], buffer: &mut [u8], _encrypt: bool) -> Result<()> {
         buffer.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    /// P-256 domain fields: prime, A, B, uncompressed generator, and order.
+    fn p256_parameter(&self, _id: u8) -> Option<&'static [u8]> { None }
+
+    fn p256_key_valid(&mut self, _private: bool, _key: &[u8]) -> Result<bool> {
         Err(Error::Unsupported)
     }
 

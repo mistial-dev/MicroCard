@@ -11,6 +11,8 @@ use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 extern crate alloc;
 use zeroize::Zeroizing;
+mod ec;
+pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
 /// it is read, because these are not fields an applet can see.
@@ -72,6 +74,9 @@ pub(crate) fn symmetric_key_clear_event(kind: u16) -> u8 {
 }
 
 fn key_initialized(heap: &Heap, key: u16) -> Result<bool> {
+    if ec::key_kind(word_field(heap, key, KIND)?) {
+        return ec::initialized(heap, key);
+    }
     if symmetric_key_clear_event(word_field(heap, key, KIND)?) == 0 {
         return Ok(word_field(heap, key, READY)? != 0);
     }
@@ -112,12 +117,18 @@ pub fn call(
     jcre: &mut Jcre,
     budget: &mut u32,
 ) -> Result<Native> {
+    if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
     match (class, method) {
         (ClassId::KeyBuilder, MethodId::buildKey) => {
             let _encryption = frame.pop_short()?;
             let length = frame.pop_short()?;
             let key_type = frame.pop_short()?;
             let name = key_class(key_type)?;
+            if matches!(key_type, 9..=12 | 28..=31)
+                && (!ec::key_kind(key_type as u16) || length != 256 || _encryption != 0
+                    || host.p256_parameter(0).is_none()) {
+                return crypto_exception(heap, context, 3);
+            }
             let key = new_native(heap, name, STATE_WORDS, context)?;
             heap.put_word(key, KIND, key_type as u16)?;
             heap.put_word(key, SIZE, length as u16)?;

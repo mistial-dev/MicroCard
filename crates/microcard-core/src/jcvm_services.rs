@@ -3,6 +3,7 @@ use crate::{crypto::CryptoProvider, hal::Entropy};
 use microcard_engine_jcvm::{Error, Result, host::Host};
 
 mod ecdsa;
+mod ec_parameters;
 
 pub struct Services<'a, P>(pub &'a mut P);
 
@@ -86,6 +87,19 @@ impl<P: CryptoProvider> Services<'_, P> {
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn p256_parameter(&self, id: u8) -> Option<&'static [u8]> { ec_parameters::parameter(id) }
+
+    fn p256_key_valid(&mut self, private: bool, key: &[u8]) -> Result<bool> {
+        if private {
+            Ok(key.try_into().is_ok_and(crate::crypto::p256_private_key_valid))
+        } else {
+            match key.try_into() {
+                Ok(key) => self.p256_public_valid(key),
+                Err(_) => Ok(false),
+            }
+        }
+    }
+
     fn supports_digest(&self, algorithm: u8) -> bool {
         algorithm == 4
     }
@@ -218,6 +232,12 @@ mod tests {
     fn p256_keys_validate_through_provider_and_generation_fails_without_partial_keys() {
         let mut provider = Provider::default();
         let mut host = Services(&mut provider);
+        let mut one = [0; 32];
+        one[31] = 1;
+        assert_eq!(host.p256_parameter(3).unwrap(), crate::crypto::p256_public_key(&one).unwrap());
+        assert_eq!(host.p256_key_valid(true, &one), Ok(true));
+        assert_eq!(host.p256_key_valid(true, host.p256_parameter(4).unwrap()), Ok(false));
+        assert_eq!(host.p256_parameter(5), None);
         let mut private = [0xaa;32];
         let mut public = [0xaa;65];
         host.p256_generate(&mut private, &mut public).unwrap();

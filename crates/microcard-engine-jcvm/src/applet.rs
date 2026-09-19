@@ -713,6 +713,19 @@ mod tests {
         heap.put_word(cipher, 3, 1).unwrap();
         heap.put_word(cipher, 4, 2).unwrap();
         heap.put_word(cipher, 5, pending).unwrap();
+        let ec_public = heap.new_object(native_class_of(ClassId::ECPublicKey).unwrap(), 6, 1).unwrap();
+        let ec_public_bytes = heap.new_array(heap::KIND_BYTE, 66, 1).unwrap();
+        heap.array_put(ec_public_bytes, 0, 0x5f).unwrap();
+        heap.put_word(ec_public, 0, 11).unwrap();
+        heap.put_word(ec_public, 1, 256).unwrap();
+        heap.put_word(ec_public, 2, ec_public_bytes).unwrap();
+        let ec_private = heap.new_object(native_class_of(ClassId::ECPrivateKey).unwrap(), 6, 1).unwrap();
+        let ec_private_bytes = heap.new_transient_array(heap::KIND_BYTE, 33, 1, heap::CLEAR_ON_RESET).unwrap();
+        heap.array_put(ec_private_bytes, 0, 0x5f).unwrap();
+        heap.array_put(ec_private_bytes, 32, 1).unwrap();
+        heap.put_word(ec_private, 0, 30).unwrap();
+        heap.put_word(ec_private, 1, 256).unwrap();
+        heap.put_word(ec_private, 2, ec_private_bytes).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -728,12 +741,14 @@ mod tests {
         assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
         assert_eq!(recovered.byte_slice(pending, 0, 32).unwrap(), &[0; 32]);
         assert_eq!(recovered.get_word(cipher, 2), Ok(key));
+        assert_eq!(recovered.array_get(ec_public_bytes, 0), Ok(0x5f));
+        assert_eq!(recovered.byte_slice(ec_private_bytes, 0, 33).unwrap(), &[0; 33]);
         assert_eq!(restored.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false).unwrap().data, [0x12, 0x34]);
         // Saving must not clear authorization or transient values in the live session.
         let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(live.array_get(transient, 0), Ok(7));
         assert_eq!(live.get_word(pin, 3), Ok(1));
-        for case in 0..9 {
+        for case in 0..13 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -744,6 +759,10 @@ mod tests {
                 5 => { invalid[pending as usize + 4] &= 0x0f; instance }
                 6 => { invalid[cipher as usize + heap::HEADER + 10..cipher as usize + heap::HEADER + 12].fill(0); instance }
                 7 => { invalid[cipher as usize + heap::HEADER + 1] = 14; instance }
+                8 => { invalid[ec_public_bytes as usize + heap::HEADER] = 0x80; instance }
+                9 => { invalid[ec_private_bytes as usize + 4] &= 0x0f; instance }
+                10 => { invalid[ec_public as usize + heap::HEADER + 1] = 12; instance }
+                11 => { invalid[ec_public as usize + heap::HEADER + 7] = 1; instance }
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
@@ -754,9 +773,9 @@ mod tests {
         let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(heap.array_get(on_deselect, 0), Ok(0));
         assert_eq!(heap.array_get(transient, 0), Ok(7));
-        assert!(matches!(card.retain_volatile(64), Err(Error::Quota)));
-        let retained = card.retain_volatile(65).unwrap();
-        assert_eq!(retained.bytes(), 65);
+        assert!(matches!(card.retain_volatile(102), Err(Error::Quota)));
+        let retained = card.retain_volatile(103).unwrap();
+        assert_eq!(retained.bytes(), 103);
         // Deselection allocated an exception, so the older committed layout is stale.
         assert_eq!(restored.restore_volatile(&retained), Err(Error::Format));
         let mut suspended_heap = vec![0; card.persistent_heap_bytes()];
@@ -767,6 +786,8 @@ mod tests {
         assert_eq!(resumed.array_get(on_deselect, 0), Ok(0));
         assert_eq!(resumed.get_word(pin, 3), Ok(0));
         assert_eq!(resumed.array_get(key_material, 0), Ok(1));
+        assert_eq!(resumed.array_get(ec_private_bytes, 0), Ok(0x5f));
+        assert_eq!(resumed.array_get(ec_private_bytes, 32), Ok(1));
         assert_eq!(resumed.byte_slice(key_material, 1, 16).unwrap(), &[0x42; 16]);
         card.reset().unwrap();
         assert!(card.installed());
