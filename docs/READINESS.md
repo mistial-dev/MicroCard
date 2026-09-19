@@ -95,7 +95,9 @@ comparisons remain in Git history; reproduce current results before using them a
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
 reuses outputs with bounded workers and isolated logs/state. A warm host sample measured
 43.312 seconds with one worker and 33.489 with two for the full checkpoint, with the
-same 17 acceptance invocations. Cold-build measurements remain outstanding.
+same 17 acceptance invocations. Cold-build measurements remain outstanding. The consolidated checkpoint passed at
+`76dbdd9` in 49.534 seconds with two workers, including incremental recompilation.
+This validates the AES ECB integration but is not a cold-build measurement.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.
