@@ -21,14 +21,14 @@ AUDITED = {
         "merged.extend_from_slice(&self.storage_schema);",
         "copy.extend_from_slice(value);",
         "copy.extend_from_slice(value);",
-        'output.extend_from_slice(b"[\\\"");',
-        "output.extend_from_slice(first.as_bytes());",
-        'output.extend_from_slice(b"\\\",\\\"");',
-        "output.extend_from_slice(second.as_bytes());",
-        'output.extend_from_slice(b"\\\"]");',
+        # Clones a pair of offsets, not package bytes.
+        "image: raw.get(metadata.image.clone()).ok_or(Error::Storage)?,",
+        # MC04 recovery still owns one shared immutable package buffer.
+        "raw.extend_from_slice(bytes);",
+        # Protect descriptors for uncertain activations until recovery resolves them.
+        "protected.extend_from_slice(&self.uncommitted_images);",
         "host.out.extend_from_slice(&host.sw.to_be_bytes());",
         "self.out.extend_from_slice(source);",
-        "bytes[..value.len()].copy_from_slice(value);",
         "version[index * 2..index * 2 + 2].copy_from_slice(&component.to_be_bytes());",
         ".copy_from_slice(&crate::globalplatform::ISD_AID);",
         "heap.bytes_mut(destination)?[destination_offset..destination_end].copy_from_slice(source);",
