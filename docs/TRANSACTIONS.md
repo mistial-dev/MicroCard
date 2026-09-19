@@ -9,9 +9,12 @@ one stage when both callbacks share a domain. Both callbacks commit together;
 failure preserves the previous selection and live fields. Domain creation/deletion,
 policy updates, and SCP03 sequence reservation use small undo records. Instance
 installation/removal stages the bounded instance registry and optional callback data
-together. Both installation interfaces use the same implementation. Package removal
-retains only the removed metadata entries for allocation-free rollback. Package
-activation still copies the complete state; removing that copy remains release work.
+together. Both installation interfaces use the same implementation. Package activation
+and removal retain only changed metadata entries for allocation-free rollback.
+Activation validates the candidate links before staging the immutable image; both old
+and candidate images stay protected after an uncertain journal write. Runtime commands
+no longer clone the complete state. Affected application stores are still staged as
+bounded copies rather than per-record undo logs.
 Successful execution journals the candidate
 before publishing it. A journal error restores live mutable fields; after an uncertain
 write, reboot recovery may select either complete committed generation, never a partial

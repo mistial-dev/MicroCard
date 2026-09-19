@@ -61,7 +61,13 @@ impl ApplicationChanges {
 
 impl StagedApplication {
     pub(super) fn new(domain: &Domain) -> Result<Self> {
-        let context = &mut crate::fallible_clone::CloneContext::new();
+        Self::new_with(domain, &mut crate::fallible_clone::CloneContext::new())
+    }
+
+    pub(super) fn new_with(
+        domain: &Domain,
+        context: &mut crate::fallible_clone::CloneContext,
+    ) -> Result<Self> {
         Ok(Self {
             store: domain.store.try_clone_with(context)?,
             blobs: domain.blobs.try_clone_with(context)?,

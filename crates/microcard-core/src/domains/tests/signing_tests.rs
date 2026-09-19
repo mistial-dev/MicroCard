@@ -570,7 +570,7 @@ fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
     let good = snapshot(&c);
     let base = c.journal.flash_for_test().clone();
     for case in 0..17 {
-        let mut state = c.state.try_clone().unwrap();
+        let mut state = c.state.clone();
         let d = state.domains.get_mut("a").unwrap();
         match case {
             0 => d.image_refs.get_mut("Counter").unwrap().digest[0] ^= 1,
@@ -584,7 +584,7 @@ fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
             8 => d.store.0 = (0..513).map(|i| (i, i)).collect(),
             9 => { d.assemblies = NameMap::new(); d.key = None; }
             10 => d.key = Some([0; 32]),
-            11 => { let duplicate = d.try_clone_with(&mut crate::fallible_clone::CloneContext::new()).unwrap(); state.domains.0.push(("a".into(), duplicate)); }
+            11 => { let duplicate = d.clone(); state.domains.0.push(("a".into(), duplicate)); }
             12 => d.policy.max_int_records = 0,
             13 => d.policy.capabilities = alloc::vec![1, 1],
             14 => d.policy.capabilities = alloc::vec![1],

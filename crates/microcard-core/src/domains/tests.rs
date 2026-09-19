@@ -1775,7 +1775,7 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
     assert_eq!(card.state.domains["first"].store.get(&1), Some(&3));
 
     // The old callback succeeds before the target overflows. Neither write publishes.
-    let mut next = card.state.try_clone().unwrap();
+    let mut next = card.state.clone();
     next.domains.get_mut("second").unwrap().store.insert(1, i32::MAX).unwrap();
     card.commit(next).unwrap();
     let before = card.state.encode_snapshot().unwrap().to_vec();
@@ -1783,7 +1783,7 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
     assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
     assert_eq!(card.selected.as_ref().unwrap().2, "F04D431001");
 
-    let mut next = card.state.try_clone().unwrap();
+    let mut next = card.state.clone();
     next.domains.get_mut("second").unwrap().store.insert(1, 0).unwrap();
     card.commit(next).unwrap();
     let before = card.state.encode_snapshot().unwrap().to_vec();
@@ -2066,7 +2066,7 @@ fn invocation_and_package_removal_boundaries_recover_old_or_new_state() {
         .unwrap();
     let unrelated = create(&mut card, "untouched");
     load(&mut card, &counter_package("untouched", unrelated, 1, 8)).unwrap();
-    let mut next = card.state.try_clone().unwrap();
+    let mut next = card.state.clone();
     next.domains.get_mut("untouched").unwrap().store.insert(1, 123).unwrap();
     card.commit(next).unwrap();
     let previous = card.state.encode_snapshot().unwrap().to_vec();
@@ -2219,7 +2219,7 @@ fn recovery_rejects_missing_or_retyped_persistent_schema() {
     )
     .unwrap();
     run_loaded(&mut card, "schema-recovery", "Counter", 1, &[]).unwrap();
-    let mut corrupted = card.state.try_clone().unwrap();
+    let mut corrupted = card.state.clone();
     let domain = corrupted.domains.get_mut("schema-recovery").unwrap();
     let mut schema = domain.storage_schema.as_ref().clone();
     schema[0].kind = 2;
@@ -2386,7 +2386,7 @@ fn owned_package_indexes_image_inside_its_signed_envelope() {
 }
 
 #[test]
-fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
+fn package_names_are_shared_after_installation_and_recovery() {
     fn assert_shared_names(domain: &Domain, name: &str) {
         let package_name = domain.assemblies.get_key_value(name).unwrap().0;
         let version_name = domain.versions.get_key_value(name).unwrap().0;
@@ -2412,63 +2412,9 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
     load(&mut card, &keys).unwrap();
     card.manage(command(0xec, &management_names_wire("shared", "F04D430001").unwrap()))
         .unwrap();
-    let shared = card.state.domains.get_mut("shared").unwrap();
-    shared.store.insert(7, 11).unwrap();
-    shared.blobs.insert(8, alloc::vec![1, 2, 3, 4]).unwrap();
-    shared
-        .keys
-        .generate(shared.incarnation, 0, 1, |bytes| {
-            bytes.fill(0x5a);
-            Ok(())
-        })
-        .unwrap();
-    shared
-        .credentials
-        .create(
-            shared.incarnation,
-            0,
-            b"1234",
-            b"12345678",
-            (3, 3),
-            &mut TestPlatform(0xa4),
-        )
-        .unwrap();
-    assert!(card.state.encode_snapshot().unwrap().to_vec().len() <= 49152);
     assert_shared_names(&card.state.isd, "mscorlib");
     assert_shared_names(&card.state.domains["shared"], "Counter");
     assert_shared_names(&card.state.domains["shared"], "KeyOperations");
-    let wire_state = card.state.encode_snapshot().unwrap().to_vec();
-    let mut clone_context = crate::fallible_clone::CloneContext::new();
-    let snapshot = card.state.try_clone_with(&mut clone_context).unwrap();
-    let allocation_count = clone_context.allocations();
-    assert!(allocation_count > 16);
-    for fail_at in 0..allocation_count {
-        let mut context = crate::fallible_clone::CloneContext::failing_at(fail_at);
-        assert!(matches!(
-            card.state.try_clone_with(&mut context),
-            Err(Error::Quota)
-        ));
-        assert_eq!(card.state.encode_snapshot().unwrap().to_vec(), wire_state);
-    }
-    assert!(Rc::ptr_eq(
-        &card.state.isd.assemblies["mscorlib"],
-        &snapshot.isd.assemblies["mscorlib"]
-    ));
-    assert!(Rc::ptr_eq(
-        &card.state.domains["shared"].storage_schema,
-        &snapshot.domains["shared"].storage_schema
-    ));
-    for name in ["Counter", "KeyOperations"] {
-        assert!(Rc::ptr_eq(
-            &card.state.domains["shared"].assemblies[name],
-            &snapshot.domains["shared"].assemblies[name]
-        ));
-        assert_shared_names(&snapshot.domains["shared"], name);
-    }
-    assert_eq!(
-        card.state.encode_snapshot().unwrap().to_vec(),
-        snapshot.encode_snapshot().unwrap().to_vec()
-    );
     let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_shared_names(&reopened.state.isd, "mscorlib");
     assert_shared_names(&reopened.state.domains["shared"], "Counter");
@@ -2476,37 +2422,11 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
 }
 
 #[test]
-fn maximum_container_state_clone_is_fallible_and_atomic() {
+fn maximum_application_staging_is_fallible_and_atomic() {
     let mut card = card();
-    let incarnation = create(&mut card, "maximum-clone");
-    let domain = card.state.domains.get_mut("maximum-clone").unwrap();
+    let incarnation = create(&mut card, "maximum-staging");
+    let domain = card.state.domains.get_mut("maximum-staging").unwrap();
     domain.key = Some([0x44; 32]);
-    for index in 0..MAX_ASSEMBLIES_PER_DOMAIN {
-        let name: Rc<str> = Rc::from(alloc::format!("Assembly{index}"));
-        domain
-            .assemblies
-            .insert(Rc::clone(&name), Rc::new(alloc::vec![index]))
-            .unwrap();
-        domain.image_refs.insert(Rc::clone(&name), crate::image_store::Descriptor {
-            slot: index, length: 1, digest: [index; 32],
-        }).unwrap();
-        domain
-            .bindings
-            .insert(Rc::clone(&name), Vec::new())
-            .unwrap();
-        domain
-            .imports
-            .insert(Rc::clone(&name), Vec::new())
-            .unwrap();
-        domain
-            .versions
-            .insert(Rc::clone(&name), (1, [index; 32]))
-            .unwrap();
-        domain
-            .instances
-            .insert(alloc::format!("F04D4301{index:02X}"), name)
-            .unwrap();
-    }
     let mut schema = Vec::new();
     schema
         .try_reserve_exact(MAX_DOMAIN_STORAGE_DECLARATIONS)
@@ -2542,62 +2462,74 @@ fn maximum_container_state_clone_is_fallible_and_atomic() {
 
     let before = card.state.encode_snapshot().unwrap().to_vec();
     let mut complete_context = crate::fallible_clone::CloneContext::new();
-    let complete = card.state.try_clone_with(&mut complete_context).unwrap();
-    assert!(Rc::ptr_eq(
-        &card.state.domains["maximum-clone"].storage_schema,
-        &complete.domains["maximum-clone"].storage_schema
-    ));
+    let mut complete = StagedApplication::new_with(&card.state.domains["maximum-staging"], &mut complete_context).unwrap();
+    let domain = &card.state.domains["maximum-staging"];
+    let staged = complete.view(domain);
+    assert!(*staged.store == domain.store);
+    assert!(*staged.blobs == domain.blobs);
+    assert!(*staged.keys == domain.keys);
+    assert!(*staged.credentials == domain.credentials);
     let allocations = complete_context.allocations();
-    assert!(allocations > 70, "allocations={allocations}");
+    assert!(allocations > 0);
     for fail_at in 0..allocations {
         let mut context = crate::fallible_clone::CloneContext::failing_at(fail_at);
         assert!(matches!(
-            card.state.try_clone_with(&mut context),
+            StagedApplication::new_with(&card.state.domains["maximum-staging"], &mut context),
             Err(Error::Quota)
         ));
         assert_eq!(card.state.encode_snapshot().unwrap().to_vec(), before);
     }
+
 }
 
 #[test]
-fn first_load_power_loss_never_pins_alone() {
-    let mut c = card();
-    let inc = create(&mut c, "a");
-    let p = package("a", inc, "one", 1, 7, &[0x2a]);
-    let previous = c.state.encode_snapshot().unwrap().to_vec();
-    let base = c.into_flash();
-    let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
-    load(&mut complete, &p).unwrap();
-    let serialized = complete.state.encode_snapshot().unwrap().to_vec(); // Journal mutation behavior is exhaustively tested separately.
-    for cut in commit_cuts(serialized.len(), p.len()) {
-        let mut f = base.clone();
-        f.fail_after = Some(cut);
-        let mut c = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
-        let _ = load(&mut c, &p);
-        let marker_cut = 16384 + p.len() + 16384 + 47 + serialized.len();
-        if cut == marker_cut {
-            // The candidate is durable even though advancing the anchor failed.
-            // A later upload must not recycle its slot before reboot resolves that.
-            c.journal.flash_mut().fail_after = None;
-            c.abort_staging();
-            let replacement = package("a", inc, "one", 2, 7, &[0x2a]);
-            assert_eq!(load(&mut c, &replacement), Err(Error::Storage));
+fn package_activation_power_loss_preserves_complete_generations() {
+    for version in [1, 2] {
+        let mut c = card();
+        let inc = create(&mut c, "a");
+        if version == 2 {
+            load(&mut c, &package("a", inc, "one", 1, 7, &[0x2a])).unwrap();
         }
-        let mut f = c.into_flash();
-        f.fail_after = None;
-        let mut recovered = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
-        let actual = recovered.state.encode_snapshot().unwrap().to_vec();
-        assert!(
-            actual == previous || actual == serialized,
-            "partial activation at cut {cut}"
-        );
-        load(&mut recovered, &p).unwrap();
-        assert_eq!(recovered.state.encode_snapshot().unwrap().to_vec(), serialized);
-        let reopened =
-            Card::open(recovered.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
-        assert_eq!(reopened.state.encode_snapshot().unwrap().to_vec(), serialized);
+        let p = package("a", inc, "one", version, 7, &[0x2a]);
+        let previous = c.state.encode_snapshot().unwrap().to_vec();
+        let base = c.into_flash();
+        let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
+        load(&mut complete, &p).unwrap();
+        let serialized = complete.state.encode_snapshot().unwrap().to_vec(); // Journal mutation behavior is exhaustively tested separately.
+        for cut in commit_cuts(serialized.len(), p.len()) {
+            let mut f = base.clone();
+            f.fail_after = Some(cut);
+            let mut c = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
+            if load(&mut c, &p).is_err() {
+                assert_eq!(c.state.encode_snapshot().unwrap().as_slice(), previous);
+                assert_eq!(c.staging.as_slice(), Some(p.as_slice()));
+            }
+            let marker_cut = 16384 + p.len() + 16384 + 47 + serialized.len();
+            if cut == marker_cut {
+                // The candidate is durable even though advancing the anchor failed.
+                // A later upload must not recycle its slot before reboot resolves that.
+                c.journal.flash_mut().fail_after = None;
+                c.abort_staging();
+                let replacement = package("a", inc, "one", version + 1, 7, &[0x2a]);
+                assert_eq!(load(&mut c, &replacement), Err(Error::Storage));
+            }
+            let mut f = c.into_flash();
+            f.fail_after = None;
+            let mut recovered = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
+            let actual = recovered.state.encode_snapshot().unwrap().to_vec();
+            assert!(
+                actual == previous || actual == serialized,
+                "partial activation at cut {cut}"
+            );
+            load(&mut recovered, &p).unwrap();
+            assert_eq!(recovered.state.encode_snapshot().unwrap().to_vec(), serialized);
+            let reopened =
+                Card::open(recovered.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+            assert_eq!(reopened.state.encode_snapshot().unwrap().to_vec(), serialized);
+        }
     }
 }
+
 #[test]
 fn activation_moves_staging_and_restores_it_after_commit_failure() {
     let mut card = card();
@@ -2640,6 +2572,10 @@ fn activation_moves_staging_and_restores_it_after_commit_failure() {
         card.manage(command(0xe8, &data)).unwrap();
     }
     let staged_pointer = card.staging.bytes.as_ptr();
+    assert_eq!(card.manage_with_cancel(command(0xea, &[]), &mut || true), Err(Error::Cancelled));
+    assert_eq!(card.staging.bytes.as_ptr(), staged_pointer);
+    assert_eq!(card.state.domains["move"].versions["one"].0, 1);
+    assert!(card.state.domains["move"].storage_declaration(2).is_none());
     assert_eq!(card.manage(command(0xea, &[])), Err(Error::Storage));
     assert_eq!(card.staging.bytes, replacement);
     assert_eq!(card.staging.bytes.as_ptr(), staged_pointer);
@@ -3079,7 +3015,7 @@ fn credential_retry_floor_is_committed_and_recovers_after_invocation_failure() {
         &counter_package("credential-floor", incarnation, 1, 7),
     )
     .unwrap();
-    let mut next = card.state.try_clone().unwrap();
+    let mut next = card.state.clone();
     next.domains
         .get_mut("credential-floor")
         .unwrap()
@@ -3126,7 +3062,7 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
         &counter_package("credential-cut", incarnation, 1, 7),
     )
     .unwrap();
-    let mut initial = card.state.try_clone().unwrap();
+    let mut initial = card.state.clone();
     initial
         .domains
         .get_mut("credential-cut")
@@ -3449,7 +3385,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     assert_eq!(calls.get(), [5, 1]);
 
     let metadata = card.state.isd.packages.get("mscorlib").unwrap();
-    let candidate = card.state.try_clone().unwrap();
+    let candidate = card.state.clone();
     assert!(Rc::ptr_eq(metadata, candidate.isd.packages.get("mscorlib").unwrap()));
     let units = execution_units(&card.state, "ISD", "mscorlib").unwrap();
     assert!(core::ptr::eq(units[0].package.manifest, &metadata.manifest));
@@ -3497,5 +3433,56 @@ fn management_cbor_matches_shared_vectors_and_rejects_other_encodings() {
     for bytes in [&b"[\"ISD\",\"Counter\"]"[..], &b"\x83\x01\x78\x03ISD\x67Counter"[..],
         &b"\x9f\x01\x63ISD\x67Counter\xff"[..], &b"\x83\x01\x60\x67Counter"[..]] {
         assert_eq!(management_names(bytes), Err(Error::Format));
+    }
+}
+
+// Fixture-only publication for deliberately constructed recovery states.
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+    fn commit(&mut self, mut next: State) -> Result<()> {
+        if self.state == next {
+            return Ok(());
+        }
+        let mut protected = Vec::new();
+        let current_count: usize = core::iter::once(&self.state.isd)
+            .chain(self.state.domains.0.iter().map(|(_, domain)| domain))
+            .map(|domain| domain.image_refs.len()).sum();
+        let next_count: usize = core::iter::once(&next.isd)
+            .chain(next.domains.0.iter().map(|(_, domain)| domain))
+            .map(|domain| domain.assemblies.len()).sum();
+        protected.try_reserve_exact((self.uncommitted_images.len() + current_count + next_count).min(64))
+            .map_err(|_| Error::Quota)?;
+        protected.extend_from_slice(&self.uncommitted_images);
+        for domain in core::iter::once(&self.state.isd).chain(self.state.domains.0.iter().map(|(_, domain)| domain)) {
+            for (_, descriptor) in domain.image_refs.iter() {
+                if !protected.contains(descriptor) { protected.push(*descriptor); }
+            }
+        }
+        let mut images = crate::image_store::Images::new(self.journal.flash_mut())?;
+        for domain in core::iter::once(&mut next.isd).chain(next.domains.0.iter_mut().map(|(_, domain)| domain)) {
+            let mut references = NameMap::new();
+            for (name, raw) in domain.assemblies.iter() {
+                let digest = domain.packages.get(name).ok_or(Error::Storage)?.digest;
+                let descriptor = match domain.image_refs.get(name) {
+                    Some(descriptor) if descriptor.digest == digest && descriptor.length as usize == raw.len() => *descriptor,
+                    _ => images.stage(raw, &protected, &mut self.platform)?,
+                };
+                if !protected.contains(&descriptor) {
+                    if protected.len() == 64 { return Err(Error::Quota); }
+                    protected.push(descriptor);
+                }
+                references.insert(Rc::clone(name), descriptor)?;
+            }
+            domain.image_refs = references;
+        }
+        let data = next.encode_snapshot()?;
+        if data.len() > 49152 {
+            return Err(Error::Quota);
+        }
+        self.uncommitted_images = protected;
+        self.journal
+            .commit_with(data.as_slice(), &mut self.platform)?;
+        self.uncommitted_images.clear();
+        self.state = next;
+        Ok(())
     }
 }

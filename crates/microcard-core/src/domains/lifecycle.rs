@@ -1,5 +1,46 @@
-//! Instance registry and callback data publish in one metadata commit.
+//! Package and instance mutations with bounded rollback before metadata commits.
 use super::*;
+
+pub(super) struct PackageActivation {
+    pub name: Rc<str>,
+    pub metadata: Rc<StoredPackage>,
+    pub raw: Rc<Vec<u8>>,
+    pub bindings: Vec<ResolvedDependency>,
+    pub imports: Vec<ResolvedCall>,
+    pub schema: Rc<Vec<StorageDeclaration>>,
+}
+
+struct MapUndo<V> {
+    index: usize,
+    previous: Option<(Rc<str>, V)>,
+}
+impl<V> MapUndo<V> {
+    // The caller reserves every affected map before the first publication.
+    fn publish(map: &mut NameMap<V>, name: Rc<str>, value: V) -> Self {
+        match map.position(&name) {
+            Ok(index) => Self {
+                index,
+                previous: Some(core::mem::replace(&mut map.0[index], (name, value))),
+            },
+            Err(index) => {
+                debug_assert!(map.0.len() < map.0.capacity());
+                map.0.insert(index, (name, value));
+                Self {
+                    index,
+                    previous: None,
+                }
+            }
+        }
+    }
+
+    fn restore(self, map: &mut NameMap<V>) {
+        if let Some(previous) = self.previous {
+            map.0[self.index] = previous;
+        } else {
+            map.0.remove(self.index);
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Owner {
@@ -27,6 +68,103 @@ impl Owner {
 }
 
 impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+    pub(super) fn activate_package(
+        &mut self,
+        candidate: PackageActivation,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        let PackageActivation {
+            name,
+            metadata,
+            raw,
+            bindings,
+            imports,
+            schema,
+        } = candidate;
+        let id = metadata.manifest.domain.as_str();
+        let domain = self.state.domain(id).ok_or(Error::Domain)?;
+        let owner = Owner::resolve(&self.state, domain.registry_aid)?;
+        let current_count: usize = core::iter::once(&self.state.isd)
+            .chain(self.state.domains.values())
+            .map(|domain| domain.image_refs.len())
+            .sum();
+        let mut protected = Vec::new();
+        protected
+            .try_reserve_exact((self.uncommitted_images.len() + current_count + 1).min(64))
+            .map_err(|_| Error::Quota)?;
+        protected.extend_from_slice(&self.uncommitted_images);
+        for domain in core::iter::once(&self.state.isd).chain(self.state.domains.values()) {
+            for (_, descriptor) in domain.image_refs.iter() {
+                if !protected.contains(descriptor) {
+                    if protected.len() == 64 {
+                        return Err(Error::Quota);
+                    }
+                    protected.push(*descriptor);
+                }
+            }
+        }
+        let domain = owner.domain(&mut self.state);
+        domain.versions.reserve_for(&name)?;
+        domain.bindings.reserve_for(&name)?;
+        domain.imports.reserve_for(&name)?;
+        domain.assemblies.reserve_for(&name)?;
+        domain.packages.reserve_for(&name)?;
+        domain.image_refs.reserve_for(&name)?;
+        let assemblies =
+            MapUndo::publish(&mut domain.assemblies, Rc::clone(&name), Rc::clone(&raw));
+        let packages =
+            MapUndo::publish(&mut domain.packages, Rc::clone(&name), Rc::clone(&metadata));
+        let versions = MapUndo::publish(
+            &mut domain.versions,
+            Rc::clone(&name),
+            (metadata.manifest.version, metadata.digest),
+        );
+        let bindings = MapUndo::publish(&mut domain.bindings, Rc::clone(&name), bindings);
+        let imports = MapUndo::publish(&mut domain.imports, Rc::clone(&name), imports);
+        let key = domain.key.replace(metadata.signer);
+        let schema = core::mem::replace(&mut domain.storage_schema, schema);
+        let result = (|| {
+            execution_units(&self.state, id, &name)?;
+            if cancel() {
+                return Err(Error::Cancelled);
+            }
+            let descriptor = crate::image_store::Images::new(self.journal.flash_mut())?.stage(
+                &raw,
+                &protected,
+                &mut self.platform,
+            )?;
+            if !protected.contains(&descriptor) {
+                if protected.len() == 64 {
+                    return Err(Error::Quota);
+                }
+                protected.push(descriptor);
+            }
+            let images = MapUndo::publish(
+                &mut owner.domain(&mut self.state).image_refs,
+                Rc::clone(&name),
+                descriptor,
+            );
+            // Keep both generations' images until a later successful commit or reboot.
+            self.uncommitted_images = protected;
+            let result = self.commit_metadata_snapshot();
+            if result.is_err() {
+                images.restore(&mut owner.domain(&mut self.state).image_refs);
+            }
+            result
+        })();
+        if result.is_err() {
+            let domain = owner.domain(&mut self.state);
+            assemblies.restore(&mut domain.assemblies);
+            packages.restore(&mut domain.packages);
+            versions.restore(&mut domain.versions);
+            bindings.restore(&mut domain.bindings);
+            imports.restore(&mut domain.imports);
+            domain.key = key;
+            domain.storage_schema = schema;
+        }
+        result
+    }
+
     pub(super) fn remove_package(&mut self, id: &str, name: &str) -> Result<()> {
         if id == "ISD" && name == "mscorlib" {
             return Err(Error::Unauthorized);

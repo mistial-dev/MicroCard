@@ -56,22 +56,6 @@ impl<V> NameMap<V> {
         Self(Vec::new())
     }
 
-    fn try_clone_with(
-        &self,
-        context: &mut crate::fallible_clone::CloneContext,
-        mut clone_value: impl FnMut(
-            &mut crate::fallible_clone::CloneContext,
-            &V,
-        ) -> Result<V>,
-    ) -> Result<Self> {
-        let mut values = Vec::new();
-        context.reserve_exact(&mut values, self.0.len())?;
-        for (name, value) in &self.0 {
-            values.push((Rc::clone(name), clone_value(context, value)?));
-        }
-        Ok(Self(values))
-    }
-
     fn position(&self, name: &str) -> core::result::Result<usize, usize> {
         self.0
             .binary_search_by(|(candidate, _)| candidate.as_ref().cmp(name))
@@ -177,21 +161,6 @@ impl Domains {
         Self(Vec::new())
     }
 
-    fn try_clone_with(
-        &self,
-        context: &mut crate::fallible_clone::CloneContext,
-    ) -> Result<Self> {
-        let mut domains = Vec::new();
-        context.reserve_exact(&mut domains, self.0.len())?;
-        for (identifier, domain) in &self.0 {
-            domains.push((
-                context.clone_string(identifier)?,
-                domain.try_clone_with(context)?,
-            ));
-        }
-        Ok(Self(domains))
-    }
-
     fn position(&self, id: &str) -> core::result::Result<usize, usize> {
         self.0
             .binary_search_by(|(candidate, _)| candidate.as_str().cmp(id))
@@ -201,6 +170,7 @@ impl Domains {
         self.position(id).ok().map(|index| &self.0[index].1)
     }
 
+    #[cfg(test)]
     fn get_mut(&mut self, id: &str) -> Option<&mut Domain> {
         self.position(id)
             .ok()
@@ -448,7 +418,7 @@ impl core::ops::Index<&i32> for BlobStore {
 }
 
 #[derive(PartialEq, Eq)]
-
+#[cfg_attr(test, derive(Clone))]
 struct State {
     isd: Domain,
     domains: Domains,
@@ -467,21 +437,6 @@ const SEQUENCE_WINDOW: u32 = 64;
 #[cfg(feature = "scp03-pseudo-random")]
 const SEQUENCE_CEILING: u32 = 0x00ff_ffff;
 impl State {
-    fn try_clone(&self) -> Result<Self> {
-        self.try_clone_with(&mut crate::fallible_clone::CloneContext::new())
-    }
-
-    fn try_clone_with(
-        &self,
-        context: &mut crate::fallible_clone::CloneContext,
-    ) -> Result<Self> {
-        Ok(Self {
-            isd: self.isd.try_clone_with(context)?,
-            domains: self.domains.try_clone_with(context)?,
-            scp03_sequence: self.scp03_sequence,
-        })
-    }
-
     fn domain(&self, id: &str) -> Option<&Domain> {
         if id == "ISD" {
             Some(&self.isd)
@@ -489,6 +444,7 @@ impl State {
             self.domains.get(id)
         }
     }
+    #[cfg(test)]
     fn domain_mut(&mut self, id: &str) -> Option<&mut Domain> {
         if id == "ISD" {
             Some(&mut self.isd)
@@ -1073,22 +1029,6 @@ struct DomainPolicy {
     max_package_bytes: u16,
 }
 impl DomainPolicy {
-    fn try_clone_with(
-        &self,
-        context: &mut crate::fallible_clone::CloneContext,
-    ) -> Result<Self> {
-        Ok(Self {
-            capabilities: context.clone_vec(&self.capabilities)?,
-            max_assemblies: self.max_assemblies,
-            max_instances: self.max_instances,
-            max_int_records: self.max_int_records,
-            max_blob_records: self.max_blob_records,
-            max_blob_bytes: self.max_blob_bytes,
-            max_key_slots: self.max_key_slots,
-            max_package_bytes: self.max_package_bytes,
-        })
-    }
-
     fn standard() -> Result<Self> {
         let mut capabilities = Vec::new();
         capabilities.try_reserve_exact(44).map_err(|_| Error::Quota)?;
@@ -1395,38 +1335,6 @@ impl Domain {
         }
     }
 
-    fn try_clone_with(
-        &self,
-        context: &mut crate::fallible_clone::CloneContext,
-    ) -> Result<Self> {
-        Ok(Self {
-            incarnation: self.incarnation,
-            registry_aid: self.registry_aid,
-            key: self.key,
-            assemblies: self
-                .assemblies
-                .try_clone_with(context, |_, package| Ok(Rc::clone(package)))?,
-            image_refs: self.image_refs.try_clone_with(context, |_, value| Ok(*value))?,
-            packages: self.packages.try_clone_with(context, |_, metadata| Ok(Rc::clone(metadata)))?,
-            bindings: self.bindings.try_clone_with(context, |context, bindings| {
-                context.clone_vec(bindings)
-            })?,
-            imports: self.imports.try_clone_with(context, |context, imports| {
-                context.clone_vec(imports)
-            })?,
-            versions: self
-                .versions
-                .try_clone_with(context, |_, version| Ok(*version))?,
-            storage_schema: Rc::clone(&self.storage_schema),
-            instances: self.instances.try_clone_with(context)?,
-            store: self.store.try_clone_with(context)?,
-            blobs: self.blobs.try_clone_with(context)?,
-            keys: self.keys.try_clone_with(context)?,
-            credentials: self.credentials.try_clone_with(context)?,
-            policy: self.policy.try_clone_with(context)?,
-        })
-    }
-
     fn zeroize_application_state(&mut self) {
         for value in self.store.values_mut() {
             value.zeroize();
@@ -1471,7 +1379,7 @@ impl Domain {
             .map(|index| &self.storage_schema[index])
     }
 
-    fn merge_storage_schema(&mut self, declarations: &[StorageDeclaration]) -> Result<()> {
+    fn merged_storage_schema(&self, declarations: &[StorageDeclaration]) -> Result<Rc<Vec<StorageDeclaration>>> {
         for declaration in declarations {
             if self
                 .storage_declaration(declaration.key)
@@ -1488,7 +1396,7 @@ impl Domain {
             return Err(Error::Quota);
         }
         if additional == 0 {
-            return Ok(());
+            return Ok(Rc::clone(&self.storage_schema));
         }
         let mut merged = Vec::new();
         merged
@@ -1501,8 +1409,7 @@ impl Domain {
                 merged.insert(index, *declaration);
             }
         }
-        self.storage_schema = Rc::new(merged);
-        Ok(())
+        Ok(Rc::new(merged))
     }
 
     fn is_unbound_and_empty(&self) -> bool {
@@ -2402,53 +2309,6 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             level: 0x13,
         })
     }
-    fn commit(&mut self, mut next: State) -> Result<()> {
-        if self.state == next {
-            return Ok(());
-        }
-        let mut protected = Vec::new();
-        let current_count: usize = core::iter::once(&self.state.isd)
-            .chain(self.state.domains.0.iter().map(|(_, domain)| domain))
-            .map(|domain| domain.image_refs.len()).sum();
-        let next_count: usize = core::iter::once(&next.isd)
-            .chain(next.domains.0.iter().map(|(_, domain)| domain))
-            .map(|domain| domain.assemblies.len()).sum();
-        protected.try_reserve_exact((self.uncommitted_images.len() + current_count + next_count).min(64))
-            .map_err(|_| Error::Quota)?;
-        protected.extend_from_slice(&self.uncommitted_images);
-        for domain in core::iter::once(&self.state.isd).chain(self.state.domains.0.iter().map(|(_, domain)| domain)) {
-            for (_, descriptor) in domain.image_refs.iter() {
-                if !protected.contains(descriptor) { protected.push(*descriptor); }
-            }
-        }
-        let mut images = crate::image_store::Images::new(self.journal.flash_mut())?;
-        for domain in core::iter::once(&mut next.isd).chain(next.domains.0.iter_mut().map(|(_, domain)| domain)) {
-            let mut references = NameMap::new();
-            for (name, raw) in domain.assemblies.iter() {
-                let digest = domain.packages.get(name).ok_or(Error::Storage)?.digest;
-                let descriptor = match domain.image_refs.get(name) {
-                    Some(descriptor) if descriptor.digest == digest && descriptor.length as usize == raw.len() => *descriptor,
-                    _ => images.stage(raw, &protected, &mut self.platform)?,
-                };
-                if !protected.contains(&descriptor) {
-                    if protected.len() == 64 { return Err(Error::Quota); }
-                    protected.push(descriptor);
-                }
-                references.insert(Rc::clone(name), descriptor)?;
-            }
-            domain.image_refs = references;
-        }
-        let data = next.encode_snapshot()?;
-        if data.len() > 49152 {
-            return Err(Error::Quota);
-        }
-        self.uncommitted_images = protected;
-        self.journal
-            .commit_with(data.as_slice(), &mut self.platform)?;
-        self.uncommitted_images.clear();
-        self.state = next;
-        Ok(())
-    }
     /// The verified APDU supplies both authority and parameters. No caller-provided domain override.
     pub fn manage(&mut self, verified: Verified) -> Result<Vec<u8>> {
         self.manage_with_cancel(verified, &mut || false)
@@ -2604,7 +2464,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     return Err(Error::Domain);
                 }
                 let registry_aid = RegistryAid::synthetic(0x4c, &p.digest);
-                // An MP03 load file declares no AID of its own, so MicroCard derives one
+                // An MP05 load file declares no AID of its own, so MicroCard derives one
                 // from the digest and the host has to have declared that same one. Moving
                 // the check here from INSTALL is what lets a host leave the hash out, since
                 // the digest is only known once the whole load file has arrived.
@@ -2640,12 +2500,11 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 if existing - replaced + p.raw.len() > MAX_TOTAL_PACKAGE_BYTES {
                     return Err(Error::Quota);
                 }
-                let mut next = self.state.try_clone()?;
-                if p.manifest.domain != "ISD" && !next.is_owned() {
+                if p.manifest.domain != "ISD" && !self.state.is_owned() {
                     return Err(Error::Unauthorized);
                 }
                 if p.manifest.domain == "ISD"
-                    && next.isd.key.is_none()
+                    && self.state.isd.key.is_none()
                     && (p.manifest.assembly != "mscorlib"
                         || !p.manifest.entry_points.is_empty()
                         || !p.manifest.dependencies.is_empty())
@@ -2658,23 +2517,23 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     .map_err(|_| Error::Quota)?;
                 for dependency in &p.manifest.dependencies {
                     bindings.push(
-                        resolve_dependency(&next, &p.manifest.domain, dependency, &p)
+                        resolve_dependency(&self.state, &p.manifest.domain, dependency, &p)
                             .ok_or(Error::Missing)?,
                     );
                 }
-                let imports = resolve_calls(&next, &p, &bindings)?;
-                if next
+                let imports = resolve_calls(&self.state, &p, &bindings)?;
+                if self.state
                     .domain(&p.manifest.domain)
                     .is_some_and(|domain| {
                         domain
                             .assemblies
                             .contains_key(p.manifest.assembly.as_str())
                     })
-                    && next.provider_in_use(&p.manifest.domain, &p.manifest.assembly)
+                    && self.state.provider_in_use(&p.manifest.domain, &p.manifest.assembly)
                 {
                     return Err(Error::Busy);
                 }
-                let d = next.domain_mut(&p.manifest.domain).ok_or(Error::Domain)?;
+                let d = self.state.domain(&p.manifest.domain).ok_or(Error::Domain)?;
                 if p.manifest
                     .capabilities
                     .iter()
@@ -2688,7 +2547,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 if d.key.is_some_and(|key| key != p.signer) {
                     return Err(Error::KeyMismatch);
                 }
-                d.merge_storage_schema(&p.manifest.storage)?;
+                let schema = d.merged_storage_schema(&p.manifest.storage)?;
                 if let Some((v, h)) = d.versions.get(p.manifest.assembly.as_str()) {
                     if p.manifest.version < *v || (p.manifest.version == *v && p.digest != *h) {
                         return Err(Error::Rollback);
@@ -2728,41 +2587,17 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 {
                     return Err(Error::Quota);
                 }
-                d.versions.reserve_for(p.manifest.assembly.as_str())?;
-                d.bindings.reserve_for(p.manifest.assembly.as_str())?;
-                d.imports.reserve_for(p.manifest.assembly.as_str())?;
-                d.assemblies.reserve_for(p.manifest.assembly.as_str())?;
-                d.packages.reserve_for(p.manifest.assembly.as_str())?;
-                let signing_key = p.signer;
-                let version = p.manifest.version;
-                let digest = p.digest;
-                let activated_domain = fallible_string(&p.manifest.domain)?;
                 let activated_assembly: Rc<str> = Rc::from(p.manifest.assembly.as_str());
                 let metadata = Rc::new(StoredPackage::from_verified(p));
-
                 let raw = Rc::new(match materialized {
                     Some(raw) => raw,
                     None => self.staging.take()?,
                 });
-                d.packages.insert(Rc::clone(&activated_assembly), metadata)?;
-                d.key = Some(signing_key);
-                d.versions
-                    .insert(Rc::clone(&activated_assembly), (version, digest))?;
-                d.bindings
-                    .insert(Rc::clone(&activated_assembly), bindings)?;
-                d.imports
-                    .insert(Rc::clone(&activated_assembly), imports)?;
-                d.assemblies
-                    .insert(Rc::clone(&activated_assembly), Rc::clone(&raw))?;
-                if let Err(error) =
-                    execution_units(&next, &activated_domain, activated_assembly.as_ref())
-                {
-                    drop(next);
-                    self.staging
-                        .restore(Rc::try_unwrap(raw).map_err(|_| Error::Storage)?)?;
-                    return Err(error);
-                }
-                if let Err(error) = self.commit(next) {
+                let candidate = lifecycle::PackageActivation {
+                    name: activated_assembly, metadata, raw: Rc::clone(&raw),
+                    bindings, imports, schema,
+                };
+                if let Err(error) = self.activate_package(candidate, should_cancel) {
                     self.staging
                         .restore(Rc::try_unwrap(raw).map_err(|_| Error::Storage)?)?;
                     return Err(error);

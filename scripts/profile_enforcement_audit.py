@@ -66,7 +66,7 @@ def main() -> None:
     ))
     require("crates/microcard-core/src/domains.rs", (
         "validate_linked_program(&units)?",
-        "merge_storage_schema",
+        "merged_storage_schema",
         "authorize_storage",
         "domain_schema",
     ))

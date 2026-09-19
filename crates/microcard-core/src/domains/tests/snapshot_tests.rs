@@ -101,7 +101,7 @@ fn snapshot_rejects_duplicate_and_unsorted_records() {
         "duplicate instances",
         "duplicate schema",
     ] {
-        let mut state = fresh_card().state.try_clone().unwrap();
+        let mut state = fresh_card().state.clone();
         let domain = &mut state.isd;
         match collection {
             "duplicate names" => {

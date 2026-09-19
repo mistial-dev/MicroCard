@@ -25,14 +25,16 @@ AUDITED = {
         "image: raw.get(metadata.image.clone()).ok_or(Error::Storage)?,",
         # MC04 recovery still owns one shared immutable package buffer.
         "raw.extend_from_slice(bytes);",
-        # Protect descriptors for uncertain activations until recovery resolves them.
-        "protected.extend_from_slice(&self.uncommitted_images);",
         "host.out.extend_from_slice(&host.sw.to_be_bytes());",
         "self.out.extend_from_slice(source);",
         "version[index * 2..index * 2 + 2].copy_from_slice(&component.to_be_bytes());",
         ".copy_from_slice(&crate::globalplatform::ISD_AID);",
         "heap.bytes_mut(destination)?[destination_offset..destination_end].copy_from_slice(source);",
         ".copy_from_slice(digest.as_slice());",
+    ],
+    "crates/microcard-core/src/domains/lifecycle.rs": [
+        # Protect descriptors for uncertain activations until recovery resolves them.
+        "protected.extend_from_slice(&self.uncommitted_images);",
     ],
     "crates/microcard-core/src/staging.rs": [
         "bytes.extend_from_slice(&self.bytes);",
