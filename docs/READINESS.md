@@ -70,8 +70,9 @@ MC04 invocation and pending transactions now stage only the owning domain's muta
 records, keys, and credentials. Retry-floor commits stage only credentials. Selection
 now stages at most two affected domains. Domain creation/deletion, policy changes,
 and SCP03 counter reservation use small undo records. Instance installation/removal
-stages the bounded registry and callback data together. Package activation/removal
-still need conversion. Against `cadef33`, the same 21-invocation
+stages the bounded registry and callback data together. Package removal retains only
+the removed metadata entries for undo. Package activation still needs conversion.
+Against `cadef33`, the same 21-invocation
 credential acceptance workload reduces invocation peak host allocation from 41,310 to
 39,473 bytes and allocation traffic by 44,681 bytes, with unchanged live bytes.
 Overall workload peak falls from 41,310 to 40,496 bytes. Development firmware text
@@ -92,6 +93,10 @@ fewer bytes in total, with installation peak falling from 40,496 to 38,709 bytes
 Development text increases by 708 bytes. The existing lifecycle test also covers
 failed installation/removal commits restoring both the registry and callback data;
 no additional test fixture or suite is needed.
+Package removal then saves 160 development text bytes against `473d9a3`. The shared
+commit-boundary test covers invocation and package removal, including live rollback
+and recovery of either complete generation. Removal keeps signing-key pins, version
+history, and storage declarations, and never erases the referenced code during commit.
 
 ## Crypto replacement measurements
 

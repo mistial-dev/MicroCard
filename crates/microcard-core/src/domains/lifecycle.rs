@@ -27,6 +27,55 @@ impl Owner {
 }
 
 impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+    pub(super) fn remove_package(&mut self, id: &str, name: &str) -> Result<()> {
+        if id == "ISD" && name == "mscorlib" {
+            return Err(Error::Unauthorized);
+        }
+        if self.state.provider_in_use(id, name) {
+            return Err(Error::Busy);
+        }
+        let domain = self.state.domain(id).ok_or(Error::Domain)?;
+        if domain
+            .instances
+            .values()
+            .any(|assembly| assembly.as_ref() == name)
+        {
+            return Err(Error::Busy);
+        }
+        let owner = Owner::resolve(&self.state, domain.registry_aid)?;
+        // Resolve every slot before changing anything. Removing retains capacity,
+        // so restoring these exact entries cannot fail or allocate.
+        let assembly = domain
+            .assemblies
+            .position(name)
+            .map_err(|_| Error::Missing)?;
+        let package = domain.packages.position(name).map_err(|_| Error::Storage)?;
+        let image = domain
+            .image_refs
+            .position(name)
+            .map_err(|_| Error::Storage)?;
+        let binding = domain.bindings.position(name).map_err(|_| Error::Storage)?;
+        let import = domain.imports.position(name).map_err(|_| Error::Storage)?;
+        let domain = owner.domain(&mut self.state);
+        let previous = (
+            domain.assemblies.0.remove(assembly),
+            domain.packages.0.remove(package),
+            domain.image_refs.0.remove(image),
+            domain.bindings.0.remove(binding),
+            domain.imports.0.remove(import),
+        );
+        let result = self.commit_metadata_snapshot();
+        if result.is_err() {
+            let domain = owner.domain(&mut self.state);
+            domain.assemblies.0.insert(assembly, previous.0);
+            domain.packages.0.insert(package, previous.1);
+            domain.image_refs.0.insert(image, previous.2);
+            domain.bindings.0.insert(binding, previous.3);
+            domain.imports.0.insert(import, previous.4);
+        }
+        result
+    }
+
     pub(super) fn commit_instance_lifecycle(
         &mut self,
         owner: RegistryAid,

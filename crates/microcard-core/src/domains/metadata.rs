@@ -2,7 +2,7 @@
 use super::*;
 
 impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
-    /// Existing image descriptors are unchanged; this never stages or erases code.
+    /// Publishes existing image descriptors; this never stages or erases code.
     pub(super) fn commit_metadata_snapshot(&mut self) -> Result<()> {
         let data = self.state.encode_snapshot()?;
         self.journal

@@ -135,12 +135,6 @@ impl<V> NameMap<V> {
         self.position(name).is_ok()
     }
 
-    fn remove(&mut self, name: &str) -> Option<V> {
-        self.position(name)
-            .ok()
-            .map(|index| self.0.remove(index).1)
-    }
-
     fn len(&self) -> usize {
         self.0.len()
     }
@@ -2788,18 +2782,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 } else if c.ins == 0xee {
                     self.uninstall_instance(domain_id, name, should_cancel)?;
                 } else {
-                    if domain_id == "ISD" && name == "mscorlib" { return Err(Error::Unauthorized); }
-                    if self.state.provider_in_use(domain_id, name) { return Err(Error::Busy); }
-                    let mut next = self.state.try_clone()?;
-                    let domain = next.domain_mut(domain_id).ok_or(Error::Domain)?;
-                    if domain.instances.values().any(|assembly| assembly.as_ref() == name) {
-                        return Err(Error::Busy);
-                    }
-                    domain.assemblies.remove(name).ok_or(Error::Missing)?;
-                    domain.packages.remove(name).ok_or(Error::Storage)?;
-                    domain.bindings.remove(name).ok_or(Error::Storage)?;
-                    domain.imports.remove(name).ok_or(Error::Storage)?;
-                    self.commit(next)?;
+                    self.remove_package(domain_id, name)?;
                 }
                 Ok(Vec::new())
             }

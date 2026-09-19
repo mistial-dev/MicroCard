@@ -2058,7 +2058,7 @@ fn commit_cuts(snapshot_bytes: usize, image_bytes: usize) -> Vec<usize> {
 }
 
 #[test]
-fn invocation_commit_boundaries_recover_old_or_new_state() {
+fn invocation_and_package_removal_boundaries_recover_old_or_new_state() {
     let mut card = card();
     let incarnation = create(&mut card, "atomic");
     load(&mut card, &counter_package("atomic", incarnation, 1, 7)).unwrap();
@@ -2072,26 +2072,35 @@ fn invocation_commit_boundaries_recover_old_or_new_state() {
     let previous = card.state.encode_snapshot().unwrap().to_vec();
     let base = card.into_flash();
 
-    let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
-    complete.invoke("F04D430001", &[]).unwrap();
-    assert_eq!(complete.state.domains["untouched"].store.get(&1), Some(&123));
-    let committed = complete.state.encode_snapshot().unwrap().to_vec();
-    for cut in commit_cuts(committed.len(), 0) {
-        let mut flash = base.clone();
-        flash.fail_after = Some(cut);
-        let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
-        if interrupted.invoke("F04D430001", &[]).is_err() {
-            assert_eq!(interrupted.state.encode_snapshot().unwrap().as_slice(), previous);
+    for remove in [false, true] {
+        let mutate = |card: &mut Card<MemoryFlash, TestPlatform>| {
+            if remove {
+                card.manage(command(0xf0, &management_names_wire("untouched", "Counter").unwrap()))
+            } else {
+                card.invoke("F04D430001", &[])
+            }
+        };
+        let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
+        mutate(&mut complete).unwrap();
+        assert_eq!(complete.state.domains["untouched"].store.get(&1), Some(&123));
+        let committed = complete.state.encode_snapshot().unwrap().to_vec();
+        for cut in commit_cuts(committed.len(), 0) {
+            let mut flash = base.clone();
+            flash.fail_after = Some(cut);
+            let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+            if mutate(&mut interrupted).is_err() {
+                assert_eq!(interrupted.state.encode_snapshot().unwrap().as_slice(), previous);
+            }
+            assert_eq!(interrupted.state.domains["untouched"].store.get(&1), Some(&123));
+            let mut flash = interrupted.into_flash();
+            flash.fail_after = None;
+            let recovered = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+            let actual = recovered.state.encode_snapshot().unwrap().to_vec();
+            assert!(
+                actual == previous || actual == committed,
+                "partial commit at cut {cut}, package removal {remove}"
+            );
         }
-        assert_eq!(interrupted.state.domains["untouched"].store.get(&1), Some(&123));
-        let mut flash = interrupted.into_flash();
-        flash.fail_after = None;
-        let recovered = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
-        let actual = recovered.state.encode_snapshot().unwrap().to_vec();
-        assert!(
-            actual == previous || actual == committed,
-            "partial invocation commit at cut {cut}"
-        );
     }
 }
 #[test]
