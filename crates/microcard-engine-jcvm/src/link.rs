@@ -21,8 +21,8 @@ const PRIVATE_TOKEN: u8 = 0x80;
 /// A method in an imported package, named the way its export file names it.
 ///
 /// This is what an external reference resolves to. The engine implements a method by
-/// matching on these names, so an applet calling something unimplemented fails with the
-/// name in hand rather than as an unexplained refusal.
+/// matching on generated numeric identities. Host diagnostics resolve those identities
+/// to names; firmware does not carry their strings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ApiTarget {
     pub package: &'static ApiPackage,
@@ -370,6 +370,7 @@ fn table_entry(info: &ClassInfo, token: u8, private: bool) -> Option<u16> {
 mod tests {
     extern crate alloc;
     use super::*;
+    use crate::jcvm_api::{ClassId, MethodId, PackageId};
     use crate::test_support::{ClassSpec, Package};
     use alloc::vec;
 
@@ -489,14 +490,14 @@ mod tests {
             Some((0, 7, 1))
         );
         let target = linked.api_method(0, 7, 1, true).unwrap();
-        assert_eq!(target.package.name, "javacard.framework");
-        assert_eq!(target.class.name, "javacard/framework/ISOException");
-        assert_eq!(target.method.name, "throwIt");
+        assert_eq!(target.package.id, PackageId::javacard_framework);
+        assert_eq!(target.class.id, ClassId::ISOException);
+        assert_eq!(target.method.id, MethodId::throwIt);
         assert!(target.method.is_static);
         // The same token, resolved as a virtual method, is a different method entirely.
         // Static and virtual methods are numbered in separate namespaces.
         let virtual_target = linked.api_method(0, 7, 1, false).unwrap();
-        assert_eq!(virtual_target.method.name, "getReason");
+        assert_eq!(virtual_target.method.id, MethodId::getReason);
         // An internal reference names an offset and has no tokens at all.
         assert_eq!(linked.static_method(0), Err(Error::Unsupported));
     }

@@ -12,6 +12,9 @@ pub mod link;
 pub mod natives;
 #[allow(dead_code)]
 mod jcvm_api;
+mod jcvm_api_ids;
+#[cfg(feature = "diagnostics")]
+mod jcvm_api_names;
 #[allow(dead_code)]
 mod jcvm_opcodes;
 pub mod verify;

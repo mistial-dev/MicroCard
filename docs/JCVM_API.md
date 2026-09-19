@@ -6,7 +6,7 @@ Source: Java Card 3.0.5 export files, read from the development kit. Tokens are 
 
 A CAP file names an imported class, field or method by token. These are the tokens this engine resolves, and nothing outside this table can be called.
 
-Signatures are left out here. A Java descriptor separates its parts with a character the prose gate forbids, so the full descriptor of every method is in `format/jcvm-api.json` beside the token.
+Full method descriptors are in `format/jcvm-api.json` beside each token. Firmware dispatch uses generated numeric identities; readable names are compiled only for host diagnostics.
 
 ## java.lang 1.0
 

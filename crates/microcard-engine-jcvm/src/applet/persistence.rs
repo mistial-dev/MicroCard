@@ -107,11 +107,11 @@ impl Card {
             } else if info.kind == heap::KIND_OBJECT {
                 if natives::is_native_class(info.class) {
                     let class = natives::api_class(info.class).ok_or(Error::Format)?;
-                    let exception = class.name == "java/lang/Throwable"
-                        || class.supers.contains(&"java/lang/Throwable");
+                    let exception = class.id == ClassId::Throwable
+                        || class.supers.contains(&ClassId::Throwable);
                     if info.length != 6
                         && !(info.length == 1
-                            && (exception || class.name == "javacard/framework/APDU"))
+                            && (exception || class.id == ClassId::APDU))
                     {
                         return Err(Error::Format);
                     }
@@ -120,8 +120,8 @@ impl Card {
                             |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);
                         let material = word(2);
                         valid_reference(material)?;
-                        let pin = class.name == "javacard/framework/OwnerPIN";
-                        if material != 0 && (pin || class.name.ends_with("Key")) {
+                        let pin = class.id == ClassId::OwnerPIN;
+                        if material != 0 && (pin || class.id.is_key()) {
                             let header =
                                 &saved.heap[material as usize..material as usize + heap::HEADER];
                             let length = u16::from_be_bytes([header[2], header[3]]);

@@ -7,6 +7,7 @@
 //! The status word an applet produces is not a return value. It comes from the exception
 //! that left `process`, or from nothing going wrong, which is why every path here ends in
 //! one rather than in a result the applet chose.
+use crate::jcvm_api::{ClassId, MethodId};
 use crate::cap::LoadFile;
 use crate::code::Limits;
 use crate::jcvm_api::PACKAGES;
@@ -117,7 +118,7 @@ impl Card {
         // The buffer and the APDU object outlive every command, because an applet is
         // allowed to keep the reference it was handed, JCRE §4.
         card.buffer = heap.new_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context)?;
-        let apdu_class = native_class_of("javacard/framework/APDU")?;
+        let apdu_class = native_class_of(ClassId::APDU)?;
         card.apdu = heap.new_object(apdu_class, 1, card.context)?;
         card.runtime_bytes = heap.used();
         use crate::cap::{TYPE_BOOLEAN, TYPE_BYTE, TYPE_SHORT, TYPE_INT};
@@ -356,7 +357,7 @@ impl Card {
         let linked = Linked::new(file)?;
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
         let class = heap.info(instance)?.class;
-        let method = match linked.lookup(class, applet_token(callback.name())?) {
+        let method = match linked.lookup(class, applet_token(callback.id())?) {
             Ok(method) => method,
             // Applet's inherited select accepts, and its inherited deselect is a no-op.
             Err(Error::Missing) if !matches!(callback, Callback::Process { .. }) => {
@@ -401,8 +402,8 @@ impl Card {
 #[derive(Clone, Copy)]
 enum Callback { Select, Process { selecting: bool }, Deselect }
 impl Callback {
-    fn name(self) -> &'static str {
-        match self { Self::Select => "select", Self::Process { .. } => "process", Self::Deselect => "deselect" }
+    fn id(self) -> MethodId {
+        match self { Self::Select => MethodId::select, Self::Process { .. } => MethodId::process, Self::Deselect => MethodId::deselect }
     }
 }
 struct Invocation { exception: Option<Reference>, returned: u16, data: Vec<u8> }
@@ -411,14 +412,14 @@ fn check_applet(linked: &Linked, heap: &Heap, instance: Reference) -> Result<()>
     use crate::cap::ClassRef;
     let root = heap.info(instance)?;
     if root.kind != heap::KIND_OBJECT || natives::is_native_class(root.class) { return Err(Error::Type); }
-    linked.lookup(root.class, applet_token("process")?)?;
+    linked.lookup(root.class, applet_token(MethodId::process)?)?;
     let mut class = ClassRef::Internal(root.class);
     for _ in 0..=u8::MAX {
         match class {
             ClassRef::Internal(offset) => { class = linked.classes().at(offset)?.super_class; }
             ClassRef::External { package, class } => {
                 let api = linked.api_class(package, class)?;
-                return if api.name == "javacard/framework/Applet" { Ok(()) } else { Err(Error::Type) };
+                return if api.id == ClassId::Applet { Ok(()) } else { Err(Error::Type) };
             }
             ClassRef::None => return Err(Error::Type),
         }
@@ -468,7 +469,7 @@ fn status_word(heap: &Heap, exception: Reference) -> u16 {
     let Some(class) = natives::api_class(info.class) else {
         return SW_UNKNOWN;
     };
-    if class.name != "javacard/framework/ISOException" {
+    if class.id != ClassId::ISOException {
         return SW_UNKNOWN;
     }
     heap.get_word(exception, natives::REASON_FIELD)
@@ -476,9 +477,9 @@ fn status_word(heap: &Heap, exception: Reference) -> u16 {
 }
 
 /// The class word an instance of a card-provided class carries.
-fn native_class_of(name: &str) -> Result<u16> {
+fn native_class_of(name: ClassId) -> Result<u16> {
     for (index, package) in PACKAGES.iter().enumerate() {
-        if let Some(class) = package.classes.iter().find(|entry| entry.name == name) {
+        if let Some(class) = package.classes.iter().find(|entry| entry.id == name) {
             return Ok(natives::native_class(index, class.token));
         }
     }
@@ -490,16 +491,16 @@ fn native_class_of(name: &str) -> Result<u16> {
 /// A subclass overriding it uses the same token, because a public virtual method token is
 /// inherited across packages, JCVM §4.3.7.6. That is what lets the card call an applet's
 /// own `process` without knowing anything about the applet's package.
-fn applet_token(name: &str) -> Result<u8> {
+fn applet_token(name: MethodId) -> Result<u8> {
     for package in PACKAGES.iter() {
         for class in package.classes.iter() {
-            if class.name != "javacard/framework/Applet" {
+            if class.id != ClassId::Applet {
                 continue;
             }
             if let Some(method) = class
                 .methods
                 .iter()
-                .find(|entry| entry.name == name && !entry.static_token)
+                .find(|entry| entry.id == name && !entry.static_token)
             {
                 return Ok(method.token);
             }
@@ -598,8 +599,8 @@ mod tests {
             public: {
                 // Tokens zero to seven of Applet, with the three this class defines.
                 let mut table = vec![0xffff; 8];
-                table[applet_token("select").unwrap() as usize] = bodies[1];
-                table[applet_token("process").unwrap() as usize] = bodies[2];
+                table[applet_token(MethodId::select).unwrap() as usize] = bodies[1];
+                table[applet_token(MethodId::process).unwrap() as usize] = bodies[2];
                 table
             },
             ..ClassSpec::default()
@@ -644,7 +645,7 @@ mod tests {
         // deselect records that it ran, then throws; JCRE must still clear its arrays.
         package.extra.push((1, 0, vec![op::SCONST_1, 129, 0, 9,
             op::SSPUSH, 0x6a, 0x82, op::INVOKESTATIC, 0, 10, op::RETURN]));
-        package.classes[0].public[applet_token("deselect").unwrap() as usize] = package.extra_offsets()[3];
+        package.classes[0].public[applet_token(MethodId::deselect).unwrap() as usize] = package.extra_offsets()[3];
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
 
@@ -690,7 +691,7 @@ mod tests {
         let on_deselect = heap.new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_DESELECT).unwrap();
         heap.array_put(on_deselect, 0, 8).unwrap();
         let persistent = heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
-        let pin = heap.new_object(native_class_of("javacard/framework/OwnerPIN").unwrap(), 6, 1).unwrap();
+        let pin = heap.new_object(native_class_of(ClassId::OwnerPIN).unwrap(), 6, 1).unwrap();
         heap.array_put(transient, 0, 7).unwrap();
         heap.array_put(persistent, 0, 9).unwrap();
         heap.put_word(pin, 0, 3).unwrap();
@@ -782,7 +783,7 @@ mod tests {
         assert_eq!(declined.process(&declined_file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x6999);
         assert!(!declined.selected());
         // Inherited Applet.select() accepts; process still chooses the response status.
-        package.classes[0].public[applet_token("select").unwrap() as usize] = 0xffff;
+        package.classes[0].public[applet_token(MethodId::select).unwrap() as usize] = 0xffff;
         let inherited_bytes = package.build();
         let inherited_file = LoadFile::parse(&inherited_bytes).unwrap();
         let mut inherited = Card::new(&inherited_file, Sizes::default()).unwrap();

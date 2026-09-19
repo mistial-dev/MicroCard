@@ -197,17 +197,57 @@ def refresh(directory: pathlib.Path) -> dict:
     }
 
 
+def identities(schema):
+    classes = sorted({c["name"] for p in schema["packages"] for c in p["classes"]})
+    methods = sorted({m["name"] for p in schema["packages"] for c in p["classes"] for m in c["methods"]})
+    return {
+        "PackageId": {p["name"]: p["name"].replace(".", "_") for p in schema["packages"]},
+        "ClassId": {name: name.rsplit("/", 1)[-1].replace("$", "_") for name in classes},
+        "MethodId": {name: "Constructor" if name == "<init>" else name for name in methods},
+    }
+
+
+def rust_ids(schema):
+    lines = [f"// {BANNER}", "// Internal dispatch identities, never CAP tokens or persistent heap class words."]
+    ids = identities(schema)
+    for kind, names in ids.items():
+        if len(names) > 256 or len(set(names.values())) != len(names):
+            raise ValueError(f"ambiguous or oversized {kind}")
+        lines += ["// Preserve the spellings from the Java Card exports.",
+                  "#[allow(non_camel_case_types, clippy::upper_case_acronyms)]", "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
+                  "#[repr(u8)]", f"pub enum {kind} {{"]
+        lines += [f"    {name}," for name in names.values()]
+        lines += ["}", ""]
+    security = [name for name in ids["ClassId"] if name.startswith("javacard/security/")]
+    first, last = (ids["ClassId"][name] for name in (security[0], security[-1]))
+    keys = " | ".join(f"Self::{value}" for name, value in ids["ClassId"].items() if name.endswith("Key"))
+    lines += ["impl ClassId {", "    pub fn is_security(self) -> bool {",
+              f"        (self as u8) >= Self::{first} as u8 && (self as u8) <= Self::{last} as u8", "    }",
+              "    pub fn is_key(self) -> bool {", f"        matches!(self, {keys})", "    }", "}", ""]
+    return "\n".join(lines)
+
+
+def rust_names(schema):
+    lines = [f"// {BANNER}", "// Host diagnostics only; firmware uses the numeric identities.", "use super::jcvm_api_ids::*;", ""]
+    for kind, names in identities(schema).items():
+        lines += [f"impl {kind} {{", "    pub fn diagnostic_name(self) -> &'static str {", "        match self {"]
+        lines += [f'            Self::{value} => "{name}",' for name, value in names.items()]
+        lines += ["        }", "    }", "}", ""]
+    return "\n".join(lines)
+
+
 def rust(schema: dict) -> str:
     lines = [
         f"// {BANNER}",
         f"// Source: {schema['source']}",
+        "pub use crate::jcvm_api_ids::{ClassId, MethodId, PackageId};",
         "",
         "/// One method an imported package declares, named by its token.",
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub struct ApiMethod {",
         "    pub token: u8,",
-        "    pub name: &'static str,",
-        "    pub descriptor: &'static str,",
+        "    pub id: MethodId,",
+        "    pub signature: Signature,",
         "    pub is_static: bool,",
         "    /// Whether the token belongs to the static namespace, which constructors",
         "    /// share with static methods even though they are instance methods.",
@@ -218,11 +258,11 @@ def rust(schema: dict) -> str:
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub struct ApiClass {",
         "    pub token: u8,",
-        "    pub name: &'static str,",
+        "    pub id: ClassId,",
         "    pub is_interface: bool,",
-        "    /// Names of the classes and interfaces this one extends, nearest first. A",
+        "    /// Identities of the classes and interfaces this one extends, nearest first. A",
         "    /// catch clause matches any of them, which is how catching a supertype works.",
-        "    pub supers: &'static [&'static str],",
+        "    pub supers: &'static [ClassId],",
         "    pub methods: &'static [ApiMethod],",
         "}",
         "",
@@ -230,7 +270,7 @@ def rust(schema: dict) -> str:
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub struct ApiPackage {",
         "    pub aid: &'static [u8],",
-        "    pub name: &'static str,",
+        "    pub id: PackageId,",
         "    /// The version the export file declares, which an import has to be satisfied by.",
         "    pub major: u8,",
         "    pub minor: u8,",
@@ -238,16 +278,24 @@ def rust(schema: dict) -> str:
         "}",
         "",
     ]
+    lines += ["#[derive(Clone, Copy, Debug, PartialEq, Eq)]", "pub struct Signature(u8);",
+              "impl Signature {",
+              "    pub fn empty_parameters(self) -> bool { self.0 & 1 != 0 }",
+              "    pub fn init_vector(self) -> bool { self.0 & 2 != 0 }",
+              "    pub fn init_mode(self) -> bool { self.0 & 4 != 0 }", "}", ""]
+    ids = identities(schema)
     for package in schema["packages"]:
         for klass in package["classes"]:
             symbol = f"{package['aid']}_{klass['token']}"
-            supers = ", ".join(f'"{name}"' for name in klass["supers"] + klass["interfaces"])
-            lines.append(f"const SUPERS_{symbol}: [&str; {len(klass['supers']) + len(klass['interfaces'])}] = [{supers}];")
+            supers = ", ".join(f"ClassId::{ids['ClassId'][name]}" for name in klass["supers"] + klass["interfaces"])
+            lines.append(f"const SUPERS_{symbol}: [ClassId; {len(klass['supers']) + len(klass['interfaces'])}] = [{supers}];")
             lines.append(f"const METHODS_{symbol}: [ApiMethod; {len(klass['methods'])}] = [")
             for method in sorted(klass["methods"], key=lambda entry: entry["token"]):
+                descriptor = method["descriptor"]
+                signature = int(descriptor == "()V") | (int("[BSS" in descriptor) << 1) | (int(descriptor.endswith("B)V") or "SB" in descriptor) << 2)
                 lines.append(
-                    f"    ApiMethod {{ token: {method['token']}, name: \"{method['name']}\", "
-                    f"descriptor: \"{method['descriptor']}\", is_static: {str(method['static']).lower()}, "
+                    f"    ApiMethod {{ token: {method['token']}, id: MethodId::{ids['MethodId'][method['name']]}, "
+                    f"signature: Signature({signature}), is_static: {str(method['static']).lower()}, "
                     f"static_token: {str(method['static_namespace']).lower()} }},"
                 )
             lines += ["];", ""]
@@ -255,7 +303,7 @@ def rust(schema: dict) -> str:
         for klass in sorted(package["classes"], key=lambda entry: entry["token"]):
             symbol = f"{package['aid']}_{klass['token']}"
             lines.append(
-                f"    ApiClass {{ token: {klass['token']}, name: \"{klass['name']}\", "
+                f"    ApiClass {{ token: {klass['token']}, id: ClassId::{ids['ClassId'][klass['name']]}, "
                 f"is_interface: {str(klass['interface']).lower()}, supers: &SUPERS_{symbol}, "
                 f"methods: &METHODS_{symbol} }},"
             )
@@ -266,7 +314,7 @@ def rust(schema: dict) -> str:
         aid = ", ".join(f"0x{package['aid'][at:at + 2].lower()}" for at in range(0, len(package["aid"]), 2))
         major, minor = package["version"].split(".")
         lines.append(
-            f"    ApiPackage {{ aid: &[{aid}], name: \"{package['name']}\", "
+            f"    ApiPackage {{ aid: &[{aid}], id: PackageId::{ids['PackageId'][package['name']]}, "
             f"major: {major}, minor: {minor}, classes: &CLASSES_{package['aid']} }},"
         )
     lines += ["];", ""]
@@ -284,9 +332,9 @@ def markdown(schema: dict) -> str:
         "A CAP file names an imported class, field or method by token. These are the "
         "tokens this engine resolves, and nothing outside this table can be called.",
         "",
-        "Signatures are left out here. A Java descriptor separates its parts with a "
-        "character the prose gate forbids, so the full descriptor of every method is in "
-        "`format/jcvm-api.json` beside the token.",
+        "Full method descriptors are in `format/jcvm-api.json` beside each token. "
+        "Firmware dispatch uses generated numeric identities; readable names are "
+        "compiled only for host diagnostics.",
         "",
     ]
     for package in schema["packages"]:
@@ -322,7 +370,9 @@ def main() -> None:
         SOURCE.write_text(json.dumps(schema, indent=2) + "\n")
     else:
         schema = json.loads(SOURCE.read_text())
-    outputs = {RUST: rust(schema), MARKDOWN: markdown(schema)}
+    outputs = {RUST: rust(schema), MARKDOWN: markdown(schema),
+               RUST.with_name("jcvm_api_ids.rs"): rust_ids(schema),
+               RUST.with_name("jcvm_api_names.rs"): rust_names(schema)}
     stale = [path for path, body in outputs.items()
              if not path.exists() or path.read_text() != body]
     if arguments.check:

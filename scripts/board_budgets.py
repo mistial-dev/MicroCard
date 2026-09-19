@@ -5,6 +5,7 @@ import json
 import pathlib
 import shutil
 import subprocess
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BOARD = ROOT / "board" / "nrf52840"
@@ -30,6 +31,16 @@ def measure(extra_arguments, engine="mc04"):
     other_map_symbols = ["microcard_engine_jcvm", "microcard_core9jcvm_card"] if engine == "mc04" else ["microcard_core7mc04_vm", "microcard_core7domains"]
     if any(name in link_map.read_text() for name in other_map_symbols):
         raise SystemExit(f"{engine}: link map includes the other interpreter")
+    if engine == "jcvm":
+        # Inspect loadable bytes, not ELF debug strings or symbol names.
+        with tempfile.TemporaryDirectory(prefix="microcard-api-names-") as temporary:
+            image = pathlib.Path(temporary) / "firmware.bin"
+            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(BINARY), str(image)], check=True)
+            flashed = image.read_bytes()
+        api = json.loads((ROOT / "format/jcvm-api.json").read_text())
+        names = [klass["name"] for package in api["packages"] for klass in package["classes"]]
+        if any(name.encode() in flashed for name in names):
+            raise SystemExit("jcvm: diagnostic API names leaked into firmware")
     size = shutil.which("arm-none-eabi-size")
     if size is None:
         raise SystemExit("arm-none-eabi-size is required for the board budget gate")

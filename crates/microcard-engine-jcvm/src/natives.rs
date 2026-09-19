@@ -6,6 +6,7 @@
 //! A native class has no Class component entry to be an instance of, so its objects carry
 //! a class word with the high bit set, which no internal class reference can have. That is
 //! what lets one heap hold both kinds of object and one catch clause match either.
+use crate::jcvm_api::{ClassId, MethodId, PackageId};
 use crate::jcvm_api::{ApiClass, PACKAGES};
 use crate::link::ApiTarget;
 use crate::vm::frame::{Frame, Reference};
@@ -50,7 +51,7 @@ pub fn native_is_a(thrown: u16, caught: u16) -> bool {
     let (Some(thrown), Some(caught)) = (api_class(thrown), api_class(caught)) else {
         return false;
     };
-    thrown.supers.contains(&caught.name)
+    thrown.supers.contains(&caught.id)
 }
 
 /// Field zero of an `ISOException`, which carries the status word to report.
@@ -153,46 +154,46 @@ pub fn call(
     context: heap::Context,
     jcre: &mut Jcre,
 ) -> Result<Native> {
-    let package = target.package.name;
-    let class = target.class.name;
-    let method = target.method.name;
+    let package = target.package.id;
+    let class = target.class.id;
+    let method = target.method.id;
     match (package, class, method) {
         // Constructing an Object or any exception does nothing the engine has to model.
         // The allocation already happened, and the fields start zeroed.
-        ("java.lang", _, "<init>") => {
+        (PackageId::java_lang, _, MethodId::Constructor) => {
             frame.pop_reference()?;
             Ok(Native::Returned)
         }
-        ("javacard.framework", "javacard/framework/ISOException", "throwIt") => {
+        (PackageId::javacard_framework, ClassId::ISOException, MethodId::throwIt) => {
             let reason = frame.pop_short()?;
-            let exception = new_exception(heap, "javacard/framework/ISOException", context)?;
+            let exception = new_exception(heap, ClassId::ISOException, context)?;
             heap.put_word(exception, REASON_FIELD, reason as u16)?;
             Ok(Native::Threw(exception))
         }
-        ("javacard.framework", "javacard/framework/ISOException", "<init>") => {
+        (PackageId::javacard_framework, ClassId::ISOException, MethodId::Constructor) => {
             let reason = frame.pop_short()?;
             let this = frame.pop_reference()?;
             heap.put_word(this, REASON_FIELD, reason as u16)?;
             Ok(Native::Returned)
         }
-        ("javacard.framework", "javacard/framework/ISOException", "getReason") => {
+        (PackageId::javacard_framework, ClassId::ISOException, MethodId::getReason) => {
             let this = frame.pop_reference()?;
             let reason = heap.get_word(this, REASON_FIELD)?;
             frame.push_short(reason as i16)?;
             Ok(Native::Returned)
         }
-        ("javacard.framework", "javacard/framework/Util", name) => util(name, heap, frame, context),
-        ("javacard.framework", "javacard/framework/APDU", name) => {
+        (PackageId::javacard_framework, ClassId::Util, name) => util(name, heap, frame, context),
+        (PackageId::javacard_framework, ClassId::APDU, name) => {
             apdu(name, heap, frame, jcre, context)
         }
-        ("javacard.framework", "javacard/framework/JCSystem", name) => {
+        (PackageId::javacard_framework, ClassId::JCSystem, name) => {
             jcsystem(name, heap, frame, context, jcre)
         }
-        ("javacard.framework", "javacard/framework/Applet", "register") => {
+        (PackageId::javacard_framework, ClassId::Applet, MethodId::register) => {
             if jcre.instance.is_some() { return Err(Error::Unauthorized); }
             // Two forms, JCRE §3.1. One registers under the AID the installer gave, the
             // other under an AID the applet chose out of a byte array it holds.
-            if target.method.descriptor != "()V" {
+            if !target.method.signature.empty_parameters() {
                 let length = frame.pop_short()?;
                 let offset = frame.pop_short()?;
                 let array = frame.pop_reference()?;
@@ -211,12 +212,12 @@ pub fn call(
             jcre.instance = Some(instance);
             Ok(Native::Returned)
         }
-        ("javacard.framework", "javacard/framework/Applet", "selectingApplet") => {
+        (PackageId::javacard_framework, ClassId::Applet, MethodId::selectingApplet) => {
             frame.pop_reference()?;
             frame.push_short(jcre.selecting as i16)?;
             Ok(Native::Returned)
         }
-        ("javacard.framework", "javacard/framework/Applet", "<init>") => {
+        (PackageId::javacard_framework, ClassId::Applet, MethodId::Constructor) => {
             frame.pop_reference()?;
             Ok(Native::Returned)
         }
@@ -224,7 +225,7 @@ pub fn call(
             let handled = security::call(
                 class,
                 method,
-                target.method.descriptor,
+                target.method.signature,
                 heap,
                 host,
                 frame,
@@ -232,7 +233,8 @@ pub fn call(
                 jcre,
             )?;
             if let Native::Unimplemented = handled {
-                report(class, method);
+                #[cfg(feature = "diagnostics")]
+                report(class.diagnostic_name(), method.diagnostic_name());
             }
             Ok(handled)
         }
@@ -274,12 +276,12 @@ pub fn new_api_object(
 /// Allocate an instance of a class the card provides, with room for its state.
 fn new_native(
     heap: &mut Heap,
-    name: &str,
+    name: ClassId,
     words: u16,
     context: heap::Context,
 ) -> Result<Reference> {
     for (index, package) in PACKAGES.iter().enumerate() {
-        if let Some(class) = package.classes.iter().find(|entry| entry.name == name) {
+        if let Some(class) = package.classes.iter().find(|entry| entry.id == name) {
             return heap.new_object(native_class(index, class.token), words, context);
         }
     }
@@ -288,48 +290,48 @@ fn new_native(
 
 /// `javacard.framework.APDU`, JCRE §4. The buffer is an ordinary byte array on the heap,
 /// so an applet reading it goes through the same bounds and firewall checks as any array.
-fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context: heap::Context) -> Result<Native> {
+fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context: heap::Context) -> Result<Native> {
     match name {
-        "getBuffer" => {
+        MethodId::getBuffer => {
             frame.pop_reference()?;
             frame.push_reference(jcre.buffer)?;
         }
-        "getIncomingLength" => {
+        MethodId::getIncomingLength => {
             frame.pop_reference()?;
             frame.push_short(jcre.incoming as i16)?;
         }
-        "getOffsetCdata" => {
+        MethodId::getOffsetCdata => {
             frame.pop_reference()?;
             frame.push_short(jcre.data_offset as i16)?;
         }
-        "setIncomingAndReceive" => {
+        MethodId::setIncomingAndReceive => {
             frame.pop_reference()?;
             // The whole command is already in the buffer, so there is nothing to wait for
             // and the answer is everything that arrived.
             frame.push_short(jcre.incoming as i16)?;
         }
-        "setOutgoing" | "setOutgoingNoChaining" => {
+        MethodId::setOutgoing | MethodId::setOutgoingNoChaining => {
             frame.pop_reference()?;
             if jcre.outgoing_started { return Err(Error::Inconsistent); }
             jcre.outgoing_started = true;
             frame.push_short(jcre.expected as i16)?;
         }
-        "setOutgoingLength" => {
+        MethodId::setOutgoingLength => {
             let length = frame.pop_short()?;
             frame.pop_reference()?;
             if !jcre.outgoing_started || jcre.outgoing_length.is_some() { return Err(Error::Inconsistent); }
             if length < 0 || length as usize > jcre.response.len() { return Err(Error::Bounds); }
             jcre.outgoing_length = Some(length as u16);
         }
-        "setOutgoingAndSend" | "sendBytes" | "sendBytesLong" => {
+        MethodId::setOutgoingAndSend | MethodId::sendBytes | MethodId::sendBytesLong => {
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
-            let source = if name == "sendBytesLong" { frame.pop_reference()? } else { jcre.buffer };
+            let source = if name == MethodId::sendBytesLong { frame.pop_reference()? } else { jcre.buffer };
             frame.pop_reference()?;
             if offset < 0 || length < 0 {
                 return Err(Error::Bounds);
             }
-            if name == "setOutgoingAndSend" {
+            if name == MethodId::setOutgoingAndSend {
                 if jcre.outgoing_started { return Err(Error::Inconsistent); }
                 jcre.outgoing_started = true;
                 jcre.outgoing_length = Some(length as u16);
@@ -342,13 +344,13 @@ fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context
             jcre.response[start..end].copy_from_slice(heap.byte_slice(source, offset as usize, length as usize)?);
             jcre.outgoing = end as u16;
         }
-        "isCommandChainingCLA" | "isSecureMessagingCLA" => {
+        MethodId::isCommandChainingCLA | MethodId::isSecureMessagingCLA => {
             frame.pop_reference()?;
             let cla = heap.byte_slice(jcre.buffer, 0, 1)?[0];
-            let bit = if name == "isCommandChainingCLA" { 0x10 } else { 0x0c };
+            let bit = if name == MethodId::isCommandChainingCLA { 0x10 } else { 0x0c };
             frame.push_short((cla & bit != 0) as i16)?;
         }
-        "getProtocol" => {
+        MethodId::getProtocol => {
             // A contacted card. An applet that refuses contactless selection reads this,
             // so answering with a contactless value would make it refuse every session.
             frame.push_short(0x01)?;
@@ -360,31 +362,31 @@ fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context
 
 /// `javacard.framework.JCSystem`, JCRE §7.
 fn jcsystem(
-    name: &str,
+    name: MethodId,
     heap: &mut Heap,
     frame: &mut Frame,
     context: heap::Context,
     jcre: &mut Jcre,
 ) -> Result<Native> {
     match name {
-        "makeTransientByteArray" | "makeTransientBooleanArray" | "makeTransientShortArray"
-        | "makeTransientObjectArray" => {
+        MethodId::makeTransientByteArray | MethodId::makeTransientBooleanArray | MethodId::makeTransientShortArray
+        | MethodId::makeTransientObjectArray => {
             let event = frame.pop_short()?;
             let length = frame.pop_short()?;
             if length < 0 {
                 return Err(Error::Bounds);
             }
             let kind = match name {
-                "makeTransientByteArray" => heap::KIND_BYTE,
-                "makeTransientBooleanArray" => heap::KIND_BOOLEAN,
-                "makeTransientShortArray" => heap::KIND_SHORT,
+                MethodId::makeTransientByteArray => heap::KIND_BYTE,
+                MethodId::makeTransientBooleanArray => heap::KIND_BOOLEAN,
+                MethodId::makeTransientShortArray => heap::KIND_SHORT,
                 _ => heap::KIND_REFERENCE,
             };
             let event = match event {
                 1 => heap::CLEAR_ON_RESET,
                 2 => heap::CLEAR_ON_DESELECT,
                 _ => {
-                    let exception = new_exception(heap, "javacard/framework/SystemException", context)?;
+                    let exception = new_exception(heap, ClassId::SystemException, context)?;
                     heap.put_word(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
                     return Ok(Native::Threw(exception));
                 }
@@ -392,32 +394,32 @@ fn jcsystem(
             let array = heap.new_transient_array(kind, length as u16, context, event)?;
             frame.push_reference(array)?;
         }
-        "isTransient" => {
+        MethodId::isTransient => {
             let reference = frame.pop_reference()?;
             frame.push_short(i16::from(heap.transient_event(reference)?))?;
         }
-        "isObjectDeletionSupported" => frame.push_short(0)?,
-        "requestObjectDeletion" => {
+        MethodId::isObjectDeletionSupported => frame.push_short(0)?,
+        MethodId::requestObjectDeletion => {
             // Legal to do nothing, JCRE §7.4. An applet that depends on it asks first.
         }
-        "getTransactionDepth" => frame.push_short(jcre.transaction_depth as i16)?,
-        "beginTransaction" => {
+        MethodId::getTransactionDepth => frame.push_short(jcre.transaction_depth as i16)?,
+        MethodId::beginTransaction => {
             // Transactions do not nest, JCRE §7.6, so a second begin is an error rather
             // than a deeper level.
             if jcre.transaction_depth != 0 {
                 return Ok(Native::Threw(new_exception(
                     heap,
-                    "javacard/framework/TransactionException",
+                    ClassId::TransactionException,
                     context,
                 )?));
             }
             jcre.transaction_depth = 1;
         }
-        "commitTransaction" | "abortTransaction" => {
+        MethodId::commitTransaction | MethodId::abortTransaction => {
             if jcre.transaction_depth == 0 {
                 return Ok(Native::Threw(new_exception(
                     heap,
-                    "javacard/framework/TransactionException",
+                    ClassId::TransactionException,
                     context,
                 )?));
             }
@@ -429,9 +431,9 @@ fn jcsystem(
 }
 
 /// Allocate an instance of a class the card provides.
-pub fn new_exception(heap: &mut Heap, name: &str, context: heap::Context) -> Result<Reference> {
+pub fn new_exception(heap: &mut Heap, name: ClassId, context: heap::Context) -> Result<Reference> {
     for (index, package) in PACKAGES.iter().enumerate() {
-        if let Some(class) = package.classes.iter().find(|entry| entry.name == name) {
+        if let Some(class) = package.classes.iter().find(|entry| entry.id == name) {
             // One word, which every exception uses for its reason.
             return heap.new_object(native_class(index, class.token), 1, context);
         }
@@ -441,21 +443,21 @@ pub fn new_exception(heap: &mut Heap, name: &str, context: heap::Context) -> Res
 
 /// `javacard.framework.Util`, JCRE §3. Every method here works on arrays the applet owns,
 /// so every access goes through the firewall like any other.
-fn util(name: &str, heap: &mut Heap, frame: &mut Frame, context: heap::Context) -> Result<Native> {
+fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Context) -> Result<Native> {
     match name {
-        "makeShort" => {
+        MethodId::makeShort => {
             let low = frame.pop_short()?;
             let high = frame.pop_short()?;
             frame.push_short((((high as u16) << 8) | (low as u8 as u16)) as i16)?;
         }
-        "getShort" => {
+        MethodId::getShort => {
             let offset = frame.pop_short()?;
             let array = frame.pop_reference()?;
             heap.check_access(array, context)?;
             let bytes = heap.byte_slice(array, index(offset)?, 2)?;
             frame.push_short(i16::from_be_bytes([bytes[0], bytes[1]]))?;
         }
-        "setShort" => {
+        MethodId::setShort => {
             let value = frame.pop_short()?;
             let offset = frame.pop_short()?;
             let array = frame.pop_reference()?;
@@ -465,7 +467,7 @@ fn util(name: &str, heap: &mut Heap, frame: &mut Frame, context: heap::Context) 
             // It answers the offset one past the short it wrote.
             frame.push_short(offset.wrapping_add(2))?;
         }
-        "arrayCopy" | "arrayCopyNonAtomic" => {
+        MethodId::arrayCopy | MethodId::arrayCopyNonAtomic => {
             let length = frame.pop_short()?;
             let destination_offset = frame.pop_short()?;
             let destination = frame.pop_reference()?;
@@ -490,7 +492,7 @@ fn util(name: &str, heap: &mut Heap, frame: &mut Frame, context: heap::Context) 
             }
             frame.push_short(destination_offset.wrapping_add(length as i16))?;
         }
-        "arrayFill" | "arrayFillNonAtomic" => {
+        MethodId::arrayFill | MethodId::arrayFillNonAtomic => {
             let value = frame.pop_short()?;
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
@@ -500,7 +502,7 @@ fn util(name: &str, heap: &mut Heap, frame: &mut Frame, context: heap::Context) 
                 .fill(value as u8);
             frame.push_short(offset.wrapping_add(length))?;
         }
-        "arrayCompare" => {
+        MethodId::arrayCompare => {
             let length = frame.pop_short()?;
             let right_offset = frame.pop_short()?;
             let right = frame.pop_reference()?;
@@ -542,14 +544,14 @@ mod tests {
     use super::*;
     use alloc::vec;
 
-    fn framework(class: &str, method: &str, static_token: bool) -> ApiTarget {
+    fn framework(class: ClassId, method: MethodId, static_token: bool) -> ApiTarget {
         for package in PACKAGES.iter() {
             for entry in package.classes.iter() {
-                if entry.name != class {
+                if entry.id != class {
                     continue;
                 }
                 for candidate in entry.methods.iter() {
-                    if candidate.name == method && candidate.static_token == static_token {
+                    if candidate.id == method && candidate.static_token == static_token {
                         return ApiTarget {
                             package,
                             class: entry,
@@ -559,7 +561,7 @@ mod tests {
                 }
             }
         }
-        panic!("no {class}.{method}");
+        panic!("no {class:?}.{method:?}");
     }
 
     fn setup(words: usize) -> (alloc::vec::Vec<u8>, alloc::vec::Vec<u16>, alloc::vec::Vec<u8>) {
@@ -581,29 +583,29 @@ mod tests {
         let mut jcre = Jcre::new(0, buffer);
         jcre.expected = 7;
         frame.push_reference(0).unwrap();
-        apdu("setOutgoing", &mut heap, &mut frame, &mut jcre, 1).unwrap();
+        apdu(MethodId::setOutgoing, &mut heap, &mut frame, &mut jcre, 1).unwrap();
         assert_eq!(frame.pop_short(), Ok(7));
         frame.push_reference(0).unwrap(); frame.push_short(4).unwrap();
-        apdu("setOutgoingLength", &mut heap, &mut frame, &mut jcre, 1).unwrap();
-        for method in ["sendBytes", "sendBytesLong"] {
+        apdu(MethodId::setOutgoingLength, &mut heap, &mut frame, &mut jcre, 1).unwrap();
+        for method in [MethodId::sendBytes, MethodId::sendBytesLong] {
             frame.push_reference(0).unwrap();
-            if method == "sendBytesLong" { frame.push_reference(buffer).unwrap(); }
+            if method == MethodId::sendBytesLong { frame.push_reference(buffer).unwrap(); }
             frame.push_short(1).unwrap(); frame.push_short(2).unwrap();
             apdu(method, &mut heap, &mut frame, &mut jcre, 1).unwrap();
-            if method == "sendBytes" { assert_eq!(jcre.response_data(), Err(Error::Bounds)); }
+            if method == MethodId::sendBytes { assert_eq!(jcre.response_data(), Err(Error::Bounds)); }
             heap.byte_slice_mut(buffer, 0, 8).unwrap().fill(b'X');
         }
         assert_eq!(jcre.response_data(), Ok(&b"bcXX"[..]));
         frame.push_reference(0).unwrap(); frame.push_short(0).unwrap(); frame.push_short(1).unwrap();
-        assert!(matches!(apdu("sendBytes", &mut heap, &mut frame, &mut jcre, 1), Err(Error::Bounds)));
+        assert!(matches!(apdu(MethodId::sendBytes, &mut heap, &mut frame, &mut jcre, 1), Err(Error::Bounds)));
         assert_eq!(jcre.outgoing, 4);
         frame.push_reference(0).unwrap();
-        assert!(matches!(apdu("setOutgoing", &mut heap, &mut frame, &mut jcre, 1), Err(Error::Inconsistent)));
+        assert!(matches!(apdu(MethodId::setOutgoing, &mut heap, &mut frame, &mut jcre, 1), Err(Error::Inconsistent)));
     }
 
     #[test]
     fn transient_factories_report_lifetimes_and_reject_invalid_events() {
-        for factory in ["makeTransientByteArray", "makeTransientBooleanArray", "makeTransientShortArray", "makeTransientObjectArray"] {
+        for factory in [MethodId::makeTransientByteArray, MethodId::makeTransientBooleanArray, MethodId::makeTransientShortArray, MethodId::makeTransientObjectArray] {
             let (mut slab, mut words, mut tags) = setup(0);
             let mut heap = Heap::new(&mut slab).unwrap();
             let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
@@ -613,11 +615,11 @@ mod tests {
                 let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle()).unwrap();
                 if matches!(event, 1 | 2) {
                     assert!(matches!(result, Native::Returned));
-                    jcsystem("isTransient", &mut heap, &mut frame, 1, &mut idle()).unwrap();
+                    jcsystem(MethodId::isTransient, &mut heap, &mut frame, 1, &mut idle()).unwrap();
                     assert_eq!(frame.pop_short().unwrap(), event);
                 } else {
                     let Native::Threw(exception) = result else { panic!("invalid clear event accepted"); };
-                    assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().name, "javacard/framework/SystemException");
+                    assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, ClassId::SystemException);
                     assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 1);
                 }
             }
@@ -632,28 +634,28 @@ mod tests {
             fn supports_random(&self, algorithm: u8) -> bool { algorithm == 2 }
         }
         for (class, algorithm, external, supported) in [
-            ("javacard/security/MessageDigest", 4, false, true),
-            ("javacard/security/MessageDigest", 5, false, false),
-            ("javacard/security/MessageDigest", 4, true, false),
-            ("javacard/security/RandomData", 2, false, true),
-            ("javacard/security/RandomData", 99, false, false),
-            ("javacard/security/Signature", 1, false, false),
-            ("javacard/security/KeyAgreement", 1, false, false),
-            ("javacardx/crypto/Cipher", 1, false, false),
+            (ClassId::MessageDigest, 4, false, true),
+            (ClassId::MessageDigest, 5, false, false),
+            (ClassId::MessageDigest, 4, true, false),
+            (ClassId::RandomData, 2, false, true),
+            (ClassId::RandomData, 99, false, false),
+            (ClassId::Signature, 1, false, false),
+            (ClassId::KeyAgreement, 1, false, false),
+            (ClassId::Cipher, 1, false, false),
         ] {
             let (mut slab, mut words, mut tags) = setup(0);
             let mut heap = Heap::new(&mut slab).unwrap();
             let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
             frame.push_short(algorithm).unwrap();
-            if class != "javacard/security/RandomData" { frame.push_short(i16::from(external)).unwrap(); }
-            let result = security::call(class, "getInstance", "", &mut heap, &mut Capabilities, &mut frame, 1, &mut idle()).unwrap();
+            if class != ClassId::RandomData { frame.push_short(i16::from(external)).unwrap(); }
+            let result = security::call(class, MethodId::getInstance, framework(class, MethodId::getInstance, true).method.signature, &mut heap, &mut Capabilities, &mut frame, 1, &mut idle()).unwrap();
             if supported {
                 assert!(matches!(result, Native::Returned));
                 let instance = frame.pop_reference().unwrap();
-                assert_eq!(api_class(heap.info(instance).unwrap().class).unwrap().name, class);
+                assert_eq!(api_class(heap.info(instance).unwrap().class).unwrap().id, class);
             } else {
-                let Native::Threw(exception) = result else { panic!("unsupported {class} returned an algorithm holder"); };
-                assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().name, "javacard/security/CryptoException");
+                let Native::Threw(exception) = result else { panic!("unsupported {class:?} returned an algorithm holder"); };
+                assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, ClassId::CryptoException);
                 assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 3);
             }
         }
@@ -665,7 +667,7 @@ mod tests {
         let mut heap = Heap::new(&mut slab).unwrap();
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
         frame.push_short(0x6a80u16 as i16).unwrap();
-        let target = framework("javacard/framework/ISOException", "throwIt", true);
+        let target = framework(ClassId::ISOException, MethodId::throwIt, true);
         let Native::Threw(exception) = call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap() else {
             panic!("throwIt has to throw");
         };
@@ -673,7 +675,7 @@ mod tests {
         // It is an object of a class the card provides, which no package can define.
         let class = heap.info(exception).unwrap().class;
         assert!(is_native_class(class));
-        assert_eq!(api_class(class).unwrap().name, "javacard/framework/ISOException");
+        assert_eq!(api_class(class).unwrap().id, ClassId::ISOException);
     }
 
     #[test]
@@ -686,7 +688,7 @@ mod tests {
                     package
                         .classes
                         .iter()
-                        .find(|entry| entry.name == "javacard/framework/ISOException")
+                        .find(|entry| entry.id == ClassId::ISOException)
                         .map(|class| (index, class))
                 })
                 .unwrap();
@@ -700,7 +702,7 @@ mod tests {
                     package
                         .classes
                         .iter()
-                        .find(|entry| entry.name == "java/lang/RuntimeException")
+                        .find(|entry| entry.id == ClassId::RuntimeException)
                         .map(|class| (index, class))
                 })
                 .unwrap();
@@ -725,7 +727,7 @@ mod tests {
         frame.push_short(2).unwrap();
         frame.push_short(0x1234).unwrap();
         call(
-            framework("javacard/framework/Util", "setShort", true),
+            framework(ClassId::Util, MethodId::setShort, true),
             &mut heap,
             &mut crate::host::NoHost,
             &mut frame,
@@ -739,7 +741,7 @@ mod tests {
         frame.push_reference(array).unwrap();
         frame.push_short(2).unwrap();
         call(
-            framework("javacard/framework/Util", "getShort", true),
+            framework(ClassId::Util, MethodId::getShort, true),
             &mut heap,
             &mut crate::host::NoHost,
             &mut frame,
@@ -767,7 +769,7 @@ mod tests {
         frame.push_short(1).unwrap();
         frame.push_short(3).unwrap();
         call(
-            framework("javacard/framework/Util", "arrayCopyNonAtomic", true),
+            framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
             &mut heap,
             &mut crate::host::NoHost,
             &mut frame,
@@ -792,7 +794,7 @@ mod tests {
             frame.push_short(4).unwrap();
             frame.push_short(7).unwrap();
             call(
-                framework("javacard/framework/Util", "arrayFillNonAtomic", true),
+                framework(ClassId::Util, MethodId::arrayFillNonAtomic, true),
                 &mut heap,
                 &mut crate::host::NoHost,
                 &mut frame,
@@ -802,7 +804,7 @@ mod tests {
             .unwrap();
             frame.pop_short().unwrap();
         }
-        let compare = framework("javacard/framework/Util", "arrayCompare", true);
+        let compare = framework(ClassId::Util, MethodId::arrayCompare, true);
         let run = |heap: &mut Heap, frame: &mut Frame| {
             frame.push_reference(left).unwrap();
             frame.push_short(0).unwrap();
@@ -828,19 +830,19 @@ mod tests {
         // Shareable interfaces are not built, so this is a real API entry with nothing
         // behind it.
         let target = framework(
-            "javacard/framework/JCSystem",
-            "getAppletShareableInterfaceObject",
+            ClassId::JCSystem,
+            MethodId::getAppletShareableInterfaceObject,
             true,
         );
         assert!(matches!(
             call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap(),
             Native::Unimplemented
         ));
-        let target = framework("org/globalplatform/GPSystem", "getSecureChannel", true);
+        let target = framework(ClassId::GPSystem, MethodId::getSecureChannel, true);
         let Native::Threw(exception) = call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap() else {
             panic!("an unavailable applet channel must not return a usable-looking handle");
         };
-        assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().name, "javacard/framework/SystemException");
+        assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, ClassId::SystemException);
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
     }
 }

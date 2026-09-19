@@ -8,6 +8,7 @@
 //! a wrapping one. Two of them are worth naming: a shift distance is masked before use, and
 //! `sushr` masks its operand to 16 bits before shifting, which is the difference between a
 //! logical and an arithmetic shift on a value held in a wider register.
+use crate::jcvm_api::{ClassId};
 use super::frame::{Frame, NULL, Reference};
 use super::heap::{self, Context, Heap};
 
@@ -811,7 +812,7 @@ pub fn run_body(
                 } else {
                     let exception = natives::new_exception(
                         machine.heap,
-                        "java/lang/ClassCastException",
+                        ClassId::ClassCastException,
                         machine.context,
                     )?;
                     match find_handler(machine, body, code.len(), pc, exception)? {
