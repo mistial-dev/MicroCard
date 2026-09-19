@@ -25,6 +25,16 @@ const READY: usize = 3;
 /// Field four, tries left on a PIN, or the padding mode of a cipher.
 const COUNTER: usize = 4;
 
+pub(super) fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
+    heap.visit_objects(|_, info, payload| {
+        if info.kind == heap::KIND_OBJECT && super::api_class(info.class)
+            .is_some_and(|class| class.name == "javacard/framework/OwnerPIN") {
+            payload.get_mut(READY * 2..READY * 2 + 2).ok_or(Error::Bounds)?.fill(0);
+        }
+        Ok(())
+    })
+}
+
 /// The class a `KeyBuilder` type code builds, JCRE Table 5-1.
 ///
 /// The transient variants build the same class as their persistent counterpart. Nothing

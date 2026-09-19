@@ -162,6 +162,16 @@ impl Card {
         self.instance.is_some()
     }
 
+    /// Clear reset-scoped data while retaining the installed instance and persistent state.
+    pub fn reset(&mut self) -> Result<()> {
+        self.words.fill(0);
+        self.tags.fill(0);
+        let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
+        heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?.fill(0);
+        natives::reset_pin_validations(&mut heap)
+    }
+
     /// Hand the applet one command, as a selection or as ordinary processing.
     pub fn process(
         &mut self,
@@ -462,6 +472,26 @@ mod tests {
             .unwrap();
         assert_eq!(response.sw, SW_SUCCESS);
         assert_eq!(response.data, [0x12, 0x34]);
+
+        let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        let transient = heap.new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_RESET).unwrap();
+        let persistent = heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
+        let pin = heap.new_object(native_class_of("javacard/framework/OwnerPIN").unwrap(), 6, 1).unwrap();
+        heap.array_put(transient, 0, 7).unwrap();
+        heap.array_put(persistent, 0, 9).unwrap();
+        heap.put_word(pin, 3, 1).unwrap(); // Validated flag.
+        heap.put_word(pin, 4, 2).unwrap(); // Remaining attempts are persistent.
+        card.heap_used = heap.used();
+        card.reset().unwrap();
+        assert!(card.installed());
+        assert!(card.words.iter().all(|word| *word == 0));
+        assert!(card.tags.iter().all(|tag| *tag == 0));
+        let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        assert_eq!(heap.array_get(transient, 0), Ok(0));
+        assert_eq!(heap.array_get(persistent, 0), Ok(9));
+        assert_eq!(heap.get_word(pin, 3), Ok(0));
+        assert_eq!(heap.get_word(pin, 4), Ok(2));
+        assert!(heap.byte_slice(card.buffer, 0, card.sizes.buffer_bytes as usize).unwrap().iter().all(|byte| *byte == 0));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 # Java Card profile
 
-The target is a complete Java Card virtual machine. This document records what that means concretely, so the loader, the verifier and the interpreter can each be judged against a written target instead of against each other.
-
-OpenFIPS201 is the first applet the engine has to run, and its measurements pin the first milestone. It is a test vehicle rather than the boundary of the work. Where a number below was measured from it, the text says so, and where a feature is absent from it the engine still implements the feature.
+This document describes the supported Java Card subset and its current limitations.
+Complete Java Card conformance and every OpenFIPS201 variant are outside this release
+cleanup. [Release readiness](READINESS.md) tracks the remaining delivery blockers.
 
 Implemented so far, in `crates/microcard-engine-jcvm`:
 
@@ -18,9 +18,10 @@ Implemented so far, in `crates/microcard-engine-jcvm`:
 | Native classes | Util, ISOException, APDU, JCSystem, Applet, OwnerPIN, and the key and algorithm objects |
 | Applet lifecycle | install, register, select and process, driven from outside the engine |
 
-What this adds up to: four of the eight OpenFIPS201 release variants install, register, accept a SELECT and answer PIV commands with their own status words, through `microcard-sim serve-jcvm`. A wrong PIN answers with the tries that remain and the count goes down, which is the applet's own retry counter surviving from one command to the next.
-
-The four fips variants run power-up self tests during install and stop at a cipher operation. What is missing to finish them, and to make the others do more than answer from an empty card: the cipher, signature and key agreement operations through the host, the rest of the APDU methods, and the GlobalPlatform secure channel.
+The committed OpenFIPS201 standard-cs2 fixture installs, registers, accepts selection,
+and answers the checked PIV commands through `microcard-sim serve-jcvm`. PIN retries
+persist between commands. Other variants require separate evidence; unsupported cipher,
+signature, and key-agreement requests now fail at their factories.
 
 Two delivery paths are also absent. A GlobalPlatform LOAD does not reach the engine, so a load file arrives only as a file path given to `microcard-sim serve-jcvm`. The engine is also absent from the board image.
 
@@ -112,6 +113,20 @@ Reachability is a finding rather than a preference. A method in a CAP file recor
 Decoding by reachability sidesteps that. Bytes no path reaches are never decoded, and because every branch target is checked against the map, execution cannot reach them either. A method is still bounded above by the next offset the package does name, which is what stops a branch from entering another method's body while running on the first method's frame.
 
 Full type and dataflow verification is deferred. In its place the operand stack and the locals carry a one-bit reference tag per slot, checked on every push and pop, which makes reference and primitive confusion unrepresentable at runtime. This is the opposite trade from the MC04 engine, which verifies hard and runs lean, and it is deliberate.
+
+## Volatile and persistent memory
+
+Array clear events occupy spare bits in the existing six-byte object header. The heap
+can clear reset-scoped arrays across contexts and deselection-scoped arrays for one
+context without reallocating objects or changing references. `JCSystem.isTransient`
+reports the recorded event; invalid factory events raise `SystemException.ILLEGAL_VALUE`.
+These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/JCSystem.html).
+
+`Card.reset()` clears both transient array kinds, the APDU buffer, execution words and
+tags, and native OwnerPIN validation flags. It retains installed objects, persistent
+array values, and PIN retry counts. This is an in-memory lifecycle operation, not reboot
+recovery. Durable heap storage, recovery validation, complete deselection callbacks,
+and transaction undo still need integration before board delivery.
 
 ## Cryptography
 

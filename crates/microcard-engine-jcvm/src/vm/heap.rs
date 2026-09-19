@@ -17,6 +17,9 @@ pub const KIND_BYTE: u8 = 3;
 pub const KIND_SHORT: u8 = 4;
 pub const KIND_INT: u8 = 5;
 pub const KIND_REFERENCE: u8 = 6;
+pub const CLEAR_ON_RESET: u8 = 1;
+pub const CLEAR_ON_DESELECT: u8 = 2;
+const KIND_MASK: u8 = 0x0f;
 
 /// Bytes of header every object carries: class or element type, length, kind and owner.
 pub const HEADER: usize = 6;
@@ -43,6 +46,7 @@ pub struct Info {
     pub length: u16,
     pub kind: u8,
     pub owner: Context,
+    pub clear_event: u8,
 }
 
 impl Info {
@@ -76,7 +80,7 @@ impl<'a> Heap<'a> {
     /// The heap is position independent, so resuming is a matter of remembering how much
     /// was used. That is what lets one heap outlive the command that allocated in it.
     pub fn resume(bytes: &'a mut [u8], used: usize) -> Result<Self> {
-        if used < 2 || used > bytes.len() {
+        if used < 2 || used > bytes.len() || used > u16::MAX as usize || !used.is_multiple_of(2) {
             return Err(Error::Bounds);
         }
         Ok(Self { bytes, next: used })
@@ -98,6 +102,7 @@ impl<'a> Heap<'a> {
             length,
             kind,
             owner,
+            clear_event: 0,
         };
         let data = (length as usize)
             .checked_mul(info.element_size())
@@ -125,10 +130,47 @@ impl<'a> Heap<'a> {
 
     /// An array of `length` elements, all zero or null.
     pub fn new_array(&mut self, kind: u8, length: u16, owner: Context) -> Result<Reference> {
-        if kind == KIND_OBJECT {
+        if !(KIND_BOOLEAN..=KIND_REFERENCE).contains(&kind) {
             return Err(Error::Format);
         }
         self.allocate(0, length, kind, owner)
+    }
+
+    pub fn new_transient_array(&mut self, kind: u8, length: u16, owner: Context, event: u8) -> Result<Reference> {
+        if !matches!(event, CLEAR_ON_RESET | CLEAR_ON_DESELECT) { return Err(Error::Format); }
+        let reference = self.new_array(kind, length, owner)?;
+        self.bytes[reference as usize + 4] |= event << 4;
+        Ok(reference)
+    }
+
+    pub fn transient_event(&self, reference: Reference) -> Result<u8> {
+        if reference == NULL { return Ok(0); }
+        Ok(self.info(reference)?.clear_event)
+    }
+
+    /// Visit allocated payloads without exposing their headers or allocating a reference list.
+    pub fn visit_objects(&mut self, mut visit: impl FnMut(Reference, Info, &mut [u8]) -> Result<()>) -> Result<()> {
+        let mut at = 2usize;
+        while at < self.next {
+            let info = self.info(at as Reference)?;
+            let length = info.length as usize * info.element_size();
+            let end = at + HEADER + length;
+            visit(at as Reference, info, &mut self.bytes[at + HEADER..end])?;
+            at = end.next_multiple_of(2);
+        }
+        if at != self.next { return Err(Error::Format); }
+        Ok(())
+    }
+
+    /// Reset clears both transient kinds; deselection clears only that context's arrays.
+    pub fn clear_transient(&mut self, event: u8, context: Context) -> Result<()> {
+        if !matches!(event, CLEAR_ON_RESET | CLEAR_ON_DESELECT) { return Err(Error::Format); }
+        self.visit_objects(|_, info, payload| {
+            if info.clear_event != 0 && (event == CLEAR_ON_RESET || (info.clear_event == event && info.owner == context)) {
+                payload.fill(0);
+            }
+            Ok(())
+        })
     }
 
     /// Read an object's header.
@@ -143,12 +185,20 @@ impl<'a> Heap<'a> {
         if !at.is_multiple_of(2) || at + HEADER > self.next {
             return Err(Error::Bounds);
         }
-        Ok(Info {
+        let info = Info {
             class: u16::from_be_bytes([self.bytes[at], self.bytes[at + 1]]),
             length: u16::from_be_bytes([self.bytes[at + 2], self.bytes[at + 3]]),
-            kind: self.bytes[at + 4],
+            kind: self.bytes[at + 4] & KIND_MASK,
             owner: self.bytes[at + 5],
-        })
+            clear_event: self.bytes[at + 4] >> 4,
+        };
+        if !matches!(info.kind, KIND_OBJECT | KIND_BOOLEAN..=KIND_REFERENCE)
+            || info.clear_event > CLEAR_ON_DESELECT
+            || (info.kind == KIND_OBJECT && info.clear_event != 0)
+            || (info.is_array() && info.class != 0)
+        { return Err(Error::Format); }
+        if at + HEADER + info.length as usize * info.element_size() > self.next { return Err(Error::Bounds); }
+        Ok(info)
     }
 
     /// Check that `context` may touch this object, JCRE §6.2.
@@ -270,6 +320,45 @@ mod tests {
     extern crate alloc;
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn transient_events_clear_payloads_without_changing_handles_or_persistent_data() {
+        let mut bytes = vec![0; 2048];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        let mut arrays = alloc::vec::Vec::new();
+        for kind in [KIND_BOOLEAN, KIND_BYTE, KIND_SHORT, KIND_INT, KIND_REFERENCE] {
+            for owner in [1, 2] {
+                for event in [0, CLEAR_ON_RESET, CLEAR_ON_DESELECT] {
+                    let reference = if event == 0 { heap.new_array(kind, 3, owner).unwrap() }
+                        else { heap.new_transient_array(kind, 3, owner, event).unwrap() };
+                    if kind == KIND_INT { heap.array_put_int(reference, 0, 1).unwrap(); }
+                    else { heap.array_put(reference, 0, 1).unwrap(); }
+                    arrays.push((reference, event, owner, kind));
+                }
+            }
+        }
+        let used = heap.used();
+        heap.clear_transient(CLEAR_ON_DESELECT, 1).unwrap();
+        for &(reference, event, owner, kind) in &arrays {
+            assert_eq!(heap.transient_event(reference).unwrap(), event);
+            assert_eq!(heap.info(reference).unwrap().kind, kind);
+            let value = if kind == KIND_INT { heap.array_get_int(reference, 0).unwrap() }
+                else { i32::from(heap.array_get(reference, 0).unwrap()) };
+            assert_eq!(value, i32::from(!(owner == 1 && event == CLEAR_ON_DESELECT)));
+        }
+        heap.clear_transient(CLEAR_ON_RESET, 0).unwrap();
+        for (reference, event, _, kind) in arrays {
+            let value = if kind == KIND_INT { heap.array_get_int(reference, 0).unwrap() }
+                else { i32::from(heap.array_get(reference, 0).unwrap()) };
+            assert_eq!(value, i32::from(event == 0));
+        }
+        for event in [0, 3, 255] {
+            assert_eq!(heap.new_transient_array(KIND_BYTE, 3, 1, event), Err(Error::Format));
+            assert_eq!(heap.clear_transient(event, 1), Err(Error::Format));
+        }
+        assert_eq!(heap.used(), used);
+        assert_eq!(heap.transient_event(NULL), Ok(0));
+    }
 
     #[test]
     fn an_object_reads_back_what_it_was_made_with() {

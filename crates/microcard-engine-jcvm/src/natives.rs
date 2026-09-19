@@ -56,6 +56,10 @@ pub fn native_is_a(thrown: u16, caught: u16) -> bool {
 /// Field zero of an `ISOException`, which carries the status word to report.
 pub const REASON_FIELD: usize = 0;
 
+pub fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
+    security::reset_pin_validations(heap)
+}
+
 /// What the runtime environment knows while a command is being processed, JCRE §4.
 ///
 /// An applet sees this through the APDU object it is handed and through the static methods
@@ -334,9 +338,7 @@ fn jcsystem(
     match name {
         "makeTransientByteArray" | "makeTransientBooleanArray" | "makeTransientShortArray"
         | "makeTransientObjectArray" => {
-            // The clear event is taken and ignored. Nothing here survives a reset yet, so
-            // both events are honoured by the heap being rebuilt rather than by tracking.
-            let _event = frame.pop_short()?;
+            let event = frame.pop_short()?;
             let length = frame.pop_short()?;
             if length < 0 {
                 return Err(Error::Bounds);
@@ -347,8 +349,21 @@ fn jcsystem(
                 "makeTransientShortArray" => heap::KIND_SHORT,
                 _ => heap::KIND_REFERENCE,
             };
-            let array = heap.new_array(kind, length as u16, context)?;
+            let event = match event {
+                1 => heap::CLEAR_ON_RESET,
+                2 => heap::CLEAR_ON_DESELECT,
+                _ => {
+                    let exception = new_exception(heap, "javacard/framework/SystemException", context)?;
+                    heap.put_word(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
+                    return Ok(Native::Threw(exception));
+                }
+            };
+            let array = heap.new_transient_array(kind, length as u16, context, event)?;
             frame.push_reference(array)?;
+        }
+        "isTransient" => {
+            let reference = frame.pop_reference()?;
+            frame.push_short(i16::from(heap.transient_event(reference)?))?;
         }
         "isObjectDeletionSupported" => frame.push_short(0)?,
         "requestObjectDeletion" => {
@@ -523,6 +538,29 @@ mod tests {
     /// A runtime with no command in flight, for the methods that do not read one.
     fn idle() -> Jcre {
         Jcre::new(0, 0)
+    }
+
+    #[test]
+    fn transient_factories_report_lifetimes_and_reject_invalid_events() {
+        for factory in ["makeTransientByteArray", "makeTransientBooleanArray", "makeTransientShortArray", "makeTransientObjectArray"] {
+            let (mut slab, mut words, mut tags) = setup(0);
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+            for event in [1, 2, 0, 3] {
+                frame.push_short(2).unwrap();
+                frame.push_short(event).unwrap();
+                let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle()).unwrap();
+                if matches!(event, 1 | 2) {
+                    assert!(matches!(result, Native::Returned));
+                    jcsystem("isTransient", &mut heap, &mut frame, 1, &mut idle()).unwrap();
+                    assert_eq!(frame.pop_short().unwrap(), event);
+                } else {
+                    let Native::Threw(exception) = result else { panic!("invalid clear event accepted"); };
+                    assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().name, "javacard/framework/SystemException");
+                    assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 1);
+                }
+            }
+        }
     }
 
     #[test]
