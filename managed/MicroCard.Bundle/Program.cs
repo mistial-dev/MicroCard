@@ -1,16 +1,12 @@
+using MicroCard.Build;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Org.BouncyCastle.Asn1.Sec;
-using Org.BouncyCastle.Crypto.Digests;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Crypto.Signers;
 
 const string Usage = "usage: MicroCard.Bundle create OUTPUT SEED PACKAGE... --explicit-sign\n       MicroCard.Bundle verify BUNDLE PACKAGE...";
-ReadOnlySpan<byte> magic = "MDB1"u8;
-ReadOnlySpan<byte> context = "MicroCard default bundle v1\0"u8;
+ReadOnlySpan<byte> magic = "MDB2"u8;
+ReadOnlySpan<byte> context = "MicroCard default bundle v2\0"u8;
 
 try
 {
@@ -20,10 +16,10 @@ try
         try
         {
             if (seed.Length != 32) throw new InvalidDataException("P-256 seed must be 32 bytes");
-            var signer = PublicPoint(seed);
+            var signer = PackageSignatures.PublicKey(seed);
             var packages = LoadPackages(args[3..^1], signer);
             var body = EncodeBody(packages, signer);
-            var output = body.Concat(SignLow(seed, body)).ToArray();
+            var output = body.Concat(PackageSignatures.Sign(seed, body)).ToArray();
             File.WriteAllBytes(args[1], output);
             return 0;
         }
@@ -43,7 +39,7 @@ try
         var signature = encoded.AsSpan(encoded.Length - 64);
         var signerOffset = 4 + context.Length + 1 + 16;
         var signer = body.Slice(signerOffset, 65).ToArray();
-        if (!VerifyLow(signer, body.ToArray(), signature.ToArray())) throw new InvalidDataException("Invalid bundle signature");
+        if (!PackageSignatures.Verify(signer, body.ToArray(), signature.ToArray())) throw new InvalidDataException("Invalid bundle signature");
         var packages = LoadPackages(args[2..], signer);
         var expected = EncodeBody(packages, signer);
         if (!body.SequenceEqual(expected)) throw new InvalidDataException("Bundle does not match the supplied packages");
@@ -104,7 +100,7 @@ static PackageRecord ReadPackage(string path)
     var signedLength = checked(fixedHeader + manifestLength + imageLength + 65);
     if (signedLength + 64 != bytes.Length) throw new InvalidDataException($"Invalid package length: {path}");
     var signer = bytes.AsSpan(signedLength - 65, 65).ToArray();
-    if (!VerifyLow(signer, bytes.AsSpan(0, signedLength).ToArray(), bytes.AsSpan(signedLength, 64).ToArray()))
+    if (!PackageSignatures.Verify(signer, bytes.AsSpan(0, signedLength).ToArray(), bytes.AsSpan(signedLength, 64).ToArray()))
         throw new InvalidDataException($"Invalid package signature: {path}");
     using var document = JsonDocument.Parse(bytes.AsMemory(fixedHeader, manifestLength));
     var root = document.RootElement;
@@ -131,8 +127,8 @@ static byte[] EncodeBody(List<PackageRecord> packages, byte[] signer)
 {
     using var output = new MemoryStream();
     using var writer = new BinaryWriter(output, Encoding.UTF8, true);
-    writer.Write("MDB1"u8);
-    writer.Write("MicroCard default bundle v1\0"u8);
+    writer.Write("MDB2"u8);
+    writer.Write("MicroCard default bundle v2\0"u8);
     writer.Write(checked((byte)packages.Count));
     writer.Write(packages[0].Incarnation);
     writer.Write(signer);
@@ -148,55 +144,6 @@ static byte[] EncodeBody(List<PackageRecord> packages, byte[] signer)
         writer.Write(package.PackageDigest);
     }
     return output.ToArray();
-}
-
-static Org.BouncyCastle.Asn1.X9.X9ECParameters Curve() => SecNamedCurves.GetByName("secp256r1");
-
-static BigInteger Scalar(byte[] seed)
-{
-    var d = new BigInteger(1, seed);
-    if (d.SignValue <= 0 || d.CompareTo(Curve().N) >= 0) throw new InvalidDataException("Seed is not a P-256 private scalar");
-    return d;
-}
-
-static byte[] PublicPoint(byte[] seed) => Curve().G.Multiply(Scalar(seed)).Normalize().GetEncoded(false);
-
-// Deterministic ECDSA over SHA-256, in the low form a card accepts.
-static byte[] SignLow(byte[] seed, byte[] message)
-{
-    var curve = Curve();
-    var signer = new ECDsaSigner(new HMacDsaKCalculator(new Sha256Digest()));
-    signer.Init(true, new ECPrivateKeyParameters(Scalar(seed), new ECDomainParameters(curve.Curve, curve.G, curve.N)));
-    var parts = signer.GenerateSignature(SHA256.HashData(message));
-    var r = parts[0];
-    var s = parts[1];
-    if (s.CompareTo(curve.N.ShiftRight(1)) > 0) s = curve.N.Subtract(s);
-    var output = new byte[64];
-    Width32(r).CopyTo(output, 0);
-    Width32(s).CopyTo(output, 32);
-    return output;
-}
-
-static bool VerifyLow(byte[] publicKey, byte[] message, byte[] signature)
-{
-    if (publicKey.Length != 65 || publicKey[0] != 0x04 || signature.Length != 64) return false;
-    var curve = Curve();
-    var r = new BigInteger(1, signature[..32]);
-    var s = new BigInteger(1, signature[32..]);
-    // A card takes only the low form, so the packager has to have produced it.
-    if (s.CompareTo(curve.N.ShiftRight(1)) > 0) return false;
-    var verifier = new ECDsaSigner();
-    verifier.Init(false, new ECPublicKeyParameters(curve.Curve.DecodePoint(publicKey), new ECDomainParameters(curve.Curve, curve.G, curve.N)));
-    return verifier.VerifySignature(SHA256.HashData(message), r, s);
-}
-
-static byte[] Width32(BigInteger value)
-{
-    var bytes = value.ToByteArrayUnsigned();
-    if (bytes.Length > 32) throw new InvalidDataException("ECDSA component exceeds 32 bytes");
-    var padded = new byte[32];
-    bytes.CopyTo(padded, 32 - bytes.Length);
-    return padded;
 }
 
 sealed record PackageRecord(string Assembly, string Domain, byte[] Incarnation, ushort[] AssemblyVersion,

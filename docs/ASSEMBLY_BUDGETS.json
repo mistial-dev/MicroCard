@@ -361,30 +361,30 @@
     {
       "assembly": "MicroCard.Cryptography",
       "source_pe_bytes": 6656,
-      "mc04_bytes": 2027,
+      "mc04_bytes": 1950,
       "sections": {
         "header": 56,
-        "tables": 598,
-        "strings": 631,
+        "tables": 570,
+        "strings": 602,
         "blob": 237,
-        "code": 505
+        "code": 485
       },
       "table_rows": {
         "Module": 1,
         "TypeRef": 5,
-        "TypeDef": 11,
-        "MethodDef": 23,
-        "MemberRef": 21,
+        "TypeDef": 10,
+        "MethodDef": 22,
+        "MemberRef": 20,
         "Assembly": 1,
         "AssemblyRef": 2
       },
-      "method_defs": 23,
-      "member_refs": 21,
-      "build_metadata_bytes": 222,
-      "debug_map_bytes": 1164,
-      "representative_manifest_bytes": 371,
+      "method_defs": 22,
+      "member_refs": 20,
+      "build_metadata_bytes": 219,
+      "debug_map_bytes": 1119,
+      "representative_manifest_bytes": 368,
       "package_fixed_bytes": 169,
-      "representative_package_bytes": 2567,
+      "representative_package_bytes": 2487,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -393,31 +393,31 @@
     {
       "assembly": "CryptographyConsumer",
       "source_pe_bytes": 6656,
-      "mc04_bytes": 2299,
+      "mc04_bytes": 2282,
       "sections": {
         "header": 56,
-        "tables": 468,
-        "strings": 662,
+        "tables": 457,
+        "strings": 647,
         "blob": 252,
-        "code": 861
+        "code": 870
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 21,
+        "TypeRef": 20,
         "TypeDef": 2,
         "MethodDef": 5,
-        "MemberRef": 29,
+        "MemberRef": 28,
         "CustomAttribute": 4,
         "Assembly": 1,
         "AssemblyRef": 3
       },
       "method_defs": 5,
-      "member_refs": 29,
+      "member_refs": 28,
       "build_metadata_bytes": 560,
       "debug_map_bytes": 288,
       "representative_manifest_bytes": 709,
       "package_fixed_bytes": 169,
-      "representative_package_bytes": 3177,
+      "representative_package_bytes": 3160,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -532,8 +532,8 @@
         "MicroCard.Cryptography",
         "MicroCard.Security"
       ],
-      "aggregate_mc04_bytes": 10740,
-      "aggregate_representative_package_bytes": 13206,
+      "aggregate_mc04_bytes": 10663,
+      "aggregate_representative_package_bytes": 13126,
       "ceilings": {
         "aggregate_mc04_bytes": 12288,
         "aggregate_representative_package_bytes": 14336
@@ -547,8 +547,8 @@
         "MicroCard.Security",
         "Credential"
       ],
-      "aggregate_mc04_bytes": 6605,
-      "aggregate_representative_package_bytes": 9306,
+      "aggregate_mc04_bytes": 6528,
+      "aggregate_representative_package_bytes": 9226,
       "ceilings": {
         "aggregate_mc04_bytes": 7168,
         "aggregate_representative_package_bytes": 10240

@@ -7,5 +7,5 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-  </ItemGroup>
+  <Compile Include="../MicroCard.Build/PackageSignatures.cs" Link="PackageSignatures.cs" /></ItemGroup>
 </Project>

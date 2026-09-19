@@ -6,7 +6,7 @@ import struct
 import subprocess
 import tempfile
 
-from scp03_acceptance import ensure_assembly
+from scp03_acceptance import ensure_assembly, signer_public_key
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACK = ROOT / "managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll"
@@ -20,7 +20,7 @@ PROJECTS = [
     "managed/MicroCard.Security",
 ]
 EXPECTED = ["mscorlib", "MicroCard.Cryptography", "MicroCard.Encoding", "MicroCard.Iso7816", "MicroCard.Security"]
-CONTEXT = b"MicroCard default bundle v1\0"
+CONTEXT = b"MicroCard default bundle v2\0"
 
 
 def run(*args, ok=True):
@@ -32,14 +32,14 @@ def run(*args, ok=True):
 
 def inspect(path):
     raw = path.read_bytes()
-    assert raw[:4] == b"MDB1" and raw[4:4 + len(CONTEXT)] == CONTEXT
+    assert raw[:4] == b"MDB2" and raw[4:4 + len(CONTEXT)] == CONTEXT
     offset = 4 + len(CONTEXT)
     count = raw[offset]
     offset += 1
     incarnation = raw[offset:offset + 16]
     offset += 16
-    signer = raw[offset:offset + 32]
-    offset += 32
+    signer = raw[offset:offset + 65]
+    offset += 65
     entries = []
     for _ in range(count):
         length = raw[offset]
@@ -95,7 +95,11 @@ with tempfile.TemporaryDirectory() as temporary:
     }
     for name, _, _, _, package_digest in entries:
         assert package_digest == hashlib.sha256(by_name[name].read_bytes()).digest()
-    assert len(signer) == 32 and signer != bytes(32)
+    assert signer == signer_public_key(seed.read_bytes())
+
+    old = directory / "old.mdb"
+    old.write_bytes(b"MDB1" + first.read_bytes()[4:])
+    assert run("dotnet", BUNDLE, "verify", old, *packages, ok=False).returncode != 0
 
     changed = directory / "changed.mdb"
     damaged = bytearray(first.read_bytes())
