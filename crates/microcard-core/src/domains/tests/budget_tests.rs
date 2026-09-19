@@ -282,7 +282,7 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
         (active_package_bytes, serialized_state_bytes, peak),
         (
             5792,
-            7052,
+            1404,
             crate::mc04_vm::ExecutionMetrics {
                 instructions: 78,
                 peak_evaluation_slots: 19,

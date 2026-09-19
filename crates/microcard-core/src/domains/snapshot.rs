@@ -1,4 +1,4 @@
-//! Versioned MC04 state snapshot. Images remain inline until the image-store migration.
+//! Versioned MC04 metadata snapshot. Immutable packages live in separate image slots.
 use super::*;
 use crate::cbor::{Decoder, Encoder};
 
@@ -156,17 +156,21 @@ fn read_domain(d: &mut Decoder<'_>, package_total: &mut usize) -> Result<Domain>
     let policy = read_policy(d)?;
     let mut domain = Domain::new(incarnation, aid, policy);
     domain.key = key;
-    domain.assemblies = read_names(d, |d| {
-        let raw = d.bytes(MAX_PACKAGE_BYTES)?;
-        *package_total = package_total.checked_add(raw.len()).ok_or(Error::Quota)?;
-        if *package_total > MAX_TOTAL_PACKAGE_BYTES {
-            return Err(Error::Quota);
+    domain.image_refs = read_names(d, |d| {
+        d.record(3)?;
+        let descriptor = crate::image_store::Descriptor {
+            slot: d.number()?, length: d.number()?, digest: d.fixed()?,
+        };
+        if descriptor.slot >= 64 || descriptor.length == 0 || descriptor.length as usize > MAX_PACKAGE_BYTES {
+            return Err(Error::Format);
         }
-        let mut value = Vec::new();
-        reserve(&mut value, raw.len())?;
-        value.extend_from_slice(raw);
-        Ok(Rc::new(value))
+        *package_total = package_total.checked_add(descriptor.length as usize).ok_or(Error::Quota)?;
+        if *package_total > MAX_TOTAL_PACKAGE_BYTES { return Err(Error::Quota); }
+        Ok(descriptor)
     })?;
+    for (name, _) in domain.image_refs.iter() {
+        domain.assemblies.insert(name.as_ref().into(), Rc::new(Vec::new()))?;
+    }
     domain.bindings = read_names(d, |d| {
         let count = d.array(16)?;
         let mut values = Vec::new();
@@ -269,7 +273,16 @@ fn write_domain(e: &mut Encoder, domain: &Domain) -> Result<()> {
         None => e.null()?,
     }
     write_policy(e, &domain.policy)?;
-    write_names(e, &domain.assemblies, |e, raw| e.bytes(raw))?;
+    e.array(domain.assemblies.len())?;
+    for (name, _) in domain.assemblies.iter() {
+        let descriptor = domain.image_refs.get(name).ok_or(Error::Missing)?;
+        e.array(2)?;
+        e.text(name)?;
+        e.array(3)?;
+        e.unsigned(u64::from(descriptor.slot))?;
+        e.unsigned(u64::from(descriptor.length))?;
+        e.bytes(&descriptor.digest)?;
+    }
     write_names(e, &domain.bindings, |e, values| {
         e.array(values.len())?;
         for value in values {
@@ -324,7 +337,7 @@ impl State {
     pub(super) fn encode_snapshot(&self) -> Result<Zeroizing<Vec<u8>>> {
         let mut e = Encoder::new(MAX_BYTES);
         e.array(5)?;
-        e.unsigned(1)?;
+        e.unsigned(2)?;
         e.unsigned(0)?;
         e.unsigned(u64::from(self.scp03_sequence))?;
         write_domain(&mut e, &self.isd)?;
@@ -346,7 +359,7 @@ impl State {
         }
         let mut d = Decoder::new(bytes);
         d.record(5)?;
-        if d.unsigned()? != 1 || d.unsigned()? != 0 {
+        if d.unsigned()? != 2 || d.unsigned()? != 0 {
             return Err(Error::IncompatibleState);
         }
         let sequence = d.number()?;

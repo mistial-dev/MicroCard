@@ -86,6 +86,19 @@ impl crate::hal::StagingFlash for TestStagingFlash {
 }
 #[derive(Clone)]
 struct SharedJournalFlash(Rc<RefCell<MemoryFlash>>);
+impl crate::image_store::ImageFlash for SharedJournalFlash {
+    fn slot_count(&self) -> usize { crate::image_store::ImageFlash::slot_count(&*self.0.borrow()) }
+    fn slot_size(&self) -> usize { crate::image_store::ImageFlash::slot_size(&*self.0.borrow()) }
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        crate::image_store::ImageFlash::with_slot(&*self.0.borrow(), index, read)
+    }
+    fn erase(&mut self, index: usize) -> Result<()> {
+        crate::image_store::ImageFlash::erase(&mut *self.0.borrow_mut(), index)
+    }
+    fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
+        crate::image_store::ImageFlash::program(&mut *self.0.borrow_mut(), index, offset, bytes)
+    }
+}
 impl Flash for SharedJournalFlash {
     fn slot_size(&self) -> usize {
         self.0.borrow().slot_size()
@@ -1935,8 +1948,24 @@ fn cooperative_cancellation_rolls_back_all_writes() {
     assert!(!reopened.state.domains["cancel"].store.contains_key(&30));
 }
 
+// Primitive tests sweep every flash byte. Domain tests exercise both sides of each
+// storage phase and the state changes that must commit together.
+fn commit_cuts(snapshot_bytes: usize, image_bytes: usize) -> Vec<usize> {
+    let image_end = if image_bytes == 0 { 0 } else { 16384 + image_bytes };
+    let journal_header = image_end + 1 + 16384;
+    let ciphertext_end = journal_header + 32 + snapshot_bytes;
+    let mut cuts = alloc::vec![0, 1];
+    for boundary in [16384.min(image_end), image_end, image_end + 1, journal_header,
+        ciphertext_end, ciphertext_end + 1, ciphertext_end + 2, ciphertext_end + 6] {
+        cuts.extend([boundary.saturating_sub(1), boundary, boundary + 1]);
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts
+}
+
 #[test]
-fn every_invocation_commit_mutation_recovers_old_or_new_state() {
+fn invocation_commit_boundaries_recover_old_or_new_state() {
     let mut card = card();
     let incarnation = create(&mut card, "atomic");
     load(&mut card, &counter_package("atomic", incarnation, 1, 7)).unwrap();
@@ -1948,8 +1977,7 @@ fn every_invocation_commit_mutation_recovers_old_or_new_state() {
     let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
     complete.invoke("F04D430001", &[]).unwrap();
     let committed = complete.state.encode_snapshot().unwrap().to_vec();
-    let mutations = 16384 + 35 + committed.len();
-    for cut in 0..=mutations {
+    for cut in commit_cuts(committed.len(), 0) {
         let mut flash = base.clone();
         flash.fail_after = Some(cut);
         let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
@@ -2348,6 +2376,9 @@ fn maximum_container_state_clone_is_fallible_and_atomic() {
             .assemblies
             .insert(Rc::clone(&name), Rc::new(alloc::vec![index]))
             .unwrap();
+        domain.image_refs.insert(Rc::clone(&name), crate::image_store::Descriptor {
+            slot: index, length: 1, digest: [index; 32],
+        }).unwrap();
         domain
             .bindings
             .insert(Rc::clone(&name), Vec::new())
@@ -2427,11 +2458,20 @@ fn first_load_power_loss_never_pins_alone() {
     let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
     load(&mut complete, &p).unwrap();
     let serialized = complete.state.encode_snapshot().unwrap().to_vec(); // Journal mutation behavior is exhaustively tested separately.
-    for cut in 0..=16384 + 35 + serialized.len() {
+    for cut in commit_cuts(serialized.len(), p.len()) {
         let mut f = base.clone();
         f.fail_after = Some(cut);
         let mut c = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
         let _ = load(&mut c, &p);
+        let marker_cut = 16384 + p.len() + 16384 + 35 + serialized.len();
+        if cut == marker_cut {
+            // The candidate is durable even though advancing the anchor failed.
+            // A later upload must not recycle its slot before reboot resolves that.
+            c.journal.flash_mut().fail_after = None;
+            c.abort_staging();
+            let replacement = package("a", inc, "one", 2, 7, &[0x2a]);
+            assert_eq!(load(&mut c, &replacement), Err(Error::Storage));
+        }
         let mut f = c.into_flash();
         f.fail_after = None;
         let mut recovered = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
@@ -3001,7 +3041,7 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
         .unwrap();
     let serialized = complete.state.encode_snapshot().unwrap().to_vec();
 
-    for cut in 0..=16384 + 35 + serialized.len() {
+    for cut in commit_cuts(serialized.len(), 0) {
         let mut flash = base.clone();
         flash.fail_after = Some(cut);
         let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
@@ -3295,7 +3335,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     let mut card = Card::open(MemoryFlash::new(16384), platform, STORAGE_KEY).unwrap();
     let package = library_package("ISD", card.state.isd.incarnation, "mscorlib", 1, 42);
     load(&mut card, &package).unwrap();
-    assert_eq!(calls.get(), [3, 1]);
+    assert_eq!(calls.get(), [5, 1]);
 
     let metadata = card.state.isd.packages.get("mscorlib").unwrap();
     let candidate = card.state.try_clone().unwrap();
@@ -3305,7 +3345,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     visit_registry(&card.state, 0x10, |aid, entry| {
         registry_record(0x10, aid, entry).map(|_| ())
     }).unwrap();
-    assert_eq!(calls.get(), [3, 1]);
+    assert_eq!(calls.get(), [5, 1]);
     drop(units);
     drop(candidate);
 
@@ -3318,7 +3358,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     // Digest and signature again on reopening. A stored identity is the digest of a
     // key rather than a key, so there is nothing left for recovery to revalidate as a
     // curve point. A package whose key is wrong fails its signature instead.
-    assert_eq!(calls.get(), [6, 2]);
+    assert_eq!(calls.get(), [9, 2]);
 }
 
 #[test]

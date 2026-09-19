@@ -3,13 +3,13 @@ use super::*;
 #[test]
 fn snapshot_matches_python_golden_vector() {
     let vector: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../../format/snapshot-cbor-v1.json")).unwrap();
+        serde_json::from_str(include_str!("../../../../../format/snapshot-cbor-v2.json")).unwrap();
     let hex = vector["hex"].as_str().unwrap();
     let bytes: Vec<u8> = (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
         .collect();
-    let state = State {
+    let mut state = State {
         isd: Domain::new(
             [1; 16],
             RegistryAid::isd(),
@@ -18,6 +18,11 @@ fn snapshot_matches_python_golden_vector() {
         domains: Domains(Vec::new()),
         scp03_sequence: 0,
     };
+    state.isd.key = Some([2; 32]);
+    state.isd.assemblies.insert(Rc::from("mscorlib"), Rc::new(Vec::new())).unwrap();
+    state.isd.image_refs.insert(Rc::from("mscorlib"), crate::image_store::Descriptor {
+        slot: 7, length: 123, digest: [3; 32],
+    }).unwrap();
     assert_eq!(*state.encode_snapshot().unwrap(), bytes);
     let decoded = State::decode_snapshot(&bytes).unwrap();
     assert!(decoded == state);
@@ -41,11 +46,11 @@ fn snapshot_rejects_every_truncation_and_noncanonical_header() {
     trailing.push(0);
     assert!(State::decode_snapshot(&trailing).is_err());
     let mut overlong = raw.to_vec();
-    overlong.splice(1..2, [0x18, 1]);
+    overlong.splice(1..2, [0x18, 2]);
     assert!(State::decode_snapshot(&overlong).is_err());
     for index in [1, 2] {
         let mut unsupported = raw.to_vec();
-        unsupported[index] = 2;
+        unsupported[index] = 3;
         assert!(matches!(
             State::decode_snapshot(&unsupported),
             Err(Error::IncompatibleState)
@@ -100,7 +105,10 @@ fn snapshot_rejects_duplicate_and_unsorted_records() {
         let domain = &mut state.isd;
         match collection {
             "duplicate names" => {
-                domain.assemblies.0 = alloc::vec![(Rc::from("a"), Rc::new(Vec::new())); 2]
+                domain.assemblies.0 = alloc::vec![(Rc::from("a"), Rc::new(Vec::new())); 2];
+                domain.image_refs.insert(Rc::from("a"), crate::image_store::Descriptor {
+                    slot: 0, length: 1, digest: [0; 32],
+                }).unwrap();
             }
             "duplicate instances" => {
                 domain.instances.0 =
@@ -127,7 +135,10 @@ fn snapshot_rejects_duplicate_and_unsorted_records() {
             "assemblies" => {
                 domain.assemblies.0 = (0..=MAX_ASSEMBLIES_PER_DOMAIN)
                     .map(|i| (Rc::from(alloc::format!("a{i:02}")), Rc::new(Vec::new())))
-                    .collect()
+                    .collect();
+                domain.image_refs.0 = domain.assemblies.iter().map(|(name, _)| (Rc::clone(name), crate::image_store::Descriptor {
+                    slot: 0, length: 1, digest: [0; 32],
+                })).collect();
             }
             "instances" => {
                 domain.instances.0 = (0..=MAX_INSTANCES_PER_DOMAIN)

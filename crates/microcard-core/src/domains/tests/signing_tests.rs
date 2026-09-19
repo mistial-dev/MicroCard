@@ -568,11 +568,12 @@ fn empty_domain_retains_versions_and_key_after_reboot() {
 fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
     let (c, _) = fixture(true);
     let good = snapshot(&c);
+    let base = c.journal.flash_for_test().clone();
     for case in 0..17 {
         let mut state = c.state.try_clone().unwrap();
         let d = state.domains.get_mut("a").unwrap();
         match case {
-            0 => { let mut raw = d.assemblies.get("Counter").unwrap().as_ref().clone(); raw[20] ^= 1; d.assemblies.insert("Counter".into(), Rc::new(raw)).unwrap(); }
+            0 => d.image_refs.get_mut("Counter").unwrap().digest[0] ^= 1,
             1 => d.key = None,
             2 => d.incarnation[0] = 99,
             3 => d.versions.get_mut("Counter").unwrap().0 = 999,
@@ -592,7 +593,7 @@ fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
         }
         let mut raw = state.encode_snapshot().unwrap().to_vec();
         if case == 6 { raw[0] = 0x86; raw.push(0xf5); }
-        let (mut journal, _) = Journal::open(MemoryFlash::new(65536), STORAGE_KEY).unwrap();
+        let (mut journal, _) = Journal::open(base.clone(), STORAGE_KEY).unwrap();
         journal.commit(&good).unwrap();
         journal.commit(&raw).unwrap(); // Writes a validly authenticated newer generation.
         assert!(
@@ -600,7 +601,7 @@ fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
             "accepted corruption {case}"
         );
     }
-    let (mut journal, _) = Journal::open(MemoryFlash::new(16384), STORAGE_KEY).unwrap();
+    let (mut journal, _) = Journal::open(base, STORAGE_KEY).unwrap();
     journal.commit(&good).unwrap();
     Card::open(journal.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
 }

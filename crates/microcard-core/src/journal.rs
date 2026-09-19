@@ -251,6 +251,12 @@ impl<F: Flash> Journal<F> {
         let Self { flash, .. } = self;
         flash
     }
+    #[cfg(feature = "mc04")]
+    pub(crate) fn flash_mut(&mut self) -> &mut F {
+        &mut self.flash
+    }
+    #[cfg(all(test, feature = "mc04"))]
+    pub(crate) fn flash_for_test(&self) -> &F { &self.flash }
 }
 
 fn nonce(generation: u64) -> [u8; 13] {
@@ -305,6 +311,7 @@ pub fn decode_monotonic_bits(bytes: &[u8]) -> Result<u64> {
 #[derive(Clone)]
 pub struct MemoryFlash {
     slots: Vec<Vec<u8>>,
+    images: Vec<Vec<u8>>,
     monotonic: Vec<u8>,
     pub fail_after: Option<usize>,
 }
@@ -315,6 +322,7 @@ impl MemoryFlash {
     fn with_slots(size: usize, slot_count: usize) -> Self {
         Self {
             slots: (0..slot_count).map(|_| vec![255; size]).collect(),
+            images: (0..64).map(|_| Vec::new()).collect(),
             monotonic: vec![255; size],
             fail_after: None,
         }
@@ -325,6 +333,37 @@ impl MemoryFlash {
                 return Err(Error::Storage);
             }
             *n -= 1;
+        }
+        Ok(())
+    }
+}
+impl crate::image_store::ImageFlash for MemoryFlash {
+    fn slot_count(&self) -> usize { self.images.len() }
+    fn slot_size(&self) -> usize { crate::staging::MAX_PACKAGE_BYTES }
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        let image = self.images.get(index).ok_or(Error::Bounds)?;
+        if image.is_empty() { return Err(Error::Storage); }
+        read(image)
+    }
+    fn erase(&mut self, index: usize) -> Result<()> {
+        let image = self.images.get_mut(index).ok_or(Error::Bounds)?;
+        if image.is_empty() {
+            image.try_reserve_exact(crate::staging::MAX_PACKAGE_BYTES).map_err(|_| Error::Quota)?;
+            image.resize(crate::staging::MAX_PACKAGE_BYTES, 255);
+        }
+        for offset in 0..image.len() {
+            self.tick()?;
+            self.images[index][offset] = 255;
+        }
+        Ok(())
+    }
+    fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
+        let end = offset.checked_add(bytes.len()).ok_or(Error::Bounds)?;
+        let old = self.images.get(index).and_then(|image| image.get(offset..end)).ok_or(Error::Bounds)?;
+        if old.iter().zip(bytes).any(|(old, new)| old & new != *new) { return Err(Error::Storage); }
+        for (at, byte) in bytes.iter().enumerate() {
+            self.tick()?;
+            self.images[index][offset + at] = *byte;
         }
         Ok(())
     }

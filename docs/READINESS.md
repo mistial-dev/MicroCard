@@ -20,27 +20,27 @@ provider adapter, now used by the simulator. Unsupported JCVM crypto factories r
 explicit Java Card exceptions. P-256/AES bindings, authenticated package loading, and
 durable applet state still need integration before a JCVM firmware artifact is ready.
 
-The shared image-store primitive stages bytes into independently erasable slots and
-verifies readback through the crypto provider before returning a slot/length/digest
-descriptor. Callers must protect all descriptors reachable from committed and pending
-state, then activate the new descriptor through authenticated metadata. Interrupted
-writes leave an unreferenced slot reclaimable without touching protected images.
-This primitive is tested, but MC04 snapshots still contain packages and board flash
-partitions have not yet been connected to it.
+MC04 stores immutable packages in separate image slots and commits only descriptors
+in its version-2 metadata snapshot. Recovery verifies image hashes and package
+signatures. Interrupted activation protects both committed and uncertain candidate
+images. Both board layouts reserve eight 16 KiB image slots; the simulator uses files.
+Runtime package views still occupy RAM. JCVM heap partitioning and its management
+adapter remain unfinished.
 
 ## Required implementation work
 
+- Give every journal encryption attempt a durable unique nonce. MJ02 derives it from the committed generation, which can repeat after an interrupted attempt; recovery tests do not establish nonce uniqueness.
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
-- MP05 manifests, lifecycle management names, and journal snapshots now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Move immutable images and the JCVM heap out of the metadata journal.
+- MP05 manifests, lifecycle management names, and journal snapshots now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Allocate the separate JCVM heap journal in both board layouts.
 - Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
 - Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
 - Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.
 
-CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of active packages and a 7,052-byte snapshot, down from 12,549 bytes; its interpreted execution metrics are unchanged. Heap high-water and device latency remain unmeasured.
+CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,404-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. Heap high-water and device latency remain unmeasured.
 
 ## Crypto replacement measurements
 
-`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 182,584 text bytes, SHA-256 replacement 185,292, SHA-256 plus P-256 199,356, and all hardware providers 208,392. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
+`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 185,684 text bytes, SHA-256 replacement 188,584, SHA-256 plus P-256 202,692, and all hardware providers 211,688. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
 
 For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
 

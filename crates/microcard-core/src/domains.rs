@@ -1388,6 +1388,7 @@ struct Domain {
     assemblies: NameMap<Rc<Vec<u8>>>,
 
     packages: NameMap<Rc<StoredPackage>>,
+    image_refs: NameMap<crate::image_store::Descriptor>,
     bindings: NameMap<Vec<ResolvedDependency>>,
     imports: NameMap<Vec<ResolvedCall>>,
     versions: NameMap<(u32, [u8; 32])>,
@@ -1429,6 +1430,7 @@ impl Domain {
             key: None,
             assemblies: NameMap::new(),
             packages: NameMap::new(),
+            image_refs: NameMap::new(),
             bindings: NameMap::new(),
             imports: NameMap::new(),
             versions: NameMap::new(),
@@ -1453,6 +1455,7 @@ impl Domain {
             assemblies: self
                 .assemblies
                 .try_clone_with(context, |_, package| Ok(Rc::clone(package)))?,
+            image_refs: self.image_refs.try_clone_with(context, |_, value| Ok(*value))?,
             packages: self.packages.try_clone_with(context, |_, metadata| Ok(Rc::clone(metadata)))?,
             bindings: self.bindings.try_clone_with(context, |context, bindings| {
                 context.clone_vec(bindings)
@@ -1798,11 +1801,14 @@ struct GlobalPlatformLoad {
     payload: Option<crate::globalplatform::Payload>,
 }
 
-pub struct Card<F: Flash, P: Platform, S: PackageStaging = RamStaging> {
+pub struct Card<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging = RamStaging> {
     journal: Journal<F>,
     state: State,
     platform: P,
     staging: S,
+    // A failed metadata write may already have committed its marker. Keep candidate
+    // images protected until a later successful commit or reboot resolves ownership.
+    uncommitted_images: Vec<crate::image_store::Descriptor>,
     globalplatform_load: Option<GlobalPlatformLoad>,
     selected: Option<(String, [u8; 16], String)>,
     transaction: Option<PendingTransaction>,
@@ -1855,13 +1861,13 @@ impl TransactionDisposition {
         self != Self::Inactive
     }
 }
-impl<F: Flash, P: Platform> Card<F, P, RamStaging> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform> Card<F, P, RamStaging> {
     pub fn open(flash: F, platform: P, storage_key: impl Into<JournalKey>) -> Result<Self> {
         Self::open_with_staging(flash, platform, storage_key, RamStaging::default())
     }
 }
 
-impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
     pub fn open_with_staging(
         flash: F,
         mut platform: P,
@@ -1888,6 +1894,18 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 state
             }
         };
+        let images = crate::image_store::Images::new(journal.flash_mut())?;
+        for domain in core::iter::once(&mut state.isd).chain(state.domains.0.iter_mut().map(|(_, domain)| domain)) {
+            for (name, raw) in domain.assemblies.iter_mut() {
+                let descriptor = domain.image_refs.get(name).ok_or(Error::Storage)?;
+                *raw = images.with_image(descriptor, &mut platform, |bytes| {
+                    let mut raw = Vec::new();
+                    raw.try_reserve_exact(bytes.len()).map_err(|_| Error::Quota)?;
+                    raw.extend_from_slice(bytes);
+                    Ok(Rc::new(raw))
+                })?;
+            }
+        }
         if state.domains.len() > MAX_SSDS {
             return Err(Error::Storage);
         }
@@ -2052,6 +2070,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             state,
             platform,
             staging,
+            uncommitted_images: Vec::new(),
             globalplatform_load: None,
             selected: None,
             transaction: None,
@@ -2494,16 +2513,50 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             level: 0x13,
         })
     }
-    fn commit(&mut self, next: State) -> Result<()> {
+    fn commit(&mut self, mut next: State) -> Result<()> {
         if self.state == next {
             return Ok(());
+        }
+        let mut protected = Vec::new();
+        let current_count: usize = core::iter::once(&self.state.isd)
+            .chain(self.state.domains.0.iter().map(|(_, domain)| domain))
+            .map(|domain| domain.image_refs.len()).sum();
+        let next_count: usize = core::iter::once(&next.isd)
+            .chain(next.domains.0.iter().map(|(_, domain)| domain))
+            .map(|domain| domain.assemblies.len()).sum();
+        protected.try_reserve_exact((self.uncommitted_images.len() + current_count + next_count).min(64))
+            .map_err(|_| Error::Quota)?;
+        protected.extend_from_slice(&self.uncommitted_images);
+        for domain in core::iter::once(&self.state.isd).chain(self.state.domains.0.iter().map(|(_, domain)| domain)) {
+            for (_, descriptor) in domain.image_refs.iter() {
+                if !protected.contains(descriptor) { protected.push(*descriptor); }
+            }
+        }
+        let mut images = crate::image_store::Images::new(self.journal.flash_mut())?;
+        for domain in core::iter::once(&mut next.isd).chain(next.domains.0.iter_mut().map(|(_, domain)| domain)) {
+            let mut references = NameMap::new();
+            for (name, raw) in domain.assemblies.iter() {
+                let digest = domain.packages.get(name).ok_or(Error::Storage)?.digest;
+                let descriptor = match domain.image_refs.get(name) {
+                    Some(descriptor) if descriptor.digest == digest && descriptor.length as usize == raw.len() => *descriptor,
+                    _ => images.stage(raw, &protected, &mut self.platform)?,
+                };
+                if !protected.contains(&descriptor) {
+                    if protected.len() == 64 { return Err(Error::Quota); }
+                    protected.push(descriptor);
+                }
+                references.insert(Rc::clone(name), descriptor)?;
+            }
+            domain.image_refs = references;
         }
         let data = next.encode_snapshot()?;
         if data.len() > 49152 {
             return Err(Error::Quota);
         }
+        self.uncommitted_images = protected;
         self.journal
             .commit_with(data.as_slice(), &mut self.platform)?;
+        self.uncommitted_images.clear();
         self.state = next;
         Ok(())
     }

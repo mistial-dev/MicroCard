@@ -87,6 +87,9 @@ impl FileFlash {
         let slot1 = self.path(1).exists();
         let monotonic = self.monotonic_path().exists();
         if !slot0 && !slot1 && !monotonic {
+            if (0..64).any(|index| self.dir.join(format!("image{index}.bin")).exists()) {
+                return Err(Error::IncompatibleState);
+            }
             self.erase(0)?;
             self.erase(1)?;
             let mut file = private_open_options()
@@ -101,6 +104,72 @@ impl FileFlash {
             return Ok(());
         }
         Err(Error::Storage)
+    }
+}
+impl FileFlash {
+    fn erase_file(path: &Path, size: usize) -> Result<()> {
+        let mut f = private_open_options()
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|_| Error::Storage)?;
+        Self::write_erased(&mut f, size)?;
+        f.sync_all().map_err(|_| Error::Storage)?;
+        #[cfg(unix)]
+        fs::File::open(path.parent().ok_or(Error::Storage)?)
+            .and_then(|directory| directory.sync_all()).map_err(|_| Error::Storage)?;
+        Ok(())
+    }
+    fn program_file(path: &Path, size: usize, o: usize, b: &[u8]) -> Result<()> {
+        let end = o.checked_add(b.len()).ok_or(Error::Bounds)?;
+        if end > size {
+            return Err(Error::Bounds);
+        }
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|_| Error::Storage)?;
+        if f.metadata().map_err(|_| Error::Storage)?.len() != size as u64 {
+            return Err(Error::Storage);
+        }
+        f.seek(SeekFrom::Start(o as u64))
+            .map_err(|_| Error::Storage)?;
+        let mut old = [0; Self::IO_CHUNK_BYTES];
+        for chunk in b.chunks(old.len()) {
+            f.read_exact(&mut old[..chunk.len()])
+                .map_err(|_| Error::Storage)?;
+            if old[..chunk.len()]
+                .iter()
+                .zip(chunk)
+                .any(|(previous, next)| previous & next != *next)
+            {
+                return Err(Error::Storage);
+            }
+        }
+        f.seek(SeekFrom::Start(o as u64))
+            .map_err(|_| Error::Storage)?;
+        f.write_all(b).map_err(|_| Error::Storage)?;
+        f.sync_all().map_err(|_| Error::Storage)
+    }
+    fn image_path(&self, index: usize) -> Result<std::path::PathBuf> {
+        if index >= 64 { return Err(Error::Bounds); }
+        Ok(self.dir.join(format!("image{index}.bin")))
+    }
+}
+impl microcard_core::image_store::ImageFlash for FileFlash {
+    fn slot_count(&self) -> usize { 64 }
+    fn slot_size(&self) -> usize { microcard_core::staging::MAX_PACKAGE_BYTES }
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        let mut file = fs::File::open(self.image_path(index)?).map_err(|_| Error::Storage)?;
+        if file.metadata().map_err(|_| Error::Storage)?.len() != microcard_core::staging::MAX_PACKAGE_BYTES as u64 { return Err(Error::Storage); }
+        let mut bytes = vec![0; microcard_core::staging::MAX_PACKAGE_BYTES];
+        file.read_exact(&mut bytes).map_err(|_| Error::Storage)?;
+        read(&bytes)
+    }
+    fn erase(&mut self, index: usize) -> Result<()> { Self::erase_file(&self.image_path(index)?, microcard_core::staging::MAX_PACKAGE_BYTES) }
+    fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
+        Self::program_file(&self.image_path(index)?, microcard_core::staging::MAX_PACKAGE_BYTES, offset, bytes)
     }
 }
 impl Flash for FileFlash {
@@ -191,47 +260,9 @@ impl Flash for FileFlash {
             .map_err(|_| Error::Storage)?;
         file.read_exact(output).map_err(|_| Error::Storage)
     }
-    fn erase(&mut self, s: usize) -> Result<()> {
-        let mut f = private_open_options()
-            .create(true)
-            .truncate(true)
-            .open(self.path(s))
-            .map_err(|_| Error::Storage)?;
-        Self::write_erased(&mut f, self.slot_size())?;
-        f.sync_all().map_err(|_| Error::Storage)
-    }
-    fn program(&mut self, s: usize, o: usize, b: &[u8]) -> Result<()> {
-        let end = o.checked_add(b.len()).ok_or(Error::Bounds)?;
-        if end > self.slot_size() {
-            return Err(Error::Bounds);
-        }
-        let mut f = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(self.path(s))
-            .map_err(|_| Error::Storage)?;
-        if f.metadata().map_err(|_| Error::Storage)?.len() != self.slot_size() as u64 {
-            return Err(Error::Storage);
-        }
-        f.seek(SeekFrom::Start(o as u64))
-            .map_err(|_| Error::Storage)?;
-        let mut old = [0; Self::IO_CHUNK_BYTES];
-        for chunk in b.chunks(old.len()) {
-            f.read_exact(&mut old[..chunk.len()])
-                .map_err(|_| Error::Storage)?;
-            if old[..chunk.len()]
-                .iter()
-                .zip(chunk)
-                .any(|(previous, next)| previous & next != *next)
-            {
-                return Err(Error::Storage);
-            }
-        }
-        f.seek(SeekFrom::Start(o as u64))
-            .map_err(|_| Error::Storage)?;
-        f.write_all(b).map_err(|_| Error::Storage)?;
-        f.sync_all().map_err(|_| Error::Storage)
-    }
+    fn erase(&mut self, s: usize) -> Result<()> { Self::erase_file(&self.path(s), self.slot_size()) }
+    fn program(&mut self, s: usize, o: usize, b: &[u8]) -> Result<()> { Self::program_file(&self.path(s), self.slot_size(), o, b) }
+
 }
 
 fn main() {
@@ -333,6 +364,12 @@ mod tests {
 
         fs::remove_file(flash.monotonic_path()).unwrap();
         assert_eq!(flash.initialize(), Err(Error::Storage));
+        fs::remove_file(flash.path(0)).unwrap();
+        fs::remove_file(flash.path(1)).unwrap();
+        let image = flash.image_path(0).unwrap();
+        fs::write(&image, b"orphaned image").unwrap();
+        assert_eq!(flash.initialize(), Err(Error::IncompatibleState));
+        assert_eq!(fs::read(image).unwrap(), b"orphaned image");
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -1,6 +1,6 @@
 use super::*;
 
-impl<F: Flash, P: Platform, S: PackageStaging> crate::engine::CardEngine for Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> crate::engine::CardEngine for Card<F, P, S> {
     type Provider = P;
 
     fn crypto_provider(&mut self) -> &mut P {

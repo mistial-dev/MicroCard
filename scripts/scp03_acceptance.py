@@ -248,7 +248,7 @@ def main():
     try: plaintext=AESCCM(storage_key,tag_length=16).decrypt(nonce,raw[16:16+n],raw[:16])
     except Exception: continue
     from device_cbor import decode
-    snapshot=decode(plaintext);assert snapshot[:2]==[1,0]
+    snapshot=decode(plaintext);assert snapshot[:2]==[2,0]
     snapshots.append((generation,snapshot))
   state=dict(max(snapshots,key=lambda x:x[0])[1][4])['keys'];entries={entry[0]:entry for entry in state[12]}
   import hmac

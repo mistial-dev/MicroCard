@@ -5,7 +5,8 @@ use crate::{crypto::CryptoProvider, Error, Result};
 /// Reads must reflect completed writes; programming only clears bits and reports failure.
 pub trait ImageFlash {
     fn slot_count(&self) -> usize;
-    fn slot(&self, index: usize) -> Result<&[u8]>;
+    fn slot_size(&self) -> usize;
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T>;
     fn erase(&mut self, index: usize) -> Result<()>;
     fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()>;
 }
@@ -36,11 +37,11 @@ mod tests {
         fn slot_count(&self) -> usize {
             self.slots.len()
         }
-        fn slot(&self, index: usize) -> Result<&[u8]> {
-            self.slots
-                .get(index)
-                .map(|slot| slot.as_slice())
-                .ok_or(Error::Bounds)
+        fn slot_size(&self) -> usize {
+            32
+        }
+        fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+            read(self.slots.get(index).ok_or(Error::Bounds)?)
         }
         fn erase(&mut self, index: usize) -> Result<()> {
             for byte in &mut self.slots[index] {
@@ -196,27 +197,42 @@ impl<F: ImageFlash> Images<F> {
         Ok(Self { flash })
     }
 
-    /// Resolve a descriptor recovered from authenticated metadata, without allocating.
-    pub fn read(
+    /// Borrow verified image bytes for the duration of `read`, without allocating.
+    pub fn with_image<T>(
         &self,
         descriptor: &Descriptor,
         provider: &mut impl CryptoProvider,
-    ) -> Result<&[u8]> {
-        let bytes = self.bytes(descriptor)?;
-        if provider.sha256(bytes)? != descriptor.digest {
-            return Err(Error::Authentication);
-        }
-        Ok(bytes)
+        read: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        self.validate(descriptor)?;
+        self.flash.with_slot(usize::from(descriptor.slot), |slot| {
+            let bytes = slot
+                .get(..descriptor.length as usize)
+                .ok_or(Error::Bounds)?;
+            if provider.sha256(bytes)? != descriptor.digest {
+                return Err(Error::Authentication);
+            }
+            read(bytes)
+        })
     }
 
-    fn bytes(&self, descriptor: &Descriptor) -> Result<&[u8]> {
-        if usize::from(descriptor.slot) >= self.flash.slot_count() || descriptor.length == 0 {
+    fn validate(&self, descriptor: &Descriptor) -> Result<()> {
+        if usize::from(descriptor.slot) >= self.flash.slot_count()
+            || descriptor.length == 0
+            || descriptor.length as usize > self.flash.slot_size()
+        {
             return Err(Error::Bounds);
         }
-        self.flash
-            .slot(usize::from(descriptor.slot))?
-            .get(..descriptor.length as usize)
-            .ok_or(Error::Bounds)
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn read(
+        &self,
+        descriptor: &Descriptor,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<alloc::vec::Vec<u8>> {
+        self.with_image(descriptor, provider, |bytes| Ok(bytes.to_vec()))
     }
 
     /// `protected` includes every descriptor reachable by committed or pending state.
@@ -234,14 +250,14 @@ impl<F: ImageFlash> Images<F> {
         }
         let mut occupied = 0u64;
         for descriptor in protected {
-            self.bytes(descriptor)?;
+            self.validate(descriptor)?;
             occupied |= 1u64 << descriptor.slot;
         }
         let digest = provider.sha256(image)?;
         for descriptor in protected {
             if descriptor.length == length && descriptor.digest == digest {
                 // Reuse only after verifying the physical bytes, not the cached hash.
-                if self.read(descriptor, provider)? != image {
+                if self.with_image(descriptor, provider, |bytes| Ok(bytes != image))? {
                     return Err(Error::Authentication);
                 }
                 return Ok(*descriptor);
@@ -249,7 +265,7 @@ impl<F: ImageFlash> Images<F> {
         }
         let mut candidate = None;
         for slot in 0..self.flash.slot_count() {
-            if occupied & (1u64 << slot) == 0 && self.flash.slot(slot)?.len() >= image.len() {
+            if occupied & (1u64 << slot) == 0 && self.flash.slot_size() >= image.len() {
                 candidate = Some(slot);
                 break;
             }
@@ -264,11 +280,29 @@ impl<F: ImageFlash> Images<F> {
             length,
             digest,
         };
-        self.read(&descriptor, provider)?;
+        self.with_image(&descriptor, provider, |_| Ok(()))?;
         Ok(descriptor)
     }
 
     pub fn into_flash(self) -> F {
         self.flash
+    }
+}
+
+impl<F: ImageFlash> ImageFlash for &mut F {
+    fn slot_count(&self) -> usize {
+        F::slot_count(self)
+    }
+    fn slot_size(&self) -> usize {
+        F::slot_size(self)
+    }
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        F::with_slot(self, index, read)
+    }
+    fn erase(&mut self, index: usize) -> Result<()> {
+        F::erase(self, index)
+    }
+    fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
+        F::program(self, index, offset, bytes)
     }
 }

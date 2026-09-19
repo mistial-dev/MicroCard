@@ -1278,6 +1278,10 @@ impl Nvm {
                 return Ok(false);
             }
         }
+        if unsafe { core::slice::from_raw_parts(crate::layout::IMAGES_BASE as *const u8, crate::layout::IMAGES_BYTES) }
+            .iter().any(|byte| *byte != 0xff) {
+            return Ok(false);
+        }
         Ok(unsafe {
             core::slice::from_raw_parts(Self::MONOTONIC_BASE as *const u8, Self::MONOTONIC_BYTES)
         }
@@ -1412,6 +1416,29 @@ impl StagingFlash for StagingNvm {
     }
     fn program(&mut self, offset: usize, bytes: &[u8]) -> Result<()> {
         Nvm::program_region(self.bank_base()?, Self::BANK_BYTES, offset, bytes)
+    }
+}
+impl Nvm {
+    const IMAGE_SLOT_BYTES: usize = microcard_core::staging::MAX_PACKAGE_BYTES;
+    const IMAGE_SLOTS: usize = crate::layout::IMAGES_BYTES / Self::IMAGE_SLOT_BYTES;
+
+    fn image_base(index: usize) -> Result<usize> {
+        if index >= Self::IMAGE_SLOTS { return Err(Error::Bounds); }
+        Ok(crate::layout::IMAGES_BASE + index * Self::IMAGE_SLOT_BYTES)
+    }
+}
+impl microcard_core::image_store::ImageFlash for Nvm {
+    fn slot_count(&self) -> usize { Self::IMAGE_SLOTS }
+    fn slot_size(&self) -> usize { Self::IMAGE_SLOT_BYTES }
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        let base = Self::image_base(index)?;
+        read(unsafe { core::slice::from_raw_parts(base as *const u8, Self::IMAGE_SLOT_BYTES) })
+    }
+    fn erase(&mut self, index: usize) -> Result<()> {
+        Nvm::erase_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES)
+    }
+    fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
+        Nvm::program_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES, offset, bytes)
     }
 }
 impl Flash for Nvm {
