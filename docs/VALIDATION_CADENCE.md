@@ -20,9 +20,17 @@ Consolidate several related changes when practical. A source-control checkpoint 
 
 This checkpoint does not run a sustained fuzz campaign.
 
-## What continuous integration adds
+## Focused suites and timings
 
-The workflow runs two things the checkpoint gate leaves out. `scripts/wallet_acceptance.py` builds the Java wallet and drives the whole demonstration, which is the only gate covering host code outside this repository's Python and Rust. Both nRF52840 link steps also run there. Reproduce the whole workflow locally with `act` before pushing anything that touches the wallet, a sample reader or the secure channel, because a green checkpoint gate alone has already missed a wallet failure.
+Use `python3 scripts/check.py --suite rust`, `--suite managed`, or `--suite schemas` for a focused loop. `--suite wallet` runs the Java demonstration and `--suite board` links and checks the board variants. With no selection, the quick gate runs schemas, Rust checks, and managed reference tests.
+
+Managed projects build through one generated solution graph, so common dependencies share one build. `--jobs N` controls MSBuild workers, with one worker as the portable default. Independent invocations must use separate worktrees because managed output directories are shared.
+
+Every command reports elapsed time. `work/validation-timings.json` records commands, durations, and exit codes, including the failing stage. Use `--timings PATH` to preserve a comparison run. These timings reflect existing caches unless a separate clean build directory is used.
+
+## Continuous integration
+
+CI runs quick validation, wallet and Java Card acceptance, workspace Clippy, and board release links. The local checkpoint now includes wallet acceptance and board budgets. Workspace Clippy remains an additional gate, and the full recovery checkpoint remains outside ordinary CI. Reproduce CI with `act` before pushing wallet, reader, or secure-channel changes.
 
 ## Dedicated fuzz checkpoint
 
