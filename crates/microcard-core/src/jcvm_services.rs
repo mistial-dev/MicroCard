@@ -9,16 +9,19 @@ pub struct Services<'a, P> {
     provider: &'a mut P,
     command: Option<&'a [u8]>,
     security_level: u8,
+    reset_requested: bool,
 }
 
 impl<'a, P> Services<'a, P> {
     pub fn new(provider: &'a mut P) -> Self {
-        Self { provider, command: None, security_level: 0 }
+        Self { provider, command: None, security_level: 0, reset_requested: false }
     }
+
+    pub(crate) fn reset_requested(&self) -> bool { self.reset_requested }
 
     // Only the persistent session's Verified-command entry point grants this context.
     pub(crate) fn verified(provider: &'a mut P, command: &'a [u8], level: u8) -> Self {
-        Self { provider, command: Some(command), security_level: 0x80 | level }
+        Self { provider, command: Some(command), security_level: 0x80 | level, reset_requested: false }
     }
 }
 
@@ -102,7 +105,14 @@ impl<P: CryptoProvider> Services<'_, P> {
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn secure_channel_available(&self) -> bool { true }
     fn secure_channel_level(&self) -> u8 { self.security_level }
+    fn reset_secure_channel(&mut self) -> Result<()> {
+        self.command = None;
+        self.security_level = 0;
+        self.reset_requested = true;
+        Ok(())
+    }
 
     fn unwrap_secure_command(&mut self, command: &mut [u8]) -> Result<()> {
         let Some(expected) = self.command.take() else {
@@ -321,6 +331,11 @@ mod tests {
         assert_eq!(&received[1..], &command[1..]);
         assert_eq!(host.unwrap_secure_command(&mut command.clone()), Err(Error::Unauthorized));
         assert_eq!(host.secure_channel_level(), 0);
+        let mut host = Services::verified(&mut provider, &command, 3);
+        host.reset_secure_channel().unwrap();
+        assert!(host.reset_requested());
+        assert_eq!(host.secure_channel_level(), 0);
+        assert_eq!(host.unwrap_secure_command(&mut command.clone()), Err(Error::Unauthorized));
         assert_eq!(provider.calls, 0, "the transport already performed cryptography");
     }
 

@@ -52,21 +52,25 @@ board's reserved heap.
 
 - Prove a personalized OpenFIPS201 workflow on the Makerdiary JCVM build. P-256 keys,
   generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Remaining work includes
-  complete applet secure-channel lifecycle services, ordinary PIV transport access,
-  certificate storage/retrieval and the final ordinary-PIV lifecycle acceptance.
+  interrupted provisioning and physical acceptance. Ordinary PIV access, reselect,
+  secure-channel reset, chained certificate upload, and certificate retrieval now pass
+  through the managed simulator path.
   Management-key creation/import, PIV challenge-response, PIN provisioning, P-256
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
   reboot does not preserve PIN validation. These do not establish hardware execution.
+- Implement actual JCVM transaction rollback. Native transaction methods currently
+  track nesting only; heap/static writes are not restored on abort, and transaction
+  depth is callback-local. Per-APDU journal atomicity does not replace this guarantee.
 - Validate the current Makerdiary JCVM image and actual memory use. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 190,920 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 192,408 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded
   passing budget report predates EC integration and must be refreshed for final release.
   The latest checkpoint passed host, wallet, generated-artifact and fuzz-build stages,
-  then failed the board budget gate: MC04 hardware release text is 212,200 bytes against
+  then failed the board budget gate: MC04 hardware release text is 212,312 bytes against
   212,000. All seven profile artifacts linked before budget comparison; optimization
   ceilings remain unchanged.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;

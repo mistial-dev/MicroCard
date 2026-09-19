@@ -62,6 +62,7 @@ pub struct Card {
     buffer: Reference,
     instance: Option<Reference>,
     selected: bool,
+    reselecting: bool,
     context: heap::Context,
     sizes: Sizes,
 }
@@ -106,6 +107,7 @@ impl Card {
             // be loaded, JCRE §6.1.2.
             instance: None,
             selected: false,
+            reselecting: false,
             context: 1,
             sizes,
         };
@@ -303,6 +305,8 @@ impl Card {
     ) -> Result<Response> {
         if cancel() { return Err(Error::Cancelled); }
         self.instance.ok_or(Error::Missing)?;
+        self.reselecting = selecting && self.selected;
+        if self.reselecting { self.deselect_inner(file, host, cancel, true)?; }
         if selecting { self.selected = false; }
         if command.len() < 4 || command.len() > self.sizes.buffer_bytes as usize {
             return Err(Error::Bounds);
@@ -334,8 +338,16 @@ impl Card {
     pub fn deselect_with_cancel(
         &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.deselect_inner(file, host, cancel, false)
+    }
+
+    fn deselect_inner(
+        &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
+        reselecting: bool,
+    ) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
         if !self.selected { return Ok(()); }
+        self.reselecting = reselecting;
         self.selected = false;
         let mut budget = self.sizes.budget;
         self.callback(file, host, Callback::Deselect, (0, 0), &mut budget, cancel)?;
@@ -366,6 +378,7 @@ impl Card {
             Err(error) => return Err(error),
         };
         let mut jcre = Jcre::new(self.apdu, self.buffer);
+        jcre.reselecting = self.reselecting;
         jcre.selecting = matches!(callback, Callback::Select | Callback::Process { selecting: true });
         jcre.incoming = lengths.0;
         jcre.expected = lengths.1;

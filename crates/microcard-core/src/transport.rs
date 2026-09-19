@@ -84,6 +84,21 @@ impl<C: CardEngine> Endpoint<C> {
             result?;
             return globalplatform::isd_fci();
         }
+        if C::DIRECT_APDUS && matches!(c.cla, 0x00 | 0x10) {
+            self.card.abort_staging();
+            self.status_cursor = None;
+            let result = if c.ins == 0xa4 && c.p1 == 4 {
+                self.card.select_plain_with_cancel(&c, should_cancel)
+            } else {
+                self.card.process_plain_with_cancel(&c, should_cancel)
+            };
+            if self.card.take_security_reset() { self.session = None; }
+            return match result {
+                Ok(response) => Ok(response),
+                Err(Error::Missing) => fixed_response(&[0x6a, 0x82]),
+                Err(error) => Err(error),
+            };
+        }
         if c.cla == 0x00 && c.ins == 0xa4 && c.p1 == 0x04 {
             return fixed_response(&[0x6a, 0x82]);
         }
@@ -165,7 +180,7 @@ impl<C: CardEngine> Endpoint<C> {
             self.status_cursor = None;
             return fixed_response(&[0x90, 0]);
         }
-        if c.cla == 0x04 && !C::DIRECT_APDUS {
+        if !C::DIRECT_APDUS && c.cla != 0x84 {
             return Err(Error::Authentication);
         }
         let verified = s.unwrap_with(c, self.card.crypto_provider())?;
@@ -182,17 +197,17 @@ impl<C: CardEngine> Endpoint<C> {
                     && verified.command().data.first().copied() == Some(0x4f));
         if gp_management {
             self.status_cursor = None;
-            return match self
-                .card
-                .manage_globalplatform_with_cancel(verified, should_cancel)
-            {
-                Ok(data) => s.response_with(&data, 0x9000, self.card.crypto_provider()),
-                Err(error) => s.response_with(
-                    &[],
-                    globalplatform_management_status(&error),
-                    self.card.crypto_provider(),
-                ),
+            let (mut data, status) = match self.card.manage_globalplatform_with_cancel(verified, should_cancel) {
+                Ok(data) => (data, 0x9000u16),
+                Err(error) => (Vec::new(), globalplatform_management_status(&error)),
             };
+            if self.card.take_security_reset() {
+                self.session = None;
+                data.try_reserve_exact(2).map_err(|_| Error::Quota)?;
+                data.extend_from_slice(&status.to_be_bytes());
+                return Ok(data);
+            }
+            return s.response_with(&data, status, self.card.crypto_provider());
         }
         if management_class && verified.command().ins == 0xca {
             self.status_cursor = None;
@@ -264,6 +279,11 @@ impl<C: CardEngine> Endpoint<C> {
                 self.card
                     .process_verified_with_cancel(verified, should_cancel)?
             };
+            if self.card.take_security_reset() {
+                self.session = None;
+                self.status_cursor = None;
+                return Ok(r);
+            }
             let n = r.len();
             if n < 2 {
                 return Err(Error::Format);

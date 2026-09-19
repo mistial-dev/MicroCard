@@ -48,6 +48,7 @@ pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
     upload: Option<Upload>,
     selected: Option<(Aid, StoredSession<H::Bank, I>)>,
     retained: Vec<Retained>,
+    reset_requested: bool,
     #[cfg(feature = "scp03-pseudo-random")]
     sequences: Option<core::ops::RangeInclusive<u32>>,
 }
@@ -96,6 +97,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             upload: None,
             selected: None,
             retained: Vec::new(),
+            reset_requested: false,
             #[cfg(feature = "scp03-pseudo-random")]
             sequences: None,
         })
@@ -103,16 +105,91 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
 
     fn park_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, session)) = self.selected.as_mut() else { return Ok(()); };
-        let identity = self.storage.registry.state()?.instances()
-            .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?.identity;
+        let instance = *self.storage.registry.state()?.instances()
+            .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;
+        let identity = instance.identity;
         let used: usize = self.retained.iter().map(|entry| entry.state.bytes()).sum();
         let available = MAX_RETAINED_VOLATILE.checked_sub(used).ok_or(Error::Quota)?;
         self.retained.try_reserve_exact(1).map_err(|_| Error::Quota)?;
         session.deselect(&mut self.provider, cancel)?;
+        if session.take_security_reset() && instance.domain == Aid::isd() { self.reset_requested = true; }
         let state = session.retain_volatile(available)?;
         if state.bytes() != 0 { self.retained.push(Retained { aid: *aid, identity, state }); }
         self.selected = None;
         Ok(())
+    }
+
+    fn select_application(
+        &mut self,
+        request: &Command<'_>,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<u8>> {
+        let result = self.select_application_inner(request, cancel);
+        if result.as_ref().is_err_and(|error| !matches!(error, Error::Missing | Error::Format)) {
+            self.selected = None;
+        }
+        result
+    }
+
+    fn select_application_inner(
+        &mut self,
+        request: &Command<'_>,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<u8>> {
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        if !matches!(request.p1, 0 | 4) || !matches!(request.p2, 0 | 0x0c) {
+            return Err(Error::Format);
+        }
+        let aid = Aid::new(&request.data)?;
+        // A missing target does not deselect the currently selected applet.
+        if !self
+            .storage
+            .registry
+            .state()?
+            .instances()
+            .any(|instance| instance.aid == aid)
+        {
+            return Err(Error::Missing);
+        }
+        let command = Command {
+            cla: 0,
+            ins: 0xa4,
+            p1: 4,
+            p2: request.p2,
+            data: aid.as_slice().into(),
+            le: request.le.or(Some(256)),
+        }
+        .encode()?;
+        if self.selected.as_ref().is_some_and(|(selected, _)| *selected == aid) {
+            let (_, session) = self.selected.as_mut().unwrap();
+            let response = session.process(&command, true, &mut self.provider, cancel)?;
+            if session.take_security_reset() && self.storage.registry.state()?.instances()
+                .any(|instance| instance.aid == aid && instance.domain == Aid::isd()) {
+                self.reset_requested = true;
+            }
+            if !session.selected()? { self.park_selected(cancel)?; }
+            return response_wire(response);
+        }
+        self.park_selected(cancel)?;
+        let identity = self.storage.registry.state()?.instances()
+            .find(|instance| instance.aid == aid).ok_or(Error::Missing)?.identity;
+        let mut session = self.storage.registry.open_session(
+            aid, &self.storage.images, &mut self.storage.heaps,
+            &self.storage.heap_key, &mut self.scratch, &mut self.provider,
+        )?;
+        if let Some(index) = self.retained.iter().position(|entry| entry.aid == aid) {
+            let cached = &self.retained[index];
+            if cached.identity != identity { return Err(Error::Storage); }
+            session.restore_volatile(&cached.state)?;
+            self.retained.remove(index);
+        }
+        let response = session.process(&command, true, &mut self.provider, cancel)?;
+        let selected = session.selected()?;
+        self.selected = Some((aid, session));
+        if !selected { self.park_selected(cancel)?; }
+        response_wire(response)
     }
 
     pub fn into_storage(self) -> Storage<F, I, H> {
@@ -261,6 +338,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     fn abort_transaction(&mut self) {
         self.selected = None;
         self.retained.clear();
+        self.reset_requested = false;
     }
     fn globalplatform_load_active(&self) -> bool {
         self.upload.is_some()
@@ -351,57 +429,28 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         Ok(())
     }
 
-    fn select_verified_with_cancel(
-        &mut self,
-        verified: Verified,
-        cancel: &mut dyn FnMut() -> bool,
-    ) -> Result<Vec<u8>> {
-        if cancel() {
-            return Err(Error::Cancelled);
-        }
-        let request = verified.command();
-        if !matches!(request.p1, 0 | 4) || !matches!(request.p2, 0 | 0x0c) {
-            return Err(Error::Format);
-        }
-        let aid = Aid::new(&request.data)?;
-        // A missing target does not deselect the currently selected applet.
-        if !self
-            .storage
-            .registry
-            .state()?
-            .instances()
-            .any(|instance| instance.aid == aid)
-        {
-            return Err(Error::Missing);
-        }
-        self.park_selected(cancel)?;
-        let identity = self.storage.registry.state()?.instances()
-            .find(|instance| instance.aid == aid).ok_or(Error::Missing)?.identity;
-        let mut session = self.storage.registry.open_session(
-            aid, &self.storage.images, &mut self.storage.heaps,
-            &self.storage.heap_key, &mut self.scratch, &mut self.provider,
-        )?;
-        if let Some(index) = self.retained.iter().position(|entry| entry.aid == aid) {
-            let cached = &self.retained[index];
-            if cached.identity != identity { return Err(Error::Storage); }
-            session.restore_volatile(&cached.state)?;
-            self.retained.remove(index);
-        }
-        let command = Command {
-            cla: 0,
-            ins: 0xa4,
-            p1: 4,
-            p2: request.p2,
-            data: aid.as_slice().into(),
-            le: request.le.or(Some(256)),
-        }
-        .encode()?;
-        let response = session.process(&command, true, &mut self.provider, cancel)?;
-        let selected = session.selected()?;
-        self.selected = Some((aid, session));
-        if !selected { self.park_selected(cancel)?; }
-        response_wire(response)
+    fn select_verified_with_cancel(&mut self, verified: Verified, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        self.select_application(verified.command(), cancel)
     }
+
+    fn select_plain_with_cancel(&mut self, command: &Command<'_>, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        self.select_application(command, cancel)
+    }
+
+    fn process_plain_with_cancel(&mut self, command: &Command<'_>, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
+        let result = session.process(&command.encode()?, false, &mut self.provider, cancel);
+        if session.take_security_reset() && self.storage.registry.state()?.instances()
+            .any(|instance| instance.aid == *aid && instance.domain == Aid::isd()) {
+            self.reset_requested = true;
+        }
+        match result {
+            Ok(response) => response_wire(response),
+            Err(error) => { self.selected = None; Err(error) }
+        }
+    }
+
+    fn take_security_reset(&mut self) -> bool { core::mem::take(&mut self.reset_requested) }
 
     fn manage_globalplatform_with_cancel(
         &mut self,
@@ -478,6 +527,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         } else {
             session.process(&verified.command().encode()?, false, &mut self.provider, cancel)
         };
+        if session.take_security_reset() && instance.domain == Aid::isd() { self.reset_requested = true; }
         let response = match result {
             Ok(response) => response,
             Err(error) => {

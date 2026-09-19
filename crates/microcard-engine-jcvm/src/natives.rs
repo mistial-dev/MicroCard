@@ -86,6 +86,7 @@ pub struct Jcre {
     pub data_offset: u16,
     /// Whether this command is the one that selected the applet.
     pub selecting: bool,
+    pub reselecting: bool,
     /// Transactions are counted rather than nested. A second begin is an error, JCRE §7.
     pub transaction_depth: u8,
     /// The applet's lifecycle byte, which GlobalPlatform keeps rather than the applet.
@@ -116,6 +117,7 @@ impl Jcre {
             outgoing_length: None,
             data_offset: 5,
             selecting: false,
+            reselecting: false,
             transaction_depth: 0,
             // Selectable, GP 2.3 Table 11-4. An applet moves itself on from here.
             lifecycle: 0x07,
@@ -221,6 +223,10 @@ pub fn call_with_budget(
             let instance = frame.pop_reference()?;
             heap.check_access(instance, context)?;
             jcre.instance = Some(instance);
+            Ok(Native::Returned)
+        }
+        (PackageId::javacard_framework, ClassId::Applet, MethodId::reSelectingApplet) => {
+            frame.push_short(jcre.reselecting as i16)?;
             Ok(Native::Returned)
         }
         (PackageId::javacard_framework, ClassId::Applet, MethodId::selectingApplet) => {

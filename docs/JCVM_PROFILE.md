@@ -66,8 +66,10 @@ serves GP status records, domain discovery, and authenticated applet APDUs with 
 original instruction, parameters, and data. Encrypted ISD applet commands retain their
 protected CLA until the applet's secure-channel unwrap; other commands receive the
 unprotected CLA. GP management commands are dispatched only in class `80` after
-transport verification. Application commands still require SCP03; plain
-APDUs cannot invoke an applet. The former JCVM INS 10 tunnel is no longer decoded.
+transport verification. Basic-channel plain `00`/`10` APDUs can select and invoke
+applets without inheriting SCP03 authority; the applet enforces its own access policy.
+Protected command chaining uses `14`/`94` with the complete CLA covered by C-MAC.
+MC04 continues to require SCP03. The former JCVM INS 10 tunnel is no longer decoded.
 SELECT calls `select()` and then `process()` with the
 selection flag, returning the applet's data and status. A refusal leaves no selection;
 a status from the subsequent `process()` does not undo accepted selection.
@@ -75,8 +77,13 @@ a status from the subsequent `process()` does not undo accepted selection.
 Selection changes call and commit `deselect()` before switching. Applet exceptions do
 not prevent deselection; engine errors or failed commits trigger authenticated recovery.
 Reset discards the live session without calling deselect. Reselecting the same instance
-reuses its heap. Switching instances retains reset-scoped transient data in the bounded
-RAM cache described below; deselection-scoped data is cleared.
+reuses its heap and runs deselect/select/process with
+[`reSelectingApplet()`](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacard/framework/Applet.html)
+true.
+Switching instances retains reset-scoped transient data in the bounded RAM cache
+below; deselection-scoped data is cleared. A missing selection target leaves the
+current selection intact. An applet secure-channel reset drops transport keys before
+response protection; clients must establish a new SCP03 session for further management.
 
 ## What holds this claim up
 
@@ -290,8 +297,11 @@ using that key and an independent host AES implementation. A MAC-only management
 definition and an incorrect challenge response are rejected. The same flow provisions
 a local PIN and generates a P-256 key in slot 9C. It verifies signatures independently
 before and after reboot against the original public key, rejects signing without PIN
-validation, and requires a fresh PIN verification for every signature. Certificate
-storage/retrieval and ordinary PIV transport remain unverified end to end.
+validation, and requires a fresh PIN verification for every signature. It stores a
+DER X.509 certificate through chained encrypted PUT DATA commands, then retrieves the
+exact object through plain GET DATA/GET RESPONSE before and after reboot. Signing
+and PIN operations use plain PIV commands. Reselect preserves PIN validation; a missing
+SELECT leaves it intact; selecting the ISD and returning to the applet clears it.
 
 For ISD-owned applets, the shared transport passes encrypted, authenticated commands
 with a command-scoped secure-channel grant. `GPSystem.getSecureChannel` returns a
@@ -301,27 +311,33 @@ with the verified command, and consumes the grant's unwrap permission once. It c
 the protected CLA bit without repeating cryptography. Changed bytes or repeated
 unwrapping fail closed. No command authority enters persistent applet state.
 
-MAC-only commands retain ordinary applet semantics without an administrative grant.
-SSD-owned applets do not receive ISD secure-channel authority. Without a grant,
-`getSecureChannel` still throws `SystemException.NO_RESOURCE`. Applet-initiated
-handshake, reset, wrap, and data-encryption operations remain unavailable and reject
-with `6982`; transport handles its own handshake and response protection. In particular,
-OpenFIPS201's deselection callback needs secure-channel reset integration before
-ordinary PIV access is enabled. This is a bounded provisioning bridge, not complete
-GlobalPlatform applet secure-channel support.
+MAC-only and plain commands retain ordinary applet semantics without an administrative
+grant. SSD-owned applets do not receive ISD secure-channel authority. Platform services
+provide a channel handle even without an active session; its security level is zero.
+`resetSecurity` immediately removes the current command's grant and asks the shared
+transport to discard the session before protecting a response. This also applies to
+reset during deselection initiated by a management command. Without platform services,
+`getSecureChannel` throws `SystemException.NO_RESOURCE`. Applet-initiated handshake,
+wrap, and data-encryption operations remain unavailable and reject with `6982`;
+transport handles its own handshake and response protection.
 
 The runtime preserves bytes already sent when an applet completes through
 `ISOException`, including success and response-chaining status words. Other exceptions
 still discard response data. OpenFIPS201 uses this path for its authentication challenge;
 previously it returned an empty `9000` response.
 
-Next, extend the same lifecycle acceptance with certificate storage/retrieval and
-ordinary PIV access. Certificate responses span multiple short APDUs, so this also
-requires command/response chaining through the final transport path. Keep unauthorized
-administration and loss of PIN validation across reset in that flow.
 The fixture is pinned to OpenFIPS201 `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
-Upstream tests mock the secure channel; they supply command encodings but do not prove
-this platform integration.
+Upstream tests mock the secure channel; this acceptance exercises the actual shared
+transport. Physical Makerdiary execution and interrupted provisioning remain unverified.
+
+## Transaction limitation
+
+JCVM `beginTransaction`, `commitTransaction`, and `abortTransaction` currently validate
+nesting through a callback-local depth flag. They do not yet journal and undo heap or
+static-field writes, and the depth does not survive an APDU boundary. The persistent
+session's atomic journal commit is a separate guarantee; it does not implement Java
+Card transaction semantics. Implement bounded undo and interrupted-operation acceptance
+before treating personalized applet state as production ready.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 

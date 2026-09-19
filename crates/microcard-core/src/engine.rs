@@ -4,12 +4,21 @@ use alloc::vec::Vec;
 
 pub trait CardEngine {
     type Provider: CryptoProvider;
-    /// Native applet commands can use the interindustry class inside SCP03.
+    /// Native applet commands support plain interindustry APDUs and SCP03 delivery.
     const DIRECT_APDUS: bool = false;
 
     fn is_application_command(&self, command: &Command<'_>) -> bool {
         matches!(command.ins, 0xa4 | 0x10)
     }
+
+    /// Plain APDUs never carry a transport authorization grant.
+    fn select_plain_with_cancel(&mut self, _command: &Command<'_>, _cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        Err(crate::Error::Unauthorized)
+    }
+    fn process_plain_with_cancel(&mut self, _command: &Command<'_>, _cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        Err(crate::Error::Unauthorized)
+    }
+    fn take_security_reset(&mut self) -> bool { false }
 
     fn crypto_provider(&mut self) -> &mut Self::Provider;
     fn random(&mut self, output: &mut [u8]) -> Result<()>;

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Exercise persistent JCVM delivery with the independent Python SCP03/package client."""
+import datetime
 import hashlib
 import pathlib
 import subprocess
 import tempfile
 
-from cryptography.hazmat.primitives import hashes
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 
 from device_cbor import decode, jcvm_manifest
@@ -22,17 +24,60 @@ def files(directory):
             for path in directory.rglob("*") if path.is_file() and path.name != ".lock"}
 
 
+def piv(client, ins, data=b"", *, p1=0, p2=0, status=0x9000, cla=0, le=None):
+    command = bytes([cla, ins, p1, p2])
+    if data:
+        command += bytes([len(data)]) + data
+    if le is not None:
+        command += bytes([le % 256])
+    response = client.raw(command)
+    assert response[-2:] == status.to_bytes(2, "big"), (hex(ins), response.hex())
+    return response[:-2]
+
+
+def tlv(tag, value):
+    length = len(value)
+    encoded = bytes([length]) if length < 128 else bytes([0x82]) + length.to_bytes(2, "big")
+    return bytes([tag]) + encoded + value
+
+
+def certificate_for(public_key):
+    issuer_key = ec.derive_private_key(9, ec.SECP256R1())
+    issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "MicroCard acceptance CA")])
+    subject = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "OpenFIPS201 signing key")])
+    return (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer)
+            .public_key(public_key).serial_number(1)
+            .not_valid_before(datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
+            .not_valid_after(datetime.datetime(2040, 1, 1, tzinfo=datetime.timezone.utc))
+            .sign(issuer_key, hashes.SHA256()).public_bytes(serialization.Encoding.DER))
+
+
+def read_certificate(client, expected):
+    response = client.raw(bytes.fromhex("00CB3FFF055C035FC10AC0"))
+    collected = bytearray()
+    for _ in range(8):
+        collected.extend(response[:-2])
+        assert len(collected) <= len(expected)
+        status = int.from_bytes(response[-2:], "big")
+        if status == 0x9000:
+            assert collected == expected
+            return
+        assert status >> 8 == 0x61, response.hex()
+        response = client.raw(bytes.fromhex("00C00000C0"))
+    raise AssertionError("certificate response did not finish")
+
+
 def sign_with_pin(client, public_key, pin):
     digest = hashlib.sha256(b"MicroCard OpenFIPS201 signing acceptance").digest()
     request = bytes.fromhex("7C2482008120") + digest
-    client.command(0x87, request, p1=0x11, p2=0x9c, cla=0x04, status=0x6982)
-    client.command(0x20, pin, p2=0x80, cla=0x04)
-    response = client.command(0x87, request, p1=0x11, p2=0x9c, cla=0x04, le=256)
+    piv(client, 0x87, request, p1=0x11, p2=0x9c, status=0x6982)
+    piv(client, 0x20, pin, p2=0x80)
+    response = piv(client, 0x87, request, p1=0x11, p2=0x9c, le=256)
     assert response[0] == 0x7c and response[1] == len(response) - 2, response.hex()
     assert response[2] == 0x82 and response[3] == len(response) - 4, response.hex()
     public_key.verify(response[4:], digest, ec.ECDSA(utils.Prehashed(hashes.SHA256())))
     # Slot 9C requires a fresh PIN verification for every signature.
-    client.command(0x87, request, p1=0x11, p2=0x9c, cla=0x04, status=0x6982)
+    piv(client, 0x87, request, p1=0x11, p2=0x9c, status=0x6982)
 
 
 def main():
@@ -52,7 +97,7 @@ def main():
         assert blocked.returncode and "already in use" in blocked.stderr
         package = bytes.fromhex("A00000030800001000")
         module = bytes.fromhex("A000000308000010000100")
-        instance = bytes.fromhex("F04D434A01")
+        instance = module
         image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
         manifest = jcvm_manifest(dict(domain=discovery[4].hex(), incarnation=discovery[5].hex(),
             package=package.hex(), package_version=[1, 10], version=1,
@@ -88,6 +133,17 @@ def main():
         assert len(generated) == 70 and generated[:5] == bytes.fromhex("7F49438641"), generated.hex()
         public_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), generated[5:])
         sign_with_pin(client, public_key, signing_pin)
+        certificate = certificate_for(public_key)
+        container = tlv(0x70, certificate) + bytes.fromhex("710100FE00")
+        certificate_object = tlv(0x53, container)
+        client.command(0xdb, bytes.fromhex("64128B035FC10A8C017F8D017F91019B92021000"),
+                       p1=0xff, p2=0xff)
+        payload = bytes.fromhex("5C035FC10A") + certificate_object
+        for offset in range(0, len(payload), 180):
+            more = offset + 180 < len(payload)
+            client.command(0xdb, payload[offset:offset + 180], p1=0x3f, p2=0xff,
+                           cla=0x14 if more else 0x04)
+        read_certificate(client, certificate_object)
         # The interindustry class belongs to the applet, even for a GP instruction number.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance,
                        cla=0x04, status=0x6d00)
@@ -96,6 +152,9 @@ def main():
         client.close()
 
         client = Client(keys, state, mode)
+        # A normal PIV client can select and read after boot without ever opening SCP03.
+        assert piv(client, 0xa4, instance, p1=4, le=256) == selected
+        read_certificate(client, certificate_object)
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]
         assert client.command(0xa4, instance, p1=4) == selected
@@ -114,12 +173,30 @@ def main():
         client.connect()
         assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
         client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c4)
-        # Direct command routing must not admit a command without its SCP03 MAC.
-        assert client.raw(pin) == bytes.fromhex("6982")
+        # Plain application traffic receives no administrative authority from SCP03.
+        assert client.raw(pin) == bytes.fromhex("63c3")
+        piv(client, 0xdb, definition, p1=0xff, p2=0xff, cla=0x80, status=0x6982)
         client.connect()
         assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
-        client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c3)
         sign_with_pin(client, public_key, signing_pin)
+        # A reselect runs deselect/select callbacks but retains the PIV PIN validation.
+        piv(client, 0x20, signing_pin, p2=0x80)
+        assert piv(client, 0xa4, instance, p1=4, le=256) == selected
+        piv(client, 0x20, p2=0x80)
+        # The applet reset its secure channel during reselect; old SCP commands fail.
+        client.command(0xe2, b"\0", status=0x6982)
+        client.connect()
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        piv(client, 0x20, p2=0x80, status=0x63c6)
+        # A real deselection clears PIN validation, while a missing SELECT preserves it.
+        piv(client, 0x20, signing_pin, p2=0x80)
+        piv(client, 0xa4, bytes.fromhex("F04D434AFF"), p1=4, status=0x6a82)
+        piv(client, 0x20, p2=0x80)
+        piv(client, 0xa4, bytes.fromhex("A000000151000000"), p1=4)
+        piv(client, 0xa4, instance, p1=4)
+        piv(client, 0x20, p2=0x80, status=0x63c6)
+        piv(client, 0xa4, bytes.fromhex("A000000151000000"), p1=4)
+        client.connect()
         # Reclaiming an explicitly deleted instance must establish a fresh heap identity.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance)
         client.command(0xe6, install, p1=0x0c)
@@ -142,7 +219,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing after reboot, reclaim and fail-closed storage")
+    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing/certificate retrieval after reboot, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":

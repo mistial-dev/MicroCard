@@ -185,7 +185,7 @@ impl Session {
         c: &Command<'_>,
         provider: &mut impl CryptoProvider,
     ) -> Result<usize> {
-        if !matches!(c.cla, 0x04 | 0x84) || c.data.len() < MAC_BYTES || c.data.len() > 255 {
+        if !matches!(c.cla, 0x04 | 0x14 | 0x84 | 0x94) || c.data.len() < MAC_BYTES || c.data.len() > 255 {
             return Err(Error::Authentication);
         }
         let n = c.data.len() - MAC_BYTES;

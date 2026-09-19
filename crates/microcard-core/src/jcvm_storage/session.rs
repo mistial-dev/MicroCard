@@ -9,6 +9,7 @@ pub struct Session<F: Flash, I: CodeImage = Vec<u8>> {
     sizes: Sizes,
     card: Option<Card>,
     recovery_required: bool,
+    reset_requested: bool,
 }
 
 impl<F: Flash, I: CodeImage> Session<F, I> {
@@ -30,7 +31,12 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             sizes,
             card,
             recovery_required: false,
+            reset_requested: false,
         })
+    }
+
+    pub(crate) fn take_security_reset(&mut self) -> bool {
+        core::mem::take(&mut self.reset_requested)
     }
 
     pub fn installed(&self) -> Result<bool> {
@@ -65,11 +71,11 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         }
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            self.card
-                .as_mut()
-                .ok_or(Error::Missing)?
-                .deselect_with_cancel(&file, &mut Services::new(provider), cancel)
-                .map_err(engine_error)
+            let mut services = Services::new(provider);
+            let result = self.card.as_mut().ok_or(Error::Missing)?
+                .deselect_with_cancel(&file, &mut services, cancel).map_err(engine_error);
+            self.reset_requested |= services.reset_requested();
+            result
         });
         self.finish(result, provider, cancel)
     }
@@ -208,9 +214,11 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
                 Some(level) => Services::verified(provider, command.get(..protected_length).ok_or(Error::Format)?, level),
                 None => Services::new(provider),
             };
-            self.card.as_mut().unwrap()
+            let result = self.card.as_mut().unwrap()
                 .process_with_cancel(&file, &mut services, command, selecting, cancel)
-                .map_err(engine_error)
+                .map_err(engine_error);
+            self.reset_requested |= services.reset_requested();
+            result
         });
         self.finish(result, provider, cancel)
     }

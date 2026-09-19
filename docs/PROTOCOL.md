@@ -6,6 +6,14 @@ This is a MicroCard profile inspired by smart-card lifecycle conventions. It doe
 
 Only the basic logical channel is supported. `80 50 00 00 <length> <host challenge> 00` initializes SCP03. The challenge is 16 bytes in S16 mode and 8 bytes otherwise, and a host offering the other width is answered 6700 so it can retry at the width the card wants. Key version 0 or 1 is accepted. The card returns ten zero diversification bytes, key version 1, SCP identifier 03, the implementation option this build advertises, a card challenge, a card cryptogram of the same width, and in derived-challenge mode a three-byte sequence counter. `84 82 <level> 00 <length> <host cryptogram><C-MAC>` authenticates. Levels 01, 03, 11, 13 and 33 are implemented, covering every combination that carries a command MAC. Management requires a command MAC and accepts any of them. A level requesting protection this build does not implement is refused with 6982.
 
+JCVM additionally accepts plain basic-channel `00`/`10` application APDUs. These carry
+no secure-channel authority; applet PIN and key policies still apply. Card management
+continues to require SCP03. JCVM accepts protected chaining classes `14`/`94`, including
+the CLA byte in C-MAC. `SecureChannel.resetSecurity` during an applet callback clears
+the transport session before response protection, so that response is plain and a new
+SCP03 session is needed for subsequent management. MC04's authenticated-only policy
+is unchanged.
+
 S16 mode transmits the whole 16-byte AES-CMAC. S8 mode transmits its first eight bytes. Either way the full 16-byte command MAC chains subsequent commands and response MACs. C-ENC uses an incrementing counter starting at one after authentication. MAC verification precedes decryption. Authentication/MAC/padding failures discard the session. Error responses contain only their status, per SCP03 §6.2.5. R-ENCRYPTION follows §6.2.7: a response with a data field is encrypted under S-ENC in CBC, using the counter block of the command being answered with its most significant byte set to 80, and the R-MAC then covers the ciphertext. A response with no data field is never encrypted. No BEGIN/END R-MAC SESSION or key-diversification scheme is implemented.
 
 Where the card challenge is derived, §6.2.2.1 applies. A three-byte sequence counter seeds AES-CMAC over the static ENC key with derivation constant 02 and a context of the counter followed by the ISD AID. The counter advances on every INITIALIZE UPDATE and is refused at saturation with 6985. Blocks of 64 values are made durable before any of them is issued, so a power cut skips the unused remainder and no value can seed two challenges.

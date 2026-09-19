@@ -228,9 +228,11 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     assert_eq!(before & 0xfff0, 0x63c0);
     // Switching heaps preserves each installation's independent state.
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &other_aid), select_response);
-    let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
+    let response = endpoint.exchange(&pin);
     assert_eq!(u16::from_be_bytes(response.try_into().unwrap()), before);
-    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
+    let mut select = vec![0, 0xa4, 4, 0, aid.len() as u8];
+    select.extend_from_slice(&aid);
+    assert_eq!(endpoint.exchange(&select), select_response);
     #[cfg(feature = "scp03-pseudo-random")]
     let previous_session_key = host.key;
 
@@ -249,8 +251,10 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     assert_ne!(host.key, previous_session_key);
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
-    let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
+    let response = endpoint.exchange(&pin);
     assert_eq!(u16::from_be_bytes(response.try_into().unwrap()) + 1, before);
+    let mut host = Host::connect(&mut endpoint, 1);
+    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
 
     // A MAC failure discards selection, so a new channel must select again.
     let mut corrupted = host.command(0x20, 0, 0x80, &pin[5..]);

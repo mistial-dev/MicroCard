@@ -6,7 +6,7 @@ pub(super) fn call(
     frame: &mut Frame, context: heap::Context, jcre: &Jcre,
 ) -> Result<Native> {
     if class == ClassId::GPSystem {
-        if host.secure_channel_level() == 0 {
+        if !host.secure_channel_available() {
             let exception = super::super::new_exception(heap, ClassId::SystemException, context)?;
             heap.put_word(exception, super::super::REASON_FIELD, 5)?;
             return Ok(Native::Threw(exception));
@@ -34,6 +34,12 @@ pub(super) fn call(
             frame.push_short(host.secure_channel_level() as i8 as i16)?;
             Ok(Native::Returned)
         }
+        MethodId::resetSecurity => {
+            let handle = frame.pop_reference()?;
+            heap.check_access(handle, context)?;
+            if host.reset_secure_channel().is_err() { return rejected(heap, context); }
+            Ok(Native::Returned)
+        }
         MethodId::unwrap => {
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
@@ -51,8 +57,8 @@ pub(super) fn call(
             frame.push_short(length)?;
             Ok(Native::Returned)
         }
-        // Transport owns handshake and response protection. These applet operations
-        // need session lifecycle integration before they can be exposed.
+        // Transport owns handshake and response protection. The remaining applet
+        // encryption operations are unavailable, rather than success-shaped stubs.
         _ => rejected(heap, context),
     }
 }
