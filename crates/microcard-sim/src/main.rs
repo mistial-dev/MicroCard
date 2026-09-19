@@ -13,6 +13,8 @@ use std::{
 mod sim_hal;
 mod file_flash;
 mod jcvm_storage;
+#[cfg(feature = "heap-metrics")]
+mod heap_metrics;
 use file_flash::FileFlash;
 use sim_hal::Hardware;
 const MAX_TEXT_APDU_BYTES: usize = 261;
@@ -72,11 +74,16 @@ fn main() {
 fn serve_endpoint<C: microcard_core::engine::CardEngine>(
     mut endpoint: microcard_core::transport::Endpoint<C>, binary: bool,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "heap-metrics")]
+    let mut report = heap_metrics::Report::open()?;
     if binary {
         use std::io::Read;
         let mut decoder = microcard_core::framing::Decoder::default();
         for byte in io::stdin().lock().bytes() {
             if let Some(frame) = decoder.push(byte?, 0) {
+                #[cfg(feature = "heap-metrics")]
+                let response = report.measure("apdu", frame.get(1).copied(), || endpoint.exchange(frame));
+                #[cfg(not(feature = "heap-metrics"))]
                 let response = endpoint.exchange(frame);
                 io::stdout().write_all(&(response.len() as u16).to_le_bytes())?;
                 io::stdout().write_all(&response)?;
@@ -85,7 +92,12 @@ fn serve_endpoint<C: microcard_core::engine::CardEngine>(
         }
     } else {
         for line in io::stdin().lock().lines() {
-            println!("{}", hex(&endpoint.exchange(&unhex(line?.trim())?))?);
+            let command = unhex(line?.trim())?;
+            #[cfg(feature = "heap-metrics")]
+            let response = report.measure("apdu", command.get(1).copied(), || endpoint.exchange(&command));
+            #[cfg(not(feature = "heap-metrics"))]
+            let response = endpoint.exchange(&command);
+            println!("{}", hex(&response)?);
             io::stdout().flush()?;
         }
     }
@@ -120,14 +132,22 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let _state_lock=lock_state(directory)?;
   let binary=a[1].ends_with("-binary");
   if a[1].starts_with("serve-jcvm-managed") {
-   serve_endpoint(jcvm_storage::open(keys,directory).map_err(|e|format!("{e:?}"))?,binary)?;
+   #[cfg(feature = "heap-metrics")]
+   let opened=heap_metrics::Report::open()?.measure("open",None,||jcvm_storage::open(keys,directory));
+   #[cfg(not(feature = "heap-metrics"))]
+   let opened=jcvm_storage::open(keys,directory);
+   serve_endpoint(opened.map_err(|e|format!("{e:?}"))?,binary)?;
   } else {
    let mut hardware=Hardware;
    let key=keys.storage_key_with(&mut hardware).map_err(|e|format!("{e:?}"))?;
    fs::create_dir_all(directory)?;
    let mut flash=FileFlash { dir:directory.into() };
    flash.initialize().map_err(|e|format!("{e:?}"))?;
-   let card=Card::open(flash,hardware,key).map_err(|e|format!("{e:?}"))?;
+   #[cfg(feature = "heap-metrics")]
+   let opened=heap_metrics::Report::open()?.measure("open",None,||Card::open(flash,hardware,key));
+   #[cfg(not(feature = "heap-metrics"))]
+   let opened=Card::open(flash,hardware,key);
+   let card=opened.map_err(|e|format!("{e:?}"))?;
    serve_endpoint(microcard_core::transport::Endpoint::new(card,keys),binary)?;
   }
  },

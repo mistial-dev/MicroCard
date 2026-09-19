@@ -46,3 +46,19 @@ Build the affected fuzz target when its interface changes. During ordinary devel
 Fuzz campaigns remain separate from both `scripts/check.py` modes and require an explicit duration. Record the exact revision before treating a campaign as evidence.
 
 Never reuse an older broad result as evidence for changed code. Keep the work-list item open until its required gate has run at the relevant revision.
+
+## Heap measurements
+
+Reuse an existing acceptance workload with simulator-only allocation counters:
+
+```sh
+cargo build -p microcard-sim --locked --features heap-metrics
+python3 scripts/heap_profile.py --output work/jcvm-heap.json -- python3 scripts/jcvm_transport_acceptance.py
+```
+
+The report groups startup and APDU operations by instruction. It records live and peak
+requested allocation bytes, allocation traffic, and host execution time. It does not
+include allocator metadata or stack use. Host file reads and pointer sizes differ from
+the board, so these figures are optimization evidence, not a safe device heap bound.
+The ordinary simulator and firmware builds omit the counters. No new applet behavior
+suite is needed for profiling; the existing workload must still pass.
