@@ -61,7 +61,7 @@ The verifier authenticates MP05, validates this record, resolves imports, and ru
 structural bytecode verification. The management layer must additionally authorize
 the signer, match the current domain/incarnation, enforce rollback and storage quotas,
 and activate atomically. The [JCVM manifest vector](../format/jcvm-manifest-cbor-v1.json)
-is checked by Rust and Python. This contract does not yet connect JCVM to board loading.
+is checked by Rust, Python, .NET, and Java. This contract does not yet connect JCVM to board loading.
 
 ## Internal state snapshot, version 2
 

@@ -10,9 +10,9 @@ internal static class PackageEnvelope
     public static int HeaderBytes => Prefix.Length + 8;
     public static int OverheadBytes => HeaderBytes + 32 + 65 + 64;
 
-    public static byte[] Create(byte[] manifest, byte[] image, byte[] seed)
+    public static byte[] Create(byte[] manifest, byte[] image, byte[] seed, int maximum = 16384)
     {
-        if ((long)OverheadBytes + manifest.Length + image.Length > 16384) throw new InvalidDataException("Package exceeds 16 KiB quota");
+        if ((long)OverheadBytes + manifest.Length + image.Length > maximum) throw new InvalidDataException("Package exceeds quota");
         using var output = new MemoryStream(); using var writer = new BinaryWriter(output);
         writer.Write(Prefix); writer.Write((uint)manifest.Length); writer.Write((uint)image.Length);
         writer.Write(manifest); writer.Write(SHA256.HashData(image)); writer.Write(PackageSignatures.PublicKey(seed));
@@ -20,9 +20,9 @@ internal static class PackageEnvelope
         return output.ToArray();
     }
 
-    public static (byte[] Manifest, byte[] Image, byte[] Key) Verify(byte[] raw)
+    public static (byte[] Manifest, byte[] Image, byte[] Key) Verify(byte[] raw, int maximum = 16384)
     {
-        if (raw.Length < OverheadBytes || raw.Length > 16384 || !raw.AsSpan(0, Prefix.Length).SequenceEqual(Prefix))
+        if (raw.Length < OverheadBytes || raw.Length > maximum || !raw.AsSpan(0, Prefix.Length).SequenceEqual(Prefix))
             throw new InvalidDataException("Invalid MP05 envelope");
         int manifestLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(Prefix.Length, 4)));
         int imageLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(Prefix.Length + 4, 4)));

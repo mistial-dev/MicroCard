@@ -16,6 +16,10 @@ final class DeviceCborTest {
         assertArrayEquals(hex.parseHex(vector.get("package").getAsString()), PackageEnvelope.create(
             hex.parseHex(vector.get("manifest").getAsString()), hex.parseHex(vector.get("image").getAsString()),
             hex.parseHex(vector.get("seed").getAsString())));
+        byte[] image = new byte[17 * 1024], seed = hex.parseHex(vector.get("seed").getAsString());
+        assertThrows(java.io.IOException.class, () -> PackageEnvelope.create(new byte[0], image, seed));
+        byte[] larger = PackageEnvelope.create(new byte[0], image, seed, 60 * 1024);
+        assertArrayEquals(image, java.util.Arrays.copyOfRange(larger, larger.length - image.length, larger.length));
     }
 
     @Test
@@ -25,6 +29,13 @@ final class DeviceCborTest {
             var vector = item.getAsJsonObject();
             assertArrayEquals(HexFormat.of().parseHex(vector.get("hex").getAsString()),
                 ManifestCbor.encode(vector.getAsJsonObject("manifest")));
+        }
+        var jcvm = JsonParser.parseString(Files.readString(vectors.resolveSibling("jcvm-manifest-cbor-v1.json"))).getAsJsonObject();
+        assertArrayEquals(HexFormat.of().parseHex(jcvm.get("hex").getAsString()), ManifestCbor.encodeJcvm(jcvm.getAsJsonObject("manifest")));
+        for (String invalid : new String[]{"65537", "512.5", "true", "\"512\""}) {
+            var changed = jcvm.getAsJsonObject("manifest").deepCopy();
+            changed.getAsJsonObject("limits").add("heap_bytes", JsonParser.parseString(invalid));
+            assertThrows(IllegalArgumentException.class, () -> ManifestCbor.encodeJcvm(changed));
         }
     }
 

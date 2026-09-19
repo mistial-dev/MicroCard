@@ -6,9 +6,45 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 
-/** Fixed-field version-1 manifest encoding, before package envelope activation. */
+/** Fixed-field device manifests using one restricted CBOR writer. */
 final class ManifestCbor {
     private ManifestCbor() {}
+
+    static byte[] encodeJcvm(JsonObject value) {
+        if (!value.keySet().equals(java.util.Set.of("domain", "incarnation", "package", "package_version", "version", "limits")))
+            throw new IllegalArgumentException("Invalid JCVM manifest fields");
+        byte[] domain = hex(value.get("domain"), 5, 16), incarnation = hex(value.get("incarnation"), 16, 16),
+            aid = hex(value.get("package"), 5, 16);
+        var version = value.getAsJsonArray("package_version");
+        if (version.size() != 2) throw new IllegalArgumentException("Invalid package version");
+        long major = unsigned(version.get(0), 0, 255), minor = unsigned(version.get(1), 0, 255);
+        long rollback = unsigned(value.get("version"), 1, 0xffffffffL);
+        var limits = value.getAsJsonObject("limits");
+        if (!limits.keySet().equals(java.util.Set.of("heap_bytes", "frame_words", "buffer_bytes", "budget")))
+            throw new IllegalArgumentException("Invalid JCVM limits");
+        long heap = unsigned(limits.get("heap_bytes"), 512, 65536), frames = unsigned(limits.get("frame_words"), 8, 8192),
+            buffer = unsigned(limits.get("buffer_bytes"), 261, 261), budget = unsigned(limits.get("budget"), 1, 1000000);
+        if (heap % 2 != 0) throw new IllegalArgumentException("Heap must be even");
+        Object[] record = {1L, 1L, domain, incarnation, aid, new Object[]{major, minor}, rollback, new Object[]{heap, frames, buffer, budget}};
+        var output = new ByteArrayOutputStream(); write(output, record); return output.toByteArray();
+    }
+
+    private static long unsigned(JsonElement value, long minimum, long maximum) {
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber() || !value.getAsString().matches("[0-9]+"))
+            throw new IllegalArgumentException("Integer required");
+        final long result;
+        try { result = value.getAsBigDecimal().longValueExact(); }
+        catch (ArithmeticException e) { throw new IllegalArgumentException("Integer required", e); }
+        if (result < minimum || result > maximum) throw new IllegalArgumentException("Integer outside profile");
+        return result;
+    }
+
+    private static byte[] hex(JsonElement value, int minimum, int maximum) {
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) throw new IllegalArgumentException("Hex string required");
+        byte[] bytes = HexFormat.of().parseHex(value.getAsString());
+        if (bytes.length < minimum || bytes.length > maximum) throw new IllegalArgumentException("Invalid binary length");
+        return bytes;
+    }
 
     private static Object integer(JsonElement value) { return value.isJsonNull() ? null : value.getAsLong(); }
     private static Object[] version(JsonElement value) {

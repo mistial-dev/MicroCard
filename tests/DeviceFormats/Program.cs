@@ -12,6 +12,32 @@ foreach (var vector in vectors.RootElement.EnumerateArray())
 }
 Console.WriteLine("PASS: .NET manifest CBOR shared vectors");
 
+using var jcvmVector = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(args[0])!, "jcvm-manifest-cbor-v1.json")));
+var jcvm = jcvmVector.RootElement;
+var jcvmBytes = Convert.FromHexString(jcvm.GetProperty("hex").GetString()!);
+if (!ManifestCbor.EncodeJcvm(jcvm.GetProperty("manifest")).AsSpan().SequenceEqual(jcvmBytes)
+    || !ManifestCbor.EncodeJcvm(ManifestCbor.DecodeJcvm(jcvmBytes)).AsSpan().SequenceEqual(jcvmBytes))
+    throw new Exception("JCVM manifest differs from shared vector");
+void Reject(Action action)
+{
+    try { action(); }
+    catch (Exception error) when (error is FormatException or InvalidDataException or InvalidOperationException or OverflowException or ArgumentException) { return; }
+    throw new Exception("Accepted invalid device format");
+}
+foreach (var (offset, value) in new[] { (0, (byte)0x89), (1, (byte)2), (2, (byte)0) })
+{
+    var invalid = (byte[])jcvmBytes.Clone(); invalid[offset] = value;
+    Reject(() => ManifestCbor.DecodeJcvm(invalid));
+}
+Reject(() => ManifestCbor.DecodeJcvm([..jcvmBytes, 0]));
+foreach (var invalid in new[] { "65537", "512.5", "true", "\"512\"" })
+{
+    var changed = System.Text.Json.Nodes.JsonNode.Parse(jcvm.GetProperty("manifest").GetRawText())!;
+    changed["limits"]!["heap_bytes"] = System.Text.Json.Nodes.JsonNode.Parse(invalid);
+    Reject(() => ManifestCbor.EncodeJcvm(JsonSerializer.SerializeToElement(changed)));
+}
+Console.WriteLine("PASS: .NET JCVM manifest vector and bounded field rejection");
+
 using var envelopeVector = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(args[0])!, "package-envelope-v5.json")));
 var envelope = envelopeVector.RootElement;
 byte[] Field(string name) => Convert.FromHexString(envelope.GetProperty(name).GetString()!);
@@ -20,6 +46,12 @@ if (!package.AsSpan().SequenceEqual(Field("package"))) throw new Exception("MP05
 var verified = PackageEnvelope.Verify(package);
 if (!verified.Manifest.AsSpan().SequenceEqual(Field("manifest")) || !verified.Image.AsSpan().SequenceEqual(Field("image")))
     throw new Exception("MP05 decoded fields differ");
+var largerImage = new byte[17 * 1024];
+Reject(() => PackageEnvelope.Create(jcvmBytes, largerImage, Field("seed")));
+var largerPackage = PackageEnvelope.Create(jcvmBytes, largerImage, Field("seed"), 60 * 1024);
+Reject(() => PackageEnvelope.Verify(largerPackage));
+if (!PackageEnvelope.Verify(largerPackage, 60 * 1024).Image.AsSpan().SequenceEqual(largerImage))
+    throw new Exception("Bounded envelope lost image bytes");
 for (int i = 0; i < package.Length; i++)
 {
     var changed = (byte[])package.Clone(); changed[i] ^= 1;

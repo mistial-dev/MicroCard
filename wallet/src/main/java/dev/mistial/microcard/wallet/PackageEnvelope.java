@@ -12,8 +12,11 @@ import java.security.NoSuchAlgorithmException;
 final class PackageEnvelope {
     private PackageEnvelope() {}
     static byte[] create(byte[] manifest, byte[] image, byte[] seed) throws IOException {
+        return create(manifest, image, seed, 16384);
+    }
+    static byte[] create(byte[] manifest, byte[] image, byte[] seed, int maximum) throws IOException {
         byte[] prefix = "MP05MicroCard signed package v5\0".getBytes(StandardCharsets.US_ASCII);
-        if ((long)prefix.length + 8 + 32 + 65 + 64 + manifest.length + image.length > 16384)
+        if ((long)prefix.length + 8 + 32 + 65 + 64 + manifest.length + image.length > maximum)
             throw new IOException("Package exceeds quota");
         if (seed.length != 32) throw new IOException("Invalid seed length");
         var output = new ByteArrayOutputStream();

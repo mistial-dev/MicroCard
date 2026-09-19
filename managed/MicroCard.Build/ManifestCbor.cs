@@ -4,12 +4,62 @@ using System.Text.Json;
 
 namespace MicroCard.Build;
 
-/// <summary>Fixed-field version-1 manifest CBOR for the next package envelope.</summary>
+/// <summary>Fixed-field device manifests, sharing a restricted CBOR codec.</summary>
 internal static class ManifestCbor
 {
-    public static JsonElement Decode(byte[] bytes)
+    public static byte[] EncodeJcvm(JsonElement value)
     {
-        if (bytes.Length > 16384) throw new FormatException("Manifest quota exceeded");
+        static void Fields(JsonElement record, params string[] names)
+        {
+            var actual = record.EnumerateObject().Select(p => p.Name).ToArray();
+            if (actual.Length != names.Length || actual.Distinct().Count() != names.Length || actual.Any(n => !names.Contains(n)))
+                throw new FormatException("Invalid JCVM manifest fields");
+        }
+        Fields(value, "domain", "incarnation", "package", "package_version", "version", "limits");
+        byte[] Binary(string name, int minimum, int maximum)
+        {
+            var bytes = Convert.FromHexString(value.GetProperty(name).GetString()!);
+            if (bytes.Length < minimum || bytes.Length > maximum) throw new FormatException("Invalid binary length");
+            return bytes;
+        }
+        var domain = Binary("domain", 5, 16); var incarnation = Binary("incarnation", 16, 16); var package = Binary("package", 5, 16);
+        var version = value.GetProperty("version").GetUInt32();
+        if (version == 0) throw new FormatException("Invalid rollback version");
+        var parts = value.GetProperty("package_version");
+        if (parts.GetArrayLength() != 2) throw new FormatException("Invalid package version");
+        var major = parts[0].GetByte(); var minor = parts[1].GetByte();
+        var limits = value.GetProperty("limits");
+        Fields(limits, "heap_bytes", "frame_words", "buffer_bytes", "budget");
+        uint heap = limits.GetProperty("heap_bytes").GetUInt32(), frames = limits.GetProperty("frame_words").GetUInt32();
+        uint buffer = limits.GetProperty("buffer_bytes").GetUInt32(), budget = limits.GetProperty("budget").GetUInt32();
+        if (heap is < 512 or > 65536 || heap % 2 != 0 || frames is < 8 or > 8192 || buffer != 261 || budget is < 1 or > 1000000)
+            throw new FormatException("Limits exceed JCVM profile");
+        using var output = new MemoryStream();
+        void Number(ulong number) => WriteArgument(output, 0, number);
+        void Bytes(byte[] bytes) { WriteArgument(output, 2, (ulong)bytes.Length); output.Write(bytes); }
+        WriteArgument(output, 4, 8); Number(1); Number(1); Bytes(domain); Bytes(incarnation); Bytes(package);
+        WriteArgument(output, 4, 2); Number(major); Number(minor); Number(version);
+        WriteArgument(output, 4, 4); Number(heap); Number(frames); Number(buffer); Number(budget);
+        return output.ToArray();
+    }
+
+    public static JsonElement DecodeJcvm(byte[] bytes)
+    {
+        var r = ReadRecord(bytes, 128);
+        if (r.GetArrayLength() != 8 || r[0].GetUInt32() != 1 || r[1].GetUInt32() != 1 || r[7].GetArrayLength() != 4)
+            throw new FormatException("Invalid JCVM manifest record");
+        static string Hex(JsonElement value) => Convert.ToHexString(value.EnumerateArray().Select(b => b.GetByte()).ToArray()).ToLowerInvariant();
+        var value = JsonSerializer.SerializeToElement(new {
+            domain = Hex(r[2]), incarnation = Hex(r[3]), package = Hex(r[4]), package_version = r[5], version = r[6],
+            limits = new { heap_bytes = r[7][0], frame_words = r[7][1], buffer_bytes = r[7][2], budget = r[7][3] }
+        });
+        if (!EncodeJcvm(value).AsSpan().SequenceEqual(bytes)) throw new FormatException("Invalid JCVM manifest encoding");
+        return value;
+    }
+
+    private static JsonElement ReadRecord(byte[] bytes, int maximum)
+    {
+        if (bytes.Length > maximum) throw new FormatException("Manifest quota exceeded");
         int offset = 0;
         byte[] Take(int count)
         {
@@ -38,7 +88,14 @@ internal static class ManifestCbor
             var array = new object?[count]; for (int i = 0; i < count; i++) array[i] = Read(depth + 1); return array;
         }
         var r = JsonSerializer.SerializeToElement(Read(0));
-        if (offset != bytes.Length || r.GetArrayLength() != 12 || r[0].GetInt32() != 1) throw new FormatException("Invalid manifest record");
+        if (offset != bytes.Length) throw new FormatException("Trailing CBOR data");
+        return r;
+    }
+
+    public static JsonElement Decode(byte[] bytes)
+    {
+        var r = ReadRecord(bytes, 16384);
+        if (r.GetArrayLength() != 12 || r[0].GetInt32() != 1) throw new FormatException("Invalid manifest record");
         static Dictionary<string, JsonElement> Fields(JsonElement record, params string[] names)
         {
             if (record.GetArrayLength() != names.Length) throw new FormatException("Invalid record width");
@@ -62,10 +119,7 @@ internal static class ManifestCbor
         return result;
     }
 
-    public static byte[] Encode(JsonElement value)
-    {
-        using var output = new MemoryStream();
-        void Argument(byte major, ulong value)
+    private static void WriteArgument(MemoryStream output, byte major, ulong value)
         {
             Span<byte> bytes = stackalloc byte[9];
             int length;
@@ -81,6 +135,11 @@ internal static class ManifestCbor
             integer[(8 - length)..].CopyTo(bytes[1..]);
             output.Write(bytes[..(length + 1)]);
         }
+
+    public static byte[] Encode(JsonElement value)
+    {
+        using var output = new MemoryStream();
+        void Argument(byte major, ulong value) => WriteArgument(output, major, value);
         void Array(int count) => Argument(4, checked((ulong)count));
         void Number(JsonElement number) => Argument(0, number.GetUInt64());
         void Bytes(byte[] bytes) { Argument(2, (ulong)bytes.Length); output.Write(bytes); }
