@@ -204,7 +204,7 @@ fn assembly_name_maps_are_compact_sorted_bounded_and_unique() {
 
 #[test]
 fn lifecycle_management_names_borrow_the_command_buffer() {
-    let encoded = br#"["payments","F04D430001"]"#;
+    let encoded = &management_names_wire("payments", "F04D430001").unwrap();
     let (domain, instance) = management_names(encoded).unwrap();
     let start = encoded.as_ptr() as usize;
     let end = start + encoded.len();
@@ -270,7 +270,7 @@ fn managed_response_reserves_its_complete_bound() {
 #[test]
 fn management_name_encoding_is_bounded_and_canonical() {
     let encoded = management_names_wire("payments", "Wallet").unwrap();
-    assert_eq!(encoded, br#"["payments","Wallet"]"#);
+    assert_eq!(encoded, b"\x83\x01\x68payments\x66Wallet");
     assert_eq!(management_names(&encoded), Ok(("payments", "Wallet")));
     assert!(encoded.capacity() >= encoded.len());
     assert_eq!(management_names_wire("bad/name", "Wallet"), Err(Error::Format));
@@ -366,7 +366,7 @@ fn globalplatform_registry_reports_isd_domains_and_loads_in_bounded_records() {
     owned
         .manage(command(
             0xec,
-            &serde_json::to_vec(&("payments", "F04D430001")).unwrap(),
+            &management_names_wire("payments", "F04D430001").unwrap(),
         ))
         .unwrap();
     let (application, more) = owned.get_status_record(0x40, 1, &[]).unwrap();
@@ -1416,7 +1416,7 @@ fn mscorlib_takes_permanent_isd_ownership_before_ssd_creation() {
     );
     load(&mut c, &library_package("ISD", inc, "mscorlib", 1, 42)).unwrap();
     assert_eq!(
-        c.manage(command(0xf0, br#"["ISD","mscorlib"]"#)),
+        c.manage(command(0xf0, &management_names_wire("ISD", "mscorlib").unwrap())),
         Err(Error::Unauthorized)
     );
     assert_eq!(
@@ -1668,8 +1668,8 @@ fn installed_instance_capacity_is_enforced_per_domain_and_card() {
     .unwrap();
 
     let install = |card: &mut Card<MemoryFlash, TestPlatform>, domain: &str, aid: u16| {
-        let request = alloc::format!(r#"["{domain}","F04D43{aid:04X}"]"#);
-        card.manage(command(0xec, request.as_bytes()))
+        let request = management_names_wire(domain, &alloc::format!("F04D43{aid:04X}")).unwrap();
+        card.manage(command(0xec, &request))
     };
     for aid in 0x100..0x108 {
         install(&mut card, "a", aid).unwrap();
@@ -1698,7 +1698,7 @@ fn pin_survives_unload_and_reboot() {
     let inc = create(&mut c, "a");
     let p = package("a", inc, "one", 1, 7, &[0x2a]);
     load(&mut c, &p).unwrap();
-    c.manage(command(0xf0, br#"["a","one"]"#)).unwrap();
+    c.manage(command(0xf0, &management_names_wire("a", "one").unwrap())).unwrap();
     let mut c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(
         load(&mut c, &package("a", inc, "two", 1, 8, &[0x2a])),
@@ -1816,7 +1816,7 @@ fn domain_policy_is_immutable_and_enforced() {
         .insert(2, 99)
         .unwrap();
     assert_eq!(
-        c.manage(command(0xec, br#"["a","F04D430001"]"#)),
+        c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())),
         Err(Error::Quota)
     );
     assert_eq!(c.state.domains["a"].store.get(&2), Some(&99));
@@ -1825,7 +1825,7 @@ fn domain_policy_is_immutable_and_enforced() {
     let index = store.position(2).unwrap();
     store.0[index].1.zeroize();
     store.0.remove(index);
-    c.manage(command(0xf0, br#"["a","Counter"]"#)).unwrap();
+    c.manage(command(0xf0, &management_names_wire("a", "Counter").unwrap())).unwrap();
     assert_eq!(
         load(&mut c, &package("a", inc, "two", 1, 7, &[0x2a])),
         Err(Error::Quota)
@@ -1846,7 +1846,7 @@ fn failed_invocation_rolls_back_store() {
     let inc = create(&mut c, "a");
     let p = counter_package("a", inc, 1, 7);
     load(&mut c, &p).unwrap();
-    c.manage(command(0xec, br#"["a","F04D430001"]"#)).unwrap();
+    c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
     c.state
         .domains
         .get_mut("a")
@@ -1857,7 +1857,7 @@ fn failed_invocation_rolls_back_store() {
     assert_eq!(c.invoke("F04D430001", &[]), Err(Error::Arithmetic));
     assert_eq!(c.state.domains["a"].store.get(&1), Some(&i32::MAX));
     assert_eq!(
-        c.manage(command(0xf0, br#"["a","Counter"]"#)),
+        c.manage(command(0xf0, &management_names_wire("a", "Counter").unwrap())),
         Err(Error::Busy)
     );
 }
@@ -1873,7 +1873,7 @@ fn selected_identity_buffers_are_reused_across_processing() {
     .unwrap();
     card.manage(command(
         0xec,
-        br#"["selected-buffer","F04D430001"]"#,
+        &management_names_wire("selected-buffer", "F04D430001").unwrap(),
     ))
     .unwrap();
     card.select("F04D430001").unwrap();
@@ -1936,12 +1936,12 @@ fn signed_multi_command_transactions_commit_abort_and_expire() {
         &transaction_negative_package("transaction", incarnation, 1, 7),
     )
     .unwrap();
-    card.manage(command(0xec, br#"["transaction","F04D430020"]"#))
+    card.manage(command(0xec, &management_names_wire("transaction", "F04D430020").unwrap()))
         .unwrap();
-    card.manage(command(0xec, br#"["transaction","F04D430022"]"#))
+    card.manage(command(0xec, &management_names_wire("transaction", "F04D430022").unwrap()))
         .unwrap();
     assert_eq!(
-        card.manage(command(0xec, br#"["transaction","F04D430021"]"#)),
+        card.manage(command(0xec, &management_names_wire("transaction", "F04D430021").unwrap())),
         Err(Error::Unauthorized)
     );
     assert!(!card.state.domains["transaction"]
@@ -2050,7 +2050,7 @@ fn representative_simulator_runtime_peaks_stay_within_budget() {
     for aid in ["F04D430010", "F04D430011"] {
         card.manage(command(
             0xec,
-            alloc::format!(r#"["metrics","{aid}"]"#).as_bytes(),
+            &management_names_wire("metrics", aid).unwrap(),
         ))
         .unwrap();
     }
@@ -2107,12 +2107,12 @@ fn native_failure_and_fuel_exhaustion_roll_back_all_writes() {
     )
     .unwrap();
 
-    card.manage(command(0xec, br#"["atomic","F04D430011"]"#))
+    card.manage(command(0xec, &management_names_wire("atomic", "F04D430011").unwrap()))
         .unwrap();
     assert_eq!(card.invoke("F04D430011", &[]), Err(Error::Missing));
     assert!(!card.state.domains["atomic"].store.contains_key(&10));
 
-    card.manage(command(0xec, br#"["atomic","F04D430013"]"#))
+    card.manage(command(0xec, &management_names_wire("atomic", "F04D430013").unwrap()))
         .unwrap();
     assert_eq!(card.invoke("F04D430013", &[]), Err(Error::Budget));
     assert!(!card.state.domains["atomic"].store.contains_key(&30));
@@ -2131,7 +2131,7 @@ fn cooperative_cancellation_rolls_back_all_writes() {
         &key_operations_package("cancel", incarnation, 1, 7),
     )
     .unwrap();
-    card.manage(command(0xec, br#"["cancel","F04D430013"]"#))
+    card.manage(command(0xec, &management_names_wire("cancel", "F04D430013").unwrap()))
         .unwrap();
 
     let mut polls = 0;
@@ -2152,7 +2152,7 @@ fn every_invocation_commit_mutation_recovers_old_or_new_state() {
     let mut card = card();
     let incarnation = create(&mut card, "atomic");
     load(&mut card, &counter_package("atomic", incarnation, 1, 7)).unwrap();
-    card.manage(command(0xec, br#"["atomic","F04D430001"]"#))
+    card.manage(command(0xec, &management_names_wire("atomic", "F04D430001").unwrap()))
         .unwrap();
     let previous = serde_json::to_vec(&card.state).unwrap();
     let base = card.into_flash();
@@ -2206,7 +2206,7 @@ fn stores_are_domain_scoped() {
         run_loaded(&mut c, "a", "Counter", 28, &[]).unwrap(),
         [1, 0, 0, 0, 0x90, 0]
     );
-    c.manage(command(0xf0, br#"["a","Counter"]"#)).unwrap();
+    c.manage(command(0xf0, &management_names_wire("a", "Counter").unwrap())).unwrap();
     load(&mut c, &counter_package("b", b, 1, 8)).unwrap();
     assert_eq!(
         run_loaded(&mut c, "b", "Counter", 28, &[]).unwrap(),
@@ -2233,9 +2233,9 @@ fn persistent_storage_schema_is_pinned_until_domain_deletion() {
         card.state.domains["schema"].storage_declaration(1),
         Some(&StorageDeclaration { key: 1, kind: 1, max_bytes: 0 })
     );
-    card.manage(command(0xf0, br#"["schema","Counter"]"#))
+    card.manage(command(0xf0, &management_names_wire("schema", "Counter").unwrap()))
         .unwrap();
-    card.manage(command(0xf0, br#"["schema","Library"]"#))
+    card.manage(command(0xf0, &management_names_wire("schema", "Library").unwrap()))
         .unwrap();
     let conflicting = signed_package_with_storage(
         "schema",
@@ -2515,7 +2515,7 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
     let keys = key_operations_package("shared", incarnation, 1, 7);
     load(&mut card, &counter).unwrap();
     load(&mut card, &keys).unwrap();
-    card.manage(command(0xec, br#"["shared","F04D430001"]"#))
+    card.manage(command(0xec, &management_names_wire("shared", "F04D430001").unwrap()))
         .unwrap();
     let shared = card.state.domains.get_mut("shared").unwrap();
     shared.store.insert(7, 11).unwrap();
@@ -2872,7 +2872,7 @@ fn failed_install_is_invisible_and_durable() {
     raw.extend(signature);
     load(&mut c, &raw).unwrap();
     assert_eq!(
-        c.manage(command(0xec, br#"["a","F04D430001"]"#)),
+        c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())),
         Err(Error::Budget)
     );
     let c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
@@ -3584,4 +3584,26 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     // key rather than a key, so there is nothing left for recovery to revalidate as a
     // curve point. A package whose key is wrong fails its signature instead.
     assert_eq!(calls.get(), [2, 2]);
+}
+
+#[test]
+fn management_cbor_matches_shared_vectors_and_rejects_other_encodings() {
+    let vectors: serde_json::Value = serde_json::from_str(include_str!("../../../../format/management-names-v1.json")).unwrap();
+    for vector in vectors.as_array().unwrap() {
+        let first = vector["first"].as_str().unwrap();
+        let second = vector["second"].as_str().unwrap();
+        let hex = vector["hex"].as_str().unwrap();
+        let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i+2], 16).unwrap()).collect();
+        assert_eq!(management_names_wire(first, second).unwrap(), bytes);
+        assert_eq!(management_names(&bytes), Ok((first, second)));
+        for end in 0..bytes.len() { assert_eq!(management_names(&bytes[..end]), Err(Error::Format)); }
+        let mut trailing = bytes.clone(); trailing.push(0);
+        assert_eq!(management_names(&trailing), Err(Error::Format));
+        let mut version = bytes.clone(); version[1] = 2;
+        assert_eq!(management_names(&version), Err(Error::Format));
+    }
+    for bytes in [&b"[\"ISD\",\"Counter\"]"[..], &b"\x83\x01\x78\x03ISD\x67Counter"[..],
+        &b"\x9f\x01\x63ISD\x67Counter\xff"[..], &b"\x83\x01\x60\x67Counter"[..]] {
+        assert_eq!(management_names(bytes), Err(Error::Format));
+    }
 }

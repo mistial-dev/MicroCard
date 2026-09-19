@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Host acceptance for the signed Kdf108 ISD/SSD assembly pair."""
+from device_cbor import management_names
 import json, os, pathlib, subprocess, tempfile
 from domain_inventory import inventory
 from scp03_acceptance import (Client, bootstrap_isd, ensure_assembly, sign_package,
@@ -188,7 +189,7 @@ def main():
 
         # Install executes verified MC04 through sealed framework import IDs and
         # creates an SSD-owned AES key without exposing its bytes to managed code.
-        client.command(0xec, b'["kdf-test","F04D430108"]')
+        client.command(0xec, management_names("kdf-test", "F04D430108"))
         installed = {path.name: path.read_bytes() for path in state.glob("slot*.bin")}
         assert {domain["identifier"]: domain for domain in inventory(client)}["kdf-test"]["instances"] == 1
         client.command(0xa4, bytes.fromhex("F04D430108"))
@@ -205,7 +206,7 @@ def main():
 
         # The exact ISD provider binding prevents removal while the SSD
         # consumer remains active, even though each assembly has its own signer.
-        client.command(0xf0, b'["ISD","Kdf108"]', status=0x6985)
+        client.command(0xf0, management_names("ISD", "Kdf108"), status=0x6985)
 
         bad_consumer_metadata = dict(consumer_metadata)
         bad_consumer_metadata["entry_points"] = [dict(consumer_metadata["entry_points"][0], process=65535)]
@@ -267,7 +268,7 @@ def main():
             "kdf-test", recreated_incarnation.hex(), "1", str(ssd_seed), str(recreated_package),
             "--explicit-sign"], check=True)
         upload(recreated_package.read_bytes())
-        client.command(0xec, b'["kdf-test","F04D430108"]')
+        client.command(0xec, management_names("kdf-test", "F04D430108"))
         client.command(0xa4, bytes.fromhex("F04D430108"))
         assert len(client.command(0x10, b"\x05\x03xyz")) == 16
 
@@ -290,7 +291,7 @@ def main():
             "--explicit-sign"], check=True)
         upload(local_provider.read_bytes())
         upload(local_consumer.read_bytes())
-        client.command(0xec, b'["local-kdf","F04D430109"]')
+        client.command(0xec, management_names("local-kdf", "F04D430109"))
         client.command(0xa4, bytes.fromhex("F04D430109"))
         assert len(client.command(0x10, b"\x06\x05local")) == 16
         local = {domain["identifier"]: domain for domain in inventory(client)}["local-kdf"]

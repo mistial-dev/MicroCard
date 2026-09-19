@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Signed default-cryptography dependency acceptance."""
+from device_cbor import management_names
 import hashlib
 import json
 import os
@@ -91,7 +92,7 @@ def main():
         package(consumer_image, consumer_metadata, "crypto-test", ssd_incarnation, ssd_seed,
             consumer_package)
         upload(client, consumer_package.read_bytes())
-        client.command(0xEC, b'["crypto-test","F04D4306C0"]')
+        client.command(0xEC, management_names("crypto-test", "F04D4306C0"))
         client.command(0xA4, bytes.fromhex("F04D4306C0"))
 
         message = b"MicroCard cryptography facade"
@@ -156,7 +157,7 @@ def main():
         random_two = client.command(0x10, b"\x0b")
         assert len(random_one) == 32 and len(random_two) == 32 and random_one != random_two
         client.command(0x10, b"\x01", status=0x6700)
-        client.command(0xF0, b'["ISD","MicroCard.Cryptography"]', status=0x6985)
+        client.command(0xF0, management_names("ISD", "MicroCard.Cryptography"), status=0x6985)
         client.command(0x10, b"\x0a" + bytes(65), status=0x6982)
 
         client.close()

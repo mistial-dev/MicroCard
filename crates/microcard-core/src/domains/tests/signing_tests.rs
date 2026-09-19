@@ -75,7 +75,7 @@ fn fixture(bound: bool) -> (Card<MemoryFlash, TestPlatform>, [u8; 16]) {
     let inc = create(&mut c, "a");
     if bound {
         load(&mut c, &counter_package("a", inc, 1, 7)).unwrap();
-        c.manage(command(0xec, br#"["a","F04D430001"]"#)).unwrap();
+        c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
         c.invoke("F04D430001", &[]).unwrap();
         assert_eq!(c.state.domains["a"].store[&1], 1);
     }
@@ -184,10 +184,10 @@ fn signed_dependency_predicates_and_export_policy_are_enforced() {
     let accepted = consumer(unchanged);
     load(&mut c, &accepted).unwrap();
     assert_eq!(
-        c.manage(command(0xf0, br#"["a","provider"]"#)),
+        c.manage(command(0xf0, &management_names_wire("a", "provider").unwrap())),
         Err(Error::Busy)
     );
-    c.manage(command(0xf0, br#"["a","consumer"]"#)).unwrap();
+    c.manage(command(0xf0, &management_names_wire("a", "consumer").unwrap())).unwrap();
 
     let pinned = rewritten(
         &package("a", inc, "consumer", 2, 7, &[0x2a]),
@@ -296,7 +296,7 @@ fn ssd_dependency_resolves_pinned_isd_provider_with_distinct_signer() {
     obsolete_call["target"]["Managed"]["assembly"] = "Kdf108".into();
     assert!(serde_json::from_value::<ResolvedCall>(obsolete_call).is_err());
     assert_eq!(
-        c.manage(command(0xf0, br#"["ISD","Kdf108"]"#)),
+        c.manage(command(0xf0, &management_names_wire("ISD", "Kdf108").unwrap())),
         Err(Error::Busy)
     );
     let upgraded_provider = rewritten(&provider, 42, |manifest| manifest.version = 2);
@@ -307,9 +307,9 @@ fn ssd_dependency_resolves_pinned_isd_provider_with_distinct_signer() {
         manifest.dependencies[0].signer = Some(parsed_consumer.signer);
     });
     rejected(&mut c, &wrong_pin, Some(Error::Missing));
-    c.manage(command(0xf0, br#"["consumer","KdfConsumer"]"#))
+    c.manage(command(0xf0, &management_names_wire("consumer", "KdfConsumer").unwrap()))
         .unwrap();
-    c.manage(command(0xf0, br#"["ISD","Kdf108"]"#)).unwrap();
+    c.manage(command(0xf0, &management_names_wire("ISD", "Kdf108").unwrap())).unwrap();
 }
 
 #[test]
@@ -566,9 +566,9 @@ fn empty_domain_retains_versions_and_key_after_reboot() {
     let inc = create(&mut c, "a");
     let raw = package("a", inc, "one", 2, 7, &[0x2a]);
     load(&mut c, &raw).unwrap();
-    c.manage(command(0xec, br#"["a","F04D430001"]"#)).unwrap();
-    c.manage(command(0xee, br#"["a","F04D430001"]"#)).unwrap();
-    c.manage(command(0xf0, br#"["a","one"]"#)).unwrap();
+    c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
+    c.manage(command(0xee, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
+    c.manage(command(0xf0, &management_names_wire("a", "one").unwrap())).unwrap();
     let mut c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(c.state.domains["a"].assemblies.is_empty());
     assert!(c.state.domains["a"].instances.is_empty());

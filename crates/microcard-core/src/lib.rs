@@ -1,6 +1,7 @@
 #![no_std]
 extern crate alloc;
 pub mod apdu;
+pub mod cbor;
 pub mod assembly;
 pub mod crypto;
 mod credential_store;

@@ -2,6 +2,7 @@
 """Adversarial signed loading over SCP03; optional DK reset, no firmware writes.
 Creates and deletes only a fresh test SSD. Never deletes a pre-existing SSD.
 """
+from device_cbor import management_names
 import argparse
 import hashlib
 import json
@@ -153,8 +154,8 @@ def main():
             # Successful first load under another signer demonstrates failures did not pin the first key.
             raw = package(meta, other); upload(raw)
             results.append("failed first loads did not bind signer")
-            c.command(0xec, encode([domain, AID])); c.command(0xa4, bytes.fromhex(AID)); assert c.command(0x10) == b""
-            c.command(0xee, encode([domain, AID])); c.command(0xf0, encode([domain, meta["assembly"]]))
+            c.command(0xec, management_names(domain, AID)); c.command(0xa4, bytes.fromhex(AID)); assert c.command(0x10) == b""
+            c.command(0xee, management_names(domain, AID)); c.command(0xf0, management_names(domain, meta["assembly"]))
             did_reboot = reboot()
             reject("wrong key after unload", package(meta, key))
             reject("rollback after unload", package(manifest(domain, inc, 1), other))

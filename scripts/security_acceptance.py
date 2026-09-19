@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Signed default-security dependency and durable retry acceptance."""
+from device_cbor import management_names
 import json
 import os
 import pathlib
@@ -85,7 +86,7 @@ def main():
         package(consumer_image, consumer_metadata, "security-test", ssd_incarnation,
                 ssd_seed, consumer_package)
         upload(client, consumer_package.read_bytes())
-        client.command(0xEC, b'["security-test","F04D4307C0"]')
+        client.command(0xEC, management_names("security-test", "F04D4307C0"))
         client.command(0xA4, AID)
 
         client.command(0x10, b"\x00" + b"1234" + b"12345678")
@@ -113,16 +114,16 @@ def main():
         assert client.command(0x10, b"\x07") == b"\x00"
         assert client.command(0x10, b"\x06" + b"5678" + b"2468") == b"\x01"
         assert client.command(0x10, b"\x01" + b"2468") == b"\x01"
-        client.command(0xF0, b'["ISD","MicroCard.Security"]', status=0x6985)
+        client.command(0xF0, management_names("ISD", "MicroCard.Security"), status=0x6985)
 
         # The same managed assembly in another SSD cannot see the first SSD's verifier.
-        client.command(0xEE, b'["security-test","F04D4307C0"]')
+        client.command(0xEE, management_names("security-test", "F04D4307C0"))
         other_incarnation = client.command(0xE0, b"security-other")
         other_package = directory / "other-consumer.mcp"
         package(consumer_image, consumer_metadata, "security-other", other_incarnation,
                 ssd_seed, other_package)
         upload(client, other_package.read_bytes())
-        client.command(0xEC, b'["security-other","F04D4307C0"]')
+        client.command(0xEC, management_names("security-other", "F04D4307C0"))
         client.close()
         client = Client(management, state)
         client.connect()
@@ -132,7 +133,7 @@ def main():
         client = Client(management, state)
         client.connect()
         client.command(0xE4, b"security-other")
-        client.command(0xEC, b'["security-test","F04D4307C0"]')
+        client.command(0xEC, management_names("security-test", "F04D4307C0"))
         client.command(0xA4, AID)
 
         client.close()

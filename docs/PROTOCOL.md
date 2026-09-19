@@ -22,7 +22,7 @@ All have P1=P2=0, except EXTERNAL AUTHENTICATE. Management responses use 9000 on
 | E1 / E3 | Set an unbound SSD policy / read its policy. E1 uses the bounded binary policy request below. E3 data is the UTF-8 SSD identifier. |
 | E2 | One-byte record index. Index zero is always ISD. Later records are SSDs ordered by identifier. |
 | E6 / E8 / EA | Begin upload / append LE-u32 offset plus chunk / activate. E6 and EA have no data. |
-| EC / EE / F0 | JSON `["domain","AID"]` installs/uninstalls, or `["domain","assembly"]` unloads. |
+| EC / EE / F0 | CBOR `[1, "domain", "AID"]` installs/uninstalls, or `[1, "domain", "assembly"]` unloads. See [device CBOR](DEVICE_CBOR.md). |
 | A4 / 10 | Select binary AID / process plaintext assembly data. Both use the authenticated channel in this checkpoint. |
 
 Use chunks of at most 200 bytes before the offset. SCP03 encryption/MAC overhead must fit a short APDU. Staging is bounded RAM and discarded on reboot. Identical append retries are accepted. No staged byte is executable before the complete signed package passes validation and activation commits.

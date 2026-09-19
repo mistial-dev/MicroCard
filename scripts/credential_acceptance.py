@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Signed credential assembly acceptance using default ISD dependencies."""
+from device_cbor import management_names
 import json
 import os
 import pathlib
@@ -96,7 +97,7 @@ def main():
         package(credential_image, credential_metadata,
                 "credential-test", ssd_incarnation, ssd_seed, credential_package)
         upload(client, credential_package.read_bytes())
-        client.command(0xEC, b'["credential-test","F04D4308C0"]')
+        client.command(0xEC, management_names("credential-test", "F04D4308C0"))
         client.command(0xA4, AID)
 
         assert client.command(0x10, b"\x01") == b""
@@ -112,8 +113,8 @@ def main():
         signature = client.command(0x10, b"\x03" + b"1234" + message)
         verify_p256(public_key, message, signature)
         client.command(0x10, b"\x03" + b"1234", status=0x6700)
-        client.command(0xF0, b'["ISD","MicroCard.Cryptography"]', status=0x6985)
-        client.command(0xF0, b'["ISD","MicroCard.Security"]', status=0x6985)
+        client.command(0xF0, management_names("ISD", "MicroCard.Cryptography"), status=0x6985)
+        client.command(0xF0, management_names("ISD", "MicroCard.Security"), status=0x6985)
 
         client.close()
         client = Client(management, state)
@@ -142,7 +143,7 @@ def main():
         package(credential_image, credential_metadata,
                 "credential-test", recreated, ssd_seed, recreated_package)
         upload(client, recreated_package.read_bytes())
-        client.command(0xEC, b'["credential-test","F04D4308C0"]')
+        client.command(0xEC, management_names("credential-test", "F04D4308C0"))
         client.command(0xA4, AID)
         assert client.command(0x10, b"\x01") == b""
         assert client.command(0x10, b"\x02") != public_key

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Post-flash UART smoke test. Does not flash, erase, recover or reset a device."""
+from device_cbor import management_names
 import argparse,os,pathlib,select,termios,time,subprocess,tempfile
 from scp03_acceptance import Client,ROOT,SIM,bootstrap_isd
 class SerialClient(Client):
@@ -41,7 +42,7 @@ def main():
    for offset in range(0,len(raw),200):c.command(0xe8,offset.to_bytes(4,'little')+raw[offset:offset+200])
    c.command(0xea)
    import json
-   for aid in ['F04D430010','F04D430011','F04D430012']:c.command(0xec,json.dumps([a.domain,aid],separators=(',',':')).encode())
+   for aid in ['F04D430010','F04D430011','F04D430012']:c.command(0xec,management_names(a.domain, aid))
    c.command(0xa4,bytes.fromhex('F04D430010'));tag=c.command(0x10,b'\x00');assert len(tag)==32
    assert len(c.command(0x10,b'\x01'))==16
    assert c.command(0x10,b'\x02')==b'a';assert c.command(0x10,b'\x03')==b'a'

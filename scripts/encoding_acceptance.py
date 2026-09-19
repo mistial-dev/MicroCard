@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Signed ISD dependency acceptance for MicroCard.Encoding."""
+from device_cbor import management_names
 import json, os, pathlib, subprocess, tempfile
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from domain_inventory import inventory
@@ -72,7 +73,7 @@ def main():
         package(consumer_image, consumer_metadata, "encoding-test", ssd_incarnation, ssd_seed,
             consumer_package)
         upload(client, consumer_package.read_bytes())
-        client.command(0xEC, b'["encoding-test","F04D430690"]')
+        client.command(0xEC, management_names("encoding-test", "F04D430690"))
         client.command(0xA4, bytes.fromhex("F04D430690"))
 
         assert client.command(0x10, bytes.fromhex("0002020080")) == bytes.fromhex("000002020002")
@@ -92,7 +93,7 @@ def main():
             "3106020101020102")
         client.command(0x10, bytes.fromhex("07020102020101"), status=0x6A80)
         client.command(0x10, bytes([8]), status=0x6A86)
-        client.command(0xF0, b'["ISD","MicroCard.Encoding"]', status=0x6985)
+        client.command(0xF0, management_names("ISD", "MicroCard.Encoding"), status=0x6985)
 
         client.close()
         client = Client(management, state)

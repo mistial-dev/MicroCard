@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Signed ISD dependency acceptance for MicroCard.Iso7816."""
+from device_cbor import management_names
 import json, os, pathlib, subprocess, tempfile
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from domain_inventory import inventory
@@ -71,7 +72,7 @@ def main():
         consumer_package = directory / "consumer.mcp"
         package(consumer_image, consumer_metadata, "iso-test", ssd_incarnation, ssd_seed, consumer_package)
         upload(client, consumer_package.read_bytes())
-        client.command(0xEC, b'["iso-test","F04D430781"]')
+        client.command(0xEC, management_names("iso-test", "F04D430781"))
         client.command(0xA4, bytes.fromhex("F04D430781"))
 
         select = bytes.fromhex("00A4040005A00000010100")
@@ -80,7 +81,7 @@ def main():
         assert client.command(0x10, bytes([1, len(tlv)]) + tlv) == bytes.fromhex("007F210003")
         client.command(0x10, bytes.fromhex("01035A817F"), status=0x6A80)
         client.command(0x10, bytes([2, 0]), status=0x6A86)
-        client.command(0xF0, b'["ISD","MicroCard.Iso7816"]', status=0x6985)
+        client.command(0xF0, management_names("ISD", "MicroCard.Iso7816"), status=0x6985)
 
         client.close()
         client = Client(management, state)

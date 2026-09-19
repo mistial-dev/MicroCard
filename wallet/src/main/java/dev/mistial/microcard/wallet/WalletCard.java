@@ -93,7 +93,7 @@ final class WalletCard {
         requireSigner(domain, Packages.signerIdentity(identity.signerSeed()));
         if (domain.assemblies() != 1) throw new IOException(identity.label() + " has unexpected assembly state");
         if (domain.instances() == 0) {
-            card.command(0xEC, Packages.JSON.toJson(List.of(identity.domain(), identity.aid())).getBytes(StandardCharsets.UTF_8));
+            card.command(0xEC, DeviceCbor.managementNames(identity.domain(), identity.aid()));
             domain = find(identity.domain()).orElseThrow();
         }
         if (domain.instances() != 1) throw new IOException(identity.label() + " has unexpected instance state");

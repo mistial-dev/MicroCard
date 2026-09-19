@@ -11,7 +11,7 @@ JCVM runs the supported applet corpus in the simulator. It still needs the board
 ## Required implementation work
 
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
-- Replace device JSON manifests, management payloads, and journal snapshots. Prefer deterministic CBOR where it provides a compact bounded representation. Move immutable images and the JCVM heap out of the metadata journal.
+- Replace device JSON manifests, remaining management payloads, and journal snapshots. Lifecycle management names now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated Rust, Python, and Java clients. Move immutable images and the JCVM heap out of the metadata journal.
 - Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
 - Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
 - Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.

@@ -2353,28 +2353,28 @@ fn decode_aid(text: &str) -> Result<([u8; 16], usize)> {
 }
 
 fn management_names(data: &[u8]) -> Result<(&str, &str)> {
-    serde_json::from_slice(data).map_err(|_| Error::Format)
+    let mut decoder = crate::cbor::Decoder::new(data);
+    decoder.record(3)?;
+    if decoder.unsigned()? != 1 { return Err(Error::Format); }
+    let first = decoder.text(64)?;
+    let second = decoder.text(64)?;
+    if !crate::package::valid_identifier(first) || !crate::package::valid_identifier(second) {
+        return Err(Error::Format);
+    }
+    decoder.finish()?;
+    Ok((first, second))
 }
 
 fn management_names_wire(first: &str, second: &str) -> Result<Vec<u8>> {
     if !crate::package::valid_identifier(first) || !crate::package::valid_identifier(second) {
         return Err(Error::Format);
     }
-    let capacity = first
-        .len()
-        .checked_add(second.len())
-        .and_then(|length| length.checked_add(7))
-        .ok_or(Error::Quota)?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(capacity)
-        .map_err(|_| Error::Quota)?;
-    output.extend_from_slice(b"[\"");
-    output.extend_from_slice(first.as_bytes());
-    output.extend_from_slice(b"\",\"");
-    output.extend_from_slice(second.as_bytes());
-    output.extend_from_slice(b"\"]");
-    Ok(output)
+    let mut encoder = crate::cbor::Encoder::new(134);
+    encoder.array(3)?;
+    encoder.unsigned(1)?;
+    encoder.text(first)?;
+    encoder.text(second)?;
+    Ok(encoder.finish())
 }
 
 pub(crate) fn encode_aid(value: &[u8]) -> Result<String> {

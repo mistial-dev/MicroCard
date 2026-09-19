@@ -157,7 +157,7 @@ fn sha256_offset_api_writes_a_caller_owned_destination() {
     .unwrap();
     let incarnation = create(&mut card, "crypto-offset");
     load(&mut card, &cryptography_consumer_package(incarnation)).unwrap();
-    card.manage(command(0xec, br#"["crypto-offset","F04D4306C0"]"#))
+    card.manage(command(0xec, &management_names_wire("crypto-offset", "F04D4306C0").unwrap()))
         .unwrap();
 
     let payload = b"offset input";
@@ -223,7 +223,7 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
     load(&mut card, &credential).unwrap();
     card.manage(command(
         0xec,
-        br#"["credential-budget","F04D4308C0"]"#,
+        &management_names_wire("credential-budget", "F04D4308C0").unwrap(),
     ))
     .unwrap();
 

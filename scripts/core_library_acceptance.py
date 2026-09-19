@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Signed execution acceptance for the compact core library and its reference-name rewrite."""
+from device_cbor import management_names
 import json
 import os
 import pathlib
@@ -57,7 +58,7 @@ def main():
         package(consumer_image, consumer_metadata, "core-test", incarnation, ssd_seed,
                 consumer_package)
         upload(client, consumer_package.read_bytes())
-        client.command(0xEC, b'["core-test","F04D4309C0"]')
+        client.command(0xEC, management_names("core-test", "F04D4309C0"))
         client.command(0xA4, bytes.fromhex("F04D4309C0"))
 
         assert client.command(0x10, bytes([0])) == bytes([1, 1, 2, 3, 4])
@@ -67,7 +68,7 @@ def main():
         assert client.command(0x10, bytes.fromhex("040102")) == bytes([0])
         assert client.command(0x10, bytes.fromhex("0501")) == bytes([10])
         assert client.command(0x10, bytes.fromhex("0519")) == bytes([20])
-        client.command(0xF0, b'["ISD","mscorlib"]', status=0x6985)
+        client.command(0xF0, management_names("ISD", "mscorlib"), status=0x6985)
 
         client.close()
         client = Client(management, state)

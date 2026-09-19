@@ -2,6 +2,7 @@
 """Independent host-side SCP03 implementation, GP 1.1.2 §§4.1.5, 6.2.
 Uses Python cryptography/OpenSSL, not the Rust implementation. Development acceptance only.
 """
+from device_cbor import management_names
 import hashlib, json, os, pathlib, subprocess, tempfile
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -198,14 +199,14 @@ def main():
    chunk=offset.to_bytes(4,'little')+package[offset:offset+200];c.command(0xe8,chunk);c.command(0xe8,chunk) # idempotent retry
   subprocess.run(['dotnet',ROOT/'managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll',ROOT/'work/counter.mca',ROOT/'work/counter.json','team',inc.hex(),'1',td/'signing.seed',td/'dotnet.mcp','--explicit-sign'],check=True)
   assert (td/'dotnet.mcp').read_bytes()==package,'Rust/.NET signatures differ'
-  c.command(0xea);c.command(0xec,b'["team","F04D430001"]')
+  c.command(0xea);c.command(0xec,management_names("team", "F04D430001"))
   first=c.command(0xf2,b'\x4f\x00',status=0x6310,p1=0x40,p2=0x02);assert first[0]==0xe3 and b'\xc5\x03\x80\x00\x00' in first
   second=c.command(0xf2,b'\x4f\x00',p1=0x40,p2=0x03);assert second[0]==0xe3 and bytes.fromhex('F04D430001') in second
   c.command(0xa4,bytes.fromhex('F04D430001'))
   assert c.command(0x10)==b'\x01';assert c.command(0x10)==b'\x02'
-  c.command(0xec,b'["team","F04D430002"]');c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
-  c.command(0xec,b'["team","F04D430003"]');c.command(0xa4,bytes.fromhex('F04D430003'));assert c.command(0x10,b'X')==b'X'
-  c.command(0xec,b'["team","F04D430004"]');c.command(0xa4,bytes.fromhex('F04D430004'));assert c.command(0x10)==hashlib.sha256(b'a').digest()[:1]
+  c.command(0xec,management_names("team", "F04D430002"));c.command(0xa4,bytes.fromhex('F04D430002'));assert c.command(0x10)==(2).to_bytes(4,'little',signed=True)
+  c.command(0xec,management_names("team", "F04D430003"));c.command(0xa4,bytes.fromhex('F04D430003'));assert c.command(0x10,b'X')==b'X'
+  c.command(0xec,management_names("team", "F04D430004"));c.command(0xa4,bytes.fromhex('F04D430004'));assert c.command(0x10)==hashlib.sha256(b'a').digest()[:1]
   reboot_floor=getattr(c,'counter_seen',b'');c.close()
   c=Client(keys,td/'state');c.connect()
   # A reserved block is durable before it is used, so a restart can only skip values.
@@ -234,7 +235,7 @@ def main():
   subprocess.run([SIM,'pack',ROOT/'work/keys.mca',ROOT/'work/keys.json','keys',inc.hex(),'1',td/'signing.seed',td/'keys.mcp','--explicit-sign'],check=True)
   package=(td/'keys.mcp').read_bytes();c.command(0xe6)
   for offset in range(0,len(package),200):c.command(0xe8,offset.to_bytes(4,'little')+package[offset:offset+200])
-  c.command(0xea);c.command(0xec,b'["keys","F04D430010"]');c.command(0xec,b'["keys","F04D430011"]');c.command(0xec,b'["keys","F04D430012"]')
+  c.command(0xea);c.command(0xec,management_names("keys", "F04D430010"));c.command(0xec,management_names("keys", "F04D430011"));c.command(0xec,management_names("keys", "F04D430012"))
   c.command(0xa4,bytes.fromhex('F04D430010'));tag=c.command(0x10,b'\x00');assert len(tag)==32
   aes_tag=c.command(0x10,b'\x01');assert len(aes_tag)==16
   assert c.command(0x10,b'\x02')==b'a';assert c.command(0x10,b'\x03')==b'a'
