@@ -211,7 +211,7 @@ mod cc310 {
             output: *mut u8,
             output_size: usize,
         ) -> i32;
-        #[cfg(feature = "cc310-cbc")]
+        #[cfg(feature = "cc310-aes")]
         fn microcard_cc310_aes128_cbc_in_place(
             key: *const u8,
             key_size: usize,
@@ -440,7 +440,7 @@ mod cc310 {
         true
     }
 
-    #[cfg(feature = "cc310-cbc")]
+    #[cfg(feature = "cc310-aes")]
     pub(super) fn aes128_cbc_in_place(
         key: &[u8; 16],
         iv: &[u8; 16],
@@ -773,13 +773,19 @@ impl Hardware {
                     0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30, 0xd8, 0xcd, 0xb7, 0x80, 0x70,
                     0xb4, 0xc5, 0x5a,
                 ];
-                let mut block = [
+                const PLAINTEXT: [u8; 16] = [
                     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
                     0xdd, 0xee, 0xff,
                 ];
+                let mut block = PLAINTEXT;
                 core::hint::black_box(&mut block);
                 self.aes128_encrypt_block_in_place(&KEY, &mut block)?;
                 if block != EXPECTED {
+                    block.fill(0);
+                    return Err(Error::Native);
+                }
+                self.aes128_decrypt_block_in_place(&KEY, &mut block)?;
+                if block != PLAINTEXT {
                     block.fill(0);
                     return Err(Error::Native);
                 }
@@ -972,6 +978,23 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         let ready = self.ensure_cc310();
         microcard_core::crypto::clear_output_on_error(block, ready)?;
         let result = if cc310::aes128_encrypt_block(key, block) {
+            Ok(())
+        } else {
+            Err(Error::Native)
+        };
+        microcard_core::crypto::clear_output_on_error(block, result)
+    }
+
+    #[cfg(feature = "cc310-aes")]
+    fn aes128_decrypt_block_in_place(
+        &mut self,
+        key: &[u8; 16],
+        block: &mut [u8; 16],
+    ) -> Result<()> {
+        let ready = self.ensure_cc310();
+        microcard_core::crypto::clear_output_on_error(block, ready)?;
+        // One CBC block with a zero IV is raw AES decryption.
+        let result = if cc310::aes128_cbc_in_place(key, &[0; 16], block, false) {
             Ok(())
         } else {
             Err(Error::Native)

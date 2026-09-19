@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 211592,
+      "text_bytes": 211696,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 211608,
+      "text_bytes": 211712,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 223156,
+      "text_bytes": 223276,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 222952,
+      "text_bytes": 223080,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 164476,
+      "text_bytes": 164604,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 174344,
+      "text_bytes": 174472,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {

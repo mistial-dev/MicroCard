@@ -126,6 +126,19 @@ pub trait CryptoProvider {
         }
     );
 
+    software_method!(
+        "software-aes",
+        fn aes128_decrypt_block_in_place(
+            &mut self,
+            key: &[u8; 16],
+            block: &mut [u8; 16],
+        ) -> Result<()> {
+            let cipher = Aes128::new(key.into());
+            cipher.decrypt_block(block.into());
+            Ok(())
+        }
+    );
+
     fn aes128_encrypt_block(&mut self, key: &[u8; 16], mut block: [u8; 16]) -> Result<[u8; 16]> {
         let mut output = Zeroizing::new(block);
         block.zeroize();
