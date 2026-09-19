@@ -115,11 +115,20 @@ Full type and dataflow verification is deferred. In its place the operand stack 
 
 ## Cryptography
 
-The API surface is the whole of Java Card 3.0.5. Required by the first test applet, and therefore first to be implemented: SHA-256 and SHA-384, ECDSA over P-256 and P-384, AES-CMAC-128, AES ECB and CBC at 128, 192 and 256, 3DES ECB, raw RSA at 1024, 2048 and 3072, EC SVDP-DH, and secure random.
+The generated bindings describe Java Card API names; they do not establish algorithm support.
+The simulator's default JCVM host now uses the shared platform provider for SHA-256
+and entropy. The same adapter builds without MC04 or software crypto for future board
+integration. Provider failures clear output and return an error without a software retry.
+SHA-384 remains only in the engine's explicit test-reference host.
 
-Elliptic curve domain parameters arrive from the applet as explicit field values rather than as named curves. They are matched byte for byte against committed P-256 and P-384 tables and bound to the fixed-curve backend on a match, and an unrecognised parameter set raises an illegal value error.
+Algorithm factories consult host capabilities. Unsupported algorithms and shared-access
+requests raise [CryptoException.NO_SUCH_ALGORITHM](https://docs.oracle.com/en/java/javacard/3.2/jcapi/api_classic/javacard/security/CryptoException.html).
+Cipher, Signature, and KeyAgreement operations are not wired up, so their factories
+reject requests rather than creating unusable objects. The committed PIV acceptance
+still installs, selects, and exercises PIN retry behavior with this restriction.
 
-RSA is the open risk. On a 64 MHz Cortex-M4 without a hardware accelerator, a 3072-bit private operation runs into tens of seconds and key generation runs into minutes, which exceeds any plausible command timeout and any watchdog window. The size range this profile actually commits to is settled before that work starts.
+JCVM integration of existing P-256 and AES services remains required. Additional software
+implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
 ## Authorization
 

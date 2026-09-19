@@ -234,41 +234,6 @@ impl Flash for FileFlash {
     }
 }
 
-/// The card an applet's cryptography reaches, answered in software.
-///
-/// A real card would use its accelerators. What matters here is that the answers are the
-/// ones a card would give, so an applet that checks a digest against its own expectation
-/// agrees with this one.
-struct JavaCardHost;
-
-impl microcard_engine_jcvm::host::Host for JavaCardHost {
-    fn random(&mut self, output: &mut [u8]) -> microcard_engine_jcvm::Result<()> {
-        getrandom::getrandom(output).map_err(|_| microcard_engine_jcvm::Error::Unsupported)
-    }
-
-    fn digest(
-        &mut self,
-        algorithm: u8,
-        message: &[u8],
-        output: &mut [u8],
-    ) -> microcard_engine_jcvm::Result<usize> {
-        use sha2::Digest;
-        // The algorithms the profile commits to. Anything else is refused rather than
-        // answered with something that looks like a digest.
-        match algorithm {
-            4 => {
-                output[..32].copy_from_slice(&sha2::Sha256::digest(message));
-                Ok(32)
-            }
-            5 => {
-                output[..48].copy_from_slice(&sha2::Sha384::digest(message));
-                Ok(48)
-            }
-            _ => Err(microcard_engine_jcvm::Error::Unsupported),
-        }
-    }
-}
-
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!("microcard-sim {}", env!("CARGO_PKG_VERSION"));
@@ -301,7 +266,8 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let file=microcard_engine_jcvm::cap::LoadFile::parse(&block).map_err(|e|format!("{e:?}"))?;
   let sizes=microcard_engine_jcvm::applet::Sizes{heap_bytes:64*1024,frame_words:8192,..Default::default()};
   let mut card=microcard_engine_jcvm::applet::Card::new(&file,sizes).map_err(|e|format!("{e:?}"))?;
-  let mut host=JavaCardHost;
+  let mut hardware=Hardware;
+  let mut host=microcard_core::jcvm_services::Services(&mut hardware);
   // The install parameters GlobalPlatform would deliver, empty here because nothing has
   // asked for an instance AID or privileges.
   card.install(&file,&mut host,&[0,0,0]).map_err(|e|format!("{e:?}"))?;

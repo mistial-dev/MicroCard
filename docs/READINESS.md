@@ -15,6 +15,11 @@ Disabling it leaves transport, journal, crypto, and hardware contracts available
 compiling MC04. Quick validation exercises that configuration with an independent test
 engine. This boundary does not yet supply JCVM's durable management adapter or board profile.
 
+The independent `jcvm` core feature exposes SHA-256 and entropy through the shared
+provider adapter, now used by the simulator. Unsupported JCVM crypto factories raise
+explicit Java Card exceptions. P-256/AES bindings, authenticated package loading, and
+durable applet state still need integration before a JCVM firmware artifact is ready.
+
 ## Required implementation work
 
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.

@@ -21,6 +21,8 @@ def rust():
     run("cargo", "check", "--workspace", "--all-targets", "--locked")
     run("cargo", "test", "-p", "microcard-core", "--locked", "--no-default-features",
         "--features", "software-crypto", "--test", "shared_transport")
+    run("cargo", "test", "-p", "microcard-core", "--locked", "--no-default-features",
+        "--features", "software-crypto,jcvm", "--lib", "jcvm_services")
 
 
 def managed(jobs=1):

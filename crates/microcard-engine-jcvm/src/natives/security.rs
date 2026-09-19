@@ -2,8 +2,8 @@
 //!
 //! These classes are objects with state, and the state lives on the heap like any other
 //! object, so the firewall covers it. What they are not is algorithms: an operation that
-//! needs one asks the host, which is where a card's accelerators or its software fallback
-//! live. Key material never crosses into the Java heap as a result.
+//! needs one asks the host. Key and PIN fields currently occupy native heap objects;
+//! protected-key service integration remains separate work.
 use super::{Jcre, Native, new_native, word_field};
 use crate::vm::frame::{Frame, NULL};
 use crate::vm::heap::{self, Heap};
@@ -281,10 +281,21 @@ pub fn call(
         | ("javacardx/crypto/Cipher", "getInstance") => {
             // Every one of these takes an algorithm, and all but RandomData also take
             // whether the instance is shared.
-            if class != "javacard/security/RandomData" {
-                let _external = frame.pop_short()?;
-            }
+            let external = class != "javacard/security/RandomData" && frame.pop_short()? != 0;
             let algorithm = frame.pop_short()?;
+            let supported = match u8::try_from(algorithm) {
+                Ok(id) if !external => match class {
+                    "javacard/security/MessageDigest" => host.supports_digest(id),
+                    "javacard/security/RandomData" => host.supports_random(id),
+                    _ => false,
+                },
+                _ => false,
+            };
+            if !supported {
+                let exception = super::new_exception(heap, "javacard/security/CryptoException", context)?;
+                heap.put_word(exception, super::REASON_FIELD, 3)?; // NO_SUCH_ALGORITHM
+                return Ok(Native::Threw(exception));
+            }
             let instance = new_native(heap, class, STATE_WORDS, context)?;
             heap.put_word(instance, KIND, algorithm as u16)?;
             frame.push_reference(instance)?;

@@ -14,6 +14,8 @@ use microcard_engine_jcvm::host::Host;
 struct TestHost(u8);
 
 impl Host for TestHost {
+    fn supports_digest(&self, algorithm: u8) -> bool { matches!(algorithm, 4 | 5) }
+    fn supports_random(&self, algorithm: u8) -> bool { matches!(algorithm, 1 | 2) }
     fn digest(
         &mut self,
         algorithm: u8,

@@ -2,12 +2,15 @@
 //!
 //! Algorithms are not the virtual machine's business. A card has accelerators, key storage
 //! and an entropy source, and which of those exist differs between one card and the next.
-//! The engine asks through this trait, so key material never has to pass through the Java
-//! heap and a card can answer with hardware where it has it.
+//! The engine asks through this trait so a platform can supply hardware implementations.
+//! This boundary currently covers digest and entropy services.
 use crate::{Error, Result};
 
 /// The services an applet's cryptography needs.
 pub trait Host {
+    fn supports_digest(&self, _algorithm: u8) -> bool { false }
+    fn supports_random(&self, _algorithm: u8) -> bool { false }
+
     /// Fill a buffer with random bytes.
     fn random(&mut self, output: &mut [u8]) -> Result<()> {
         let _ = output;
