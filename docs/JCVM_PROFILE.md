@@ -130,9 +130,10 @@ checks object boundaries, typed references, roots, ownership, and native PIN sta
 without running installation again. The committed PIV applet test verifies that PIN
 retry counts survive restoration; saving does not clear the live session.
 
-These are engine APIs, not an authenticated storage format. Their caller must bind
-state to the verified code image, authenticate it, and protect the staging buffer.
-Durable heap storage, atomic activation, complete deselection callbacks, and transaction
+The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
+binding the snapshot to the exact code image and installation identity using the
+[JCVM state contract](DEVICE_CBOR.md#dedicated-jcvm-state-journal). Board flash
+partitioning, atomic image activation, complete deselection callbacks, and transaction
 undo still need integration before board delivery.
 
 ## Cryptography

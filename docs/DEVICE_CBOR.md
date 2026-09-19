@@ -94,6 +94,27 @@ Old JSON snapshots return `IncompatibleState`, without an erase, migration, or r
 of an older authenticated generation. Packages still reside inline in this version;
 dedicated immutable image storage remains separate work.
 
+## Dedicated JCVM state journal
+
+The JCVM store uses a separate journal region and key, with plaintext:
+
+```
+[1, 1, image_sha256_bytes32, installation_bytes16, root_uint16, heap_bytes, static_bytes]
+```
+
+The first two fields are the schema version and engine identifier. The image digest
+covers the exact verified load-file bytes; the installation identity changes on
+reinstallation. Neither mismatch permits automatic reset. The load file is not
+included in this snapshot. Heap length is bounded by the configured applet heap,
+static length must match the load file, and the complete record must fit the journal
+payload capacity. Engine recovery validates object and reference structure and
+requires volatile values to be cleared. Unknown versions and trailing bytes fail.
+
+`jcvm_storage::Store` authenticates records through the shared journal provider and
+uses its commit/recovery protocol. The caller still must authenticate the code image,
+allocate the dedicated flash region, and roll back live mutations on commit failure.
+Board partitioning and GlobalPlatform activation are not integrated yet.
+
 ## Migration status
 
 MP05 packages, management names, and journal snapshots use these binary contracts.

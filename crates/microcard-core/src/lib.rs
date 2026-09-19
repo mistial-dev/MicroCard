@@ -57,6 +57,8 @@ pub mod transport;
 pub mod engine;
 #[cfg(feature = "jcvm")]
 pub mod jcvm_services;
+#[cfg(feature = "jcvm")]
+pub mod jcvm_storage;
 
 pub mod key_store;
 
