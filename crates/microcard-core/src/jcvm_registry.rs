@@ -625,7 +625,8 @@ impl<F: crate::journal::Flash> Store<F> {
         scratch: &mut [u8],
         provider: &mut (impl crate::crypto::CryptoProvider + crate::hal::Entropy),
         cancel: &mut dyn FnMut() -> bool,
-    ) -> Result<Instance> {
+        volatile_limit: usize,
+    ) -> Result<(Instance, microcard_engine_jcvm::applet::VolatileState)> {
         let mut next = *self.state()?;
         if cancel() { return Err(Error::Cancelled); }
         let load = Aid::new(request.load_aid)?;
@@ -645,12 +646,13 @@ impl<F: crate::journal::Flash> Store<F> {
         let flash = heaps.prepare(bank)?;
         let mut session = crate::jcvm_storage::Session::open(flash, key, image, identity, sizes, provider)?;
         session.install_globalplatform(request, provider, cancel)?;
-        // Release all installation memory before serializing metadata. On any failure,
+        let volatile = session.retain_volatile(volatile_limit)?;
+        // Release the execution heap before serializing metadata. On any failure,
         // this heap remains an orphan until a later authorized installation reclaims it.
         drop(session);
         if cancel() { return Err(Error::Cancelled); }
         self.commit(next, provider)?;
-        Ok(*self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Storage)?)
+        Ok((*self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Storage)?, volatile))
     }
 
     /// Reopen exactly the heap named by committed metadata. Missing or incompatible

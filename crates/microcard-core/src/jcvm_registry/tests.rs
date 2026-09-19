@@ -25,7 +25,7 @@ fn heap_publication_failures_preserve_existing_instances_and_never_reuse_identit
         load_aid: package.manifest.package, module_aid: module,
         instance_aid: &[0xf0, 1, 2, 3, 4], privileges: &[0], parameters: &[],
     };
-    let first = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false).unwrap();
+    let (first, _) = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 65536).unwrap();
     let select = [0, 0xa4, 4, 0, 0];
     let wrong_pin = [0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 255, 255];
     let mut session = store.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider).unwrap();
@@ -35,20 +35,23 @@ fn heap_publication_failures_preserve_existing_instances_and_never_reuse_identit
     drop(session);
 
     request.instance_aid = &[0xf0, 1, 2, 3, 5];
+    // Insufficient transient RAM must not publish an otherwise valid installation.
+    assert!(matches!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 0), Err(Error::Quota)));
+    assert_eq!(store.state().unwrap().instances().count(), 1);
     heaps.fail_write = Some(128);
-    assert!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false).is_err());
+    assert!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 65536).is_err());
     assert_eq!(store.state().unwrap().instances().count(), 1);
     heaps.fail_write = None;
     // Let identity reservation finish, then fail publication after the heap commits.
     store.journal.flash_mut().fail_after = Some(4);
-    assert_eq!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false), Err(Error::Storage));
+    assert!(matches!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 65536), Err(Error::Storage)));
     assert_eq!(store.state().unwrap().instances().count(), 1);
     let consumed = store.journal.flash_mut().nonce_generation().unwrap();
     store.journal.flash_mut().fail_after = None;
-    let second = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false).unwrap();
+    let (second, _) = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 65536).unwrap();
     assert!(u64::from_le_bytes(second.identity[..8].try_into().unwrap()) > consumed);
     assert_ne!(first.identity, second.identity);
-    assert_eq!(heaps.preparations, [1, 3]);
+    assert_eq!(heaps.preparations, [1, 4]);
     let mut session = store.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider).unwrap();
     assert_eq!(session.process(&select, true, &mut provider, &mut || false).unwrap().sw, 0x9000);
     assert_eq!(session.process(&wrong_pin, false, &mut provider, &mut || false).unwrap().sw + 1, before);
@@ -58,7 +61,7 @@ fn heap_publication_failures_preserve_existing_instances_and_never_reuse_identit
     // Referenced erased heaps are errors, not an instruction to rerun install.
     *heaps.banks[0].borrow_mut() = MemoryFlash::new(65536);
     assert!(matches!(store.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider), Err(Error::Storage)));
-    assert_eq!(heaps.preparations, [1, 3]);
+    assert_eq!(heaps.preparations, [1, 4]);
 }
 
 #[test]

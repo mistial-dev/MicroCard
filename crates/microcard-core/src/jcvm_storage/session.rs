@@ -45,6 +45,16 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         Ok(self.card.as_ref().is_some_and(Card::selected))
     }
 
+    pub fn retain_volatile(&mut self, maximum: usize) -> Result<microcard_engine_jcvm::applet::VolatileState> {
+        self.installed()?;
+        self.card.as_mut().ok_or(Error::Missing)?.retain_volatile(maximum).map_err(engine_error)
+    }
+
+    pub fn restore_volatile(&mut self, saved: &microcard_engine_jcvm::applet::VolatileState) -> Result<()> {
+        self.installed()?;
+        self.card.as_mut().ok_or(Error::Missing)?.restore_volatile(saved).map_err(engine_error)
+    }
+
     pub fn deselect(
         &mut self,
         provider: &mut (impl CryptoProvider + Entropy),

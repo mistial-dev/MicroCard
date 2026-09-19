@@ -210,6 +210,9 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
         host.send(&mut endpoint, 0xe6, 0x0c, 0, &install),
         [0, 0x90, 0]
     );
+    let other_aid = [0xf0, 1, 2, 3, 5];
+    let other_install = lv(&[package.manifest.package, module, &other_aid, &[0], &[0xc9, 0], &[]]);
+    assert_eq!(host.send(&mut endpoint, 0xe6, 0x0c, 0, &other_install), [0, 0x90, 0]);
     let modules = host.send(&mut endpoint, 0xf2, 0x10, 2, &[0x4f, 0]);
     assert!(modules.windows(module.len()).any(|value| value == module));
     assert_eq!(&modules[modules.len() - 2..], &[0x90, 0]);
@@ -223,6 +226,11 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
     let before = u16::from_be_bytes(response.try_into().unwrap());
     assert_eq!(before & 0xfff0, 0x63c0);
+    // Switching heaps preserves each installation's independent state.
+    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &other_aid), select_response);
+    let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
+    assert_eq!(u16::from_be_bytes(response.try_into().unwrap()), before);
+    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
     #[cfg(feature = "scp03-pseudo-random")]
     let previous_session_key = host.key;
 
@@ -261,6 +269,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
         [0x90, 0]
     );
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), [0x69, 0x85]);
+    assert_eq!(host.send(&mut endpoint, 0xe4, 0, 0, &delete(&other_aid)), [0x90, 0]);
     assert_eq!(
         host.send(&mut endpoint, 0xe4, 0, 0, &delete(package.manifest.package)),
         [0x90, 0]

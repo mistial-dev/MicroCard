@@ -25,14 +25,18 @@ provider adapter, now used by the simulator. Unsupported JCVM crypto factories r
 explicit Java Card exceptions. Its durable registry and dedicated applet journals
 are integrated in core. Full SELECT responses and durable deselection callbacks now
 run through the adapter. Authenticated applet APDUs preserve their original command
-fields without a nested tunnel. P-256/AES applet bindings and retention of
-inactive-instance volatile state still need integration before board delivery. The engine
-now exposes an opaque, zeroizing snapshot of only CLEAR_ON_RESET array payloads,
-with a caller-supplied byte limit. Restoration validates the full heap layout before
-publishing any bytes. The existing lifecycle test covers quota rejection, stale layouts,
-retained reset-scoped values, and exclusion of deselection-scoped data and PIN validation.
-Card-level cache admission, installation binding, and reset/deletion invalidation remain
-required before this fixes cross-applet selection.
+fields without a nested tunnel. P-256/AES applet bindings still need integration.
+Inactive instances retain only CLEAR_ON_RESET array payloads in an opaque, zeroizing
+RAM cache, bounded to 64 KiB across cached instances. Installation captures constructor
+values before publication; selection binds restoration to the installation identity and
+validates the complete heap layout. Reset clears the cache and deletion removes the
+corresponding entries. Insufficient cache capacity fails explicitly without eviction.
+Engine lifecycle tests cover retained values, stale layouts, and exclusion of
+deselection-scoped data and PIN validation. Existing core tests cover installation
+quota rejection and switching between two independently persisted applets.
+This is a logical cache bound, not evidence that worst-case workloads fit the board heap.
+The snapshot and cache integration raises JCVM text from 129,572 to 132,236 bytes
+(serial) and 139,332 to 142,104 bytes (USB), with unchanged static RAM.
 
 MC04 stores immutable packages in separate image slots and commits only descriptors
 in its version-2 metadata snapshot. Recovery verifies image hashes and package

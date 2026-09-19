@@ -227,8 +227,12 @@ retry counts survive restoration; saving does not clear the live session.
 The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
 binding the snapshot to the exact code image and installation identity using the
 [JCVM state contract](DEVICE_CBOR.md#dedicated-jcvm-state-journal). Board flash
-partitioning, inactive-instance volatile state, and transaction
-undo still need integration before board delivery.
+partitioning is checked for both board layouts. Inactive instances retain reset-scoped
+array payloads in a zeroizing RAM cache with a shared 64 KiB limit. Installation and
+selection bind these records to the installation identity; reset and deletion clear
+them. Cache admission failure returns an error without evicting another instance.
+Persistent snapshots continue to exclude all transient payloads. Worst-case live heap
+plus cache usage still needs board measurement.
 
 ## Cryptography
 

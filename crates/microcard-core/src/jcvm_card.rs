@@ -32,6 +32,14 @@ struct Upload {
 
 type StoredSession<F, I> = Session<F, PinnedImage<I>>;
 
+// A card-wide RAM quota, independent of the persistent heap journals.
+const MAX_RETAINED_VOLATILE: usize = 65536;
+struct Retained {
+    aid: Aid,
+    identity: [u8; 16],
+    state: microcard_engine_jcvm::applet::VolatileState,
+}
+
 pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
     storage: Storage<F, I, H>,
     provider: P,
@@ -39,6 +47,7 @@ pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
     scratch: Vec<u8>,
     upload: Option<Upload>,
     selected: Option<(Aid, StoredSession<H::Bank, I>)>,
+    retained: Vec<Retained>,
     #[cfg(feature = "scp03-pseudo-random")]
     sequences: Option<core::ops::RangeInclusive<u32>>,
 }
@@ -86,9 +95,24 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             scratch,
             upload: None,
             selected: None,
+            retained: Vec::new(),
             #[cfg(feature = "scp03-pseudo-random")]
             sequences: None,
         })
+    }
+
+    fn park_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        let Some((aid, session)) = self.selected.as_mut() else { return Ok(()); };
+        let identity = self.storage.registry.state()?.instances()
+            .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?.identity;
+        let used: usize = self.retained.iter().map(|entry| entry.state.bytes()).sum();
+        let available = MAX_RETAINED_VOLATILE.checked_sub(used).ok_or(Error::Quota)?;
+        self.retained.try_reserve_exact(1).map_err(|_| Error::Quota)?;
+        session.deselect(&mut self.provider, cancel)?;
+        let state = session.retain_volatile(available)?;
+        if state.bytes() != 0 { self.retained.push(Retained { aid: *aid, identity, state }); }
+        self.selected = None;
+        Ok(())
     }
 
     pub fn into_storage(self) -> Storage<F, I, H> {
@@ -168,7 +192,10 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
                 return Ok(Vec::new());
             }
             let request = gp::application_install(command)?;
-            self.storage.registry.install(
+            let used: usize = self.retained.iter().map(|entry| entry.state.bytes()).sum();
+            let available = MAX_RETAINED_VOLATILE.checked_sub(used).ok_or(Error::Quota)?;
+            self.retained.try_reserve_exact(1).map_err(|_| Error::Quota)?;
+            let (instance, state) = self.storage.registry.install(
                 &request,
                 &self.storage.images,
                 &mut self.storage.heaps,
@@ -176,7 +203,11 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
                 &mut self.scratch,
                 &mut self.provider,
                 cancel,
+                available,
             )?;
+            if state.bytes() != 0 {
+                self.retained.push(Retained { aid: instance.aid, identity: instance.identity, state });
+            }
             return receipt();
         }
         let aid = Aid::new(gp::delete_aid(command)?)?;
@@ -189,6 +220,8 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             next.remove_load(aid)?;
         }
         self.commit(next, cancel)?;
+        self.retained.retain(|entry| next.instances().any(|instance|
+            instance.aid == entry.aid && instance.identity == entry.identity));
         Ok(Vec::new())
     }
 }
@@ -227,6 +260,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     }
     fn abort_transaction(&mut self) {
         self.selected = None;
+        self.retained.clear();
     }
     fn globalplatform_load_active(&self) -> bool {
         self.upload.is_some()
@@ -310,9 +344,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     }
 
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
-        if let Some((_, mut session)) = self.selected.take() {
-            session.deselect(&mut self.provider, cancel)?;
-        }
+        self.park_selected(cancel)?;
         if cancel() {
             return Err(Error::Cancelled);
         }
@@ -342,24 +374,19 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         {
             return Err(Error::Missing);
         }
-        let mut reusable = None;
-        if let Some((previous, mut session)) = self.selected.take() {
-            session.deselect(&mut self.provider, cancel)?;
-            if previous == aid {
-                reusable = Some(session);
-            }
+        self.park_selected(cancel)?;
+        let identity = self.storage.registry.state()?.instances()
+            .find(|instance| instance.aid == aid).ok_or(Error::Missing)?.identity;
+        let mut session = self.storage.registry.open_session(
+            aid, &self.storage.images, &mut self.storage.heaps,
+            &self.storage.heap_key, &mut self.scratch, &mut self.provider,
+        )?;
+        if let Some(index) = self.retained.iter().position(|entry| entry.aid == aid) {
+            let cached = &self.retained[index];
+            if cached.identity != identity { return Err(Error::Storage); }
+            session.restore_volatile(&cached.state)?;
+            self.retained.remove(index);
         }
-        let mut session = match reusable {
-            Some(session) => session,
-            None => self.storage.registry.open_session(
-                aid,
-                &self.storage.images,
-                &mut self.storage.heaps,
-                &self.storage.heap_key,
-                &mut self.scratch,
-                &mut self.provider,
-            )?,
-        };
         let command = Command {
             cla: 0,
             ins: 0xa4,
@@ -370,9 +397,9 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         }
         .encode()?;
         let response = session.process(&command, true, &mut self.provider, cancel)?;
-        if session.selected()? {
-            self.selected = Some((aid, session));
-        }
+        let selected = session.selected()?;
+        self.selected = Some((aid, session));
+        if !selected { self.park_selected(cancel)?; }
         response_wire(response)
     }
 
