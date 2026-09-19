@@ -564,7 +564,15 @@ pub fn p256_signature_acceptable(public_key: &[u8], signature: &[u8]) -> bool {
 
 /// Validate a P-256 private scalar before dispatching to a hardware provider.
 pub fn p256_private_key_valid(private_key: &[u8; 32]) -> bool {
-    p256::SecretKey::from_slice(private_key).is_ok()
+    use subtle::ConstantTimeEq;
+    // Subtract the order across every byte. A final borrow means the scalar is smaller.
+    let mut borrow = 0u16;
+    for index in (0..32).rev() {
+        let difference = u16::from(private_key[index])
+            .wrapping_sub(u16::from(P256_ORDER[index]) + borrow);
+        borrow = difference >> 15;
+    }
+    bool::from(!private_key.ct_eq(&[0; 32]) & (borrow as u8).ct_eq(&1))
 }
 
 /// Return an uncompressed SEC1 public key without exposing the private scalar.
@@ -860,6 +868,30 @@ mod p256_tests {
 #[cfg(test)]
 mod signature_shape_tests {
     use super::*;
+
+    #[test]
+    fn scalar_order_boundaries_match_the_reference_parser() {
+        let mut below = P256_ORDER;
+        below[31] -= 1;
+        let mut above = P256_ORDER;
+        above[31] += 1;
+        let mut one = [0; 32];
+        one[31] = 1;
+        for (value, expected) in [
+            ([0; 32], false), (one, true), (below, true),
+            (P256_ORDER, false), (above, false), ([0xff; 32], false),
+        ] {
+            assert_eq!(p256_private_key_valid(&value), expected);
+            assert_eq!(p256_private_key_valid(&value), p256::SecretKey::from_slice(&value).is_ok());
+        }
+        for index in 0..32 {
+            for byte in 0..=255 {
+                let mut value = P256_ORDER;
+                value[index] = byte;
+                assert_eq!(p256_private_key_valid(&value), p256::SecretKey::from_slice(&value).is_ok());
+            }
+        }
+    }
 
     fn sign(seed: u8, message: &[u8]) -> ([u8; 65], [u8; 64]) {
         let private = [seed; 32];
