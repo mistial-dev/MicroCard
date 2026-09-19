@@ -36,6 +36,7 @@ const MAX_ENTRIES: usize = 8;
 struct Entries(Vec<(i32, Entry)>);
 
 impl Entries {
+    #[cfg(feature = "mc04")]
     pub(crate) fn try_clone_with(
         &self,
         context: &mut crate::fallible_clone::CloneContext,
@@ -185,7 +186,7 @@ pub struct KeyStore {
     entries: Entries,
 }
 impl KeyStore {
-    pub(crate) fn encode_state(&self, e: &mut crate::cbor::Encoder) -> Result<()> {
+    pub fn encode_state(&self, e: &mut crate::cbor::Encoder) -> Result<()> {
         e.array(self.entries.len())?;
         for (slot, entry) in &self.entries.0 {
             e.array(4)?; e.unsigned(*slot as u64)?;
@@ -195,7 +196,7 @@ impl KeyStore {
         Ok(())
     }
 
-    pub(crate) fn decode_state(d: &mut crate::cbor::Decoder<'_>) -> Result<Self> {
+    pub fn decode_state(d: &mut crate::cbor::Decoder<'_>) -> Result<Self> {
         let count = d.array(MAX_ENTRIES)?;
         let mut entries = Vec::new();
         entries.try_reserve_exact(count).map_err(|_| Error::Quota)?;
@@ -216,6 +217,7 @@ impl KeyStore {
         Ok(result)
     }
 
+    #[cfg(feature = "mc04")]
     pub(crate) fn try_clone_with(
         &self,
         context: &mut crate::fallible_clone::CloneContext,
@@ -225,10 +227,10 @@ impl KeyStore {
         })
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.entries.len()
     }
     pub fn validate(&self) -> Result<()> {
@@ -253,7 +255,7 @@ impl KeyStore {
         }
         Ok(())
     }
-    pub(crate) fn generate(
+    pub fn generate(
         &mut self,
         owner: [u8; 16],
         slot: i32,
@@ -304,7 +306,7 @@ impl KeyStore {
         self.entries.insert(slot, entry)?;
         self.open(owner, slot)
     }
-    pub(crate) fn open(&self, owner: [u8; 16], slot: i32) -> Result<Vec<u8>> {
+    pub fn open(&self, owner: [u8; 16], slot: i32) -> Result<Vec<u8>> {
         let entry = self.entries.get(&slot).ok_or(Error::Missing)?;
         let mut token = Vec::new();
         token.try_reserve_exact(32).map_err(|_| Error::Quota)?;
@@ -312,7 +314,7 @@ impl KeyStore {
         token.extend_from_slice(&entry.nonce);
         Ok(token)
     }
-    pub(crate) fn delete(&mut self, slot: i32) -> Result<()> {
+    pub fn delete(&mut self, slot: i32) -> Result<()> {
         self.entries.remove(&slot).ok_or(Error::Missing)?;
         Ok(())
     }
@@ -330,7 +332,7 @@ impl KeyStore {
         }
         Ok(&entry.key)
     }
-    pub(crate) fn hmac(
+    pub fn hmac(
         &self,
         owner: [u8; 16],
         token: &[u8],
@@ -345,7 +347,7 @@ impl KeyStore {
         )?;
         Ok(core::mem::take(&mut *output))
     }
-    pub(crate) fn cmac(
+    pub fn cmac(
         &self,
         owner: [u8; 16],
         token: &[u8],
@@ -362,7 +364,7 @@ impl KeyStore {
         )?;
         Ok(core::mem::take(&mut *output))
     }
-    pub(crate) fn cbc(
+    pub fn cbc(
         &self,
         owner: [u8; 16],
         token: &[u8],
@@ -402,7 +404,7 @@ impl KeyStore {
         output.truncate(length);
         Ok(core::mem::take(&mut *output))
     }
-    pub(crate) fn ccm(
+    pub fn ccm(
         &self,
         owner: [u8; 16],
         token: &[u8],
@@ -444,7 +446,7 @@ impl KeyStore {
         Ok(core::mem::take(&mut *output))
     }
 
-    pub(crate) fn p256_public_key(
+    pub fn p256_public_key(
         &self,
         owner: [u8; 16],
         token: &[u8],
@@ -458,7 +460,7 @@ impl KeyStore {
         Ok(core::mem::take(&mut *output))
     }
 
-    pub(crate) fn p256_sign(
+    pub fn p256_sign(
         &self,
         owner: [u8; 16],
         token: &[u8],
@@ -474,7 +476,7 @@ impl KeyStore {
         Ok(core::mem::take(&mut *output))
     }
 
-    pub(crate) fn p256_ecdh(
+    pub fn p256_ecdh(
         &self,
         owner: [u8; 16],
         token: &[u8],

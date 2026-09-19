@@ -18,7 +18,7 @@ const RECOGNITION_DATA: [u8; 38] = [
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct StatusCursor {
+pub struct StatusCursor {
     pub p1: u8,
     pub next: usize,
     aid: [u8; MAX_AID_BYTES],
@@ -77,7 +77,7 @@ fn parse_aid_qualifier(data: &[u8]) -> Result<&[u8]> {
     Ok(&data[2..2 + length])
 }
 
-pub(crate) fn is_isd_select(command: &crate::apdu::Command) -> bool {
+pub fn is_isd_select(command: &crate::apdu::Command) -> bool {
     command.cla == 0x00
         && command.ins == 0xa4
         && command.p1 == 0x04
@@ -85,7 +85,7 @@ pub(crate) fn is_isd_select(command: &crate::apdu::Command) -> bool {
         && (command.data.is_empty() || command.data.as_ref() == ISD_AID)
 }
 
-pub(crate) fn isd_fci() -> Result<Vec<u8>> {
+pub fn isd_fci() -> Result<Vec<u8>> {
     let mut response = Vec::new();
     response.try_reserve_exact(62).map_err(|_| Error::Quota)?;
     response.extend_from_slice(&[0x6f, 0x36, 0x84, 0x08]);
@@ -98,7 +98,7 @@ pub(crate) fn isd_fci() -> Result<Vec<u8>> {
     Ok(response)
 }
 
-pub(crate) fn card_recognition_data() -> Result<Vec<u8>> {
+pub fn card_recognition_data() -> Result<Vec<u8>> {
     let mut response = Vec::new();
     response.try_reserve_exact(44).map_err(|_| Error::Quota)?;
     response.extend_from_slice(&[0x66, RECOGNITION_DATA.len() as u8]);
@@ -106,7 +106,7 @@ pub(crate) fn card_recognition_data() -> Result<Vec<u8>> {
     Ok(response)
 }
 
-pub(crate) fn get_data(command: &crate::apdu::Command) -> Result<Option<Vec<u8>>> {
+pub fn get_data(command: &crate::apdu::Command) -> Result<Option<Vec<u8>>> {
     if command.ins != 0xca || !command.data.is_empty() {
         return Ok(None);
     }
@@ -116,7 +116,7 @@ pub(crate) fn get_data(command: &crate::apdu::Command) -> Result<Option<Vec<u8>>
     Ok(None)
 }
 
-pub(crate) fn ssd_install_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Result<&'a [u8]> {
+pub fn ssd_install_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Result<&'a [u8]> {
     if command.ins != 0xe6 || command.p1 != 0x0c || command.p2 != 0 {
         return Err(Error::Format);
     }
@@ -143,7 +143,7 @@ pub(crate) fn ssd_install_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Resu
     Ok(instance)
 }
 
-pub(crate) struct ApplicationInstall<'a> {
+pub struct ApplicationInstall<'a> {
     pub load_aid: &'a [u8],
     /// The AID this instance answers to. GlobalPlatform lets it differ from the module AID,
     /// and lets one module back several instances, which applets rely on to tell which
@@ -151,7 +151,7 @@ pub(crate) struct ApplicationInstall<'a> {
     pub instance_aid: &'a [u8],
 }
 
-pub(crate) fn application_install<'a>(
+pub fn application_install<'a>(
     command: &'a crate::apdu::Command<'_>,
 ) -> Result<ApplicationInstall<'a>> {
     if command.ins != 0xe6 || command.p1 != 0x0c || command.p2 != 0 {
@@ -208,7 +208,7 @@ fn install_parameter_value(parameters: &[u8]) -> Result<&[u8]> {
     Ok(&parameters[2..])
 }
 
-pub(crate) struct LoadRequest<'a> {
+pub struct LoadRequest<'a> {
     pub load_aid: &'a [u8],
     pub domain_aid: &'a [u8],
     /// The Load File Data Block Hash, which GlobalPlatform makes optional and which
@@ -218,7 +218,7 @@ pub(crate) struct LoadRequest<'a> {
     pub hash: Option<[u8; 32]>,
 }
 
-pub(crate) fn load_request<'a>(
+pub fn load_request<'a>(
     command: &'a crate::apdu::Command<'_>,
 ) -> Result<LoadRequest<'a>> {
     if command.ins != 0xe6 || command.p1 != 0x02 || command.p2 != 0 {
@@ -257,7 +257,7 @@ pub(crate) fn load_request<'a>(
 
 /// Parse the C4 Load File Data Block prefix from the first LOAD command.
 /// Later command data contains only the remaining value bytes.
-pub(crate) fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
+pub fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
     if data.first().copied() != Some(0xc4) {
         return Err(Error::Format);
     }
@@ -283,7 +283,7 @@ pub(crate) fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
         }
         _ => return Err(Error::Format),
     };
-    if length > crate::package::MAX_PACKAGE_BYTES {
+    if length > crate::staging::MAX_PACKAGE_BYTES {
         return Err(Error::Quota);
     }
     Ok((length, &data[header..]))
@@ -295,7 +295,7 @@ pub(crate) fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
 /// bytes rather than from anything the host declared. Both formats begin with a fixed
 /// magic, and the two cannot collide.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Payload {
+pub enum Payload {
     /// A signed MP05 package for the CIL engine.
     Mp04,
     /// A Java Card package, whose load file leads with the Header component.
@@ -306,7 +306,7 @@ pub(crate) enum Payload {
 ///
 /// A Java Card load file begins with the Header component, JCVM §6.3, which is the tag
 /// `0x01`, a two byte size and then the magic `DECAFFED`.
-pub(crate) fn payload_kind(value: &[u8]) -> Result<Payload> {
+pub fn payload_kind(value: &[u8]) -> Result<Payload> {
     if value.starts_with(b"MP05") {
         return Ok(Payload::Mp04);
     }
@@ -316,7 +316,7 @@ pub(crate) fn payload_kind(value: &[u8]) -> Result<Payload> {
     Err(Error::Format)
 }
 
-pub(crate) fn delete_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Result<&'a [u8]> {
+pub fn delete_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Result<&'a [u8]> {
     if command.ins != 0xe4 || command.p1 != 0 || !matches!(command.p2, 0 | 0x80) {
         return Err(Error::Format);
     }
@@ -339,11 +339,11 @@ fn take_lv<'a>(data: &'a [u8], offset: &mut usize) -> Result<&'a [u8]> {
     Ok(value)
 }
 
-pub(crate) fn aid_matches(candidate: &[u8], filter: &[u8]) -> bool {
+pub fn aid_matches(candidate: &[u8], filter: &[u8]) -> bool {
     filter.is_empty() || candidate.starts_with(filter)
 }
 
-pub(crate) fn synthetic_aid(kind: u8, stable: &[u8]) -> [u8; 16] {
+pub fn synthetic_aid(kind: u8, stable: &[u8]) -> [u8; 16] {
     debug_assert!(stable.len() >= 10);
     let mut aid = [0; 16];
     aid[..6].copy_from_slice(&[0xa0, 0x00, 0x00, 0x01, 0x51, kind]);
@@ -351,7 +351,7 @@ pub(crate) fn synthetic_aid(kind: u8, stable: &[u8]) -> [u8; 16] {
     aid
 }
 
-pub(crate) fn push_tlv(out: &mut Vec<u8>, tag: &[u8], value: &[u8]) -> Result<()> {
+pub fn push_tlv(out: &mut Vec<u8>, tag: &[u8], value: &[u8]) -> Result<()> {
     if value.len() > 255 {
         return Err(Error::Quota);
     }
@@ -373,7 +373,7 @@ pub(crate) fn push_tlv(out: &mut Vec<u8>, tag: &[u8], value: &[u8]) -> Result<()
     Ok(())
 }
 
-pub(crate) fn template(body: Vec<u8>) -> Result<Vec<u8>> {
+pub fn template(body: Vec<u8>) -> Result<Vec<u8>> {
     let encoded_len = 1usize
         .checked_add(if body.len() < 0x80 { 1 } else { 2 })
         .and_then(|length| length.checked_add(body.len()))

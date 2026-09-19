@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub use envelope::{CONTEXT, HEADER_BYTES};
 /// The image digest, uncompressed SEC1 key, and P1363 signature in the descriptor.
 pub const SUFFIX_BYTES: usize = envelope::OVERHEAD_BYTES - HEADER_BYTES;
-pub const MAX_PACKAGE_BYTES: usize = 16 * 1024;
+pub use crate::staging::MAX_PACKAGE_BYTES;
 pub const MAX_STORAGE_DECLARATIONS: usize = 64;
 pub const MAX_DECLARED_BLOB_BYTES: u16 = 2048;
 

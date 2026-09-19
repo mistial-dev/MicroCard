@@ -4,12 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [features]
-default = ["software-crypto", "scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
+default = ["mc04", "software-crypto", "scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
 software-crypto = ["software-sha256", "software-hmac", "software-aes", "software-p256"]
 software-sha256 = ["dep:sha2"]
 software-hmac = ["dep:hmac", "dep:sha2"]
 software-aes = ["dep:aes", "dep:cmac", "dep:ccm"]
 software-p256 = ["dep:p256"]
+mc04 = []
 fuzzing = []
 hal-conformance = []
 # Optional SCP03 capabilities. The advertised i parameter and the accepted security

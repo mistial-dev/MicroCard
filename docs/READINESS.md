@@ -8,6 +8,13 @@ The .NET path compiles, verifies, signs, installs, and runs MC04 applications in
 
 JCVM runs the supported applet corpus in the simulator. It still needs the board loading, persistence, and shared security-service integration described in [JCVM profile](JCVM_PROFILE.md). Neither a linked image nor host acceptance establishes hardware behavior.
 
+The shared APDU endpoint is generic over `CardEngine`. It owns SCP03 authentication,
+session reset, cancellation, and response protection; engine adapters receive verified
+commands and raw AIDs. The core's `mc04` feature includes its loader and interpreter.
+Disabling it leaves transport, journal, crypto, and hardware contracts available without
+compiling MC04. Quick validation exercises that configuration with an independent test
+engine. This boundary does not yet supply JCVM's durable management adapter or board profile.
+
 ## Required implementation work
 
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
@@ -20,7 +27,7 @@ CBOR removes device JSON parsing and canonical re-encoding. The snapshot migrati
 
 ## Crypto replacement measurements
 
-`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 182,516 text bytes, SHA-256 replacement 185,212, SHA-256 plus P-256 199,300, and all hardware providers 208,328. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
+`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 182,584 text bytes, SHA-256 replacement 185,292, SHA-256 plus P-256 199,356, and all hardware providers 208,392. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
 
 For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
 

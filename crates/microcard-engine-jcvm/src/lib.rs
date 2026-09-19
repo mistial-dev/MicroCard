@@ -1,7 +1,7 @@
 //! Java Card execution engine, per [docs/JCVM_PROFILE.md](../../../docs/JCVM_PROFILE.md).
 //!
-//! The CAP container and the bytecode decoder are implemented. There is no linker or
-//! interpreter yet, and nothing on the card reaches this crate.
+//! CAP verification, linking, and interpretation run in host acceptance. Board loading
+//! and durable state integration remain outside this engine.
 #![no_std]
 extern crate alloc;
 pub mod applet;

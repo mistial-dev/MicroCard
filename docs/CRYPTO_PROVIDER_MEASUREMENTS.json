@@ -4,7 +4,7 @@
   "device_latency_measured": false,
   "stages": {
     "software": {
-      "text_bytes": 182516,
+      "text_bytes": 182584,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "software_dependencies": [
@@ -23,7 +23,7 @@
       ]
     },
     "sha256": {
-      "text_bytes": 185212,
+      "text_bytes": 185292,
       "data_bytes": 128,
       "bss_bytes": 196668,
       "software_dependencies": [
@@ -45,7 +45,7 @@
       ]
     },
     "p256": {
-      "text_bytes": 199300,
+      "text_bytes": 199356,
       "data_bytes": 144,
       "bss_bytes": 197692,
       "software_dependencies": [
@@ -64,7 +64,7 @@
       ]
     },
     "hardware": {
-      "text_bytes": 208328,
+      "text_bytes": 208392,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "software_dependencies": [],

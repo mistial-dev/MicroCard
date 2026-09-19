@@ -17,6 +17,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 pub use crate::hal::RuntimePlatform as Platform;
 mod snapshot;
+mod engine;
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
 const MAX_SSDS: usize = 8;

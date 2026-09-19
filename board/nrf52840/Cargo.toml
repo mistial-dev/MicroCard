@@ -33,7 +33,7 @@ cc310-ccm = ["cc310-aes"]
 cc310-p256 = ["cc310-entropy"]
 
 [dependencies]
-microcard-core = { path = "../../crates/microcard-core", default-features = false, features = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"] }
+microcard-core = { path = "../../crates/microcard-core", default-features = false, features = ["mc04", "scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"] }
 cortex-m = {version="0.7", features=["critical-section-single-core"]}
 cortex-m-rt = "0.7"
 embedded-alloc = "0.6"

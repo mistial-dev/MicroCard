@@ -1,6 +1,8 @@
 //! Bounded upload staging with volatile and flash-backed implementations.
 
-use crate::{Error, Result, hal::StagingFlash, package::MAX_PACKAGE_BYTES};
+pub const MAX_PACKAGE_BYTES: usize = 16 * 1024;
+
+use crate::{Error, Result, hal::StagingFlash};
 use alloc::vec::Vec;
 
 pub trait PackageStaging {

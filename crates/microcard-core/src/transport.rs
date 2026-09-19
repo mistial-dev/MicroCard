@@ -2,11 +2,9 @@
 use crate::{
     Error, Result,
     apdu::Command,
-    domains::{Card, Platform},
+    engine::CardEngine,
     globalplatform::{self, StatusCursor},
-    journal::Flash,
     scp03::{Keys, Session},
-    staging::{PackageStaging, RamStaging},
 };
 use alloc::vec::Vec;
 
@@ -23,14 +21,14 @@ fn fixed_response_or_empty(bytes: &[u8]) -> Vec<u8> {
     fixed_response(bytes).unwrap_or_default()
 }
 
-pub struct Endpoint<F: Flash, P: Platform, S: PackageStaging = RamStaging> {
-    card: Card<F, P, S>,
+pub struct Endpoint<C: CardEngine> {
+    card: C,
     keys: Keys,
     session: Option<Session>,
     status_cursor: Option<StatusCursor>,
 }
-impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
-    pub fn new(card: Card<F, P, S>, keys: Keys) -> Self {
+impl<C: CardEngine> Endpoint<C> {
+    pub fn new(card: C, keys: Keys) -> Self {
         Self {
             card,
             keys,
@@ -241,9 +239,8 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
         self.status_cursor = None;
         let result = match verified.command().ins {
             0xa4 => {
-                let aid = crate::domains::encode_aid(&verified.command().data)?;
                 self.card
-                    .select_with_cancel(&aid, should_cancel)
+                    .select_aid_with_cancel(&verified.command().data, should_cancel)
                     .map(|_| Vec::new())
             }
             0x10 => {
@@ -251,6 +248,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
                     .card
                     .process_verified_with_cancel(verified, should_cancel)?;
                 let n = r.len();
+                if n < 2 { return Err(Error::Format); }
                 return s.response_with(
                     &r[..n - 2],
                     u16::from_be_bytes([r[n - 2], r[n - 1]]),
@@ -276,11 +274,11 @@ fn globalplatform_management_status(error: &Error) -> u16 {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mc04"))]
 mod tests {
     use super::*;
     use alloc::vec;
-    use crate::journal::MemoryFlash;
+    use crate::{journal::MemoryFlash, domains::Card};
 
     struct TestPlatform;
     impl crate::crypto::CryptoProvider for TestPlatform {}
@@ -296,7 +294,7 @@ mod tests {
         }
     }
 
-    fn endpoint() -> Endpoint<MemoryFlash, TestPlatform> {
+    fn endpoint() -> Endpoint<Card<MemoryFlash, TestPlatform>> {
         Endpoint::new(
             Card::open(MemoryFlash::new(16384), TestPlatform, [0x33; 16]).unwrap(),
             Keys {
@@ -337,7 +335,7 @@ mod tests {
     fn the_sequence_counter_advances_and_never_repeats_across_a_restart() {
         use crate::scp03::{CHALLENGE_BYTES, SEQUENCE_BYTES};
         let offset = 13 + 2 * CHALLENGE_BYTES;
-        let initialize_update = |endpoint: &mut Endpoint<MemoryFlash, TestPlatform>| {
+        let initialize_update = |endpoint: &mut Endpoint<Card<MemoryFlash, TestPlatform>>| {
             let mut command = vec![0x80, 0x50, 0, 0, CHALLENGE_BYTES as u8];
             command.extend(core::iter::repeat_n(0x77, CHALLENGE_BYTES));
             command.push(0);

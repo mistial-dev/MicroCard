@@ -43,15 +43,15 @@ impl<'a> Decoder<'a> {
         Ok(value)
     }
 
-    pub(crate) fn number<T: TryFrom<u64>>(&mut self) -> Result<T> {
+    pub fn number<T: TryFrom<u64>>(&mut self) -> Result<T> {
         T::try_from(self.unsigned()?).map_err(|_| Error::Format)
     }
 
-    pub(crate) fn fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+    pub fn fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         self.bytes(N)?.try_into().map_err(|_| Error::Format)
     }
 
-    pub(crate) fn owned_text(&mut self, maximum: usize) -> Result<String> {
+    pub fn owned_text(&mut self, maximum: usize) -> Result<String> {
         let text = self.text(maximum)?;
         let mut output = String::new();
         output

@@ -2,19 +2,29 @@
 extern crate alloc;
 pub mod apdu;
 pub mod cbor;
+#[cfg(feature = "mc04")]
 pub mod assembly;
 pub mod crypto;
+#[cfg(feature = "mc04")]
 mod credential_store;
+#[cfg(feature = "mc04")]
 pub mod domains;
+#[cfg(feature = "mc04")]
 mod fallible_clone;
 pub mod journal;
+#[cfg(feature = "mc04")]
 pub mod mc04_imports;
 #[allow(dead_code)]
+#[cfg(feature = "mc04")]
 mod mc04_opcodes;
 #[allow(dead_code)]
+#[cfg(feature = "mc04")]
 mod mc04_schema;
+#[cfg(feature = "mc04")]
 pub mod mc04_vm;
+#[cfg(feature = "mc04")]
 pub mod native_abi;
+#[cfg(feature = "mc04")]
 pub mod package;
 pub mod provisioning;
 pub mod scp03;
@@ -44,6 +54,7 @@ pub enum Error {
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub mod transport;
+pub mod engine;
 
 pub mod key_store;
 

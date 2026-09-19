@@ -50,7 +50,7 @@ def oracle(features):
 
 
 def run(features, check_only):
-    arguments = ["--no-default-features", "--features", ",".join(["software-crypto", *features])]
+    arguments = ["--no-default-features", "--features", ",".join(["mc04", "software-crypto", *features])]
     command = ["cargo", "test" if not check_only else "check", "-p", CRATE, "--lib", "--release", *arguments]
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     return result.returncode == 0, result.stdout + result.stderr
