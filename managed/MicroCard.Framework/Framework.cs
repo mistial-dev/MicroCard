@@ -123,3 +123,18 @@ public sealed class KeyHandle {
 }
 
 public static class KeyAlgorithms { public const int HmacSha256=1; public const int Aes128=2; public const int P256=3; }
+
+
+public static class Buffers
+{
+    public static bool Copy(byte[] source, int sourceOffset, byte[] destination,
+        int destinationOffset, int length)
+    {
+        if (sourceOffset < 0 || destinationOffset < 0 || length < 0 ||
+            sourceOffset > source.Length || length > source.Length - sourceOffset ||
+            destinationOffset > destination.Length || length > destination.Length - destinationOffset)
+            return false;
+        System.Array.Copy(source, sourceOffset, destination, destinationOffset, length);
+        return true;
+    }
+}

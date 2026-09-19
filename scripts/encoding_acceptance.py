@@ -31,7 +31,7 @@ def main():
     provider = json.loads(provider_metadata.read_text())
     consumer = json.loads(consumer_metadata.read_text())
     assert provider["assembly"] == "MicroCard.Encoding"
-    assert provider["capabilities"] == [] and provider["entry_points"] == []
+    assert provider["capabilities"] == [53] and provider["entry_points"] == []
     dependency = consumer["dependencies"][0]
     assert dependency["assembly"] == "MicroCard.Encoding"
     assert dependency["scope"] == 1 and bytes(dependency["signer"]) == ISD_PUBLIC

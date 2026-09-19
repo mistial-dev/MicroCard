@@ -145,6 +145,24 @@ impl Heap {
             .ok_or(Error::Bounds)
     }
 
+    pub(crate) fn copy_bytes(
+        &mut self,
+        source: RuntimeValue,
+        source_offset: usize,
+        destination: RuntimeValue,
+        destination_offset: usize,
+        length: usize,
+    ) -> Result<()> {
+        microcard_memory::byte_range(self.bytes(source)?.len(), source_offset, length)
+            .ok_or(Error::Bounds)?;
+        microcard_memory::byte_range(self.bytes(destination)?.len(), destination_offset, length)
+            .ok_or(Error::Bounds)?;
+        let source = self.info(source)?.0 + HEADER + source_offset;
+        let destination = self.info(destination)?.0 + HEADER + destination_offset;
+        microcard_memory::copy_bytes(&mut self.data, source, destination, length)
+            .ok_or(Error::Bounds)
+    }
+
     pub(super) fn array_length(&self, handle: RuntimeValue) -> Result<usize> {
         let (_, kind, length) = self.info(handle)?;
         if kind == STRUCT {

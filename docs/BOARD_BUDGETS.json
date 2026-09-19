@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "production": {
-      "text_bytes": 183888,
+      "text_bytes": 184496,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 183920,
+      "text_bytes": 184528,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 195916,
+      "text_bytes": 196528,
       "data_bytes": 0,
       "bss_bytes": 197224,
       "ceilings": {
@@ -33,7 +33,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 195576,
+      "text_bytes": 196176,
       "data_bytes": 0,
       "bss_bytes": 197224,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 129388,
+      "text_bytes": 129568,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 139148,
+      "text_bytes": 139328,
       "data_bytes": 0,
       "bss_bytes": 197224,
       "ceilings": {

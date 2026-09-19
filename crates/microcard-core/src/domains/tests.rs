@@ -2709,7 +2709,7 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
     let mut keys = crate::key_store::KeyStore::default();
     let mut credentials = crate::credential_store::CredentialStore::default();
     let mut platform = TestPlatform(0);
-    let capabilities = [12, 13];
+    let capabilities = [12, 13, 53];
     let mut transaction = TransactionDisposition::Inactive;
     let mut host = Host {
         store: &mut store,
@@ -2762,7 +2762,18 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
     assert_eq!(host.out, b"bc");
     assert_eq!(host.budget, 25);
 
+    assert!(host.copy_bytes(&mut heap, destination, 0, destination, 1, 4).unwrap());
+    assert_eq!(heap.bytes(destination).unwrap(), b"\0\0bcd");
+    assert_eq!(host.budget, 20);
+    assert!(!host.copy_bytes(&mut heap, destination, -1, destination, 0, 1).unwrap());
+    assert!(!host.copy_bytes(&mut heap, destination, 0, destination, 4, 2).unwrap());
+    assert_eq!(heap.bytes(destination).unwrap(), b"\0\0bcd");
+    host.budget = 2;
+    assert_eq!(host.copy_bytes(&mut heap, destination, 0, destination, 0, 3), Err(Error::Budget));
+    assert_eq!(heap.bytes(destination).unwrap(), b"\0\0bcd");
+    host.budget = 25;
     host.capabilities = &[];
+    assert_eq!(host.copy_bytes(&mut heap, destination, 0, destination, 0, 1), Err(Error::Unauthorized));
     assert_eq!(
         host.copy_command(&mut heap, destination, 0, 0, 1),
         Err(Error::Unauthorized)

@@ -306,8 +306,7 @@ impl<'a> Heap<'a> {
         self.byte_slice(destination, destination_offset, length)?;
         let source = source as usize + HEADER + source_offset;
         let destination = destination as usize + HEADER + destination_offset;
-        self.bytes.copy_within(source..source + length, destination);
-        Ok(())
+        microcard_memory::copy_bytes(self.bytes, source, destination, length).ok_or(Error::Bounds)
     }
 
     pub fn byte_slice_mut(

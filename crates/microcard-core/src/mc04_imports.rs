@@ -176,6 +176,11 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
         {
             Import::Native(12)
         }
+        ("Buffers", "Copy")
+            if exact(&types, false, &[byte_array, int, byte_array, int, int], Some(int)) =>
+        {
+            Import::Native(53)
+        }
         ("ResponseApdu", "Write")
             if exact(&types, false, &[byte_array, int, int], None) =>
         {

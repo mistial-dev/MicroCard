@@ -7,24 +7,8 @@ public static class ByteBuffer
         length <= bufferLength - offset;
 
     public static bool Copy(byte[] source, int sourceOffset, byte[] destination,
-        int destinationOffset, int length)
-    {
-        if (!Contains(source.Length, sourceOffset, length) ||
-            !Contains(destination.Length, destinationOffset, length))
-            return false;
-        if (source == destination && destinationOffset > sourceOffset &&
-            destinationOffset - sourceOffset < length)
-        {
-            for (int index = length - 1; index >= 0; index--)
-                destination[destinationOffset + index] = source[sourceOffset + index];
-        }
-        else
-        {
-            for (int index = 0; index < length; index++)
-                destination[destinationOffset + index] = source[sourceOffset + index];
-        }
-        return true;
-    }
+        int destinationOffset, int length) =>
+        MicroCard.Framework.Buffers.Copy(source, sourceOffset, destination, destinationOffset, length);
 
     public static bool Fill(byte[] destination, int offset, int length, byte value)
     {

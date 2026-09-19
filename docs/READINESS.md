@@ -64,7 +64,7 @@ decreases from 149,456 to 129,328 bytes on the DK and from 159,216 to 139,088 on
 dongle. Static RAM is unchanged. These internal identities do not change CAP tokens
 or the package/token class words stored in applet heaps.
 
-CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,404-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. The JCVM lifecycle now has host allocation measurements in [its profile](JCVM_PROFILE.md#memory-placement). Device heap high-water and latency remain unmeasured.
+CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,406-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. The JCVM lifecycle now has host allocation measurements in [its profile](JCVM_PROFILE.md#memory-placement). Device heap high-water and latency remain unmeasured.
 
 MC04 invocation and pending transactions now stage only the owning domain's mutable
 records, keys, and credentials. Retry-floor commits stage only credentials. Selection
@@ -138,8 +138,17 @@ across chunk boundaries and could partially modify an invalid destination. The e
 copy test now covers both overlap directions beyond that boundary, empty end ranges,
 and unchanged data on rejected ranges. Against `08cff1e`, the fix adds 36 JCVM text
 bytes on each board layout, removes the explicit 256-byte stack buffer, and leaves
-static RAM unchanged. Physical stack and latency benefits remain unmeasured. Sharing
-this operation with MC04 and native work charging remain implementation work.
+static RAM unchanged. Physical stack and latency benefits remain unmeasured. The subsequent shared service now serves both engines. MC04 capability 53 replaces
+byte loops in the core-library and DER wrappers, charging one native work unit per call
+plus one per copied byte before writing. JCVM charges copied bytes against its existing
+execution budget, in addition to the call instruction. Both engines retain their own
+handle, access, and error checks. Existing copy tests cover budget exhaustion without
+buffer mutation. The two managed code sections each shrink by 82 bytes, but import
+metadata increases the complete default bundle by 62 bytes. Against `b9b90fd`,
+development firmware text grows by 608 bytes for MC04 and 180 bytes for JCVM,
+with unchanged static RAM. The default policy adds capability 53, increasing the
+two-domain credential snapshot by two bytes. Native DER/BER-TLV parsing
+and device latency measurements remain outstanding.
 
 ## Crypto replacement measurements
 

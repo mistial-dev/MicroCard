@@ -16,3 +16,10 @@ Package authorization and package signatures are independent. Only an authentica
 
 
 The framework supplies a device-focused `mscorlib`. Host and device heap allocation charge six header bytes, two handle bytes, and an even-sized payload per object. Byte elements use one byte; Int32 elements and sealed-object fields use four. Quota decisions agree across 32-bit and 64-bit platforms. Native cryptography has weighted work costs in addition to VM fuel.
+
+Native capability 53 binds `MicroCard.Framework.Buffers.Copy(byte[], int, byte[], int, int)`.
+It returns false for invalid numeric ranges and performs no write. Valid calls support
+both overlap directions and empty end ranges. The MC04 native budget pays one unit per
+call plus one per copied byte, before mutation; missing capability or insufficient
+budget remains a command error. The core-library byte-copy and DER-copy wrappers use
+this service. Capability 21 remains reserved.

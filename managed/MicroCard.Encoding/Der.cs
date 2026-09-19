@@ -216,19 +216,8 @@ public static class Der
         return header + valueLength;
     }
 
-    private static bool Copy(byte[] output, int destination, byte[] value, int source, int length)
-    {
-        if (!Bounds.Contains(output.Length, destination, length) ||
-            !Bounds.Contains(value.Length, source, length))
-            return false;
-        if (output == value && destination > source && destination < source + length)
-            for (int index = length - 1; index >= 0; index--)
-                output[destination + index] = value[source + index];
-        else
-            for (int index = 0; index < length; index++)
-                output[destination + index] = value[source + index];
-        return true;
-    }
+    private static bool Copy(byte[] output, int destination, byte[] value, int source, int length) =>
+        MicroCard.Framework.Buffers.Copy(value, source, output, destination, length);
 
     private static int ReadLength(byte[] input, int offset, int end)
     {

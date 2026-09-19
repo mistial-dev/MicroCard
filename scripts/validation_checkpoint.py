@@ -72,7 +72,7 @@ def run_checkpoint(jobs=1):
  iso_manifest=json.loads((ROOT/'work/iso7816.json').read_text())
  assert iso_manifest['assembly']=='MicroCard.Iso7816' and iso_manifest['capabilities']==[] and iso_manifest['entry_points']==[]
  encoding_manifest=json.loads((ROOT/'work/encoding.json').read_text())
- assert encoding_manifest['assembly']=='MicroCard.Encoding' and encoding_manifest['capabilities']==[] and encoding_manifest['entry_points']==[]
+ assert encoding_manifest['assembly']=='MicroCard.Encoding' and encoding_manifest['capabilities']==[53] and encoding_manifest['entry_points']==[]
  encoding_consumer=json.loads((ROOT/'work/encoding-consumer.json').read_text())
  assert encoding_consumer['capabilities']==[2,11,12,13] and encoding_consumer['dependencies'][0]['assembly']=='MicroCard.Encoding'
  cryptography_manifest=json.loads((ROOT/'work/cryptography.json').read_text())

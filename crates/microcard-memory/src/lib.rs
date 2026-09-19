@@ -21,3 +21,22 @@ pub fn allocation_range(
     let end = used.checked_add(size)?;
     (end <= limit).then_some(used..end)
 }
+
+/// Validate a complete slice range, including empty ranges at its end.
+pub fn byte_range(size: usize, offset: usize, length: usize) -> Option<Range<usize>> {
+    let end = offset.checked_add(length)?;
+    (end <= size).then_some(offset..end)
+}
+
+/// Copy validated ranges in one slab using the CPU's overlap-safe memory operation.
+pub fn copy_bytes(
+    bytes: &mut [u8],
+    source: usize,
+    destination: usize,
+    length: usize,
+) -> Option<()> {
+    let source = byte_range(bytes.len(), source, length)?;
+    byte_range(bytes.len(), destination, length)?;
+    bytes.copy_within(source, destination);
+    Some(())
+}

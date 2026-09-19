@@ -200,6 +200,7 @@ sealed class Compiler : IDisposable
                 ("CommandApdu", "get_Length") => 11,
                 ("CommandApdu", "CopyTo") => 12,
                 ("ResponseApdu", "Write") => 13,
+                ("Buffers", "Copy") => 53,
                 ("Cryptography", "Sha256") => 20,
                               ("DomainKeys", "Generate") => 22,
                 ("DomainKeys", "Open") => 23,

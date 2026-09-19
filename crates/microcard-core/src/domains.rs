@@ -1031,9 +1031,9 @@ struct DomainPolicy {
 impl DomainPolicy {
     fn standard() -> Result<Self> {
         let mut capabilities = Vec::new();
-        capabilities.try_reserve_exact(44).map_err(|_| Error::Quota)?;
+        capabilities.try_reserve_exact(45).map_err(|_| Error::Quota)?;
         // 21 was the Ed25519 verification primitive, which the card no longer carries.
-        capabilities.extend((2..=13).chain(core::iter::once(20)).chain(22..=52));
+        capabilities.extend((2..=13).chain(core::iter::once(20)).chain(22..=53));
         Ok(Self {
             capabilities,
             max_assemblies: MAX_ASSEMBLIES_PER_DOMAIN,
@@ -3310,6 +3310,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
                 )?;
                 BufferResult::Void
             }
+            (53, [source, Int(source_offset), destination, Int(destination_offset), Int(length)]) => {
+                let copied = self.copy_bytes(heap, *source, *source_offset, *destination, *destination_offset, *length)?;
+                BufferResult::Scalar(i32::from(copied))
+            }
             (13, [source, Int(source_offset), Int(length)]) => {
                 self.write_response(heap, *source, *source_offset, *length)?;
                 BufferResult::Void
@@ -4037,6 +4041,23 @@ impl<P: Platform> Host<'_, P> {
         }
         self.budget -= cost;
         Ok((left.len() == right.len() && bool::from(left.ct_eq(right))) as i32)
+    }
+
+    fn copy_bytes(
+        &mut self, heap: &mut crate::mc04_vm::Heap,
+        source: crate::mc04_vm::RuntimeValue, source_offset: i32,
+        destination: crate::mc04_vm::RuntimeValue, destination_offset: i32, length: i32,
+    ) -> Result<bool> {
+        self.charge(53, 0)?;
+        let (Ok(source_offset), Ok(destination_offset), Ok(length)) = (
+            usize::try_from(source_offset), usize::try_from(destination_offset), usize::try_from(length),
+        ) else { return Ok(false); };
+        if microcard_memory::byte_range(heap.bytes(source)?.len(), source_offset, length).is_none()
+            || microcard_memory::byte_range(heap.bytes(destination)?.len(), destination_offset, length).is_none()
+        { return Ok(false); }
+        self.budget = self.budget.checked_sub(length).ok_or(Error::Budget)?;
+        heap.copy_bytes(source, source_offset, destination, destination_offset, length)?;
+        Ok(true)
     }
 
     fn copy_command(

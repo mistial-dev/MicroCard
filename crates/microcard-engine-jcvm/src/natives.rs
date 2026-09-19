@@ -142,17 +142,27 @@ pub enum Native {
     Unimplemented,
 }
 
+#[cfg(test)]
+pub fn call(
+    target: ApiTarget, heap: &mut Heap, host: &mut dyn crate::host::Host,
+    frame: &mut Frame, context: heap::Context, jcre: &mut Jcre,
+) -> Result<Native> {
+    let mut budget = u32::MAX;
+    call_with_budget(target, heap, host, frame, context, jcre, &mut budget)
+}
+
 /// Call an API method.
 ///
 /// Arguments are on the frame's stack, receiver first as in any instance call, and a
 /// result is left there the same way.
-pub fn call(
+pub fn call_with_budget(
     target: ApiTarget,
     heap: &mut Heap,
     host: &mut dyn crate::host::Host,
     frame: &mut Frame,
     context: heap::Context,
     jcre: &mut Jcre,
+    budget: &mut u32,
 ) -> Result<Native> {
     let package = target.package.id;
     let class = target.class.id;
@@ -182,7 +192,7 @@ pub fn call(
             frame.push_short(reason as i16)?;
             Ok(Native::Returned)
         }
-        (PackageId::javacard_framework, ClassId::Util, name) => util(name, heap, frame, context),
+        (PackageId::javacard_framework, ClassId::Util, name) => util(name, heap, frame, context, budget),
         (PackageId::javacard_framework, ClassId::APDU, name) => {
             apdu(name, heap, frame, jcre, context)
         }
@@ -443,7 +453,7 @@ pub fn new_exception(heap: &mut Heap, name: ClassId, context: heap::Context) -> 
 
 /// `javacard.framework.Util`, JCRE §3. Every method here works on arrays the applet owns,
 /// so every access goes through the firewall like any other.
-fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Context) -> Result<Native> {
+fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Context, budget: &mut u32) -> Result<Native> {
     match name {
         MethodId::makeShort => {
             let low = frame.pop_short()?;
@@ -476,6 +486,9 @@ fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Conte
             heap.check_access(source, context)?;
             heap.check_access(destination, context)?;
             let length = index(length)?;
+            heap.byte_slice(source, index(source_offset)?, length)?;
+            heap.byte_slice(destination, index(destination_offset)?, length)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             heap.copy_bytes(
                 source, index(source_offset)?, destination, index(destination_offset)?, length,
             )?;
@@ -758,16 +771,30 @@ mod tests {
             frame.push_reference(array).unwrap();
             frame.push_short(destination).unwrap();
             frame.push_short(length).unwrap();
-            call(
+            let mut budget = length as u32;
+            call_with_budget(
                 framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
-                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(),
+                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget,
             ).unwrap();
+            assert_eq!(budget, 0);
             assert_eq!(frame.pop_short().unwrap(), destination + length);
             let mut expected = before;
             expected.copy_within(source as usize..(source + length) as usize, destination as usize);
             assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), expected);
         }
         let before = heap.byte_slice(array, 0, 600).unwrap().to_vec();
+        frame.push_reference(array).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(1).unwrap();
+        frame.push_short(599).unwrap();
+        let mut budget = 598;
+        assert!(matches!(call_with_budget(
+            framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
+            &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget,
+        ), Err(Error::Quota)));
+        assert_eq!(budget, 598);
+        assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), before);
         assert_eq!(heap.copy_bytes(array, 0, array, 1, 600), Err(Error::Bounds));
         assert_eq!(heap.copy_bytes(array, usize::MAX, array, 0, 1), Err(Error::Bounds));
         assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), before);

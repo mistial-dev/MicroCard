@@ -5,9 +5,12 @@ from collections import Counter
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TOKENS = (".clone()", ".to_vec()", ".to_owned()", "Vec::from(", "extend_from_slice(", "copy_from_slice(")
+TOKENS = (".clone()", ".to_vec()", ".to_owned()", "Vec::from(", "extend_from_slice(", "copy_from_slice(", "copy_within(")
 
 AUDITED = {
+    "crates/microcard-memory/src/lib.rs": [
+        "bytes.copy_within(source, destination);",
+    ],
     "crates/microcard-core/src/package.rs": [
         "raw.extend_from_slice(verified.raw);",
         "&self.raw[self.image.clone()]",

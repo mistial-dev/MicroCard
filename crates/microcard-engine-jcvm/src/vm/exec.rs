@@ -993,13 +993,14 @@ pub fn run_body(
                 let outcome = match machine.linked.external_static_method(index) {
                     Ok(Some((package, class, method))) => {
                         let target = machine.linked.api_method(package, class, method, true)?;
-                        Some(natives::call(
+                        Some(natives::call_with_budget(
                             target,
                             machine.heap,
                             machine.host,
                             frame,
                             machine.context,
                             &mut machine.jcre,
+                            budget,
                         )?)
                     }
                     _ => None,
@@ -1048,13 +1049,14 @@ pub fn run_body(
                     machine.linked.external_class_method(index)?
                 {
                     let target = machine.linked.api_method(package, class, method, false)?;
-                    match natives::call(
+                    match natives::call_with_budget(
                         target,
                         machine.heap,
                         machine.host,
                         frame,
                         machine.context,
                         &mut machine.jcre,
+                        budget,
                     )? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
@@ -1116,13 +1118,14 @@ pub fn run_body(
                         return Err(Error::Type);
                     };
                     let target = machine.linked.api_method(package, class, token, false)?;
-                    match natives::call(
+                    match natives::call_with_budget(
                         target,
                         machine.heap,
                         machine.host,
                         frame,
                         machine.context,
                         &mut machine.jcre,
+                        budget,
                     )? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
