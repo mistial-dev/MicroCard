@@ -332,29 +332,8 @@ pub fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
     if data.first().copied() != Some(0xc4) {
         return Err(Error::Format);
     }
-    let first = *data.get(1).ok_or(Error::Format)?;
-    let (length, header) = match first {
-        0..=0x7f => (usize::from(first), 2),
-        0x81 => {
-            let value = usize::from(*data.get(2).ok_or(Error::Format)?);
-            if value < 0x80 {
-                return Err(Error::Format);
-            }
-            (value, 3)
-        }
-        0x82 => {
-            let value = usize::from(u16::from_be_bytes([
-                *data.get(2).ok_or(Error::Format)?,
-                *data.get(3).ok_or(Error::Format)?,
-            ]));
-            if value < 0x100 {
-                return Err(Error::Format);
-            }
-            (value, 4)
-        }
-        _ => return Err(Error::Format),
-    };
-    Ok((length, &data[header..]))
+    let (length, octets) = crate::tlv::length(&data[1..]).ok_or(Error::Format)?;
+    Ok((length, &data[1 + octets..]))
 }
 
 /// The outer container carried by a C4 load. The authenticated manifest selects

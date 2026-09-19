@@ -1031,9 +1031,9 @@ struct DomainPolicy {
 impl DomainPolicy {
     fn standard() -> Result<Self> {
         let mut capabilities = Vec::new();
-        capabilities.try_reserve_exact(45).map_err(|_| Error::Quota)?;
+        capabilities.try_reserve_exact(46).map_err(|_| Error::Quota)?;
         // 21 was the Ed25519 verification primitive, which the card no longer carries.
-        capabilities.extend((2..=13).chain(core::iter::once(20)).chain(22..=53));
+        capabilities.extend((2..=13).chain(core::iter::once(20)).chain(22..=54));
         Ok(Self {
             capabilities,
             max_assemblies: MAX_ASSEMBLIES_PER_DOMAIN,
@@ -3310,6 +3310,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
                 )?;
                 BufferResult::Void
             }
+            (54, [input, Int(offset), Int(length), result, Int(result_offset), Int(der)]) => {
+                let read = self.read_tlv(heap, *input, *offset, *length, *result, *result_offset, *der != 0)?;
+                BufferResult::Scalar(i32::from(read))
+            }
             (53, [source, Int(source_offset), destination, Int(destination_offset), Int(length)]) => {
                 let copied = self.copy_bytes(heap, *source, *source_offset, *destination, *destination_offset, *length)?;
                 BufferResult::Scalar(i32::from(copied))
@@ -4041,6 +4045,26 @@ impl<P: Platform> Host<'_, P> {
         }
         self.budget -= cost;
         Ok((left.len() == right.len() && bool::from(left.ct_eq(right))) as i32)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn read_tlv(
+        &mut self, heap: &mut crate::mc04_vm::Heap,
+        input: crate::mc04_vm::RuntimeValue, offset: i32, length: i32,
+        result: crate::mc04_vm::RuntimeValue, result_offset: i32, der: bool,
+    ) -> Result<bool> {
+        self.charge(54, 0)?;
+        let (Ok(offset), Ok(length), Ok(result_offset)) = (
+            usize::try_from(offset), usize::try_from(length), usize::try_from(result_offset),
+        ) else { return Ok(false); };
+        let Some(range) = microcard_memory::byte_range(heap.bytes(input)?.len(), offset, length) else { return Ok(false); };
+        if microcard_memory::byte_range(heap.int_length(result)?, result_offset, 5).is_none() { return Ok(false); }
+        self.budget = self.budget.checked_sub(length).ok_or(Error::Budget)?;
+        let Some(mut parsed) = crate::tlv::read(&heap.bytes(input)?[range], der) else { return Ok(false); };
+        parsed[2] += offset as i32;
+        parsed[4] += offset as i32;
+        heap.write_ints(result, result_offset, &parsed)?;
+        Ok(true)
     }
 
     fn copy_bytes(

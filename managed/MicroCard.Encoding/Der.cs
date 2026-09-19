@@ -24,34 +24,8 @@ public static class Der
     public const int NextOffsetIndex = 4;
     public const int ResultSize = 5;
 
-    public static bool TryRead(byte[] input, int offset, int length, int[] result, int resultOffset)
-    {
-        if (!Bounds.Contains(input.Length, offset, length) || length < 2 ||
-            !Bounds.Contains(result.Length, resultOffset, ResultSize))
-            return false;
-
-        int end = offset + length;
-        int tagLength = ReadTagLength(input, offset, end);
-        if (tagLength < 0)
-            return false;
-        int tag = DecodeTag(input, offset, tagLength);
-        if (!CanonicalTagForm(tag))
-            return false;
-        int cursor = offset + tagLength;
-        int valueLength = ReadLength(input, cursor, end);
-        if (valueLength < 0)
-            return false;
-        cursor += LengthOctets(input[cursor]);
-        if (valueLength > end - cursor || !CanonicalValue(input, cursor, valueLength, tag))
-            return false;
-
-        result[resultOffset + TagIndex] = tag;
-        result[resultOffset + HeaderLengthIndex] = cursor - offset;
-        result[resultOffset + ValueOffsetIndex] = cursor;
-        result[resultOffset + ValueLengthIndex] = valueLength;
-        result[resultOffset + NextOffsetIndex] = cursor + valueLength;
-        return true;
-    }
+    public static bool TryRead(byte[] input, int offset, int length, int[] result, int resultOffset) =>
+        Tlv.TryRead(input, offset, length, result, resultOffset, true);
 
     public static int WriteInteger(byte[] output, int offset, int capacity, int value)
     {
@@ -270,32 +244,7 @@ public static class Der
         }
     }
 
-    private static int ReadTagLength(byte[] input, int offset, int end)
-    {
-        if (offset >= end || input[offset] == 0)
-            return -1;
-        int first = input[offset];
-        if ((first & 0x1F) != 0x1F)
-            return 1;
-        if (offset + 1 >= end)
-            return -1;
-        int second = input[offset + 1];
-        if ((second & 0x7F) == 0)
-            return -1;
-        if ((second & 0x80) == 0)
-            return (second & 0x7F) >= 0x1F ? 2 : -1;
-        if (offset + 2 >= end || (input[offset + 2] & 0x80) != 0)
-            return -1;
-        return 3;
-    }
 
-    private static int DecodeTag(byte[] input, int offset, int length)
-    {
-        int tag = input[offset];
-        for (int index = 1; index < length; index++)
-            tag = tag << 8 | input[offset + index];
-        return tag;
-    }
 
     private static int EncodedTagLength(int tag)
     {

@@ -86,7 +86,7 @@ impl Heap {
         Ok(RuntimeValue::Ref(handle))
     }
 
-    pub(super) fn allocate(&mut self, bytes: bool, length: usize) -> Result<RuntimeValue> {
+    pub(crate) fn allocate(&mut self, bytes: bool, length: usize) -> Result<RuntimeValue> {
         self.allocate_object(if bytes { BYTES } else { INTS }, 0, 0, length)
     }
 
@@ -163,6 +163,29 @@ impl Heap {
             .ok_or(Error::Bounds)
     }
 
+    pub(crate) fn int_length(&self, handle: RuntimeValue) -> Result<usize> {
+        let (_, kind, length) = self.info(handle)?;
+        if kind != INTS {
+            return Err(Error::Format);
+        }
+        Ok(length)
+    }
+
+    pub(crate) fn write_ints(
+        &mut self,
+        handle: RuntimeValue,
+        offset: usize,
+        values: &[i32],
+    ) -> Result<()> {
+        microcard_memory::byte_range(self.int_length(handle)?, offset, values.len())
+            .ok_or(Error::Bounds)?;
+        let at = self.info(handle)?.0 + HEADER + offset * 4;
+        for (index, &value) in values.iter().enumerate() {
+            self.write_int(at + index * 4, value);
+        }
+        Ok(())
+    }
+
     pub(super) fn array_length(&self, handle: RuntimeValue) -> Result<usize> {
         let (_, kind, length) = self.info(handle)?;
         if kind == STRUCT {
@@ -182,7 +205,7 @@ impl Heap {
         Ok(at + HEADER + index * if bytes { 1 } else { 4 })
     }
 
-    pub(super) fn array_get(&self, handle: RuntimeValue, index: usize, bytes: bool) -> Result<i32> {
+    pub(crate) fn array_get(&self, handle: RuntimeValue, index: usize, bytes: bool) -> Result<i32> {
         let at = self.array_slot(handle, index, bytes)?;
         Ok(if bytes {
             i32::from(self.data[at])

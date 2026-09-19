@@ -233,30 +233,31 @@
     },
     {
       "assembly": "MicroCard.Iso7816",
-      "source_pe_bytes": 8192,
-      "mc04_bytes": 2057,
+      "source_pe_bytes": 7680,
+      "mc04_bytes": 1854,
       "sections": {
         "header": 56,
-        "tables": 258,
-        "strings": 225,
-        "blob": 134,
-        "code": 1384
+        "tables": 284,
+        "strings": 249,
+        "blob": 170,
+        "code": 1095
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 1,
+        "TypeRef": 2,
         "TypeDef": 8,
         "MethodDef": 12,
+        "MemberRef": 1,
         "Assembly": 1,
-        "AssemblyRef": 1
+        "AssemblyRef": 2
       },
       "method_defs": 12,
-      "member_refs": 0,
-      "build_metadata_bytes": 161,
+      "member_refs": 1,
+      "build_metadata_bytes": 163,
       "debug_map_bytes": 604,
-      "representative_manifest_bytes": 71,
+      "representative_manifest_bytes": 72,
       "package_fixed_bytes": 201,
-      "representative_package_bytes": 2329,
+      "representative_package_bytes": 2127,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -298,30 +299,30 @@
     {
       "assembly": "MicroCard.Encoding",
       "source_pe_bytes": 9216,
-      "mc04_bytes": 3657,
+      "mc04_bytes": 3377,
       "sections": {
         "header": 56,
-        "tables": 520,
-        "strings": 292,
-        "blob": 268,
-        "code": 2521
+        "tables": 508,
+        "strings": 296,
+        "blob": 280,
+        "code": 2237
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 2,
+        "TypeRef": 3,
         "TypeDef": 3,
-        "MethodDef": 32,
-        "MemberRef": 1,
+        "MethodDef": 30,
+        "MemberRef": 2,
         "Assembly": 1,
         "AssemblyRef": 2
       },
-      "method_defs": 32,
-      "member_refs": 1,
-      "build_metadata_bytes": 164,
-      "debug_map_bytes": 1557,
-      "representative_manifest_bytes": 73,
+      "method_defs": 30,
+      "member_refs": 2,
+      "build_metadata_bytes": 167,
+      "debug_map_bytes": 1465,
+      "representative_manifest_bytes": 74,
       "package_fixed_bytes": 201,
-      "representative_package_bytes": 3931,
+      "representative_package_bytes": 3652,
       "ceilings": {
         "mc04_bytes": 4096,
         "package_bytes": 5120
@@ -534,8 +535,8 @@
         "MicroCard.Cryptography",
         "MicroCard.Security"
       ],
-      "aggregate_mc04_bytes": 10725,
-      "aggregate_representative_package_bytes": 12109,
+      "aggregate_mc04_bytes": 10242,
+      "aggregate_representative_package_bytes": 11628,
       "ceilings": {
         "aggregate_mc04_bytes": 12288,
         "aggregate_representative_package_bytes": 14336

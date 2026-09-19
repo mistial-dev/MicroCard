@@ -65,7 +65,7 @@ fn write_names<T>(
 fn read_policy(d: &mut Decoder<'_>) -> Result<DomainPolicy> {
     d.record(8)?;
     let policy = DomainPolicy {
-        capabilities: bytes(d, 45)?,
+        capabilities: bytes(d, 46)?,
         max_assemblies: d.number()?,
         max_instances: d.number()?,
         max_int_records: d.number()?,

@@ -2709,7 +2709,7 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
     let mut keys = crate::key_store::KeyStore::default();
     let mut credentials = crate::credential_store::CredentialStore::default();
     let mut platform = TestPlatform(0);
-    let capabilities = [12, 13, 53];
+    let capabilities = [12, 13, 53, 54];
     let mut transaction = TransactionDisposition::Inactive;
     let mut host = Host {
         store: &mut store,
@@ -2771,6 +2771,21 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
     host.budget = 2;
     assert_eq!(host.copy_bytes(&mut heap, destination, 0, destination, 0, 3), Err(Error::Budget));
     assert_eq!(heap.bytes(destination).unwrap(), b"\0\0bcd");
+    host.budget = 25;
+    let input = heap.allocate_bytes(alloc::vec![0, 2, 2, 0, 1]).unwrap();
+    let parsed = heap.allocate(false, 7).unwrap();
+    heap.write_ints(parsed, 0, &[99; 7]).unwrap();
+    assert!(!host.read_tlv(&mut heap, input, 1, 4, parsed, 1, true).unwrap());
+    assert_eq!(host.budget, 20);
+    assert_eq!((0..7).map(|i| heap.array_get(parsed, i, false).unwrap()).collect::<Vec<_>>(), [99; 7]);
+    assert!(host.read_tlv(&mut heap, input, 1, 4, parsed, 1, false).unwrap());
+    assert_eq!(host.budget, 15);
+    // No partial publication on malformed input or an undersized result window.
+    assert!(!host.read_tlv(&mut heap, input, 1, 4, parsed, 3, false).unwrap());
+    assert!(!host.read_tlv(&mut heap, input, 0, 5, parsed, 1, false).unwrap());
+    host.budget = 2;
+    assert_eq!(host.read_tlv(&mut heap, input, 1, 4, parsed, 1, false), Err(Error::Budget));
+    assert_eq!((0..7).map(|i| heap.array_get(parsed, i, false).unwrap()).collect::<Vec<_>>(), [99, 2, 2, 3, 2, 5, 99]);
     host.budget = 25;
     host.capabilities = &[];
     assert_eq!(host.copy_bytes(&mut heap, destination, 0, destination, 0, 1), Err(Error::Unauthorized));

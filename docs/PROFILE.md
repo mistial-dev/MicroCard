@@ -23,3 +23,12 @@ both overlap directions and empty end ranges. The MC04 native budget pays one un
 call plus one per copied byte, before mutation; missing capability or insufficient
 budget remains a command error. The core-library byte-copy and DER-copy wrappers use
 this service. Capability 21 remains reserved.
+
+Native capability 54 binds `MicroCard.Framework.Tlv.TryRead` for bounded BER-TLV or
+DER decoding. Tags are at most three bytes; lengths use minimal definite forms up to
+65535. DER additionally checks universal tag forms and primitive values. Recursive
+constructed validation and SET ordering remain in the managed DER validator. Invalid
+input returns false without changing the five-word result window. A call pays one
+native work unit plus the supplied input-window length before decoding; insufficient
+budget or missing capability remains a command error. Result offsets refer to the
+original input array, including when decoding a subrange.

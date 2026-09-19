@@ -151,74 +151,8 @@ public static class BerTlv
     public const int NextOffsetIndex = 4;
     public const int ResultSize = 5;
 
-    public static bool TryRead(byte[] input, int offset, int length, int[] result, int resultOffset)
-    {
-        if (!BufferBounds.Contains(input.Length, offset, length) || length < 2 ||
-            !BufferBounds.Contains(result.Length, resultOffset, ResultSize))
-            return false;
-
-        int end = offset + length;
-        int cursor = offset;
-        int tag = input[cursor++];
-        if (tag == 0)
-            return false;
-        if ((tag & 0x1F) == 0x1F)
-        {
-            if (cursor >= end)
-                return false;
-            int next = input[cursor++];
-            if ((next & 0x7F) == 0)
-                return false;
-            tag = (tag << 8) | next;
-            if ((next & 0x80) != 0)
-            {
-                if (cursor >= end)
-                    return false;
-                next = input[cursor++];
-                if ((next & 0x80) != 0)
-                    return false;
-                tag = (tag << 8) | next;
-            }
-            else if ((next & 0x7F) < 0x1F)
-                return false;
-        }
-
-        if (cursor >= end)
-            return false;
-        int firstLength = input[cursor++];
-        int valueLength;
-        if (firstLength < 0x80)
-            valueLength = firstLength;
-        else if (firstLength == 0x81)
-        {
-            if (cursor >= end)
-                return false;
-            valueLength = input[cursor++];
-            if (valueLength < 0x80)
-                return false;
-        }
-        else if (firstLength == 0x82)
-        {
-            if (cursor + 1 >= end)
-                return false;
-            valueLength = (input[cursor] << 8) | input[cursor + 1];
-            cursor += 2;
-            if (valueLength < 0x100)
-                return false;
-        }
-        else
-            return false;
-
-        if (valueLength > end - cursor)
-            return false;
-
-        result[resultOffset + TagIndex] = tag;
-        result[resultOffset + HeaderLengthIndex] = cursor - offset;
-        result[resultOffset + ValueOffsetIndex] = cursor;
-        result[resultOffset + ValueLengthIndex] = valueLength;
-        result[resultOffset + NextOffsetIndex] = cursor + valueLength;
-        return true;
-    }
+    public static bool TryRead(byte[] input, int offset, int length, int[] result, int resultOffset) =>
+        Tlv.TryRead(input, offset, length, result, resultOffset, false);
 
     public static int WriteHeader(byte[] output, int offset, int capacity, int tag, int valueLength)
     {
