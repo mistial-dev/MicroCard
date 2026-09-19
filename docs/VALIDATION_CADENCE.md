@@ -44,7 +44,7 @@ remain separate measurements.
 
 ## Continuous integration
 
-CI runs quick validation, wallet and Java Card acceptance, workspace Clippy, and board release links. The local checkpoint now includes wallet acceptance and board budgets. Workspace Clippy remains an additional gate, and the full recovery checkpoint remains outside ordinary CI. Reproduce CI with `act` before pushing wallet, reader, or secure-channel changes.
+CI runs quick validation, wallet and Java Card acceptance, workspace Clippy, and board release links. Linux CI additionally fetches verified CC310 inputs and cross-links the provider replacement matrix for both engines and board layouts. The local checkpoint now includes wallet acceptance and board budgets. Workspace Clippy remains an additional gate, and the full recovery checkpoint remains outside ordinary CI. Reproduce CI with `act` before pushing wallet, reader, or secure-channel changes.
 
 ## Dedicated fuzz checkpoint
 

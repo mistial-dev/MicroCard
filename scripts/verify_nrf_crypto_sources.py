@@ -53,6 +53,21 @@ def check_git_identity(checkout, expected):
         raise SystemExit("Nordic source checkout has modified tracked files")
 
 
+def verify_checkout(checkout, lock_path):
+    if not (checkout / ".git").exists():
+        raise SystemExit(f"pinned Nordic checkout is absent: {checkout}")
+    lock = json.loads(lock_path.read_text())
+    expected = lock["source"]
+    check_git_identity(checkout, expected)
+    if "upstream_version" in expected:
+        if (checkout / "VERSION").read_text().strip() != expected["upstream_version"]:
+            raise SystemExit("Nordic source VERSION mismatch")
+    for group in ("license_files", "integration_files", "artifacts", "public_headers"):
+        for entry in lock.get(group, []):
+            check_digest(checkout, entry)
+    return lock
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkout", type=pathlib.Path, default=DEFAULT_CHECKOUT)
@@ -67,51 +82,10 @@ def main():
     parser.add_argument("--sdk-nrf-lock", type=pathlib.Path, default=DEFAULT_SDK_NRF_LOCK)
     args = parser.parse_args()
 
-    if not (args.checkout / ".git").exists():
-        raise SystemExit(
-            "pinned Nordic source checkout is absent; fetch it explicitly into "
-            f"{args.checkout} before verification"
-        )
-
-    if not (args.nrfxlib_checkout / ".git").exists():
-        raise SystemExit(
-            "pinned nrfxlib checkout is absent; fetch it explicitly into "
-            f"{args.nrfxlib_checkout} before verification"
-        )
-
-    if not (args.sdk_nrf_checkout / ".git").exists():
-        raise SystemExit(
-            "pinned nRF Connect SDK checkout is absent; fetch it explicitly into "
-            f"{args.sdk_nrf_checkout} before verification"
-        )
-
-    lock = json.loads(args.lock.read_text())
+    lock = verify_checkout(args.checkout, args.lock)
     expected = lock["source"]
-    check_git_identity(args.checkout, expected)
-
-    version = (args.checkout / "VERSION").read_text().strip()
-    if version != expected["upstream_version"]:
-        raise SystemExit("Nordic source VERSION mismatch")
-
-    entries = lock["license_files"] + lock["integration_files"]
-    for entry in entries:
-        check_digest(args.checkout, entry)
-
-    nrfxlib_lock = json.loads(args.nrfxlib_lock.read_text())
-    check_git_identity(args.nrfxlib_checkout, nrfxlib_lock["source"])
-    nrfxlib_entries = (
-        nrfxlib_lock["artifacts"]
-        + nrfxlib_lock["license_files"]
-        + nrfxlib_lock["public_headers"]
-    )
-    for entry in nrfxlib_entries:
-        check_digest(args.nrfxlib_checkout, entry)
-
-    sdk_nrf_lock = json.loads(args.sdk_nrf_lock.read_text())
-    check_git_identity(args.sdk_nrf_checkout, sdk_nrf_lock["source"])
-    sdk_nrf_entries = sdk_nrf_lock["license_files"] + sdk_nrf_lock["integration_files"]
-    for entry in sdk_nrf_entries:
-        check_digest(args.sdk_nrf_checkout, entry)
+    nrfxlib_lock = verify_checkout(args.nrfxlib_checkout, args.nrfxlib_lock)
+    sdk_nrf_lock = verify_checkout(args.sdk_nrf_checkout, args.sdk_nrf_lock)
 
     print(
         f"PASS: Nordic Oberon PSA Crypto {expected['tag']} source, licenses, "

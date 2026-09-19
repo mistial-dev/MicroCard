@@ -48,6 +48,22 @@ SCP03 command verification consumes the parsed command. MAC validation borrows i
 
 Long-running validation follows the repository cadence: focused provider tests during development, the complete host and fault-injection gate after consolidated security batches or before device/release acceptance, and sustained fuzz campaigns only at dedicated fuzz checkpoints or release candidates.
 
+## Reproducible build inputs
+
+Install `arm-none-eabi-gcc` and GNU ARM binutils, then run:
+
+```sh
+python3 scripts/fetch_nrf_crypto_sources.py
+python3 scripts/verify_nrf_crypto_sources.py
+```
+
+The fetch command uses the repository's lock files, performs shallow sparse checkouts
+under ignored `work/`, and verifies the annotated tag, commit, tree, licenses, and
+pinned file hashes before publishing each directory. Existing checkouts are verified
+without reset, cleanup, or replacement. Cargo's build script separately validates every
+compiled vendor dependency and archive. Fetching is explicit; Cargo does not download
+vendor source. Linux CI runs this setup and all engine/layout replacement matrices.
+
 ## Replacement measurements
 
 Run `python3 scripts/crypto_provider_matrix.py --output work/crypto-mc04-dk.json`.

@@ -46,7 +46,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: ARM link inspection tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
       - name: Separate firmware links and budgets
         if: runner.os == 'Linux'
         run: python scripts/board_budgets.py --check
+      - name: Pinned hardware crypto inputs
+        if: runner.os == 'Linux'
+        run: python scripts/fetch_nrf_crypto_sources.py
+      - name: Hardware crypto replacement links
+        if: runner.os == 'Linux'
+        run: |
+          python scripts/crypto_provider_matrix.py --engine mc04 --output work/crypto-mc04-dk.json
+          python scripts/crypto_provider_matrix.py --engine mc04 --layout dongle --output work/crypto-mc04-dongle.json
+          python scripts/crypto_provider_matrix.py --engine jcvm --output work/crypto-jcvm-dk.json
+          python scripts/crypto_provider_matrix.py --engine jcvm --layout dongle --output work/crypto-jcvm-dongle.json
