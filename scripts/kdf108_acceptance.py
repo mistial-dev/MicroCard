@@ -107,13 +107,15 @@ def main():
         import hashlib as _hashlib
         assert KDF_PUBLIC != SSD_PUBLIC
         assert _hashlib.sha256(consumer_raw[-129:-64]).digest() == SSD_PUBLIC
-        tampered = bytearray(consumer_raw); tampered[20] ^= 1
+        from cryptography.exceptions import InvalidSignature
+        tampered = bytearray(consumer_raw); tampered[-130] ^= 1
         tampered_path = directory / "tampered.mcp"; tampered_path.write_bytes(bytes(tampered))
         try:
             verify_package(tampered_path, SSD_PUBLIC)
+        except InvalidSignature:
+            pass
+        else:
             raise AssertionError("tampered package signature accepted")
-        except Exception as error:
-            if isinstance(error, AssertionError): raise
         management = directory / "management.key"
         management.write_bytes(os.urandom(32)); management.chmod(0o600)
         state = directory / "state"
