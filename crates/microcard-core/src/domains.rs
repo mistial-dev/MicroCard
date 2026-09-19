@@ -2690,7 +2690,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
 
     pub(crate) fn select_isd_with_cancel(
         &mut self,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         self.abort_transaction();
         let Some(selected) = self.selected.take() else {
@@ -2748,7 +2748,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
     pub(crate) fn manage_globalplatform_with_cancel(
         &mut self,
         verified: Verified,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         self.abort_transaction();
         if verified.level & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
@@ -2899,7 +2899,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
     fn continue_globalplatform_load(
         &mut self,
         command: &crate::apdu::Command,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         if command.ins != 0xe8 || !matches!(command.p1, 0 | 0x80) || command.data.is_empty() {
             return Err(Error::Format);
@@ -2969,7 +2969,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         &mut self,
         load_aid: RegistryAid,
         aid: &str,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         let (aid_bytes, aid_len) = decode_aid(aid)?;
         if self
@@ -3074,7 +3074,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
     pub(crate) fn manage_with_cancel(
         &mut self,
         verified: Verified,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         self.abort_transaction();
         if verified.level & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
@@ -3534,7 +3534,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
     pub(crate) fn select_with_cancel(
         &mut self,
         aid: &str,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         self.abort_transaction();
         let old = self
@@ -3639,7 +3639,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
     pub(crate) fn process_verified_with_cancel(
         &mut self,
         verified: Verified,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         let selected = self.selected.take().ok_or(Error::Missing)?;
         let (id, inc, aid) = &selected;
@@ -3668,7 +3668,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         aid: &str,
         data: &[u8],
         level: u8,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
         self.invoke_context_with_metrics_and_cancel(aid, data, level, should_cancel)
             .map(|(output, _)| output)
@@ -3687,7 +3687,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         aid: &str,
         data: &[u8],
         level: u8,
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
         if data.len() > 255 {
             self.abort_transaction();
@@ -3868,7 +3868,7 @@ fn run_context_with_cancel(
     entry: u16,
     input: InvocationInput<'_>,
     platform: &mut impl Platform,
-    should_cancel: &mut impl FnMut() -> bool,
+    should_cancel: &mut dyn FnMut() -> bool,
 ) -> Result<Vec<u8>> {
     run_context_with_metrics_and_cancel(d, p, units, entry, input, platform, should_cancel)
         .map(|(output, _)| output)
@@ -3880,7 +3880,7 @@ fn run_context_with_metrics_and_cancel(
     entry: u16,
     input: InvocationInput<'_>,
     platform: &mut impl Platform,
-    should_cancel: &mut impl FnMut() -> bool,
+    should_cancel: &mut dyn FnMut() -> bool,
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut retry_floor = CredentialRetryFloors::default();
     let mut transaction = TransactionDisposition::Inactive;

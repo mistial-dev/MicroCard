@@ -53,7 +53,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
     pub fn exchange_with_cancel(
         &mut self,
         raw: &[u8],
-        should_cancel: &mut impl FnMut() -> bool,
+        should_cancel: &mut dyn FnMut() -> bool,
     ) -> Vec<u8> {
         let mut cancelled = false;
         let result = self.handle(raw, &mut || {
@@ -73,7 +73,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Endpoint<F, P, S> {
             }
         }
     }
-    fn handle(&mut self, raw: &[u8], should_cancel: &mut impl FnMut() -> bool) -> Result<Vec<u8>> {
+    fn handle(&mut self, raw: &[u8], should_cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
         let c = Command::parse(raw)?;
         if globalplatform::is_isd_select(&c) {
             self.reset();
