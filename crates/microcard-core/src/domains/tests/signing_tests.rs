@@ -1,9 +1,8 @@
 //! Loader rejection must preserve durable state, not merely return an error.
 use super::*;
-use alloc::collections::BTreeMap;
 
 fn snapshot(c: &Card<MemoryFlash, TestPlatform>) -> Vec<u8> {
-    serde_json::to_vec(&c.state).unwrap()
+    c.state.encode_snapshot().unwrap().to_vec()
 }
 
 fn rejected(c: &mut Card<MemoryFlash, TestPlatform>, raw: &[u8], expected: Option<Error>) {
@@ -594,84 +593,30 @@ fn empty_domain_retains_versions_and_key_after_reboot() {
 fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
     let (c, _) = fixture(true);
     let good = snapshot(&c);
-    let base: serde_json::Value = serde_json::from_slice(&good).unwrap();
     for case in 0..17 {
-        let mut bad = base.clone();
-        let d = &mut bad["domains"]["a"];
+        let mut state = c.state.try_clone().unwrap();
+        let d = state.domains.get_mut("a").unwrap();
         match case {
-            0 => {
-                let mut encoded = d["assemblies"]["Counter"]
-                    .as_str()
-                    .unwrap()
-                    .as_bytes()
-                    .to_vec();
-                encoded[20] = if encoded[20] == b'A' { b'B' } else { b'A' };
-                d["assemblies"]["Counter"] =
-                    serde_json::Value::String(String::from_utf8(encoded).unwrap());
-            }
-            1 => d["key"] = serde_json::json!(null),
-            2 => d["incarnation"][0] = serde_json::json!(99),
-            3 => d["versions"]["Counter"][0] = serde_json::json!(999),
-            4 => d["instances"]["F04D430001"] = serde_json::json!("missing"),
-            5 => {
-                d["instances"].as_object_mut().unwrap().clear();
-                d["instances"]["F04D430099"] = serde_json::json!("Counter");
-            }
-            6 => d["unknown"] = serde_json::json!(true),
-            7 => d["versions"]["Counter"][1][0] = serde_json::json!(99),
-            8 => {
-                d["store"] =
-                    serde_json::to_value((0..513).map(|i| (i, i)).collect::<BTreeMap<_, _>>())
-                        .unwrap()
-            }
-            9 => {
-                d["assemblies"].as_object_mut().unwrap().clear();
-                d["key"] = serde_json::json!(null);
-            }
-            10 => d["key"] = serde_json::to_value([0u8; 32]).unwrap(),
-            11 => {
-                d["keys"]["entries"]["8"] = serde_json::json!({"algorithm":"HmacSha256", "nonce": alloc::vec![0u8;16], "key": alloc::vec![0u8;32]})
-            }
-            12 => {
-                d["policy"] = serde_json::to_value(DomainPolicy {
-                    max_int_records: 0,
-                    ..DomainPolicy::standard().unwrap()
-                })
-                .unwrap()
-            }
-            13 => {
-                d["policy"] = serde_json::to_value(DomainPolicy {
-                    capabilities: alloc::vec![1, 1],
-                    ..DomainPolicy::standard().unwrap()
-                })
-                .unwrap()
-            }
-            14 => {
-                d["policy"] = serde_json::to_value(DomainPolicy {
-                    capabilities: alloc::vec![1],
-                    ..DomainPolicy::standard().unwrap()
-                })
-                .unwrap()
-            }
-            15 => {
-                d["bindings"]["Counter"] = serde_json::json!([{
-                    "domain": "ISD",
-                    "assembly": "mscorlib",
-                    "digest": alloc::vec![0u8; 32]
-                }])
-            }
-            _ => {
-                d["imports"]["Counter"] = serde_json::json!([{
-                    "member": 1,
-                    "target": {"Native": 1}
-                }])
-            }
+            0 => { let mut raw = d.assemblies.get("Counter").unwrap().as_ref().clone(); raw[20] ^= 1; d.assemblies.insert("Counter".into(), Rc::new(raw)).unwrap(); }
+            1 => d.key = None,
+            2 => d.incarnation[0] = 99,
+            3 => d.versions.get_mut("Counter").unwrap().0 = 999,
+            4 => d.instances.0[0].1 = Rc::from("missing"),
+            5 => d.instances.0[0].0 = "F04D430099".into(),
+            6 => (), // An extra top-level field is inserted after serialization below.
+            7 => d.versions.get_mut("Counter").unwrap().1[0] = 99,
+            8 => d.store.0 = (0..513).map(|i| (i, i)).collect(),
+            9 => { d.assemblies = NameMap::new(); d.key = None; }
+            10 => d.key = Some([0; 32]),
+            11 => { let duplicate = d.try_clone_with(&mut crate::fallible_clone::CloneContext::new()).unwrap(); state.domains.0.push(("a".into(), duplicate)); }
+            12 => d.policy.max_int_records = 0,
+            13 => d.policy.capabilities = alloc::vec![1, 1],
+            14 => d.policy.capabilities = alloc::vec![1],
+            15 => { d.bindings.insert("Counter".into(), alloc::vec![ResolvedDependency { digest: [0; 32] }]).unwrap(); }
+            _ => { d.imports.insert("Counter".into(), alloc::vec![ResolvedCall { member: 1, target: CallTarget::Native(1) }]).unwrap(); }
         }
-        // Serialize via State when possible to ensure semantic checks, not JSON ordering, reject it.
-        let raw = match serde_json::from_value::<State>(bad.clone()) {
-            Ok(state) => serde_json::to_vec(&state).unwrap(),
-            Err(_) => serde_json::to_vec(&bad).unwrap(),
-        };
+        let mut raw = state.encode_snapshot().unwrap().to_vec();
+        if case == 6 { raw[0] = 0x86; raw.push(0xf5); }
         let (mut journal, _) = Journal::open(MemoryFlash::new(65536), STORAGE_KEY).unwrap();
         journal.commit(&good).unwrap();
         journal.commit(&raw).unwrap(); // Writes a validly authenticated newer generation.

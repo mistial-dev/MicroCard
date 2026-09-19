@@ -16,6 +16,7 @@ use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
 pub use crate::hal::RuntimePlatform as Platform;
+mod snapshot;
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
 const MAX_SSDS: usize = 8;
@@ -1002,9 +1003,7 @@ struct State {
     domains: Domains,
     /// First SCP03 sequence counter value never yet handed out, SCP03 1.1.2.6 §6.2.2.1.
     ///
-    /// Reserved ahead of use so a power cut can only skip values, never repeat one. A
-    /// card that has opened no derived-challenge session omits the field, which keeps
-    /// existing snapshots byte-identical through the canonical re-encoding check.
+    /// Reserved ahead of use so a power cut can only skip values, never repeat one.
     #[serde(default, skip_serializing_if = "sequence_unused")]
     scp03_sequence: u32,
 }
@@ -2475,23 +2474,10 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
     ) -> Result<Self> {
         let (mut journal, data) = Journal::open_with(flash, storage_key, &mut platform)?;
         let mut state: State = match data {
-            Some(d) => {
-                if d.len() > 49152 {
-                    return Err(Error::Storage);
-                }
-                let mut state: State = serde_json::from_slice(&d).map_err(|_| Error::Storage)?;
-                // Writers emit canonical snapshots. Reject duplicate map keys and ignored fields.
-                let canonical =
-                    Zeroizing::new(serde_json::to_vec(&state).map_err(|_| Error::Storage)?);
-                if canonical.as_slice() != d.as_slice() {
-                    return Err(Error::Storage);
-                }
-                state.isd.intern_assembly_names()?;
-                for domain in state.domains.values_mut() {
-                    domain.intern_assembly_names()?;
-                }
-                state
-            }
+            Some(d) => State::decode_snapshot(&d).map_err(|error| match error {
+                Error::IncompatibleState => error,
+                _ => Error::Storage,
+            })?,
             None => {
                 let mut incarnation = [0; 16];
                 platform.random(&mut incarnation)?;
@@ -2501,7 +2487,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                     scp03_sequence: 0,
                 };
                 let encoded =
-                    Zeroizing::new(serde_json::to_vec(&state).map_err(|_| Error::Storage)?);
+                    state.encode_snapshot()?;
                 journal.commit_with(encoded.as_slice(), &mut platform)?;
                 state
             }
@@ -3116,7 +3102,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         if self.state == next {
             return Ok(());
         }
-        let data = Zeroizing::new(serde_json::to_vec(&next).map_err(|_| Error::Storage)?);
+        let data = next.encode_snapshot()?;
         if data.len() > 49152 {
             return Err(Error::Quota);
         }

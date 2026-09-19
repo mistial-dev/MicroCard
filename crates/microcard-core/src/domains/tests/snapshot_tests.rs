@@ -1,0 +1,86 @@
+use super::*;
+
+#[test]
+fn snapshot_matches_python_golden_vector() {
+    let vector: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../../format/snapshot-cbor-v1.json")).unwrap();
+    let hex = vector["hex"].as_str().unwrap();
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    let state = State {
+        isd: Domain::new(
+            [1; 16],
+            RegistryAid::isd(),
+            DomainPolicy::standard().unwrap(),
+        ),
+        domains: Domains(Vec::new()),
+        scp03_sequence: 0,
+    };
+    assert_eq!(*state.encode_snapshot().unwrap(), bytes);
+    let decoded = State::decode_snapshot(&bytes).unwrap();
+    assert!(decoded == state);
+}
+
+#[test]
+fn snapshot_rejects_every_truncation_and_noncanonical_header() {
+    let mut card = card();
+    let incarnation = create(&mut card, "a");
+    load(&mut card, &counter_package("a", incarnation, 1, 7)).unwrap();
+    let raw = card.state.encode_snapshot().unwrap();
+    let recovered = State::decode_snapshot(&raw).unwrap();
+    assert_eq!(*recovered.encode_snapshot().unwrap(), *raw);
+    for end in 0..raw.len() {
+        assert!(
+            State::decode_snapshot(&raw[..end]).is_err(),
+            "accepted length {end}"
+        );
+    }
+    let mut trailing = raw.to_vec();
+    trailing.push(0);
+    assert!(State::decode_snapshot(&trailing).is_err());
+    let mut overlong = raw.to_vec();
+    overlong.splice(1..2, [0x18, 1]);
+    assert!(State::decode_snapshot(&overlong).is_err());
+    for index in [1, 2] {
+        let mut unsupported = raw.to_vec();
+        unsupported[index] = 2;
+        assert!(matches!(
+            State::decode_snapshot(&unsupported),
+            Err(Error::IncompatibleState)
+        ));
+    }
+}
+
+#[test]
+fn old_snapshot_fails_explicitly_without_mutating_flash() {
+    let old = serde_json::to_vec(&fresh_card().state).unwrap();
+    let shared = SharedJournalFlash(Rc::new(RefCell::new(MemoryFlash::new(16384))));
+    let (mut journal, _) = Journal::open(shared.clone(), STORAGE_KEY).unwrap();
+    journal.commit(&old).unwrap();
+    let generation = shared.monotonic_generation().unwrap();
+    // Any attempted write consumes this budget, including an erase or sequence reservation.
+    shared.0.borrow_mut().fail_after = Some(1);
+    assert!(matches!(
+        Card::open(shared.clone(), TestPlatform(10), STORAGE_KEY),
+        Err(Error::IncompatibleState)
+    ));
+    assert_eq!(shared.0.borrow().fail_after, Some(1));
+    assert_eq!(shared.monotonic_generation().unwrap(), generation);
+    let (_, recovered) = Journal::open(shared, STORAGE_KEY).unwrap();
+    assert_eq!(*recovered.unwrap(), old);
+}
+
+#[test]
+fn snapshot_rejects_duplicate_and_unsorted_records() {
+    let mut card = fresh_card();
+    for records in [alloc::vec![(1, 10), (1, 20)], alloc::vec![(2, 10), (1, 20)]] {
+        card.state.isd.store.0 = records;
+        let raw = card.state.encode_snapshot().unwrap();
+        assert!(State::decode_snapshot(&raw).is_err());
+    }
+    card.state.isd.store.0.clear();
+    card.state.isd.blobs.0 = alloc::vec![(1, alloc::vec![1]), (1, alloc::vec![2])];
+    assert!(State::decode_snapshot(&card.state.encode_snapshot().unwrap()).is_err());
+}

@@ -37,6 +37,7 @@ pub enum Error {
     Arithmetic,
     Native,
     Storage,
+    IncompatibleState,
     Authentication,
     Cancelled,
 }

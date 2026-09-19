@@ -185,6 +185,37 @@ pub struct KeyStore {
     entries: Entries,
 }
 impl KeyStore {
+    pub(crate) fn encode_state(&self, e: &mut crate::cbor::Encoder) -> Result<()> {
+        e.array(self.entries.len())?;
+        for (slot, entry) in &self.entries.0 {
+            e.array(4)?; e.unsigned(*slot as u64)?;
+            e.unsigned(match entry.algorithm { Algorithm::HmacSha256 => 1, Algorithm::Aes128 => 2, Algorithm::P256 => 3 })?;
+            e.bytes(&entry.nonce)?; e.bytes(&entry.key)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn decode_state(d: &mut crate::cbor::Decoder<'_>) -> Result<Self> {
+        let count = d.array(MAX_ENTRIES)?;
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(count).map_err(|_| Error::Quota)?;
+        let mut previous = None;
+        for _ in 0..count {
+            d.record(4)?;
+            let slot: i32 = d.number()?;
+            if !(0..MAX_ENTRIES as i32).contains(&slot) || previous.is_some_and(|p| p >= slot) { return Err(Error::Format); }
+            previous = Some(slot);
+            let algorithm = match d.unsigned()? { 1 => Algorithm::HmacSha256, 2 => Algorithm::Aes128, 3 => Algorithm::P256, _ => return Err(Error::Format) };
+            let mut entry = Entry { algorithm, nonce: [0; 16], key: [0; 32] };
+            entry.nonce.copy_from_slice(d.bytes(16)?.get(..16).ok_or(Error::Format)?);
+            entry.key.copy_from_slice(d.bytes(32)?.get(..32).ok_or(Error::Format)?);
+            entries.push((slot, entry));
+        }
+        let result = Self { entries: Entries(entries) };
+        result.validate()?;
+        Ok(result)
+    }
+
     pub(crate) fn try_clone_with(
         &self,
         context: &mut crate::fallible_clone::CloneContext,
@@ -484,8 +515,15 @@ mod tests {
             s.cmac(owner, &h, b"x", &mut provider),
             Err(Error::Unauthorized)
         );
-        let raw = serde_json::to_vec(&s).unwrap();
-        let mut s: KeyStore = serde_json::from_slice(&raw).unwrap();
+        let mut encoder = crate::cbor::Encoder::new(1024);
+        s.encode_state(&mut encoder).unwrap();
+        let raw = zeroize::Zeroizing::new(encoder.finish());
+        for end in 0..raw.len() {
+            assert!(KeyStore::decode_state(&mut crate::cbor::Decoder::new(&raw[..end])).is_err());
+        }
+        let mut decoder = crate::cbor::Decoder::new(&raw);
+        let mut s = KeyStore::decode_state(&mut decoder).unwrap();
+        decoder.finish().unwrap();
         assert_eq!(s.hmac(owner, &h, b"x", &mut provider).unwrap(), tag);
         s.delete(0).unwrap();
         let h2 = s.generate(owner, 0, 1, &mut rng).unwrap();

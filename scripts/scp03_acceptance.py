@@ -247,12 +247,14 @@ def main():
     nonce=b'MCJNL'+generation.to_bytes(8,'little')
     try: plaintext=AESCCM(storage_key,tag_length=16).decrypt(nonce,raw[16:16+n],raw[:16])
     except Exception: continue
-    snapshots.append((generation,json.loads(plaintext)))
-  state=max(snapshots,key=lambda x:x[0])[1]['domains']['keys'];entries=state['keys']['entries']
+    from device_cbor import decode
+    snapshot=decode(plaintext);assert snapshot[:2]==[1,0]
+    snapshots.append((generation,snapshot))
+  state=dict(max(snapshots,key=lambda x:x[0])[1][4])['keys'];entries={entry[0]:entry for entry in state[12]}
   import hmac
-  assert tag==hmac.digest(bytes(entries['0']['key']),b'a','sha256')
-  assert aes_tag==cmac(bytes(entries['1']['key'][:16]),b'a')
-  assert list(state['store'].keys())==['10'],'key material leaked into application store'
+  assert tag==hmac.digest(entries[0][3],b'a','sha256')
+  assert aes_tag==cmac(entries[1][3][:16],b'a')
+  assert [entry[0] for entry in state[10]]==[10],'key material leaked into application store'
   c.command(0xa4,bytes.fromhex('F04D430011'));assert c.command(0x10)==tag
   c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x02')==b'\x00';c.command(0x10,b'\x00');assert c.command(0x10,b'\x02')==b'\x01';assert c.command(0x10,b'\x01')==b'blo';c.close()
   c=Client(keys,td/'state');c.connect();c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x01')==b'blo';c.command(0x10,b'\x03');assert c.command(0x10,b'\x02')==b'\x00'

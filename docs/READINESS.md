@@ -11,16 +11,16 @@ JCVM runs the supported applet corpus in the simulator. It still needs the board
 ## Required implementation work
 
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
-- Replace remaining management JSON and journal snapshots. MP05 manifests and lifecycle management names now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Move immutable images and the JCVM heap out of the metadata journal.
+- MP05 manifests, lifecycle management names, and journal snapshots now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Move immutable images and the JCVM heap out of the metadata journal.
 - Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
 - Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
 - Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.
 
-MP05 removes device manifest JSON parsing and canonical re-encoding. Relative to the preceding codec-only commit, the development image falls from 264,252 to 250,836 text bytes. The credential-profile test now records 5,792 bytes of active packages and a 12,549-byte JSON snapshot; its interpreted execution metrics are unchanged. Heap high-water and device latency remain unmeasured.
+CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of active packages and a 7,052-byte snapshot, down from 12,549 bytes; its interpreted execution metrics are unchanged. Heap high-water and device latency remain unmeasured.
 
 ## Crypto replacement measurements
 
-`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 250,836 text bytes, SHA-256 replacement 253,780, SHA-256 plus P-256 267,868, and all hardware providers 276,684. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
+`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 182,516 text bytes, SHA-256 replacement 185,212, SHA-256 plus P-256 199,300, and all hardware providers 208,328. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
 
 For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
 

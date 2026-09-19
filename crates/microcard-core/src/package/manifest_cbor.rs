@@ -3,7 +3,7 @@ use super::*;
 use crate::cbor::{Decoder, Encoder};
 
 fn number<T: TryFrom<u64>>(d: &mut Decoder<'_>) -> Result<T> {
-    T::try_from(d.unsigned()?).map_err(|_| Error::Format)
+    d.number()
 }
 fn owned(value: &str) -> Result<String> {
     let mut output = String::new();
@@ -52,7 +52,7 @@ fn write_optional<T>(
     }
 }
 fn fixed<const N: usize>(d: &mut Decoder<'_>) -> Result<[u8; N]> {
-    d.bytes(N)?.try_into().map_err(|_| Error::Format)
+    d.fixed()
 }
 fn list<T>(
     d: &mut Decoder<'_>,

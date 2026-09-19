@@ -1,7 +1,8 @@
 //! Restricted deterministic CBOR primitives for versioned device contracts.
 //! Callers supply field order, collection limits, and semantic validation.
 use crate::{Error, Result};
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
+use zeroize::Zeroize;
 
 pub struct Decoder<'a> {
     remaining: &'a [u8],
@@ -40,6 +41,24 @@ impl<'a> Decoder<'a> {
             return Err(Error::Format);
         }
         Ok(value)
+    }
+
+    pub(crate) fn number<T: TryFrom<u64>>(&mut self) -> Result<T> {
+        T::try_from(self.unsigned()?).map_err(|_| Error::Format)
+    }
+
+    pub(crate) fn fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        self.bytes(N)?.try_into().map_err(|_| Error::Format)
+    }
+
+    pub(crate) fn owned_text(&mut self, maximum: usize) -> Result<String> {
+        let text = self.text(maximum)?;
+        let mut output = String::new();
+        output
+            .try_reserve_exact(text.len())
+            .map_err(|_| Error::Quota)?;
+        output.push_str(text);
+        Ok(output)
     }
 
     pub fn unsigned(&mut self) -> Result<u64> {
@@ -128,9 +147,20 @@ impl Encoder {
         if bytes.len() > self.maximum.saturating_sub(self.bytes.len()) {
             return Err(Error::Quota);
         }
-        self.bytes
-            .try_reserve(bytes.len())
-            .map_err(|_| Error::Quota)?;
+        let needed = self.bytes.len() + bytes.len();
+        if needed > self.bytes.capacity() {
+            // Snapshot buffers can contain keys. Wipe the old allocation before releasing it.
+            let capacity = needed
+                .max(self.bytes.capacity().saturating_mul(2))
+                .min(self.maximum);
+            let mut replacement = Vec::new();
+            replacement
+                .try_reserve_exact(capacity)
+                .map_err(|_| Error::Quota)?;
+            replacement.extend_from_slice(&self.bytes);
+            self.bytes.zeroize();
+            self.bytes = replacement;
+        }
         self.bytes.extend_from_slice(bytes);
         Ok(())
     }
@@ -176,8 +206,14 @@ impl Encoder {
     pub fn null(&mut self) -> Result<()> {
         self.append(&[0xf6])
     }
-    pub fn finish(self) -> Vec<u8> {
-        self.bytes
+    pub fn finish(mut self) -> Vec<u8> {
+        core::mem::take(&mut self.bytes)
+    }
+}
+
+impl Drop for Encoder {
+    fn drop(&mut self) {
+        self.bytes.zeroize();
     }
 }
 

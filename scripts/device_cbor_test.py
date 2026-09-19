@@ -18,3 +18,13 @@ for vector in json.loads((Path(__file__).resolve().parents[1] / "format/manifest
     assert manifest(vector["manifest"]).hex() == vector["hex"]
     assert decode_manifest(bytes.fromhex(vector["hex"])) == vector["manifest"]
 print("PASS: manifest CBOR shared vectors")
+
+from device_cbor import encode, decode
+policy = [bytes([*range(2, 14), 20, *range(22, 53)]), 8, 8, 512, 64, 8192, 8, 16384]
+domain = [bytes([1] * 16), bytes.fromhex("a000000151000000"), None, policy,
+          [], [], [], [], [], [], [], [], [], []]
+state = [1, 0, 0, domain, []]
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/snapshot-cbor-v1.json").read_text())
+assert encode(state).hex() == vector["hex"]
+assert decode(bytes.fromhex(vector["hex"])) == state
+print("PASS: internal snapshot CBOR Rust/Python golden vector")

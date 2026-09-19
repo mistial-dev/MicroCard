@@ -277,12 +277,12 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
         .chain(card.state.domains["credential-budget"].assemblies.values())
         .map(|package| package.len())
         .sum::<usize>();
-    let serialized_state_bytes = serde_json::to_vec(&card.state).unwrap().len();
+    let serialized_state_bytes = card.state.encode_snapshot().unwrap().len();
     assert_eq!(
         (active_package_bytes, serialized_state_bytes, peak),
         (
             5792,
-            12549,
+            7052,
             crate::mc04_vm::ExecutionMetrics {
                 instructions: 78,
                 peak_evaluation_slots: 19,

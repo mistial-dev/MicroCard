@@ -182,6 +182,44 @@ impl<'de> Deserialize<'de> for Entries {
 pub(crate) struct CredentialStore(Entries);
 
 impl CredentialStore {
+    pub(crate) fn encode_state(&self, e: &mut crate::cbor::Encoder) -> Result<()> {
+        e.array(self.0.len())?;
+        for (slot, entry) in self.0.iter() {
+            if *slot != entry.slot { return Err(Error::Storage); }
+            e.array(10)?; e.unsigned(*slot as u64)?; e.bytes(&entry.owner)?;
+            e.bytes(&entry.pin_salt)?; e.bytes(&entry.pin_digest)?;
+            e.bytes(&entry.puk_salt)?; e.bytes(&entry.puk_digest)?;
+            for value in [entry.pin_retries, entry.pin_max_retries, entry.puk_retries, entry.puk_max_retries] { e.unsigned(u64::from(value))?; }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn decode_state(d: &mut crate::cbor::Decoder<'_>, owner: [u8; 16]) -> Result<Self> {
+        let count = d.array(MAX_SLOTS)?;
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(count).map_err(|_| Error::Quota)?;
+        let mut previous = None;
+        for _ in 0..count {
+            d.record(10)?;
+            let slot: i32 = d.number()?;
+            if previous.is_some_and(|p| p >= slot) { return Err(Error::Format); }
+            previous = Some(slot);
+            let mut entry = Entry { slot, owner: [0; 16], pin_salt: [0; 16], pin_digest: [0; 32],
+                puk_salt: [0; 16], puk_digest: [0; 32], pin_retries: 0, pin_max_retries: 0, puk_retries: 0, puk_max_retries: 0 };
+            entry.owner.copy_from_slice(d.bytes(16)?.get(..16).ok_or(Error::Format)?);
+            entry.pin_salt.copy_from_slice(d.bytes(16)?.get(..16).ok_or(Error::Format)?);
+            entry.pin_digest.copy_from_slice(d.bytes(32)?.get(..32).ok_or(Error::Format)?);
+            entry.puk_salt.copy_from_slice(d.bytes(16)?.get(..16).ok_or(Error::Format)?);
+            entry.puk_digest.copy_from_slice(d.bytes(32)?.get(..32).ok_or(Error::Format)?);
+            entry.pin_retries = d.number()?; entry.pin_max_retries = d.number()?;
+            entry.puk_retries = d.number()?; entry.puk_max_retries = d.number()?;
+            entries.push((slot, entry));
+        }
+        let result = Self(Entries(entries));
+        result.validate(owner)?;
+        Ok(result)
+    }
+
     pub(crate) fn try_clone_with(
         &self,
         context: &mut crate::fallible_clone::CloneContext,
@@ -438,6 +476,23 @@ mod tests {
                 Ok(())
             }))
             .unwrap();
+    }
+
+    #[test]
+    fn binary_state_roundtrip_and_truncation() {
+        let mut store = CredentialStore::default();
+        create(&mut store);
+        let mut encoder = crate::cbor::Encoder::new(2048);
+        store.encode_state(&mut encoder).unwrap();
+        let raw = zeroize::Zeroizing::new(encoder.finish());
+        for end in 0..raw.len() {
+            assert!(CredentialStore::decode_state(&mut crate::cbor::Decoder::new(&raw[..end]), OWNER).is_err());
+        }
+        let mut decoder = crate::cbor::Decoder::new(&raw);
+        let decoded = CredentialStore::decode_state(&mut decoder, OWNER).unwrap();
+        decoder.finish().unwrap();
+        assert!(decoded == store);
+        assert!(CredentialStore::decode_state(&mut crate::cbor::Decoder::new(&raw), [8; 16]).is_err());
     }
 
     #[test]

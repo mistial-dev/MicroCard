@@ -1219,6 +1219,7 @@ fn run_loaded(
 }
 mod signing_tests;
 mod budget_tests;
+mod snapshot_tests;
 
 #[test]
 fn linked_frame_graph_rejects_cycles_and_paths_over_runtime_limit() {
@@ -2140,12 +2141,12 @@ fn every_invocation_commit_mutation_recovers_old_or_new_state() {
     load(&mut card, &counter_package("atomic", incarnation, 1, 7)).unwrap();
     card.manage(command(0xec, &management_names_wire("atomic", "F04D430001").unwrap()))
         .unwrap();
-    let previous = serde_json::to_vec(&card.state).unwrap();
+    let previous = card.state.encode_snapshot().unwrap().to_vec();
     let base = card.into_flash();
 
     let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
     complete.invoke("F04D430001", &[]).unwrap();
-    let committed = serde_json::to_vec(&complete.state).unwrap();
+    let committed = complete.state.encode_snapshot().unwrap().to_vec();
     let mutations = 16384 + 35 + committed.len();
     for cut in 0..=mutations {
         let mut flash = base.clone();
@@ -2155,7 +2156,7 @@ fn every_invocation_commit_mutation_recovers_old_or_new_state() {
         let mut flash = interrupted.into_flash();
         flash.fail_after = None;
         let recovered = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
-        let actual = serde_json::to_vec(&recovered.state).unwrap();
+        let actual = recovered.state.encode_snapshot().unwrap().to_vec();
         assert!(
             actual == previous || actual == committed,
             "partial invocation commit at cut {cut}"
@@ -2524,11 +2525,11 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
             &mut TestPlatform(0xa4),
         )
         .unwrap();
-    assert!(serde_json::to_vec(&card.state).unwrap().len() <= 49152);
+    assert!(card.state.encode_snapshot().unwrap().to_vec().len() <= 49152);
     assert_shared_names(&card.state.isd, "mscorlib");
     assert_shared_names(&card.state.domains["shared"], "Counter");
     assert_shared_names(&card.state.domains["shared"], "KeyOperations");
-    let wire_state = serde_json::to_vec(&card.state).unwrap();
+    let wire_state = card.state.encode_snapshot().unwrap().to_vec();
     let mut clone_context = crate::fallible_clone::CloneContext::new();
     let snapshot = card.state.try_clone_with(&mut clone_context).unwrap();
     let allocation_count = clone_context.allocations();
@@ -2539,7 +2540,7 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
             card.state.try_clone_with(&mut context),
             Err(Error::Quota)
         ));
-        assert_eq!(serde_json::to_vec(&card.state).unwrap(), wire_state);
+        assert_eq!(card.state.encode_snapshot().unwrap().to_vec(), wire_state);
     }
     assert!(Rc::ptr_eq(
         &card.state.isd.assemblies["mscorlib"],
@@ -2557,8 +2558,8 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
         assert_shared_names(&snapshot.domains["shared"], name);
     }
     assert_eq!(
-        serde_json::to_vec(&card.state).unwrap(),
-        serde_json::to_vec(&snapshot).unwrap()
+        card.state.encode_snapshot().unwrap().to_vec(),
+        snapshot.encode_snapshot().unwrap().to_vec()
     );
     let mut noncanonical = serde_json::to_value(&card.state).unwrap();
     let mut encoded = String::from(
@@ -2639,7 +2640,7 @@ fn maximum_container_state_clone_is_fallible_and_atomic() {
             .unwrap();
     }
 
-    let before = serde_json::to_vec(&card.state).unwrap();
+    let before = card.state.encode_snapshot().unwrap().to_vec();
     let mut complete_context = crate::fallible_clone::CloneContext::new();
     let complete = card.state.try_clone_with(&mut complete_context).unwrap();
     assert!(Rc::ptr_eq(
@@ -2654,7 +2655,7 @@ fn maximum_container_state_clone_is_fallible_and_atomic() {
             card.state.try_clone_with(&mut context),
             Err(Error::Quota)
         ));
-        assert_eq!(serde_json::to_vec(&card.state).unwrap(), before);
+        assert_eq!(card.state.encode_snapshot().unwrap().to_vec(), before);
     }
 }
 
@@ -2663,11 +2664,11 @@ fn first_load_power_loss_never_pins_alone() {
     let mut c = card();
     let inc = create(&mut c, "a");
     let p = package("a", inc, "one", 1, 7, &[0x2a]);
-    let previous = serde_json::to_vec(&c.state).unwrap();
+    let previous = c.state.encode_snapshot().unwrap().to_vec();
     let base = c.into_flash();
     let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
     load(&mut complete, &p).unwrap();
-    let serialized = serde_json::to_vec(&complete.state).unwrap(); // Journal mutation behavior is exhaustively tested separately.
+    let serialized = complete.state.encode_snapshot().unwrap().to_vec(); // Journal mutation behavior is exhaustively tested separately.
     for cut in 0..=16384 + 35 + serialized.len() {
         let mut f = base.clone();
         f.fail_after = Some(cut);
@@ -2676,16 +2677,16 @@ fn first_load_power_loss_never_pins_alone() {
         let mut f = c.into_flash();
         f.fail_after = None;
         let mut recovered = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
-        let actual = serde_json::to_vec(&recovered.state).unwrap();
+        let actual = recovered.state.encode_snapshot().unwrap().to_vec();
         assert!(
             actual == previous || actual == serialized,
             "partial activation at cut {cut}"
         );
         load(&mut recovered, &p).unwrap();
-        assert_eq!(serde_json::to_vec(&recovered.state).unwrap(), serialized);
+        assert_eq!(recovered.state.encode_snapshot().unwrap().to_vec(), serialized);
         let reopened =
             Card::open(recovered.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
-        assert_eq!(serde_json::to_vec(&reopened.state).unwrap(), serialized);
+        assert_eq!(reopened.state.encode_snapshot().unwrap().to_vec(), serialized);
     }
 }
 #[test]
@@ -3240,7 +3241,7 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
     complete
         .commit_credential_retry_floor(domain_registry_aid, &floor)
         .unwrap();
-    let serialized = serde_json::to_vec(&complete.state).unwrap();
+    let serialized = complete.state.encode_snapshot().unwrap().to_vec();
 
     for cut in 0..=16384 + 35 + serialized.len() {
         let mut flash = base.clone();

@@ -41,6 +41,62 @@ The P-256 signature covers every byte from the magic through the signer key, inc
 
 Envelope authentication does not establish that a manifest or image is supported. The selected engine must then decode and validate both before installation. [The shared MP05 vector](../format/package-envelope-v5.json) deliberately uses a synthetic image to test that boundary; it is not an installable application. Its private scalar is public test data. Independent Python/OpenSSL signing produces exactly the same deterministic envelope as Rust, .NET, and Java.
 
+## Internal state snapshot, version 1
+
+The authenticated MJ02 journal plaintext is `[1, 0, scp03_sequence, isd, domains]`.
+The second field identifies MC04; other engines and versions are rejected. The sequence
+is uint32. `domains` contains at most eight `[name, domain]` records in strictly
+increasing identifier order, excluding the reserved `ISD` name. The entire snapshot
+is bounded to 48 KiB. The journal authentication, monotonic generation, commit marker,
+and interrupted-write recovery rules remain unchanged.
+
+A domain has exactly 14 fields:
+
+```text
+[incarnation, registry_aid, signer_hash_or_null, policy, assemblies,
+ bindings, imports, versions, storage_schema, instances, integers, blobs,
+ keys, credentials]
+```
+
+Incarnation is 16 bytes, registry AID is 5 through 16 bytes, and a present signer hash
+is 32 bytes. Policy is `[capabilities, max_assemblies, max_instances, max_int_records,
+max_blob_records, max_blob_bytes, max_key_slots, max_package_bytes]`. Capabilities are
+at most 44 strictly increasing supported identifiers; the existing policy quotas apply.
+
+Assemblies, bindings, imports, and versions are arrays of at most eight `[name, value]`
+records in strictly increasing name order. Assembly values are raw MP05 byte strings,
+bounded to 16 KiB each and 24 KiB across the snapshot. Bindings contain at most 16
+32-byte package digests. Imports contain `[member_uint16, target]` records, bounded
+by the MC04 member-reference limit. Targets are `[0]` for Object constructor, `[1]`
+for current domain, `[2]` for storage, `[3]` for keys, `[4, native_id]`, or
+`[5, dependency_index, method_index]`. Version values are `[uint32, digest_bytes32]`.
+Recovery verifies these cached bindings and versions against authenticated packages.
+
+Storage declarations retain the manifest's `[key, kind, max_bytes]` shape, sorted by
+key and bounded by the domain declaration limit. Instances contain at most eight
+`[aid_bytes, assembly_name]` records sorted by AID. Integer records are at most 512
+`[int32_key, int32_value]` pairs. Blob records are at most 64 `[int32_key, bytes]`
+pairs with at most 2,048 bytes each and the domain's total blob quota. Both record
+lists are sorted strictly by key.
+
+Keys contain at most eight `[slot, algorithm, nonce_bytes16, key_bytes32]` records,
+sorted by slot in 0 through 7. Algorithm identifiers are 1 for HMAC-SHA-256, 2 for
+AES-128, and 3 for P-256. AES padding, scalar validity, and nonce uniqueness are checked.
+Credentials contain at most eight `[slot, owner_bytes16, pin_salt_bytes16,
+pin_digest_bytes32, puk_salt_bytes16, puk_digest_bytes32, pin_retries, pin_max_retries,
+puk_retries, puk_max_retries]` records, sorted by nonnegative int32 slot. Owner and
+retry constraints are checked against the containing domain. Decoder failures and
+encoder reallocations clear owned secret buffers before releasing them.
+
+The [internal golden vector](../format/snapshot-cbor-v1.json) is shared by Rust and
+the Python acceptance oracle. Java and .NET clients do not read journal plaintext.
+Old JSON snapshots return `IncompatibleState`, without an erase, migration, or retry
+of an older authenticated generation. Packages still reside inline in this version;
+dedicated immutable image storage remains separate work.
+
 ## Migration status
 
-MP05 packages and management-name payloads use these contracts on the wire. The loader rejects MP04 and earlier envelopes. Rebuild all packages and use matching clients; an existing snapshot containing old packages fails recovery rather than being erased or upgraded. Other management payloads and journal snapshots remain to migrate. JSON remains permitted for host authoring, reports, and test-vector files.
+MP05 packages, management names, and journal snapshots use these binary contracts.
+The loader rejects MP04 and earlier envelopes. Rebuild packages and use matching
+clients. Old persistent state fails explicitly and must be handled by an intentional
+development reset. JSON remains permitted for host authoring, reports, and test vectors.
