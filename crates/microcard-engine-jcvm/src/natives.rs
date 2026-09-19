@@ -476,20 +476,9 @@ fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Conte
             heap.check_access(source, context)?;
             heap.check_access(destination, context)?;
             let length = index(length)?;
-            // Read the source out before writing, because the two may be the same array.
-            let mut buffer = [0u8; 256];
-            let mut copied = 0;
-            while copied < length {
-                let step = (length - copied).min(buffer.len());
-                buffer[..step].copy_from_slice(heap.byte_slice(
-                    source,
-                    index(source_offset)? + copied,
-                    step,
-                )?);
-                heap.byte_slice_mut(destination, index(destination_offset)? + copied, step)?
-                    .copy_from_slice(&buffer[..step]);
-                copied += step;
-            }
+            heap.copy_bytes(
+                source, index(source_offset)?, destination, index(destination_offset)?, length,
+            )?;
             frame.push_short(destination_offset.wrapping_add(length as i16))?;
         }
         MethodId::arrayFill | MethodId::arrayFillNonAtomic => {
@@ -756,29 +745,32 @@ mod tests {
     fn util_copies_within_one_array_without_overwriting_what_it_is_reading() {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
-        let array = heap.new_array(heap::KIND_BYTE, 8, 1).unwrap();
-        heap.byte_slice_mut(array, 0, 4)
-            .unwrap()
-            .copy_from_slice(&[1, 2, 3, 4]);
+        let array = heap.new_array(heap::KIND_BYTE, 600, 1).unwrap();
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
-        // Overlapping copy forwards, the case that would smear the first byte if the copy
-        // read and wrote one byte at a time.
-        frame.push_reference(array).unwrap();
-        frame.push_short(0).unwrap();
-        frame.push_reference(array).unwrap();
-        frame.push_short(1).unwrap();
-        frame.push_short(3).unwrap();
-        call(
-            framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
-            &mut heap,
-            &mut crate::host::NoHost,
-            &mut frame,
-            1,
-            &mut idle(),
-        )
-        .unwrap();
-        assert_eq!(frame.pop_short().unwrap(), 4);
-        assert_eq!(heap.byte_slice(array, 0, 5).unwrap(), &[1, 1, 2, 3, 0]);
+        // Cross the former 256-byte staging boundary in both overlap directions.
+        for (source, destination, length) in [(0, 1, 599), (1, 0, 599), (600, 600, 0)] {
+            for (index, byte) in heap.byte_slice_mut(array, 0, 600).unwrap().iter_mut().enumerate() {
+                *byte = index as u8;
+            }
+            let before = heap.byte_slice(array, 0, 600).unwrap().to_vec();
+            frame.push_reference(array).unwrap();
+            frame.push_short(source).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(destination).unwrap();
+            frame.push_short(length).unwrap();
+            call(
+                framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
+                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(),
+            ).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), destination + length);
+            let mut expected = before;
+            expected.copy_within(source as usize..(source + length) as usize, destination as usize);
+            assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), expected);
+        }
+        let before = heap.byte_slice(array, 0, 600).unwrap().to_vec();
+        assert_eq!(heap.copy_bytes(array, 0, array, 1, 600), Err(Error::Bounds));
+        assert_eq!(heap.copy_bytes(array, usize::MAX, array, 0, 1), Err(Error::Bounds));
+        assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), before);
     }
 
     #[test]

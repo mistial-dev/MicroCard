@@ -293,6 +293,23 @@ impl<'a> Heap<'a> {
         Ok(&self.bytes[at..at + length])
     }
 
+    /// Validate both complete ranges before an overlap-safe CPU copy.
+    pub fn copy_bytes(
+        &mut self,
+        source: Reference,
+        source_offset: usize,
+        destination: Reference,
+        destination_offset: usize,
+        length: usize,
+    ) -> Result<()> {
+        self.byte_slice(source, source_offset, length)?;
+        self.byte_slice(destination, destination_offset, length)?;
+        let source = source as usize + HEADER + source_offset;
+        let destination = destination as usize + HEADER + destination_offset;
+        self.bytes.copy_within(source..source + length, destination);
+        Ok(())
+    }
+
     pub fn byte_slice_mut(
         &mut self,
         reference: Reference,

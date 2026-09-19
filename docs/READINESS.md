@@ -132,6 +132,15 @@ its overall host peak remains 39,313 bytes. No device heap reduction or latency
 improvement is established. Native results now require a bounded copy into the slab;
 slab capacity growth and temporary provider buffers remain included in host profiling.
 
+JCVM byte-array copies now validate both full ranges before modifying memory and use
+an overlap-safe CPU copy. The former 256-byte staging loop corrupted forward overlap
+across chunk boundaries and could partially modify an invalid destination. The existing
+copy test now covers both overlap directions beyond that boundary, empty end ranges,
+and unchanged data on rejected ranges. Against `08cff1e`, the fix adds 36 JCVM text
+bytes on each board layout, removes the explicit 256-byte stack buffer, and leaves
+static RAM unchanged. Physical stack and latency benefits remain unmeasured. Sharing
+this operation with MC04 and native work charging remain implementation work.
+
 ## Crypto replacement measurements
 
 `python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 187,188 text bytes, SHA-256 replacement 189,876, SHA-256 plus P-256 203,904, and all hardware providers 213,124. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
