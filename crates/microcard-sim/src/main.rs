@@ -312,9 +312,14 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut card=microcard_engine_jcvm::applet::Card::new(&file,sizes).map_err(|e|format!("{e:?}"))?;
   let mut hardware=Hardware;
   let mut host=microcard_core::jcvm_services::Services(&mut hardware);
-  // The install parameters GlobalPlatform would deliver, empty here because nothing has
-  // asked for an instance AID or privileges.
-  card.install(&file,&mut host,&[0,0,0]).map_err(|e|format!("{e:?}"))?;
+  // The standalone simulator installs under the module AID with no privileges.
+  let module=file.applets().map_err(|e|format!("{e:?}"))?.iter().next().ok_or("No applet")?.aid;
+  let parameters=microcard_core::globalplatform::ApplicationInstall {
+   load_aid:file.header().map_err(|e|format!("{e:?}"))?.package_aid,module_aid:module,instance_aid:module,privileges:&[0],parameters:&[],
+  }.jcvm_parameters().map_err(|e|format!("{e:?}"))?;
+  card.install_instance_with_cancel(&file,&mut host,microcard_engine_jcvm::applet::Installation {
+   module_aid:module,instance_aid:module,parameters:&parameters,
+  },&mut ||false).map_err(|e|format!("{e:?}"))?;
   let mut selected=false;
   for line in io::stdin().lock().lines(){
    let line=line?;let raw=unhex(line.trim())?;

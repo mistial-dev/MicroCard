@@ -84,7 +84,10 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
             .unwrap_or_else(|error| panic!("{name}: sizes {error:?}"));
         // The parameters GlobalPlatform hands install: an instance AID, privileges and
         // applet data, each length prefixed.
-        let parameters = [0u8, 0, 0];
+        let aid = file.applets().unwrap().iter().next().unwrap().aid;
+        let mut parameters = vec![aid.len() as u8];
+        parameters.extend_from_slice(aid);
+        parameters.extend_from_slice(&[1, 0, 0]);
         let mut host = TestHost(0);
         match card.install(&file, &mut host, &parameters) {
             Ok(()) => {

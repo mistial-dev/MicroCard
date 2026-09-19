@@ -155,6 +155,24 @@ pub struct ApplicationInstall<'a> {
     pub parameters: &'a [u8],
 }
 
+impl ApplicationInstall<'_> {
+    /// JCRE install input: instance AID, privileges, and C9 data, each length-prefixed.
+    pub fn jcvm_parameters(&self) -> Result<Vec<u8>> {
+        if !(5..=MAX_AID_BYTES).contains(&self.instance_aid.len()) || self.parameters.len() > 127 {
+            return Err(Error::Format);
+        }
+        if !matches!(self.privileges, [0] | [0, 0, 0]) { return Err(Error::Unauthorized); }
+        let length = 3 + self.instance_aid.len() + self.privileges.len() + self.parameters.len();
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(length).map_err(|_| Error::Quota)?;
+        for value in [self.instance_aid, self.privileges, self.parameters] {
+            bytes.push(value.len() as u8);
+            bytes.extend_from_slice(value);
+        }
+        Ok(bytes)
+    }
+}
+
 pub fn application_install<'a>(
     command: &'a crate::apdu::Command<'_>,
 ) -> Result<ApplicationInstall<'a>> {
@@ -540,7 +558,7 @@ mod tests {
 
         let load_aid = [0xa0; 16];
         let mut application_data = Vec::new();
-        for value in [&load_aid[..], &aid, &aid, &[0][..], &[0xc9, 0], &[]] {
+        for value in [&load_aid[..], &aid, &aid, &[0][..], &[0xc9, 3, 1, 2, 3], &[]] {
             application_data.push(value.len() as u8);
             application_data.extend_from_slice(value);
         }
@@ -555,6 +573,7 @@ mod tests {
         let parsed = application_install(&application).unwrap();
         assert_eq!(parsed.load_aid, load_aid);
         assert_eq!(parsed.instance_aid, aid);
+        assert_eq!(parsed.jcvm_parameters().unwrap(), [5, 0xf0, 0x4d, 0x43, 0x53, 0x44, 1, 0, 3, 1, 2, 3]);
     }
 
     #[test]

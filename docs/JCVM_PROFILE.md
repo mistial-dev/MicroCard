@@ -44,6 +44,12 @@ The session uses the reboot journal scan to resolve uncertain writes; a failed r
 can still correspond to a committed command. The raw engine API alone does not roll
 back mutations.
 
+The session accepts parsed GlobalPlatform installation requests, checks the load-file
+AID, and frames instance AID, privileges, and C9 application data for the applet.
+Explicit `Applet.register` calls must use the requested instance AID. Empty or short
+registration AIDs and repeated registration are rejected. The management adapter
+still needs to persist registry ownership and dispatch selection by that AID.
+
 ## What holds this claim up
 
 One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, with its MIT notice, the applet revision it was built from and the digests of both the CAP and the block. Twelve PIV commands and their expected status words are committed beside it. `scripts/piv_vector_acceptance.py` replays them with no argument, and the checkpoint gate and CI both run it.

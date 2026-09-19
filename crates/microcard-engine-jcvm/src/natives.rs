@@ -166,6 +166,7 @@ pub fn call(
             jcsystem(name, heap, frame, context, jcre)
         }
         ("javacard.framework", "javacard/framework/Applet", "register") => {
+            if jcre.instance.is_some() { return Err(Error::Unauthorized); }
             // Two forms, JCRE §3.1. One registers under the AID the installer gave, the
             // other under an AID the applet chose out of a byte array it holds.
             if target.method.descriptor != "()V" {
@@ -173,7 +174,7 @@ pub fn call(
                 let offset = frame.pop_short()?;
                 let array = frame.pop_reference()?;
                 heap.check_access(array, context)?;
-                if length < 0 || offset < 0 || length as usize > jcre.aid.len() {
+                if !(5..=16).contains(&length) || offset < 0 {
                     return Err(Error::Bounds);
                 }
                 let bytes = heap.byte_slice(array, offset as usize, length as usize)?;
@@ -183,6 +184,7 @@ pub fn call(
             // The applet hands itself to the runtime. Everything after this command can
             // select it.
             let instance = frame.pop_reference()?;
+            heap.check_access(instance, context)?;
             jcre.instance = Some(instance);
             Ok(Native::Returned)
         }

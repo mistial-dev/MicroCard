@@ -79,6 +79,13 @@ pub struct Response {
     pub sw: u16,
 }
 
+/// Authenticated management identity and the framed GlobalPlatform install data.
+pub struct Installation<'a> {
+    pub module_aid: &'a [u8],
+    pub instance_aid: &'a [u8],
+    pub parameters: &'a [u8],
+}
+
 impl Card {
     /// Lay out the memory one applet gets, and build the objects the runtime hands it.
     pub fn new(file: &LoadFile, sizes: Sizes) -> Result<Self> {
@@ -147,6 +154,29 @@ impl Card {
         parameters: &[u8],
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.run_install(file, host, Installation { module_aid, instance_aid: &[], parameters }, cancel)
+    }
+
+    /// Require any explicit registration AID to match the management request.
+    pub fn install_instance_with_cancel(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        installation: Installation<'_>,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        if !(5..=16).contains(&installation.instance_aid.len()) { return Err(Error::Bounds); }
+        self.run_install(file, host, installation, cancel)
+    }
+
+    fn run_install(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        installation: Installation<'_>,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        let Installation { module_aid, instance_aid, parameters } = installation;
         if cancel() { return Err(Error::Cancelled); }
         if self.installed() { return Err(Error::Inconsistent); }
         if parameters.len() > u8::MAX as usize { return Err(Error::Bounds); }
@@ -187,10 +217,13 @@ impl Card {
             outer.push_short(0)?;
             outer.push_short(i16::from(parameters.len() as u8 as i8))?;
             let thrown = invoke(&mut machine, install, &mut outer, &mut arena, &mut budget)?;
-            (thrown, machine.jcre.instance)
+            (thrown, machine.jcre.instance, machine.jcre.aid, machine.jcre.aid_length)
         };
         self.heap_used = heap.used();
         if outcome.0.is_some() {
+            return Err(Error::Unauthorized);
+        }
+        if !instance_aid.is_empty() && outcome.3 != 0 && &outcome.2[..usize::from(outcome.3)] != instance_aid {
             return Err(Error::Unauthorized);
         }
         // An install that does not register leaves nothing to select, JCRE §3.1.
@@ -433,6 +466,10 @@ mod tests {
     /// constructs the class and registers it, a select that agrees, and a process that
     /// writes into the APDU buffer and sends it.
     fn applet(process: Vec<u8>, process_stack: u8) -> Package {
+        applet_registration(process, process_stack, false)
+    }
+
+    fn applet_registration(process: Vec<u8>, process_stack: u8, explicit: bool) -> Package {
         let mut package = Package {
             imports: vec![
                 (Vec::from(JAVA_LANG_AID), 1, 0),
@@ -459,6 +496,9 @@ mod tests {
             ],
             ..Package::default()
         };
+        if explicit {
+            package.code.splice(7..7, [op::ALOAD_0, op::SCONST_0, op::SLOAD_1 + 1]);
+        }
         let bodies = package.extra_offsets();
         package.classes = vec![ClassSpec {
             // The applet class extends javacard.framework.Applet, which is external, and
@@ -476,7 +516,7 @@ mod tests {
         package.max_stack = 8;
         package.constants = vec![
             // Applet.register, virtual token 1 in the framework.
-            [CONSTANT_VIRTUAL_METHODREF, 0x81, 3, 1],
+            [CONSTANT_VIRTUAL_METHODREF, 0x81, 3, if explicit { 2 } else { 1 }],
             [CONSTANT_CLASSREF, 0x81, 3, 0],
             [CONSTANT_CLASSREF, 0x81, 10, 0],
             // The applet's own class.
@@ -592,6 +632,16 @@ mod tests {
         assert_eq!(heap.get_word(pin, 3), Ok(0));
         assert_eq!(heap.get_word(pin, 4), Ok(2));
         assert!(heap.byte_slice(card.buffer, 0, card.sizes.buffer_bytes as usize).unwrap().iter().all(|byte| *byte == 0));
+        // Explicit registration may not change the instance management authorized.
+        let bytes = applet_registration(vec![op::RETURN], 1, true).build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        let module_aid = file.applets().unwrap().iter().next().unwrap().aid;
+        let requested = [0xf0, 1, 2, 3, 4];
+        for (parameters, expected) in [(&requested[..], Ok(())), (&[0xf0, 1, 2, 3, 5][..], Err(Error::Unauthorized)), (&[0xf0, 1, 2, 3][..], Err(Error::Bounds))] {
+            let mut card = Card::new(&file, Sizes::default()).unwrap();
+            assert_eq!(card.install_instance_with_cancel(&file, &mut crate::host::NoHost,
+                Installation { module_aid, instance_aid: &requested, parameters }, &mut || false), expected);
+        }
     }
 
     #[test]

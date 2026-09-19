@@ -74,7 +74,17 @@ mod tests {
         assert!(empty.is_none());
         let file = LoadFile::parse(image).unwrap();
         let mut card = Card::new(&file, sizes).unwrap();
-        card.install(&file, &mut Host, &[0, 0, 0]).unwrap();
+        let aid = file.applets().unwrap().iter().next().unwrap().aid;
+        let parameters = crate::globalplatform::ApplicationInstall {
+            load_aid: file.header().unwrap().package_aid,
+            module_aid: aid,
+            instance_aid: aid,
+            privileges: &[0],
+            parameters: &[],
+        }
+        .jcvm_parameters()
+        .unwrap();
+        card.install(&file, &mut Host, &parameters).unwrap();
         store.commit(&card, &mut SoftwareCrypto).unwrap();
         let flash = store.into_flash();
         for (key, installation) in [([2; 16], [4; 16]), ([3; 16], [5; 16])] {

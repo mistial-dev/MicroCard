@@ -55,6 +55,37 @@ impl<F: Flash> Session<F> {
         provider: &mut (impl CryptoProvider + Entropy),
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.install_inner(module, None, parameters, provider, cancel)
+    }
+
+    pub fn install_globalplatform(
+        &mut self,
+        request: &crate::globalplatform::ApplicationInstall<'_>,
+        provider: &mut (impl CryptoProvider + Entropy),
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
+        if file.header().map_err(engine_error)?.package_aid != request.load_aid {
+            return Err(Error::Missing);
+        }
+        let parameters = request.jcvm_parameters()?;
+        self.install_inner(
+            request.module_aid,
+            Some(request.instance_aid),
+            &parameters,
+            provider,
+            cancel,
+        )
+    }
+
+    fn install_inner(
+        &mut self,
+        module: &[u8],
+        instance: Option<&[u8]>,
+        parameters: &[u8],
+        provider: &mut (impl CryptoProvider + Entropy),
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
         if self.installed()? {
             return Err(Error::Busy);
         }
@@ -63,12 +94,27 @@ impl<F: Flash> Session<F> {
         }
         let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
         self.card = Some(Card::new(&file, self.sizes).map_err(engine_error)?);
-        let result = self
-            .card
-            .as_mut()
-            .unwrap()
-            .install_module_with_cancel(&file, &mut Services(provider), module, parameters, cancel)
-            .map_err(engine_error);
+        let card = self.card.as_mut().unwrap();
+        let result = match instance {
+            Some(instance_aid) => card.install_instance_with_cancel(
+                &file,
+                &mut Services(provider),
+                microcard_engine_jcvm::applet::Installation {
+                    module_aid: module,
+                    instance_aid,
+                    parameters,
+                },
+                cancel,
+            ),
+            None => card.install_module_with_cancel(
+                &file,
+                &mut Services(provider),
+                module,
+                parameters,
+                cancel,
+            ),
+        }
+        .map_err(engine_error);
         self.finish(result, provider, cancel)
     }
 
@@ -188,8 +234,19 @@ mod tests {
             &mut provider,
         )
         .unwrap();
+        let request = crate::globalplatform::ApplicationInstall {
+            load_aid: LoadFile::parse(image)
+                .unwrap()
+                .header()
+                .unwrap()
+                .package_aid,
+            module_aid: module,
+            instance_aid: &[0xf0, 1, 2, 3, 4],
+            privileges: &[0],
+            parameters: &[],
+        };
         session
-            .install(module, &[0, 0, 0], &mut provider, &mut || false)
+            .install_globalplatform(&request, &mut provider, &mut || false)
             .unwrap();
         let select = [0, 0xa4, 4, 0, 0];
         let wrong_pin = [
