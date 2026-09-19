@@ -56,7 +56,16 @@ The nRF52840 DK takes the same firmware through a debug probe instead. [First fl
 
 ## Known state
 
-The image builds, links at the right origin, fits the region with room to spare, and packages as UF2 whose header matches the one this bootloader writes for itself. **It has not been seen to boot.**
+On 2026-09-19, the connected board enumerated as `MicroCard virtual smart card`
+(USB `20A0:430A`). macOS PC/SC opened it with T=1 and returned ATR `3B800181`.
+Read-only `80CA006600` returned GlobalPlatform recognition data ending in `9000`,
+advertising SCP03 `i=71`. The flashed revision and engine are unknown; this confirms
+USB and APDU operation for that image, not the current JCVM build. No image was
+flashed or persistent data changed during this check. PC/SC required access outside
+the development sandbox; inside it, context creation reported service unavailable.
+
+The current JCVM dongle build links within its 288 KiB firmware region. Its physical
+execution and OpenFIPS201 workflow remain unverified.
 
 One flash attempt ended with the copy reporting an input and output error, the `UF2BOOT` volume disappearing, and the board never re-enumerating. That error is ambiguous on its own, because a UF2 bootloader reboots the moment it has every block and severs the copy, which produces the same message as a write that stopped early.
 
