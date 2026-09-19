@@ -45,10 +45,12 @@ def main() -> None:
         "MC04 local-variable quota exceeded",
         "Switch quota",
     ))
+    require("crates/microcard-core/src/package/manifest_cbor.rs", (
+        "let entry_points = list(&mut d, 4,",
+        "let dependencies = list(&mut d, 16,",
+        "let storage = list(&mut d, MAX_STORAGE_DECLARATIONS,",
+    ))
     require("crates/microcard-core/src/package.rs", (
-        "manifest.entry_points.len() > 4",
-        "manifest.dependencies.len() > 16",
-        "manifest.storage.len() > MAX_STORAGE_DECLARATIONS",
         "assembly.validate_lifecycle(id)?",
         "assembly.validate_imports(&manifest.capabilities)?",
     ))
@@ -68,7 +70,7 @@ def main() -> None:
         "authorize_storage",
         "domain_schema",
     ))
-    print("PASS: MCA0001-MCA0025 map to negative builds and independent host/device enforcement")
+    print("PASS: MCA0001-MCA0025 coverage pointers and profile enforcement sites are present")
 
 
 if __name__ == "__main__":
