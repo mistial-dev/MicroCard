@@ -39,6 +39,29 @@ impl<F: Flash> Session<F> {
         Ok(self.card.is_some())
     }
 
+    pub fn selected(&self) -> Result<bool> {
+        self.installed()?;
+        Ok(self.card.as_ref().is_some_and(Card::selected))
+    }
+
+    pub fn deselect(
+        &mut self,
+        provider: &mut (impl CryptoProvider + Entropy),
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        if !self.selected()? {
+            return Ok(());
+        }
+        let file = LoadFile::parse(&self.image).map_err(|_| Error::Format)?;
+        let result = self
+            .card
+            .as_mut()
+            .ok_or(Error::Missing)?
+            .deselect_with_cancel(&file, &mut Services(provider), cancel)
+            .map_err(engine_error);
+        self.finish(result, provider, cancel)
+    }
+
     /// Also clears volatile applet data; transport must discard its selection.
     pub fn recover(&mut self, provider: &mut impl CryptoProvider) -> Result<()> {
         self.recovery_required = true;

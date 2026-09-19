@@ -48,7 +48,7 @@ impl CardEngine for TestEngine {
         self.selections.set(self.selections.get() + 1);
         Ok(())
     }
-    fn select_aid_with_cancel(&mut self, _: &[u8], _: &mut dyn FnMut() -> bool) -> Result<()> {
+    fn select_verified_with_cancel(&mut self, _: Verified, _: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
         panic!("unauthenticated application selection");
     }
     fn manage_globalplatform_with_cancel(

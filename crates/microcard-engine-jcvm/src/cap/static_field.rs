@@ -94,8 +94,16 @@ impl<'a> StaticField<'a> {
         let described = field.reference_count as u32 * 2
             + default_value_count as u32
             + non_default_value_count as u32;
-        if described != image_size as u32 {
+        if described != image_size as u32 || array_init_count > field.reference_count {
             return Err(Error::Inconsistent);
+        }
+        for array in field.array_inits() {
+            if !array.values.len().is_multiple_of(array.element_size())
+                || array.length() > i16::MAX as usize
+                || (array.element_type == TYPE_BOOLEAN && array.values.iter().any(|byte| *byte > 1))
+            {
+                return Err(Error::Format);
+            }
         }
         Ok(field)
     }
@@ -165,7 +173,7 @@ mod tests {
     #[test]
     fn array_initialisers_carry_their_own_lengths() {
         let info = component(
-            0,
+            2,
             &[(TYPE_BYTE, &[1, 2, 3]), (TYPE_SHORT, &[0, 4, 0, 5])],
             0,
             &[],
@@ -179,11 +187,18 @@ mod tests {
         assert_eq!(all[1].element_size(), 2);
         assert_eq!(all[1].length(), 2);
         assert_eq!(all[1].values, &[0, 4, 0, 5]);
+        for (references, arrays) in [
+            (0, &[(TYPE_BYTE, &[1][..])][..]),
+            (1, &[(TYPE_SHORT, &[1][..])][..]),
+            (1, &[(TYPE_BOOLEAN, &[2][..])][..]),
+        ] {
+            assert!(StaticField::parse(&component(references, arrays, 0, &[])).is_err());
+        }
     }
 
     #[test]
     fn a_truncated_or_overrunning_component_is_refused() {
-        let info = component(0, &[(TYPE_BYTE, &[1, 2, 3])], 0, &[]);
+        let info = component(1, &[(TYPE_BYTE, &[1, 2, 3])], 0, &[]);
         for length in 0..info.len() {
             assert!(StaticField::parse(&info[..length]).is_err(), "{length}");
         }

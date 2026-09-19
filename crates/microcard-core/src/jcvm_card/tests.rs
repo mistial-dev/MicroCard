@@ -212,7 +212,10 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let modules = host.send(&mut endpoint, 0xf2, 0x10, 2, &[0x4f, 0]);
     assert!(modules.windows(module.len()).any(|value| value == module));
     assert_eq!(&modules[modules.len() - 2..], &[0x90, 0]);
-    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), [0x90, 0]);
+    let select_response = host.send(&mut endpoint, 0xa4, 4, 0, &aid);
+    assert_eq!(&select_response[..3], &[0x61, 0x81, 0x92]);
+    assert_eq!(select_response.len(), 3 + 0x92 + 2);
+    assert_eq!(&select_response[select_response.len() - 2..], &[0x90, 0]);
     let pin = [
         0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 255, 255,
     ];
@@ -235,7 +238,8 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let mut host = Host::connect(&mut endpoint, 1);
     #[cfg(feature = "scp03-pseudo-random")]
     assert_ne!(host.key, previous_session_key);
-    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), [0x90, 0]);
+    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
+    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid), select_response);
     let response = host.send(&mut endpoint, 0x10, 0, 0, &pin);
     assert_eq!(u16::from_be_bytes(response.try_into().unwrap()) + 1, before);
 

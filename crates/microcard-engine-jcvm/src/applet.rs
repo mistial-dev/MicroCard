@@ -53,12 +53,14 @@ impl Default for Sizes {
 pub struct Card {
     heap: Vec<u8>,
     heap_used: usize,
+    runtime_bytes: usize,
     statics: Vec<u8>,
     words: Vec<u16>,
     tags: Vec<u8>,
     apdu: Reference,
     buffer: Reference,
     instance: Option<Reference>,
+    selected: bool,
     context: heap::Context,
     sizes: Sizes,
 }
@@ -93,6 +95,7 @@ impl Card {
         let mut card = Self {
             heap: Vec::new(),
             heap_used: 0,
+            runtime_bytes: 0,
             statics: Vec::new(),
             words: Vec::new(),
             tags: Vec::new(),
@@ -101,6 +104,7 @@ impl Card {
             // Every applet in this package shares one context until a second package can
             // be loaded, JCRE §6.1.2.
             instance: None,
+            selected: false,
             context: 1,
             sizes,
         };
@@ -115,6 +119,31 @@ impl Card {
         card.buffer = heap.new_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context)?;
         let apdu_class = native_class_of("javacard/framework/APDU")?;
         card.apdu = heap.new_object(apdu_class, 1, card.context)?;
+        card.runtime_bytes = heap.used();
+        use crate::cap::{TYPE_BOOLEAN, TYPE_BYTE, TYPE_SHORT, TYPE_INT};
+        for (index, array) in statics.array_inits().enumerate() {
+            let kind = match array.element_type {
+                TYPE_BOOLEAN => heap::KIND_BOOLEAN,
+                TYPE_BYTE => heap::KIND_BYTE,
+                TYPE_SHORT => heap::KIND_SHORT,
+                TYPE_INT if file.header()?.int() => heap::KIND_INT,
+                _ => return Err(Error::Unsupported),
+            };
+            let reference = heap.new_array(kind, array.length() as u16, card.context)?;
+            for (element, bytes) in array.values.chunks_exact(array.element_size()).enumerate() {
+                let value = match bytes {
+                    [byte] => i32::from(*byte as i8),
+                    [a, b] => i32::from(i16::from_be_bytes([*a, *b])),
+                    [a, b, c, d] => i32::from_be_bytes([*a, *b, *c, *d]),
+                    _ => return Err(Error::Format),
+                };
+                if kind == heap::KIND_INT { heap.array_put_int(reference, element, value)?; }
+                else { heap.array_put(reference, element, value as i16)?; }
+            }
+            card.statics[index * 2..index * 2 + 2].copy_from_slice(&reference.to_be_bytes());
+        }
+        let start = usize::from(statics.reference_count) * 2 + usize::from(statics.default_value_count);
+        card.statics[start..].copy_from_slice(statics.non_default_values);
         card.heap_used = heap.used();
         Ok(card)
     }
@@ -227,7 +256,9 @@ impl Card {
             return Err(Error::Unauthorized);
         }
         // An install that does not register leaves nothing to select, JCRE §3.1.
-        self.instance = Some(outcome.1.ok_or(Error::Missing)?);
+        let instance = outcome.1.ok_or(Error::Missing)?;
+        check_applet(&linked, &heap, instance)?;
+        self.instance = Some(instance);
         Ok(())
     }
 
@@ -235,8 +266,11 @@ impl Card {
         self.instance.is_some()
     }
 
+    pub fn selected(&self) -> bool { self.selected }
+
     /// Clear reset-scoped data while retaining the installed instance and persistent state.
     pub fn reset(&mut self) -> Result<()> {
+        self.selected = false;
         self.words.fill(0);
         self.tags.fill(0);
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
@@ -267,82 +301,129 @@ impl Card {
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Response> {
         if cancel() { return Err(Error::Cancelled); }
+        self.instance.ok_or(Error::Missing)?;
+        if selecting { self.selected = false; }
+        if command.len() < 4 || command.len() > self.sizes.buffer_bytes as usize {
+            return Err(Error::Bounds);
+        }
+        let incoming = incoming_length(command)?;
+        let expected = expected_length(command)?;
+        {
+            let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+            heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?.fill(0);
+            heap.byte_slice_mut(self.buffer, 0, command.len())?.copy_from_slice(command);
+        }
+        let mut budget = self.sizes.budget;
+        if selecting {
+            let answer = self.callback(file, host, Callback::Select, (incoming, expected), &mut budget, cancel)?;
+            if answer.exception.is_some() || answer.returned == 0 {
+                return Ok(Response { data: Vec::new(), sw: 0x6999 });
+            }
+            self.selected = true;
+        }
+        // Selection is decided by select(), not by the status that process() returns.
+        let answer = self.callback(file, host, Callback::Process { selecting }, (incoming, expected), &mut budget, cancel)?;
+        let heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        let sw = answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception));
+        Ok(Response { data: answer.data, sw })
+    }
+
+    /// Applet exceptions do not prevent deselection; engine and persistence failures
+    /// still require caller recovery. Reset and power loss never run this callback.
+    pub fn deselect_with_cancel(
+        &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        if cancel() { return Err(Error::Cancelled); }
+        if !self.selected { return Ok(()); }
+        self.selected = false;
+        let mut budget = self.sizes.budget;
+        self.callback(file, host, Callback::Deselect, (0, 0), &mut budget, cancel)?;
+        let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        heap.clear_transient(heap::CLEAR_ON_DESELECT, self.context)?;
+        heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?.fill(0);
+        self.words.fill(0);
+        self.tags.fill(0);
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn callback(
+        &mut self, file: &LoadFile, host: &mut dyn Host, callback: Callback,
+        lengths: (u16, u16), budget: &mut u32, cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Invocation> {
+        if cancel() { return Err(Error::Cancelled); }
         let instance = self.instance.ok_or(Error::Missing)?;
         let linked = Linked::new(file)?;
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
-        // The command goes into the buffer the applet already holds a reference to.
-        if command.len() > self.sizes.buffer_bytes as usize {
-            return Err(Error::Bounds);
-        }
-        heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?
-            .fill(0);
-        heap.byte_slice_mut(self.buffer, 0, command.len())?
-            .copy_from_slice(command);
-
         let class = heap.info(instance)?.class;
-        let token = applet_token(if selecting { "select" } else { "process" })?;
-        let method = linked.lookup(class, token)?;
-
+        let method = match linked.lookup(class, applet_token(callback.name())?) {
+            Ok(method) => method,
+            // Applet's inherited select accepts, and its inherited deselect is a no-op.
+            Err(Error::Missing) if !matches!(callback, Callback::Process { .. }) => {
+                return Ok(Invocation { exception: None, returned: 1, data: Vec::new() });
+            }
+            Err(error) => return Err(error),
+        };
         let mut jcre = Jcre::new(self.apdu, self.buffer);
-        jcre.selecting = selecting;
-        jcre.incoming = incoming_length(command)?;
+        jcre.selecting = matches!(callback, Callback::Select | Callback::Process { selecting: true });
+        jcre.incoming = lengths.0;
+        jcre.expected = lengths.1;
         jcre.data_offset = 5;
-
-        let mut budget = self.sizes.budget;
-        let (outcome, outgoing) = {
+        let answer = {
             let mut machine = Machine::new(
-                &mut heap,
-                host,
-                &linked,
-                file.methods()?,
-                &mut self.statics,
-                self.context,
-                Limits {
-                    int: file.header()?.int(),
-                    ..Limits::IMPLEMENTED
-                },
-                jcre,
+                &mut heap, host, &linked, file.methods()?, &mut self.statics, self.context,
+                Limits { int: file.header()?.int(), ..Limits::IMPLEMENTED }, jcre,
             ).with_cancel(cancel);
-            let mut arena = Arena {
-                words: &mut self.words,
-                tags: &mut self.tags,
-            };
-            let mut outer_words = [0u16; 8];
-            let mut outer_tags = [0u8; 1];
+            let mut arena = Arena { words: &mut self.words, tags: &mut self.tags };
+            let mut outer_words = [0; 8];
+            let mut outer_tags = [0; 1];
             let mut outer = Frame::new(&mut outer_words, &mut outer_tags, 0, 8)?;
             outer.push_reference(instance)?;
-            if !selecting {
-                // process takes the APDU object. select takes nothing.
-                outer.push_reference(self.apdu)?;
+            if matches!(callback, Callback::Process { .. }) { outer.push_reference(self.apdu)?; }
+            let exception = invoke(&mut machine, method, &mut outer, &mut arena, budget)?;
+            let returned = if exception.is_none() && matches!(callback, Callback::Select) {
+                outer.pop_short()? as u16
+            } else { 0 };
+            let mut data = Vec::new();
+            if exception.is_none() {
+                let response = machine.jcre.response_data()?;
+                data.try_reserve_exact(response.len()).map_err(|_| Error::Quota)?;
+                data.extend_from_slice(response);
             }
-            let thrown = invoke(&mut machine, method, &mut outer, &mut arena, &mut budget)?;
-            let answered = if selecting {
-                // select answers whether the applet accepts the selection.
-                outer.pop_raw().map(|(value, _)| value).unwrap_or(0)
-            } else {
-                0
-            };
-            (thrown, (machine.jcre.outgoing, answered))
+            Invocation { exception, returned, data }
         };
         self.heap_used = heap.used();
-
-        let sw = match outcome {
-            None => SW_SUCCESS,
-            Some(exception) => status_word(&heap, exception),
-        };
-        if selecting && sw == SW_SUCCESS && outgoing.1 == 0 {
-            // A select that answers false is a refusal, JCRE §3.5.
-            return Ok(Response {
-                data: Vec::new(),
-                sw: 0x6999,
-            });
-        }
-        let length = if outcome.is_some() { 0 } else { outgoing.0 as usize };
-        let mut data = Vec::new();
-        data.try_reserve_exact(length).map_err(|_| Error::Quota)?;
-        data.extend_from_slice(heap.byte_slice(self.buffer, 0, length)?);
-        Ok(Response { data, sw })
+        Ok(answer)
     }
+
+}
+
+#[derive(Clone, Copy)]
+enum Callback { Select, Process { selecting: bool }, Deselect }
+impl Callback {
+    fn name(self) -> &'static str {
+        match self { Self::Select => "select", Self::Process { .. } => "process", Self::Deselect => "deselect" }
+    }
+}
+struct Invocation { exception: Option<Reference>, returned: u16, data: Vec<u8> }
+
+fn check_applet(linked: &Linked, heap: &Heap, instance: Reference) -> Result<()> {
+    use crate::cap::ClassRef;
+    let root = heap.info(instance)?;
+    if root.kind != heap::KIND_OBJECT || natives::is_native_class(root.class) { return Err(Error::Type); }
+    linked.lookup(root.class, applet_token("process")?)?;
+    let mut class = ClassRef::Internal(root.class);
+    for _ in 0..=u8::MAX {
+        match class {
+            ClassRef::Internal(offset) => { class = linked.classes().at(offset)?.super_class; }
+            ClassRef::External { package, class } => {
+                let api = linked.api_class(package, class)?;
+                return if api.name == "javacard/framework/Applet" { Ok(()) } else { Err(Error::Type) };
+            }
+            ClassRef::None => return Err(Error::Type),
+        }
+    }
+    Err(Error::Format)
 }
 
 /// The status word an escaped exception reports.
@@ -356,11 +437,13 @@ impl Card {
 /// reading its trailing Le byte as a further data byte is what makes an applet reject a
 /// well formed command. Every real PIV GET DATA is case 4.
 fn incoming_length(command: &[u8]) -> Result<u16> {
+    if !(4..=261).contains(&command.len()) { return Err(Error::Bounds); }
     // Case 1 has no Lc and no Le. Case 2 has Le alone, which byte four holds.
     if command.len() <= 5 {
         return Ok(0);
     }
     let declared = command[4] as usize;
+    if declared == 0 { return Err(Error::Bounds); }
     // Case 3 ends with the data. Case 4 appends one Le byte. Any other length disagrees
     // with its own Lc, so the command is refused rather than truncated to fit.
     if command.len() == 5 + declared || command.len() == 6 + declared {
@@ -368,6 +451,14 @@ fn incoming_length(command: &[u8]) -> Result<u16> {
     } else {
         Err(Error::Bounds)
     }
+}
+
+fn expected_length(command: &[u8]) -> Result<u16> {
+    incoming_length(command)?;
+    let le = if command.len() == 5 || (command.len() > 5 && command.len() == 6 + usize::from(command[4])) {
+        *command.last().ok_or(Error::Bounds)?
+    } else { return Ok(0); };
+    Ok(if le == 0 { 256 } else { u16::from(le) })
 }
 
 fn status_word(heap: &Heap, exception: Reference) -> u16 {
@@ -432,7 +523,7 @@ fn reserve_words(buffer: &mut Vec<u16>, words: usize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cap::{CONSTANT_CLASSREF, CONSTANT_STATIC_METHODREF, CONSTANT_VIRTUAL_METHODREF};
+    use crate::cap::{CONSTANT_CLASSREF, CONSTANT_STATIC_FIELDREF, CONSTANT_STATIC_METHODREF, CONSTANT_VIRTUAL_METHODREF};
     use crate::test_support::{ClassSpec, Package};
     use alloc::vec;
 
@@ -503,7 +594,7 @@ mod tests {
         package.classes = vec![ClassSpec {
             // The applet class extends javacard.framework.Applet, which is external, and
             // its method table is indexed by the tokens that package assigned.
-            super_class: 0x8003,
+            super_class: 0x8103,
             public: {
                 // Tokens zero to seven of Applet, with the three this class defines.
                 let mut table = vec![0xffff; 8];
@@ -547,6 +638,13 @@ mod tests {
         package.constants.push([CONSTANT_VIRTUAL_METHODREF, 0x81, 10, 1]);
         package.constants.push([CONSTANT_STATIC_METHODREF, 0x81, 16, 6]);
         package.constants.push([CONSTANT_VIRTUAL_METHODREF, 0x81, 10, 8]);
+        package.static_bytes = 2;
+        package.constants.push([CONSTANT_STATIC_FIELDREF, 0, 0, 0]);
+        package.constants.push([CONSTANT_STATIC_METHODREF, 0x81, 7, 1]);
+        // deselect records that it ran, then throws; JCRE must still clear its arrays.
+        package.extra.push((1, 0, vec![op::SCONST_1, 129, 0, 9,
+            op::SSPUSH, 0x6a, 0x82, op::INVOKESTATIC, 0, 10, op::RETURN]));
+        package.classes[0].public[applet_token("deselect").unwrap() as usize] = package.extra_offsets()[3];
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
 
@@ -577,6 +675,8 @@ mod tests {
             .process(&file, &mut crate::host::NoHost, &[0x00, 0xa4, 0x04, 0x00, 0x00], true)
             .unwrap();
         assert_eq!(response.sw, SW_SUCCESS);
+        assert_eq!(response.data, [0x12, 0x34]);
+        assert!(card.selected());
 
         // Then an ordinary command, whose answer the applet wrote into the buffer.
         let response = card
@@ -587,6 +687,8 @@ mod tests {
 
         let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         let transient = heap.new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_RESET).unwrap();
+        let on_deselect = heap.new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_DESELECT).unwrap();
+        heap.array_put(on_deselect, 0, 8).unwrap();
         let persistent = heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
         let pin = heap.new_object(native_class_of("javacard/framework/OwnerPIN").unwrap(), 6, 1).unwrap();
         heap.array_put(transient, 0, 7).unwrap();
@@ -601,6 +703,7 @@ mod tests {
         let instance = saved.instance;
         let saved_statics = saved.statics.to_vec();
         let mut restored = Card::restore(&file, Sizes::default(), saved).unwrap();
+        assert!(!restored.selected());
         let recovered = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
         assert_eq!(recovered.array_get(transient, 0), Ok(0));
         assert_eq!(recovered.array_get(persistent, 0), Ok(9));
@@ -622,6 +725,12 @@ mod tests {
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
         }
+        card.deselect_with_cancel(&file, &mut crate::host::NoHost, &mut || false).unwrap();
+        assert!(!card.selected());
+        assert_eq!(card.statics, [0, 1]);
+        let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        assert_eq!(heap.array_get(on_deselect, 0), Ok(0));
+        assert_eq!(heap.array_get(transient, 0), Ok(7));
         card.reset().unwrap();
         assert!(card.installed());
         assert!(card.words.iter().all(|word| *word == 0));
@@ -662,6 +771,24 @@ mod tests {
         // The word the applet chose, not a generic failure.
         assert_eq!(response.sw, 0x6a82);
         assert!(response.data.is_empty());
+        let response = card.process(&file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap();
+        assert_eq!(response.sw, 0x6a82);
+        assert!(card.selected(), "a process status word does not undo accepted selection");
+        package.extra[1].2[0] = op::SCONST_0;
+        let declined_bytes = package.build();
+        let declined_file = LoadFile::parse(&declined_bytes).unwrap();
+        let mut declined = Card::new(&declined_file, Sizes::default()).unwrap();
+        declined.install(&declined_file, &mut crate::host::NoHost, &[]).unwrap();
+        assert_eq!(declined.process(&declined_file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x6999);
+        assert!(!declined.selected());
+        // Inherited Applet.select() accepts; process still chooses the response status.
+        package.classes[0].public[applet_token("select").unwrap() as usize] = 0xffff;
+        let inherited_bytes = package.build();
+        let inherited_file = LoadFile::parse(&inherited_bytes).unwrap();
+        let mut inherited = Card::new(&inherited_file, Sizes::default()).unwrap();
+        inherited.install(&inherited_file, &mut crate::host::NoHost, &[]).unwrap();
+        assert_eq!(inherited.process(&inherited_file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x6a82);
+        assert!(inherited.selected());
         let mut polls = 0;
         assert_eq!(card.process_with_cancel(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false, &mut || {
             polls += 1;
@@ -692,32 +819,26 @@ mod tests {
     }
 
     #[test]
-    fn the_trailing_expected_length_byte_is_not_command_data() {
-        // Case 1, a header alone.
-        assert_eq!(incoming_length(&[0, 0xa4, 4, 0]), Ok(0));
-        // Case 2, where byte four is Le.
-        assert_eq!(incoming_length(&[0, 0xca, 0x7f, 0x61, 0]), Ok(0));
-        // Case 3, a GET DATA with no expected length.
-        let case3 = [0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 7];
-        assert_eq!(incoming_length(&case3), Ok(5));
-        // Case 4, the same command as a host actually sends it. The answer has to stay 5,
-        // because the applet parses the data field as a TLV and a sixth byte breaks it.
-        let case4 = [0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 7, 0];
-        assert_eq!(incoming_length(&case4), Ok(5));
-    }
-
-    #[test]
-    fn a_command_that_disagrees_with_its_own_length_byte_is_refused() {
-        // Lc claims five bytes and two follow.
-        assert_eq!(incoming_length(&[0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3]), Err(Error::Bounds));
-        // Lc claims one byte and four follow, which is past a case 4 trailer.
-        assert_eq!(incoming_length(&[0, 0xcb, 0x3f, 0xff, 1, 1, 2, 3, 4]), Err(Error::Bounds));
+    fn short_apdu_lengths_distinguish_command_data_from_expected_response() {
+        for (raw, incoming, expected) in [
+            (&[0, 0xa4, 4, 0][..], 0, 0),
+            (&[0, 0xa4, 4, 0, 0][..], 0, 256),
+            (&[0, 0xa4, 4, 0, 7][..], 0, 7),
+            (&[0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 7][..], 5, 0),
+            (&[0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3, 0x5f, 0xc1, 7, 0][..], 5, 256),
+        ] {
+            assert_eq!(incoming_length(raw), Ok(incoming));
+            assert_eq!(expected_length(raw), Ok(expected));
+        }
+        for raw in [&[0, 0xa4, 4][..], &[0, 0xcb, 0x3f, 0xff, 5, 0x5c, 3],
+            &[0, 0xcb, 0x3f, 0xff, 1, 1, 2, 3, 4], &[0, 0xcb, 0, 0, 0, 0]] {
+            assert_eq!(incoming_length(raw), Err(Error::Bounds));
+        }
     }
 
     #[test]
     fn an_install_that_registers_nothing_leaves_nothing_to_select() {
         let mut package = applet(vec![op::RETURN], 8);
-        // An install that returns without registering.
         package.code = vec![op::RETURN];
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();

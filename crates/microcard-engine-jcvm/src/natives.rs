@@ -76,6 +76,10 @@ pub struct Jcre {
     pub incoming: u16,
     /// Bytes of response the applet has asked to send.
     pub outgoing: u16,
+    response: [u8; 256],
+    pub expected: u16,
+    outgoing_started: bool,
+    outgoing_length: Option<u16>,
     /// Where the command data starts in the buffer. Five for a short APDU, JCRE §4.
     pub data_offset: u16,
     /// Whether this command is the one that selected the applet.
@@ -90,6 +94,13 @@ pub struct Jcre {
 }
 
 impl Jcre {
+    pub(crate) fn response_data(&self) -> Result<&[u8]> {
+        if self.outgoing_length.is_some_and(|declared| declared != self.outgoing) {
+            return Err(Error::Bounds);
+        }
+        self.response.get(..usize::from(self.outgoing)).ok_or(Error::Bounds)
+    }
+
     pub fn new(apdu: Reference, buffer: Reference) -> Self {
         Self {
             apdu,
@@ -97,6 +108,10 @@ impl Jcre {
             instance: None,
             incoming: 0,
             outgoing: 0,
+            response: [0; 256],
+            expected: 256,
+            outgoing_started: false,
+            outgoing_length: None,
             data_offset: 5,
             selecting: false,
             transaction_depth: 0,
@@ -105,6 +120,14 @@ impl Jcre {
             aid: [0; 16],
             aid_length: 0,
         }
+    }
+}
+
+impl Drop for Jcre {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.response.zeroize();
+        self.aid.zeroize();
     }
 }
 
@@ -160,7 +183,7 @@ pub fn call(
         }
         ("javacard.framework", "javacard/framework/Util", name) => util(name, heap, frame, context),
         ("javacard.framework", "javacard/framework/APDU", name) => {
-            apdu(name, heap, frame, jcre)
+            apdu(name, heap, frame, jcre, context)
         }
         ("javacard.framework", "javacard/framework/JCSystem", name) => {
             jcsystem(name, heap, frame, context, jcre)
@@ -265,7 +288,7 @@ fn new_native(
 
 /// `javacard.framework.APDU`, JCRE §4. The buffer is an ordinary byte array on the heap,
 /// so an applet reading it goes through the same bounds and firewall checks as any array.
-fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre) -> Result<Native> {
+fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context: heap::Context) -> Result<Native> {
     match name {
         "getBuffer" => {
             frame.pop_reference()?;
@@ -285,33 +308,39 @@ fn apdu(name: &str, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre) -> Resu
             // and the answer is everything that arrived.
             frame.push_short(jcre.incoming as i16)?;
         }
-        "setOutgoing" => {
+        "setOutgoing" | "setOutgoingNoChaining" => {
             frame.pop_reference()?;
-            frame.push_short(0)?;
+            if jcre.outgoing_started { return Err(Error::Inconsistent); }
+            jcre.outgoing_started = true;
+            frame.push_short(jcre.expected as i16)?;
         }
         "setOutgoingLength" => {
             let length = frame.pop_short()?;
             frame.pop_reference()?;
-            jcre.outgoing = length.max(0) as u16;
+            if !jcre.outgoing_started || jcre.outgoing_length.is_some() { return Err(Error::Inconsistent); }
+            if length < 0 || length as usize > jcre.response.len() { return Err(Error::Bounds); }
+            jcre.outgoing_length = Some(length as u16);
         }
-        "setOutgoingAndSend" => {
+        "setOutgoingAndSend" | "sendBytes" | "sendBytesLong" => {
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
+            let source = if name == "sendBytesLong" { frame.pop_reference()? } else { jcre.buffer };
             frame.pop_reference()?;
             if offset < 0 || length < 0 {
                 return Err(Error::Bounds);
             }
-            // The response has to start at the front of the buffer, which is what the
-            // transport sends. Anything else is moved there now.
-            if offset != 0 && length != 0 {
-                let mut staging = [0u8; 256];
-                let step = (length as usize).min(staging.len());
-                staging[..step]
-                    .copy_from_slice(heap.byte_slice(jcre.buffer, offset as usize, step)?);
-                heap.byte_slice_mut(jcre.buffer, 0, step)?
-                    .copy_from_slice(&staging[..step]);
+            if name == "setOutgoingAndSend" {
+                if jcre.outgoing_started { return Err(Error::Inconsistent); }
+                jcre.outgoing_started = true;
+                jcre.outgoing_length = Some(length as u16);
             }
-            jcre.outgoing = length as u16;
+            let start = usize::from(jcre.outgoing);
+            let end = start.checked_add(length as usize).ok_or(Error::Bounds)?;
+            let declared = jcre.outgoing_length.ok_or(Error::Inconsistent)?;
+            if end > usize::from(declared) || end > jcre.response.len() { return Err(Error::Bounds); }
+            heap.check_access(source, context)?;
+            jcre.response[start..end].copy_from_slice(heap.byte_slice(source, offset as usize, length as usize)?);
+            jcre.outgoing = end as u16;
         }
         "isCommandChainingCLA" | "isSecureMessagingCLA" => {
             frame.pop_reference()?;
@@ -540,6 +569,36 @@ mod tests {
     /// A runtime with no command in flight, for the methods that do not read one.
     fn idle() -> Jcre {
         Jcre::new(0, 0)
+    }
+
+    #[test]
+    fn apdu_sends_capture_bytes_before_buffer_reuse_and_enforce_the_declared_length() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let buffer = heap.new_array(heap::KIND_BYTE, 8, 1).unwrap();
+        heap.byte_slice_mut(buffer, 0, 8).unwrap().copy_from_slice(b"abcdefgh");
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut jcre = Jcre::new(0, buffer);
+        jcre.expected = 7;
+        frame.push_reference(0).unwrap();
+        apdu("setOutgoing", &mut heap, &mut frame, &mut jcre, 1).unwrap();
+        assert_eq!(frame.pop_short(), Ok(7));
+        frame.push_reference(0).unwrap(); frame.push_short(4).unwrap();
+        apdu("setOutgoingLength", &mut heap, &mut frame, &mut jcre, 1).unwrap();
+        for method in ["sendBytes", "sendBytesLong"] {
+            frame.push_reference(0).unwrap();
+            if method == "sendBytesLong" { frame.push_reference(buffer).unwrap(); }
+            frame.push_short(1).unwrap(); frame.push_short(2).unwrap();
+            apdu(method, &mut heap, &mut frame, &mut jcre, 1).unwrap();
+            if method == "sendBytes" { assert_eq!(jcre.response_data(), Err(Error::Bounds)); }
+            heap.byte_slice_mut(buffer, 0, 8).unwrap().fill(b'X');
+        }
+        assert_eq!(jcre.response_data(), Ok(&b"bcXX"[..]));
+        frame.push_reference(0).unwrap(); frame.push_short(0).unwrap(); frame.push_short(1).unwrap();
+        assert!(matches!(apdu("sendBytes", &mut heap, &mut frame, &mut jcre, 1), Err(Error::Bounds)));
+        assert_eq!(jcre.outgoing, 4);
+        frame.push_reference(0).unwrap();
+        assert!(matches!(apdu("setOutgoing", &mut heap, &mut frame, &mut jcre, 1), Err(Error::Inconsistent)));
     }
 
     #[test]
@@ -777,5 +836,11 @@ mod tests {
             call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap(),
             Native::Unimplemented
         ));
+        let target = framework("org/globalplatform/GPSystem", "getSecureChannel", true);
+        let Native::Threw(exception) = call(target, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle()).unwrap() else {
+            panic!("an unavailable applet channel must not return a usable-looking handle");
+        };
+        assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().name, "javacard/framework/SystemException");
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
     }
 }

@@ -62,14 +62,14 @@
     {
       "description": "VERIFY the PIV application PIN with a wrong value",
       "command": "0020008008313233343536FFFF",
-      "sw": "63C9",
+      "sw": "63C5",
       "source": "SP 800-73-4 part 2 section 3.2.1, padded to eight bytes",
-      "why": "A wrong PIN answers with the number of tries that remain. Nine remain after one failure."
+      "why": "SELECT processing applies Config.DEFAULT_PIN_RETRIES_CONTACT = 6 in the pinned OpenFIPS201 source. Five remain after one failure."
     },
     {
       "description": "VERIFY the PIV application PIN with a second wrong value",
       "command": "0020008008393939393939FFFF",
-      "sw": "63C8",
+      "sw": "63C4",
       "source": "SP 800-73-4 part 2 section 3.2.1, padded to eight bytes",
       "why": "The counter goes down again and stays down, which is the applet's own OwnerPIN state surviving from one command to the next."
     },

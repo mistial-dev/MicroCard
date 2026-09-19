@@ -15,11 +15,12 @@ pub trait CardEngine {
     fn globalplatform_load_active(&self) -> bool;
     fn get_status_record(&mut self, kind: u8, index: usize, filter: &[u8]) -> Result<(Vec<u8>, bool)>;
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()>;
-    fn select_aid_with_cancel(
+    /// Return the SELECT response data followed by its status word.
+    fn select_verified_with_cancel(
         &mut self,
-        aid: &[u8],
+        command: Verified,
         cancel: &mut dyn FnMut() -> bool,
-    ) -> Result<()>;
+    ) -> Result<Vec<u8>>;
     fn manage_globalplatform_with_cancel(
         &mut self,
         command: Verified,

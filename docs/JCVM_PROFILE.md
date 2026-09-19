@@ -61,9 +61,15 @@ and the current registry binding. Installation now commits a dedicated heap befo
 publishing its instance, using a fresh derived key even after an interrupted attempt.
 Reopening verifies every committed image and heap without reinstalling. The adapter
 serves GP status records, domain discovery, and the existing authenticated SELECT and
-INS 10 application tunnel. SELECT invokes the applet but currently returns only its
-success status; direct applet APDUs, full SELECT responses, and deselection callbacks
-remain incomplete. Management and transport reset discard the live applet session.
+INS 10 application tunnel. SELECT calls `select()` and then `process()` with the
+selection flag, returning the applet's data and status. A refusal leaves no selection;
+a status from the subsequent `process()` does not undo accepted selection.
+
+Selection changes call and commit `deselect()` before switching. Applet exceptions do
+not prevent deselection; engine errors or failed commits trigger authenticated recovery.
+Reset discards the live session without calling deselect. Reselecting the same instance
+reuses its heap, but switching to another instance currently drops reset-scoped volatile
+data. Preserving that data until reset and direct applet APDUs remain incomplete.
 
 ## What holds this claim up
 
@@ -164,6 +170,12 @@ context without reallocating objects or changing references. `JCSystem.isTransie
 reports the recorded event; invalid factory events raise `SystemException.ILLEGAL_VALUE`.
 These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/JCSystem.html).
 
+CAP static array initializers and non-default primitive values are applied before
+installation. Recovery restores the saved values rather than overwriting them with
+their initial values. SELECT processing now returns the PIV application template and
+applies its configured six-attempt contact PIN limit; the first two failed PIN checks
+therefore return `63C5` and `63C4`.
+
 `Card.reset()` clears both transient array kinds, the APDU buffer, execution words and
 tags, and native OwnerPIN validation flags. It retains installed objects, persistent
 array values, and PIN retry counts. `Card.save_into()` writes used heap bytes to a
@@ -175,7 +187,7 @@ retry counts survive restoration; saving does not clear the live session.
 The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
 binding the snapshot to the exact code image and installation identity using the
 [JCVM state contract](DEVICE_CBOR.md#dedicated-jcvm-state-journal). Board flash
-partitioning, persistent simulator integration, complete deselection callbacks, and transaction
+partitioning, persistent simulator integration, inactive-instance volatile state, and transaction
 undo still need integration before board delivery.
 
 ## Cryptography
@@ -191,6 +203,9 @@ requests raise [CryptoException.NO_SUCH_ALGORITHM](https://docs.oracle.com/en/ja
 Cipher, Signature, and KeyAgreement operations are not wired up, so their factories
 reject requests rather than creating unusable objects. The committed PIV acceptance
 still installs, selects, and exercises PIN retry behavior with this restriction.
+
+Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`
+throws `SystemException.NO_RESOURCE`; it never exposes the transport's management channel.
 
 JCVM integration of existing P-256 and AES services remains required. Additional software
 implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.

@@ -28,12 +28,13 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         Card::select_isd_with_cancel(self, cancel)
     }
-    fn select_aid_with_cancel(
+    fn select_verified_with_cancel(
         &mut self,
-        aid: &[u8],
+        command: Verified,
         cancel: &mut dyn FnMut() -> bool,
-    ) -> Result<()> {
-        Card::select_with_cancel(self, &encode_aid(aid)?, cancel)
+    ) -> Result<Vec<u8>> {
+        Card::select_with_cancel(self, &encode_aid(&command.command().data)?, cancel)?;
+        fallible_copy(&[0x90, 0])
     }
     fn manage_globalplatform_with_cancel(
         &mut self,

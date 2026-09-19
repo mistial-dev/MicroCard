@@ -52,7 +52,7 @@ impl Card {
         }
         let mut card = Self::new(file, sizes)?;
         // Runtime objects have deterministic handles and a zeroed APDU buffer.
-        if saved.heap.get(..card.heap_used) != Some(&card.heap[..card.heap_used]) {
+        if saved.heap.get(..card.runtime_bytes) != Some(&card.heap[..card.runtime_bytes]) {
             return Err(Error::Format);
         }
         card.heap[..saved.heap.len()].copy_from_slice(saved.heap);
@@ -174,13 +174,7 @@ impl Card {
             }
             Ok(())
         })?;
-        let root = heap.info(saved.instance)?;
-        if root.kind != heap::KIND_OBJECT || natives::is_native_class(root.class) {
-            return Err(Error::Type);
-        }
-        for method in ["select", "process"] {
-            linked.lookup(root.class, applet_token(method)?)?;
-        }
+        check_applet(&linked, &heap, saved.instance)?;
         let references = file.static_fields()?.reference_count as usize * 2;
         for word in card
             .statics

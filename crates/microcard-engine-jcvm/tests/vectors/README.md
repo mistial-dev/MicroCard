@@ -20,6 +20,11 @@ clean checkout with no external build and no path argument.
 OpenFIPS201 is MIT licensed and its notice is preserved in `OPENFIPS201_LICENSE`. This is a
 build output used as a test fixture rather than a deployment artifact.
 
+SELECT processing applies the contact PIN retry limit of six from the pinned
+[Config.java](https://github.com/OpenPhysical/OpenFIPS201/blob/9f3b99bd0f2600beea7e5c053613d8baef2b7716/src/com/makina/security/openfips201/Config.java).
+The first two wrong PINs therefore return `63C5` and `63C4`; the earlier `63C9`/`63C8`
+expectations reflected a missing SELECT `process()` call in the engine.
+
 Regenerate it from a CAP with the inventory script, which writes the components in JCVM
 section 6.3 order and excludes the Debug and Descriptor components.
 

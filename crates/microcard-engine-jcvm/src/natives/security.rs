@@ -324,6 +324,13 @@ pub fn call(
 
         // GlobalPlatform, JCRE and GP 2.3 §6. The card content state is the applet's
         // lifecycle byte, which the runtime keeps rather than the applet.
+        ("org/globalplatform/GPSystem", "getSecureChannel") => {
+            // The transport's management channel is not an applet-owned channel.
+            // Refuse the unavailable service with a Java exception, never a dummy handle.
+            let exception = super::new_exception(heap, "javacard/framework/SystemException", context)?;
+            heap.put_word(exception, super::REASON_FIELD, 5)?; // NO_RESOURCE
+            return Ok(Native::Threw(exception));
+        }
         ("org/globalplatform/GPSystem", "getCVM") => {
             let _kind = frame.pop_short()?;
             // No global PIN, JCRE leaves this optional and the applet null checks it.

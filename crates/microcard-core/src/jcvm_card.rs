@@ -36,7 +36,7 @@ pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
     staging: S,
     scratch: Vec<u8>,
     upload: Option<Upload>,
-    selected: Option<Session<H::Bank>>,
+    selected: Option<(Aid, Session<H::Bank>)>,
     #[cfg(feature = "scp03-pseudo-random")]
     sequences: Option<core::ops::RangeInclusive<u32>>,
 }
@@ -304,46 +304,70 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     }
 
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
-        self.selected = None;
+        if let Some((_, mut session)) = self.selected.take() {
+            session.deselect(&mut self.provider, cancel)?;
+        }
         if cancel() {
             return Err(Error::Cancelled);
         }
         Ok(())
     }
 
-    fn select_aid_with_cancel(
+    fn select_verified_with_cancel(
         &mut self,
-        aid: &[u8],
+        verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
-    ) -> Result<()> {
-        self.selected = None;
+    ) -> Result<Vec<u8>> {
         if cancel() {
             return Err(Error::Cancelled);
         }
-        let aid = Aid::new(aid)?;
-        let mut session = self.storage.registry.open_session(
-            aid,
-            &self.storage.images,
-            &mut self.storage.heaps,
-            &self.storage.heap_key,
-            &mut self.scratch,
-            &mut self.provider,
-        )?;
+        let request = verified.command();
+        if !matches!(request.p1, 0 | 4) || !matches!(request.p2, 0 | 0x0c) {
+            return Err(Error::Format);
+        }
+        let aid = Aid::new(&request.data)?;
+        // A missing target does not deselect the currently selected applet.
+        if !self
+            .storage
+            .registry
+            .state()?
+            .instances()
+            .any(|instance| instance.aid == aid)
+        {
+            return Err(Error::Missing);
+        }
+        let mut reusable = None;
+        if let Some((previous, mut session)) = self.selected.take() {
+            session.deselect(&mut self.provider, cancel)?;
+            if previous == aid {
+                reusable = Some(session);
+            }
+        }
+        let mut session = match reusable {
+            Some(session) => session,
+            None => self.storage.registry.open_session(
+                aid,
+                &self.storage.images,
+                &mut self.storage.heaps,
+                &self.storage.heap_key,
+                &mut self.scratch,
+                &mut self.provider,
+            )?,
+        };
         let command = Command {
             cla: 0,
             ins: 0xa4,
             p1: 4,
-            p2: 0,
+            p2: request.p2,
             data: aid.as_slice().into(),
-            le: Some(256),
+            le: request.le.or(Some(256)),
         }
         .encode()?;
         let response = session.process(&command, true, &mut self.provider, cancel)?;
-        if response.sw != 0x9000 {
-            return Err(Error::Unauthorized);
+        if session.selected()? {
+            self.selected = Some((aid, session));
         }
-        self.selected = Some(session);
-        Ok(())
+        response_wire(response)
     }
 
     fn manage_globalplatform_with_cancel(
@@ -351,10 +375,10 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
-        self.selected = None;
         if verified.level() & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
             return Err(Error::Unauthorized);
         }
+        self.select_isd_with_cancel(cancel)?;
         let result = self.manage_gp(verified.command(), cancel);
         if result.is_err() {
             self.abort_staging();
@@ -412,7 +436,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
-        let result = self.selected.as_mut().ok_or(Error::Missing)?.process(
+        let result = self.selected.as_mut().ok_or(Error::Missing)?.1.process(
             &verified.command().data,
             false,
             &mut self.provider,
@@ -425,11 +449,15 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
                 return Err(error);
             }
         };
-        let mut data = response.data;
-        data.try_reserve_exact(2).map_err(|_| Error::Quota)?;
-        data.extend_from_slice(&response.sw.to_be_bytes());
-        Ok(data)
+        response_wire(response)
     }
+}
+
+fn response_wire(response: microcard_engine_jcvm::applet::Response) -> Result<Vec<u8>> {
+    let mut data = response.data;
+    data.try_reserve_exact(2).map_err(|_| Error::Quota)?;
+    data.extend_from_slice(&response.sw.to_be_bytes());
+    Ok(data)
 }
 
 fn receipt() -> Result<Vec<u8>> {

@@ -79,8 +79,9 @@ impl<C: CardEngine> Endpoint<C> {
     fn handle(&mut self, raw: &[u8], should_cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
         let c = Command::parse(raw)?;
         if globalplatform::is_isd_select(&c) {
+            let result = self.card.select_isd_with_cancel(should_cancel);
             self.reset();
-            self.card.select_isd_with_cancel(should_cancel)?;
+            result?;
             return globalplatform::isd_fci();
         }
         if c.cla == 0x00 && c.ins == 0xa4 && c.p1 == 0x04 {
@@ -243,15 +244,15 @@ impl<C: CardEngine> Endpoint<C> {
         }
         self.status_cursor = None;
         let result = match verified.command().ins {
-            0xa4 => {
-                self.card
-                    .select_aid_with_cancel(&verified.command().data, should_cancel)
-                    .map(|_| Vec::new())
-            }
-            0x10 => {
-                let r = self
-                    .card
-                    .process_verified_with_cancel(verified, should_cancel)?;
+            0xa4 | 0x10 => {
+                let r = if verified.command().ins == 0xa4 {
+                    match self.card.select_verified_with_cancel(verified, should_cancel) {
+                        Ok(response) => response,
+                        Err(_) => return s.response_with(&[], 0x6985, self.card.crypto_provider()),
+                    }
+                } else {
+                    self.card.process_verified_with_cancel(verified, should_cancel)?
+                };
                 let n = r.len();
                 if n < 2 { return Err(Error::Format); }
                 return s.response_with(
