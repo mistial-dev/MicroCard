@@ -45,7 +45,7 @@ final class Packages {
      * The card accepts only the low of the two signatures that verify, so that one signed
      * package has one encoding and therefore one digest and one registry identity.
      */
-    private static byte[] signature(byte[] seed, byte[] message) throws IOException {
+    static byte[] signature(byte[] seed, byte[] message) throws IOException {
         ECDSASigner signer = new ECDSASigner(new HMacDSAKCalculator(new SHA256Digest()));
         signer.init(true, new ECPrivateKeyParameters(scalar(seed), new ECDomainParameters(CURVE.getCurve(), CURVE.getG(), CURVE.getN())));
         byte[] digest;

@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <Compile Include="../../managed/MicroCard.Build/PackageSignatures.cs" Link="PackageSignatures.cs" />
+    <Compile Include="../../managed/MicroCard.Build/PackageEnvelope.cs" Link="PackageEnvelope.cs" />
     <Compile Include="../../managed/MicroCard.Build/ManifestCbor.cs" Link="ManifestCbor.cs" />
     <Compile Include="../../managed/MicroCard.Build/EmbeddedIdentifier.cs" Link="EmbeddedIdentifier.cs" />
   </ItemGroup>

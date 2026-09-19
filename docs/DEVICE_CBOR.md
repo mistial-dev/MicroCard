@@ -27,6 +27,20 @@ Each dependency is `[assembly, ranges, package_version, signer_hash_or_null, pac
 
 The manifest cannot exceed 16 KiB, and the package's total size bound remains separate. The Rust decoder rejects wrong field counts, unknown versions, duplicates, overflow, malformed binary lengths, noncanonical encodings, and trailing data before image-specific validation. The Rust, Python, .NET, and Java encoders share [manifest golden vectors](../format/manifest-cbor-v1.json). The two vectors encode to 58 and 233 bytes, versus 297 and 1,030 bytes as compact host JSON. These are format measurements, not firmware or latency measurements.
 
+## MP05 signed envelope
+
+The new envelope layout is:
+
+```text
+"MP05" | "MicroCard signed package v5\0" |
+manifest_length:u32le | image_length:u32le |
+manifest_cbor | image_sha256:32 | signer_sec1:65 | signature_p1363:64 | image
+```
+
+The P-256 signature covers every byte from the magic through the signer key, inclusive. SHA-256 of the trailing image must match the signed digest. This keeps the signed descriptor contiguous without copying the image into a separate signing buffer. The total package is bounded to 16 KiB. The signer key must be uncompressed SEC1; signature scalars must have valid ranges and low S. Trailing bytes, inconsistent lengths, provider failures, and old magic are errors. Package identity remains SHA-256 of the entire envelope, including the image.
+
+Envelope authentication does not establish that a manifest or image is supported. The selected engine must then decode and validate both before installation. [The shared MP05 vector](../format/package-envelope-v5.json) deliberately uses a synthetic image to test that boundary; it is not an installable application. Its private scalar is public test data. Independent Python/OpenSSL signing produces exactly the same deterministic envelope as Rust, .NET, and Java.
+
 ## Migration status
 
-Only management-name payloads currently use this contract on the wire. Manifest codecs and cross-language vectors are ready; activating them still requires the new signed package envelope and coordinated package-reader/fixture updates. Other management payloads and journal snapshots also remain to migrate. JSON remains permitted for host authoring, reports, and test-vector files.
+Only management-name payloads currently use this contract on the wire. Manifest and MP05 envelope codecs have cross-language vectors; activating them still requires coordinated package-reader and signed-fixture updates. Other management payloads and journal snapshots also remain to migrate. JSON remains permitted for host authoring, reports, and test-vector files.
