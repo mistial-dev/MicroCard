@@ -5,6 +5,9 @@ import pathlib
 import subprocess
 import tempfile
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, utils
+
 from device_cbor import decode, jcvm_manifest
 from package_envelope import create
 from scp03_acceptance import Client, SIM, ROOT, sign_package, signer_public_key, aes, modes
@@ -17,6 +20,19 @@ def lv(*values):
 def files(directory):
     return {str(path.relative_to(directory)): hashlib.sha256(path.read_bytes()).digest()
             for path in directory.rglob("*") if path.is_file() and path.name != ".lock"}
+
+
+def sign_with_pin(client, public_key, pin):
+    digest = hashlib.sha256(b"MicroCard OpenFIPS201 signing acceptance").digest()
+    request = bytes.fromhex("7C2482008120") + digest
+    client.command(0x87, request, p1=0x11, p2=0x9c, cla=0x04, status=0x6982)
+    client.command(0x20, pin, p2=0x80, cla=0x04)
+    response = client.command(0x87, request, p1=0x11, p2=0x9c, cla=0x04, le=256)
+    assert response[0] == 0x7c and response[1] == len(response) - 2, response.hex()
+    assert response[2] == 0x82 and response[3] == len(response) - 4, response.hex()
+    public_key.verify(response[4:], digest, ec.ECDSA(utils.Prehashed(hashes.SHA256())))
+    # Slot 9C requires a fresh PIN verification for every signature.
+    client.command(0x87, request, p1=0x11, p2=0x9c, cla=0x04, status=0x6982)
 
 
 def main():
@@ -64,6 +80,14 @@ def main():
         client.command(0xdb, definition, p1=0xff, p2=0xff)
         client.command(0x25, bytes.fromhex("80010830128010") + management_key,
                        p1=1, p2=0x9b)
+        signing_pin = bytes.fromhex("363534333231FFFF")
+        client.command(0x24, signing_pin, p1=1, p2=0x80)
+        client.command(0xdb, bytes.fromhex("66128B019C8C01028D010A8E01118F0104900110"),
+                       p1=0xff, p2=0xff)
+        generated = client.command(0x47, bytes.fromhex("AC03800111"), p2=0x9c, le=256)
+        assert len(generated) == 70 and generated[:5] == bytes.fromhex("7F49438641"), generated.hex()
+        public_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), generated[5:])
+        sign_with_pin(client, public_key, signing_pin)
         # The interindustry class belongs to the applet, even for a GP instruction number.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance,
                        cla=0x04, status=0x6d00)
@@ -95,6 +119,7 @@ def main():
         client.connect()
         assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
         client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c3)
+        sign_with_pin(client, public_key, signing_pin)
         # Reclaiming an explicitly deleted instance must establish a fresh heap identity.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance)
         client.command(0xe6, install, p1=0x0c)
@@ -117,7 +142,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, management-key provisioning/authentication after reboot, reclaim and fail-closed storage")
+    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing after reboot, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":

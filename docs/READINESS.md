@@ -53,9 +53,11 @@ board's reserved heap.
 - Prove a personalized OpenFIPS201 workflow on the Makerdiary JCVM build. P-256 keys,
   generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Remaining work includes
   complete applet secure-channel lifecycle services, ordinary PIV transport access,
-  PIN/signing-key provisioning, certificate storage, and signing/reboot acceptance.
-  Management-key creation/import and PIV challenge-response after reboot now pass
-  through the shared simulator path; they do not establish the remaining workflows.
+  certificate storage/retrieval and the final ordinary-PIV lifecycle acceptance.
+  Management-key creation/import, PIV challenge-response, PIN provisioning, P-256
+  generation, and independently verified signing before/after reboot now pass through
+  the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
+  reboot does not preserve PIN validation. These do not establish hardware execution.
 - Validate the current Makerdiary JCVM image and actual memory use. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
   revision and engine are unknown. The current JCVM dongle links at 190,920 text bytes,

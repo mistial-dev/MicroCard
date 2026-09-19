@@ -287,8 +287,11 @@ one work unit. Other signature algorithms and external access are rejected.
 The managed acceptance now defines and imports an AES-128 management key through
 OpenFIPS201's administrative APDUs. After reboot it completes PIV challenge-response
 using that key and an independent host AES implementation. A MAC-only management-key
-definition is rejected. P-256 signing-key provisioning and certificate storage remain
-unverified end to end.
+definition and an incorrect challenge response are rejected. The same flow provisions
+a local PIN and generates a P-256 key in slot 9C. It verifies signatures independently
+before and after reboot against the original public key, rejects signing without PIN
+validation, and requires a fresh PIN verification for every signature. Certificate
+storage/retrieval and ordinary PIV transport remain unverified end to end.
 
 For ISD-owned applets, the shared transport passes encrypted, authenticated commands
 with a command-scoped secure-channel grant. `GPSystem.getSecureChannel` returns a
@@ -312,9 +315,10 @@ The runtime preserves bytes already sent when an applet completes through
 still discard response data. OpenFIPS201 uses this path for its authentication challenge;
 previously it returned an empty `9000` response.
 
-Next, extend the same lifecycle acceptance with PIN provisioning, a generated P-256
-signing key, certificate storage/retrieval, independently verified signing, and reboot.
-Keep unauthorized administration and loss of PIN validation across reset in that flow.
+Next, extend the same lifecycle acceptance with certificate storage/retrieval and
+ordinary PIV access. Certificate responses span multiple short APDUs, so this also
+requires command/response chaining through the final transport path. Keep unauthorized
+administration and loss of PIN validation across reset in that flow.
 The fixture is pinned to OpenFIPS201 `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
 Upstream tests mock the secure channel; they supply command encodings but do not prove
 this platform integration.
