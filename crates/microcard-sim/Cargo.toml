@@ -16,3 +16,4 @@ microcard-core = { path = "../microcard-core", default-features = false, feature
 microcard-engine-jcvm = { path = "../microcard-engine-jcvm" }
 serde_json.workspace = true
 getrandom = "0.2"
+zeroize = { version = "1", default-features = false }

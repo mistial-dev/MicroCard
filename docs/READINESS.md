@@ -15,7 +15,9 @@ Disabling it leaves transport, journal, crypto, and hardware contracts available
 compiling MC04. Quick validation exercises that configuration with an independent test
 engine. JCVM now implements this boundary with authenticated loading, installation,
 status records, selection, invocation, and deletion. A real SCP03/PIV lifecycle test
-checks recovery across reboot; persistent simulator and board backends remain unfinished.
+checks recovery across reboot. The file-backed simulator now has independent Python
+SCP03 acceptance for load, install, process restart, heap reclaim, and damaged-state
+rejection. Board storage and the separate firmware artifact remain unfinished.
 
 The independent `jcvm` core feature exposes SHA-256 and entropy through the shared
 provider adapter, now used by the simulator. Unsupported JCVM crypto factories raise

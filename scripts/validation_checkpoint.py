@@ -200,6 +200,7 @@ def run_checkpoint():
  run(str(ROOT/'target/debug/microcard-sim'),'verify-assembly',str(ROOT/'work/transaction-records.mca'))
  run(str(ROOT/'target/debug/microcard-sim'),'verify-assembly',str(ROOT/'tests/fixtures/transaction_runtime_negative.mca'))
  run('python3','scripts/piv_vector_acceptance.py')
+ run('python3','scripts/jcvm_transport_acceptance.py')
  run('python3','scripts/framework_identity_test.py')
  run('python3','scripts/mc04_output_test.py')
  run('python3','scripts/assembly_budgets.py','--check')

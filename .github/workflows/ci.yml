@@ -41,6 +41,7 @@ jobs:
         run: |
           cargo build --locked
           python scripts/piv_vector_acceptance.py
+          python scripts/jcvm_transport_acceptance.py
       - name: Rust lint
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: nRF52840 release link

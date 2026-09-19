@@ -32,9 +32,14 @@ An OpenFIPS201 build is committed, so this runs on a clean checkout.
 ```sh
 cargo build
 python3 scripts/piv_vector_acceptance.py
+python3 scripts/jcvm_transport_acceptance.py
 ```
 
 That replays twelve PIV commands through `microcard-sim serve-jcvm` and compares the applet's own status words against committed expectations. Half of those commands are authentic encodings captured from real cards. Their provenance and license are recorded beside them in `crates/microcard-engine-jcvm/tests/vectors`. Pass a different Load File Data Block to `scripts/jcvm_applet_acceptance.py` to drive another build, producing one with `scripts/jcvm_cap_inventory.py --load-file`.
+
+The transport acceptance uses `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` to load
+signed packages through SCP03 and check persistent recovery. Add `-binary` to that
+mode for length-prefixed transport. Each state directory permits one simulator process.
 
 ## Security model
 

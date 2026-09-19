@@ -26,8 +26,9 @@ signature, and key-agreement requests now fail at their factories.
 The shared core now connects authenticated GlobalPlatform loading and installation to
 JCVM through `jcvm_card::Card` and `transport::Endpoint`. The host lifecycle test sends
 real SCP03 messages, installs the committed PIV applet, selects it, checks PIN retries
-across reboot, and deletes it. The simulator command still accepts raw load-file paths;
-its persistent transport backend and the separate board image remain delivery gaps.
+across reboot, and deletes it. `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` uses this
+path with persistent files; `serve-jcvm-managed-binary` uses the shared framed transport.
+The separate board image remains a delivery gap.
 
 The shared C4 receiver now enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
@@ -148,7 +149,17 @@ One detail that only real packages show. The Directory records a size for the De
 
 MC04 now journals image descriptors and stores code in dedicated flash slots. JCVM
 has an authenticated applet-state journal bound to its image and installation, but
-its image and heap regions still need board allocation and persistent simulator backends.
+its image and heap regions still need board allocation.
+
+The managed simulator uses two 8 KiB registry journal slots, two 64 KiB image slots,
+and two independent heap banks with two 64 KiB journal slots each. Every journal has
+separate commit and nonce counters. These host capacities do not establish board
+capacity or RAM bounds. A versioned layout marker rejects other engine layouts.
+Missing committed files fail without recreation; only an authorized installation can
+reclaim an unreferenced heap with a fresh identity and key. An exclusive directory
+lock prevents simultaneous simulator writers. `scripts/jcvm_transport_acceptance.py`
+exercises this path with the independent Python signer and SCP03 client; checkpoint
+and CI run it. Set `MICROCARD_BINARY=1` to replay the same cases over framed transport.
 
 ## Verification
 
@@ -187,7 +198,7 @@ retry counts survive restoration; saving does not clear the live session.
 The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
 binding the snapshot to the exact code image and installation identity using the
 [JCVM state contract](DEVICE_CBOR.md#dedicated-jcvm-state-journal). Board flash
-partitioning, persistent simulator integration, inactive-instance volatile state, and transaction
+partitioning, inactive-instance volatile state, and transaction
 undo still need integration before board delivery.
 
 ## Cryptography
