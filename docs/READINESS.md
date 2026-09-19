@@ -1,24 +1,31 @@
-# Pre-flash readiness audit
+# Release readiness
 
-Scope: prepare host testing, documentation, interpreter, SCP03, assembly loading/signing, persistent keystore and original sample applications, then stop before writing the nRF52840 DK. This audit covers the first development test build. Production certification requires separate evidence.
+MicroCard is a development system. The current cleanup has not produced the separate .NET and JCVM firmware release candidates yet. Hardware testing of this cleanup is deferred.
 
-## Requirement evidence
+## Current implementation
 
-1. Host corpus: `scripts/check.py --checkpoint` executes Rust tests and 76 C#/.NET versus interpreter cases. Deterministic preprocessing, MSBuild incremental behavior and incorrect framework pins are checked.
-2. Interpreter: the original arithmetic, sealed-object, array, branch and switch fixtures run through normal compilation and lowering. Execution/fuel/arena bounds, malformed inputs and forged references have host tests.
-3. SCP03: a separate Python/OpenSSL implementation exercises the supported levels, command encryption/MAC, response MAC, replay and teardown. INITIALIZE UPDATE advertises the implementation option derived from the enabled capabilities, verified against SCP03 Table 5-1.
-4. Loading/signing: independent Rust and .NET P-256 packagers produce equal packages. Device-side verification precedes atomic activation. Tests cover each changed signed byte, first-load byte-mutation fault injection, immutable pinning, incarnations, rollback and retries.
-5. Keystore: private persistent slots are reached through domain-owned opaque handles. HMAC/AES key-use separation, ownership, revocation and entropy/quota errors have direct tests. End-to-end samples exercise independent HMAC/CMAC values, CBC/CCM, shared keys, reboot and stale-handle rollback.
-6. Sample applications: `Counter`, `Reader`, `Echo`, `ProtectedCommand`, `KeyOperations` and `KeyReader` are original class-library assemblies. They use the value store, secure context, hashing and key operations through managed APIs.
-7. Transport: the shared binary decoder runs on host and target. The actual serial client is tested through a fragmented pseudo-terminal. The full loading/key corpus also runs over binary framing.
-8. Board artifact: the release nRF52840 image links the same core. The preparation gate verifies load ranges, stack/reset vectors and static RAM margin, then emits ELF/HEX/bin and SHA-256 hashes. It never invokes a probe.
-9. Documentation/provisioning: FIRST_FLASH.md gives separate private development credentials, checked probe-rs command syntax and a post-flash smoke test. Protocol, keystore, references and remaining production work are documented.
-10. Stop boundary: no flash, reset, erase, recover or provisioning command has been run against a board. Hardware acceptance is intentionally subsequent work.
+The .NET path compiles, verifies, signs, installs, and runs MC04 applications in the simulator and links for nRF52840. Package signing uses P-256 with uncompressed SEC1 keys and low-S signatures. Domain identities are SHA-256 key hashes. MP04 packages and MDB2 bundles reject their earlier formats. Native capability 21 remains reserved.
 
-## Authoritative final gate
+JCVM runs the supported applet corpus in the simulator. It still needs the board loading, persistence, and shared security-service integration described in [JCVM profile](JCVM_PROFILE.md). Neither a linked image nor host acceptance establishes hardware behavior.
 
-Run `python3 scripts/prepare_first_flash.py` from the committed worktree. Inspect `artifacts/first-flash/manifest.json`: its revision must equal HEAD, `working_tree_dirty` must be false, artifact hashes must match, and `hardware_flashed` must be false. The checked-in validation record describes the host evidence. The generated manifest binds the concrete artifacts to a revision.
+## Required implementation work
 
-## Explicit limits
+- Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
+- Replace device JSON manifests, management payloads, and journal snapshots. Prefer deterministic CBOR where it provides a compact bounded representation. Move immutable images and the JCVM heap out of the metadata journal.
+- Enable CC310 providers while excluding their software replacements from board images. Provider failures must remain fatal to the operation.
+- Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
+- Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.
 
-Production wear leveling, physical rollback protection, sealed root-key storage, verified firmware updates, a complete CLI/BCL profile, sustained fuzz campaigns and actual DK measurements are not asserted by this pre-flash audit. MJ02 encrypts and authenticates framework storage, but the development security boundary still assumes trusted firmware and enabled debug recovery.
+## Validation gates
+
+[Validation cadence](VALIDATION_CADENCE.md) defines the focused, quick, and checkpoint commands. The quick gate uses one managed build graph. The analyzer suite runs the existing negative and boundary corpus in one compiler process, while checkpoint coverage retains real MSBuild integration tests.
+
+Acceptance requires host and wallet tests, exhaustive recovery, workspace Clippy, affected fuzz-target builds, and both engines' board links and size checks. Timing reports under `work/` describe the executed commands and failures. They are local evidence, not a release certification or a sustained fuzz campaign.
+
+Before hardware loading, run `python3 scripts/prepare_first_flash.py` from the committed worktree. Verify that the generated manifest names HEAD, reports a clean worktree, includes matching artifact hashes, and records `hardware_flashed` as false. This command prepares artifacts without operating a probe.
+
+## Remaining hardware and production evidence
+
+[Hardware smoke](HARDWARE_SMOKE.md) records earlier revision-specific device observations. Those results do not validate the current signing migration or future CC310 and JCVM changes. The dongle remains subject to the limits in [its guide](DONGLE.md).
+
+Production acceptance still requires provisioning and sealed root-key storage, debug lockout, verified firmware updates, physical rollback policy, flash endurance, side-channel assessment, transport fault testing, and independent hardware-crypto validation. Full CLI/BCL and Java Card API coverage are not claimed.

@@ -1,6 +1,6 @@
 # Documentation index
 
-Every document in this directory, grouped by what you are trying to do. The [status record](STATUS.md) and the [roadmap](ROADMAP.md) are the two that state what is true today, so read one of those before trusting a claim made anywhere else.
+Start with [release readiness](READINESS.md) for current limits and remaining release work. The [status record](STATUS.md) summarizes supported behavior, and the [roadmap](ROADMAP.md) tracks longer-term features.
 
 ## Start here
 
@@ -53,7 +53,7 @@ Every document in this directory, grouped by what you are trying to do. The [sta
 ## Assurance and provenance
 
 - [References](REFERENCES.md) — normative standards, editions and clause map, with the provenance rules for test vectors.
-- [Readiness](READINESS.md) — the pre-flash readiness audit.
+- [Readiness](READINESS.md) — current release blockers and required validation.
 - [Copy audit](COPY_AUDIT.md) — the rationale for every retained buffer-copy site.
 - [Fuzzing](FUZZING.md) — targets and campaign policy.
 
