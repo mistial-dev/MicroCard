@@ -871,6 +871,7 @@ mod tests {
             fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
             fn supports_random(&self, algorithm: u8) -> bool { algorithm == 2 }
             fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
+            fn supports_signature(&self, algorithm: u8) -> bool { algorithm == 33 }
         }
         for (class, algorithm, external, supported) in [
             (ClassId::MessageDigest, 4, false, true),
@@ -879,6 +880,9 @@ mod tests {
             (ClassId::RandomData, 2, false, true),
             (ClassId::RandomData, 99, false, false),
             (ClassId::Signature, 1, false, false),
+            (ClassId::Signature, 33, false, true),
+            (ClassId::Signature, 33, true, false),
+            (ClassId::Signature, 34, false, false),
             (ClassId::KeyAgreement, 1, false, false),
             (ClassId::KeyAgreement, 3, false, true),
             (ClassId::KeyAgreement, 3, true, false),

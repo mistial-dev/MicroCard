@@ -735,6 +735,15 @@ mod tests {
         heap.put_word(pair, 1, 256).unwrap();
         heap.put_word(pair, 2, ec_public).unwrap();
         heap.put_word(pair, 5, ec_private).unwrap();
+        let signature = heap.new_object(native_class_of(ClassId::Signature).unwrap(), 6, 1).unwrap();
+        let hash_state = heap.new_transient_array(heap::KIND_BYTE, crate::host::SHA256_STATE_BYTES as u16,
+            1, heap::CLEAR_ON_RESET).unwrap();
+        heap.array_put(hash_state, 0, 1).unwrap();
+        heap.put_word(signature, 0, 33).unwrap();
+        heap.put_word(signature, 2, ec_private).unwrap();
+        heap.put_word(signature, 3, 1).unwrap();
+        heap.put_word(signature, 4, 1).unwrap();
+        heap.put_word(signature, 5, hash_state).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -750,6 +759,9 @@ mod tests {
         assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
         assert_eq!(recovered.byte_slice(pending, 0, 32).unwrap(), &[0; 32]);
         assert_eq!(recovered.get_word(cipher, 2), Ok(key));
+        assert_eq!(recovered.get_word(signature, 2), Ok(ec_private));
+        assert_eq!(recovered.byte_slice(hash_state, 0, crate::host::SHA256_STATE_BYTES).unwrap(),
+            &[0; crate::host::SHA256_STATE_BYTES]);
         assert_eq!(recovered.get_word(pair, 2), Ok(ec_public));
         assert_eq!(recovered.get_word(pair, 5), Ok(ec_private));
         assert_eq!(recovered.get_word(agreement, 2), Ok(ec_private));
@@ -761,7 +773,7 @@ mod tests {
         let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(live.array_get(transient, 0), Ok(7));
         assert_eq!(live.get_word(pin, 3), Ok(1));
-        for case in 0..17 {
+        for case in 0..20 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -780,6 +792,9 @@ mod tests {
                 13 => { invalid[agreement as usize + heap::HEADER + 4..agreement as usize + heap::HEADER + 6].copy_from_slice(&ec_public.to_be_bytes()); instance }
                 14 => { invalid[pair as usize + heap::HEADER + 10..pair as usize + heap::HEADER + 12].copy_from_slice(&(ec_private + 2).to_be_bytes()); instance }
                 15 => { invalid[pair as usize + heap::HEADER + 10..pair as usize + heap::HEADER + 12].copy_from_slice(&ec_public.to_be_bytes()); instance }
+                16 => { invalid[hash_state as usize + 4] &= 0x0f; instance }
+                17 => { invalid[signature as usize + heap::HEADER + 9] = 2; instance }
+                18 => { invalid[signature as usize + heap::HEADER + 10..signature as usize + heap::HEADER + 12].copy_from_slice(&pending.to_be_bytes()); instance }
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
@@ -790,9 +805,9 @@ mod tests {
         let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(heap.array_get(on_deselect, 0), Ok(0));
         assert_eq!(heap.array_get(transient, 0), Ok(7));
-        assert!(matches!(card.retain_volatile(102), Err(Error::Quota)));
-        let retained = card.retain_volatile(103).unwrap();
-        assert_eq!(retained.bytes(), 103);
+        assert!(matches!(card.retain_volatile(363), Err(Error::Quota)));
+        let retained = card.retain_volatile(364).unwrap();
+        assert_eq!(retained.bytes(), 364);
         // Deselection allocated an exception, so the older committed layout is stale.
         assert_eq!(restored.restore_volatile(&retained), Err(Error::Format));
         let mut suspended_heap = vec![0; card.persistent_heap_bytes()];
@@ -803,6 +818,7 @@ mod tests {
         assert_eq!(resumed.array_get(on_deselect, 0), Ok(0));
         assert_eq!(resumed.get_word(pin, 3), Ok(0));
         assert_eq!(resumed.array_get(key_material, 0), Ok(1));
+        assert_eq!(resumed.array_get(hash_state, 0), Ok(1));
         assert_eq!(resumed.array_get(ec_private_bytes, 0), Ok(0x5f));
         assert_eq!(resumed.array_get(ec_private_bytes, 32), Ok(1));
         assert_eq!(resumed.byte_slice(key_material, 1, 16).unwrap(), &[0x42; 16]);

@@ -275,14 +275,19 @@ Raw P-256 ECDH (KeyAgreement algorithm 3) accepts an initialized private key and
 the provider. Output is staged until success, including overlapping buffers; each call
 charges 65 work units and rechecks key initialization. Reset preserves the binding but
 clears transient private keys. Other agreement algorithms and external access are rejected.
-Signature factories still reject requests. The committed PIV acceptance
-still installs, selects, and exercises PIN retry behavior with this restriction.
+ECDSA/SHA-256 (Signature algorithm 33) supports sign/verify modes, split updates, and
+precomputed 32-byte hashes. It retains a 256-byte CLEAR_ON_RESET provider state, stages
+DER output before publication, and accepts overlapping input/output. Successful final
+operations clear streaming state; a rejected signature also resets the verifier. Provider
+failure publishes neither output nor changed intermediate state. Each input byte charges
+one work unit. Other signature algorithms and external access are rejected.
+The committed PIV acceptance still covers blank-card behavior; personalized cryptographic
+operations require end-to-end acceptance.
 
 Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`
 throws `SystemException.NO_RESOURCE`; it never exposes the transport's management channel.
 
-JCVM P-256 signature bindings remain required. Additional software
-implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
+Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
 ## Authorization
 

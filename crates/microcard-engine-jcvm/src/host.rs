@@ -6,12 +6,15 @@
 //! This boundary covers digest, entropy, AES, and P-256 key validation.
 use crate::{Error, Result};
 
+pub const SHA256_STATE_BYTES: usize = 256;
+
 /// The services an applet's cryptography needs.
 pub trait Host {
     fn supports_digest(&self, _algorithm: u8) -> bool { false }
     fn supports_random(&self, _algorithm: u8) -> bool { false }
     fn supports_cipher(&self, _algorithm: u8) -> bool { false }
     fn supports_agreement(&self, _algorithm: u8) -> bool { false }
+    fn supports_signature(&self, _algorithm: u8) -> bool { false }
 
     /// Transform one AES-128 block; failed operations clear the entire block.
     fn aes128_block(&mut self, _key: &[u8; 16], block: &mut [u8; 16], _encrypt: bool) -> Result<()> {
@@ -29,6 +32,24 @@ pub trait Host {
     fn p256_parameter(&self, _id: u8) -> Option<&'static [u8]> { None }
 
     fn p256_key_valid(&mut self, _private: bool, _key: &[u8]) -> Result<bool> {
+        Err(Error::Unsupported)
+    }
+
+    /// Opaque transient state; zero begins a message, finalization clears state.
+    fn sha256_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], _input: &[u8],
+        output: Option<&mut [u8; 32]>) -> Result<()> {
+        state.fill(0);
+        if let Some(output) = output { output.fill(0); }
+        Err(Error::Unsupported)
+    }
+
+    /// ECDSA over a SHA-256 digest with minimal DER output; failed signing clears output.
+    fn p256_sign_hash(&mut self, _key: &[u8; 32], _hash: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
+        output.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn p256_verify_hash(&mut self, _key: &[u8; 65], _hash: &[u8; 32], _signature: &[u8]) -> Result<bool> {
         Err(Error::Unsupported)
     }
 

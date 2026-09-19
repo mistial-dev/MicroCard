@@ -14,6 +14,7 @@ use zeroize::Zeroizing;
 mod ec;
 mod agreement;
 mod key_pair;
+mod signature;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
@@ -122,6 +123,9 @@ pub fn call(
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
     if class == ClassId::KeyAgreement {
         if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? { return Ok(result); }
+    }
+    if class == ClassId::Signature {
+        if let Some(result) = signature::call(method, signature, heap, host, frame, context, budget)? { return Ok(result); }
     }
     if class == ClassId::KeyPair {
         return key_pair::call(method, signature, heap, host, frame, context, budget);
@@ -352,6 +356,7 @@ pub fn call(
                     ClassId::RandomData => host.supports_random(id),
                     ClassId::Cipher => matches!(id, 13 | 14) && host.supports_cipher(id),
                     ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
+                    ClassId::Signature => id == 33 && host.supports_signature(id),
                     _ => false,
                 },
                 _ => false,
@@ -528,36 +533,6 @@ pub fn call(
             heap.byte_slice_mut(pending, 0, 16)?.copy_from_slice(&tail[..]);
             if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&next_iv[..]); }
             frame.push_short(written as i16)?;
-        }
-        // An algorithm holder remembers the key and the direction it was given, and the
-        // operation itself is the host's to answer.
-        (ClassId::Signature, MethodId::init) => {
-            // Both forms end with the mode or the key. The longer one also carries an
-            // initialisation vector, which is taken and held with the key.
-            if signature.init_vector() {
-                let _length = frame.pop_short()?;
-                let _offset = frame.pop_short()?;
-                let _vector = frame.pop_reference()?;
-            }
-            let mode = if signature.init_mode() {
-                frame.pop_short()?
-            } else {
-                0
-            };
-            let key = frame.pop_reference()?;
-            let this = frame.pop_reference()?;
-            if !key_initialized(heap, key)? {
-                // Initialising with a key that holds nothing would leave an instance that
-                // looks ready and is not.
-                return Ok(Native::Threw(super::new_exception(
-                    heap,
-                    ClassId::CryptoException,
-                    context,
-                )?));
-            }
-            heap.put_word(this, MATERIAL, key)?;
-            heap.put_word(this, COUNTER, mode as u16)?;
-            heap.put_word(this, READY, 1)?;
         }
         (ClassId::RandomData, MethodId::generateData)
         | (ClassId::RandomData, MethodId::nextBytes) => {

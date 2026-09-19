@@ -50,14 +50,15 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
-- Complete JCVM P-256 signature bindings through shared
-  providers. P-256 key storage/generation, raw ECDH, and AES-128 ECB/CBC are connected; unsupported algorithms
-  fail explicitly without software fallback.
-- Recover the JCVM flash budget after adding EC keys, generation, and agreement. The measured DK link is
-  174,848 text bytes against the unchanged 168,000-byte ceiling, with 148 data bytes
-  and 197,692 BSS bytes. The dongle links at 184,704 text bytes against 178,000.
-  The board budget gate currently fails; the recorded passing
-  budget report predates EC key storage. Final measurements must replace it.
+- Prove a personalized OpenFIPS201 workflow on the Makerdiary JCVM build. P-256 keys,
+  generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Remaining work includes
+  applet-required management services, ordinary PIV transport access, provisioning,
+  certificate storage, signing and reboot acceptance. Blank-card tests do not prove these.
+- Resolve Makerdiary boot/USB evidence and validate actual memory use. The JCVM dongle
+  currently links at 188,976 text bytes, 148 data bytes and 198,284 BSS bytes, within
+  its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
+  optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded
+  passing budget report predates EC integration and must be refreshed for final release.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)

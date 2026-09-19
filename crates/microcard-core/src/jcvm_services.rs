@@ -62,11 +62,11 @@ impl<P: CryptoProvider> Services<'_, P> {
     }
 
     /// Sign through the provider and emit minimal DER; failure leaves output zeroed.
-    pub fn p256_sign(&mut self, key: &[u8; 32], message: &[u8], output: &mut [u8; 72]) -> Result<usize> {
+    pub fn p256_sign_hash(&mut self, key: &[u8; 32], message: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
         output.fill(0);
         if !crate::crypto::p256_private_key_valid(key) { return Err(Error::Bounds); }
         let mut raw = zeroize::Zeroizing::new([0u8; 64]);
-        self.0.p256_ecdsa_sign_into(key, message, &mut raw).map_err(|_| Error::Unauthorized)?;
+        self.0.p256_sign_hash_into(key, message, &mut raw).map_err(|_| Error::Unauthorized)?;
         if !crate::crypto::p256_private_key_valid(raw[..32].try_into().unwrap())
             || !crate::crypto::p256_private_key_valid(raw[32..].try_into().unwrap()) {
             return Err(Error::Format);
@@ -75,19 +75,39 @@ impl<P: CryptoProvider> Services<'_, P> {
     }
 
     /// Reject malformed DER locally and preserve provider failures as errors.
-    pub fn p256_verify(&mut self, key: &[u8; 65], message: &[u8], signature: &[u8]) -> Result<bool> {
+    pub fn p256_verify_hash(&mut self, key: &[u8; 65], message: &[u8; 32], signature: &[u8]) -> Result<bool> {
         if key[0] != 4 { return Ok(false); }
         let Some(raw) = ecdsa::decode(signature) else { return Ok(false); };
         // Java Card accepts either S form; package canonicalization remains separate.
         if !crate::crypto::p256_private_key_valid(raw[..32].try_into().unwrap())
             || !crate::crypto::p256_private_key_valid(raw[32..].try_into().unwrap()) { return Ok(false); }
-        self.0.p256_ecdsa_verify(key, message, &raw).map_err(|_| Error::Unauthorized)
+        self.0.p256_verify_hash(key, message, &raw).map_err(|_| Error::Unauthorized)
     }
 
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn sha256_stream(&mut self, state: &mut [u8; microcard_engine_jcvm::host::SHA256_STATE_BYTES],
+        input: &[u8], mut output: Option<&mut [u8; 32]>) -> Result<()> {
+        let result = self.0.sha256_stream(state, input, output.as_deref_mut());
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
+    fn p256_sign_hash(&mut self, key: &[u8; 32], message: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
+        Services::p256_sign_hash(self, key, message, output)
+    }
+
+    fn p256_verify_hash(&mut self, key: &[u8; 65], message: &[u8; 32], signature: &[u8]) -> Result<bool> {
+        Services::p256_verify_hash(self, key, message, signature)
+    }
+
     fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
+    fn supports_signature(&self, algorithm: u8) -> bool { algorithm == 33 }
     fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()> {
         Services::p256_generate(self, private, public)
     }
@@ -179,6 +199,16 @@ mod tests {
         bad_entropy: bool,
     }
     impl CryptoProvider for Provider {
+        fn sha256_stream(&mut self, state: &mut [u8; crate::crypto::SHA256_STATE_BYTES],
+            input: &[u8], output: Option<&mut [u8; 32]>) -> crate::Result<()> {
+            if self.fail {
+                state.fill(0x42);
+                if let Some(output) = output { output.fill(0x42); }
+                return Err(crate::Error::Native);
+            }
+            crate::crypto::SoftwareCrypto.sha256_stream(state, input, output)
+        }
+
         fn p256_public_key_into(&mut self, key: &[u8; 32], output: &mut [u8; 65]) -> crate::Result<()> {
             self.calls += 1;
             if self.fail || self.fail_public { output.fill(0x42); return Err(crate::Error::Native); }
@@ -189,15 +219,15 @@ mod tests {
             if self.fail { output.fill(0x42); return Err(crate::Error::Native); }
             crate::crypto::SoftwareCrypto.p256_ecdh_into(key, peer, output)
         }
-        fn p256_ecdsa_sign_into(&mut self, key: &[u8; 32], message: &[u8], output: &mut [u8; 64]) -> crate::Result<()> {
+        fn p256_sign_hash_into(&mut self, key: &[u8; 32], message: &[u8; 32], output: &mut [u8; 64]) -> crate::Result<()> {
             self.calls += 1;
             if self.fail { output.fill(0x42); return Err(crate::Error::Native); }
-            crate::crypto::SoftwareCrypto.p256_ecdsa_sign_into(key, message, output)
+            crate::crypto::SoftwareCrypto.p256_sign_hash_into(key, message, output)
         }
-        fn p256_ecdsa_verify(&mut self, key: &[u8], message: &[u8], signature: &[u8]) -> crate::Result<bool> {
+        fn p256_verify_hash(&mut self, key: &[u8], message: &[u8; 32], signature: &[u8]) -> crate::Result<bool> {
             self.calls += 1;
             if self.fail { return Err(crate::Error::Native); }
-            crate::crypto::SoftwareCrypto.p256_ecdsa_verify(key, message, signature)
+            crate::crypto::SoftwareCrypto.p256_verify_hash(key, message, signature)
         }
         fn aes_cbc_in_place(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> crate::Result<()> {
             self.calls += 1;
@@ -287,25 +317,33 @@ mod tests {
         let mut provider = Provider::default();
         let mut host = Services(&mut provider);
         let mut signature = [0xaa; 72];
-        let written = host.p256_sign(&key, b"message", &mut signature).unwrap();
+        let mut state = [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES];
+        let mut digest = [0; 32];
+        Host::sha256_stream(&mut host, &mut state, b"mes", None).unwrap();
+        Host::sha256_stream(&mut host, &mut state, b"sage", Some(&mut digest)).unwrap();
+        assert_eq!(state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
+        let written = Host::p256_sign_hash(&mut host, &key, &digest, &mut signature).unwrap();
         let expected = crate::crypto::p256_ecdsa_sign(&key, b"message").unwrap();
         assert_eq!(&signature[..written], p256::ecdsa::Signature::from_slice(&expected).unwrap().to_der().as_bytes());
-        assert_eq!(host.p256_verify(&public, b"message", &signature[..written]), Ok(true));
-        assert_eq!(host.p256_verify(&public, b"changed", &signature[..written]), Ok(false));
+        assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"message"), &signature[..written]), Ok(true));
+        assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"changed"), &signature[..written]), Ok(false));
         let calls = host.0.calls;
-        assert_eq!(host.p256_verify(&public, b"message", &signature[..written - 1]), Ok(false));
+        assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"message"), &signature[..written - 1]), Ok(false));
         let mut compressed = public;
         compressed[0] = 2;
-        assert_eq!(host.p256_verify(&compressed, b"message", &signature[..written]), Ok(false));
+        assert_eq!(Host::p256_verify_hash(&mut host, &compressed, &crate::crypto::sha256(b"message"), &signature[..written]), Ok(false));
         let valid_signature = signature;
-        assert_eq!(host.p256_sign(&[0;32], b"message", &mut signature), Err(Error::Bounds));
+        assert_eq!(Host::p256_sign_hash(&mut host, &[0;32], &crate::crypto::sha256(b"message"), &mut signature), Err(Error::Bounds));
         assert_eq!(signature, [0;72]);
         assert_eq!(host.0.calls, calls);
         host.0.fail = true;
-        assert_eq!(host.p256_sign(&key, b"message", &mut signature), Err(Error::Unauthorized));
+        assert_eq!(Host::p256_sign_hash(&mut host, &key, &crate::crypto::sha256(b"message"), &mut signature), Err(Error::Unauthorized));
         assert_eq!(signature, [0;72]);
-        assert_eq!(host.p256_verify(&public, b"message", &valid_signature[..written]), Err(Error::Unauthorized));
+        assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"message"), &valid_signature[..written]), Err(Error::Unauthorized));
         assert_eq!(host.0.calls, calls + 2);
+        assert_eq!(Host::sha256_stream(&mut host, &mut state, b"x", Some(&mut digest)), Err(Error::Unauthorized));
+        assert_eq!(state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
+        assert_eq!(digest, [0; 32]);
     }
 
     #[test]
