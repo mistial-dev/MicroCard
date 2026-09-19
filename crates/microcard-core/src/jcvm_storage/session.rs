@@ -68,7 +68,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             self.card
                 .as_mut()
                 .ok_or(Error::Missing)?
-                .deselect_with_cancel(&file, &mut Services(provider), cancel)
+                .deselect_with_cancel(&file, &mut Services::new(provider), cancel)
                 .map_err(engine_error)
         });
         self.finish(result, provider, cancel)
@@ -139,7 +139,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             match instance {
                 Some(instance_aid) => card.install_instance_with_cancel(
                     &file,
-                    &mut Services(provider),
+                    &mut Services::new(provider),
                     microcard_engine_jcvm::applet::Installation {
                         module_aid: module,
                         instance_aid,
@@ -149,7 +149,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
                 ),
                 None => card.install_module_with_cancel(
                     &file,
-                    &mut Services(provider),
+                    &mut Services::new(provider),
                     module,
                     parameters,
                     cancel,
@@ -167,18 +167,49 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         provider: &mut (impl CryptoProvider + Entropy),
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Response> {
-        if !self.installed()? {
-            return Err(Error::Missing);
+        self.process_command(command, selecting, None, provider, cancel)
+    }
+
+    pub(crate) fn process_verified(
+        &mut self,
+        verified: crate::scp03::Verified<'_>,
+        provider: &mut (impl CryptoProvider + Entropy),
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Response> {
+        let mut command = zeroize::Zeroizing::new(verified.command().encode()?);
+        // OpenFIPS201 requires both C-MAC and C-DECRYPTION for administrative access.
+        // MAC-only transport retains ordinary applet semantics without this grant.
+        if verified.level() & 3 != 3 {
+            return self.process(&command, false, provider, cancel);
         }
-        if cancel() {
-            return Err(Error::Cancelled);
+        command[0] |= 0x04;
+        if command.len() == 4 {
+            command.try_reserve_exact(1).map_err(|_| Error::Quota)?;
+            command.push(0);
         }
+        self.process_command(&command, false, Some(verified.level()), provider, cancel)
+    }
+
+    fn process_command(
+        &mut self,
+        command: &[u8],
+        selecting: bool,
+        security: Option<u8>,
+        provider: &mut (impl CryptoProvider + Entropy),
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Response> {
+        if !self.installed()? { return Err(Error::Missing); }
+        if cancel() { return Err(Error::Cancelled); }
+        // unwrap receives header and CDATA, not an optional trailing Le byte.
+        let protected_length = if command.len() > 5 { 5 + usize::from(command[4]) } else { 5.min(command.len()) };
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            self.card
-                .as_mut()
-                .unwrap()
-                .process_with_cancel(&file, &mut Services(provider), command, selecting, cancel)
+            let mut services = match security {
+                Some(level) => Services::verified(provider, command.get(..protected_length).ok_or(Error::Format)?, level),
+                None => Services::new(provider),
+            };
+            self.card.as_mut().unwrap()
+                .process_with_cancel(&file, &mut services, command, selecting, cancel)
                 .map_err(engine_error)
         });
         self.finish(result, provider, cancel)

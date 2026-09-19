@@ -63,9 +63,10 @@ and the current registry binding. Installation now commits a dedicated heap befo
 publishing its instance, using a fresh derived key even after an interrupted attempt.
 Reopening verifies every committed image and heap without reinstalling. The adapter
 serves GP status records, domain discovery, and authenticated applet APDUs with their
-original instruction, parameters, and data. Protected class `04` becomes applet class
-`00`; protected class `84` becomes proprietary class `80`. GP management commands
-are dispatched only in class `80`. Application commands still require SCP03; plain
+original instruction, parameters, and data. Encrypted ISD applet commands retain their
+protected CLA until the applet's secure-channel unwrap; other commands receive the
+unprotected CLA. GP management commands are dispatched only in class `80` after
+transport verification. Application commands still require SCP03; plain
 APDUs cannot invoke an applet. The former JCVM INS 10 tunnel is no longer decoded.
 SELECT calls `select()` and then `process()` with the
 selection flag, returning the applet's data and status. A refusal leaves no selection;
@@ -281,40 +282,42 @@ DER output before publication, and accepts overlapping input/output. Successful 
 operations clear streaming state; a rejected signature also resets the verifier. Provider
 failure publishes neither output nor changed intermediate state. Each input byte charges
 one work unit. Other signature algorithms and external access are rejected.
-The committed PIV acceptance still covers blank-card behavior; personalized cryptographic
-operations require end-to-end acceptance.
+### OpenFIPS201 provisioning
 
-Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`
-throws `SystemException.NO_RESOURCE`; it never exposes the transport's management channel.
+The managed acceptance now defines and imports an AES-128 management key through
+OpenFIPS201's administrative APDUs. After reboot it completes PIV challenge-response
+using that key and an independent host AES implementation. A MAC-only management-key
+definition is rejected. P-256 signing-key provisioning and certificate storage remain
+unverified end to end.
 
-### OpenFIPS201 provisioning blocker
+For ISD-owned applets, the shared transport passes encrypted, authenticated commands
+with a command-scoped secure-channel grant. `GPSystem.getSecureChannel` returns a
+reusable handle containing no authority. `getSecurityLevel` reads the current grant;
+`unwrap` accepts the actual APDU buffer only, compares its complete header and data
+with the verified command, and consumes the grant's unwrap permission once. It clears
+the protected CLA bit without repeating cryptography. Changed bytes or repeated
+unwrapping fail closed. No command authority enters persistent applet state.
 
-The pinned applet revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716` requires
-`AUTHENTICATED | C_DECRYPTION | C_MAC` and a successful `SecureChannel.unwrap`
-before treating an administrative command as secure. The current transport verifies
-and decrypts SCP03, then clears the protected CLA bit before dispatching to JCVM.
-Consequently the applet cannot recognize that authorization.
+MAC-only commands retain ordinary applet semantics without an administrative grant.
+SSD-owned applets do not receive ISD secure-channel authority. Without a grant,
+`getSecureChannel` still throws `SystemException.NO_RESOURCE`. Applet-initiated
+handshake, reset, wrap, and data-encryption operations remain unavailable and reject
+with `6982`; transport handles its own handshake and response protection. In particular,
+OpenFIPS201's deselection callback needs secure-channel reset integration before
+ordinary PIV access is enabled. This is a bounded provisioning bridge, not complete
+GlobalPlatform applet secure-channel support.
 
-On MicroCard `3b3cc70`, after the managed acceptance's load/install/select sequence,
-the encrypted command `DB FF FF` with data
-`66128B019B8C017F8D01008E01088F0101900114` returns `6982`. This is the upstream
-AES-128 management-key definition for reference `9B`; it should return `9000` in
-an authorized provisioning session. The remaining managed lifecycle acceptance passes.
-This probe establishes the first blocker, not successful provisioning.
+The runtime preserves bytes already sent when an applet completes through
+`ISOException`, including success and response-chaining status words. Other exceptions
+still discard response data. OpenFIPS201 uses this path for its authentication challenge;
+previously it returned an empty `9000` response.
 
-The platform bridge must bind authorization to the verified command, selected
-installation, and owning security domain. It must expose the applet's secure-channel
-operations without decrypting twice or accepting applet-supplied claims of verification.
-Reset, deselection, failed authentication, and replay must not retain authority.
-Ordinary PIV commands need a separate unauthenticated transport path whose access
-decisions remain with the applet; card management remains authenticated.
-
-Extend the existing managed lifecycle acceptance into one personalized flow: define
-and import the management key, set the PIN, create and generate a P-256 signing key,
-store and retrieve its certificate, sign a challenge, independently verify the signature,
-then reboot and repeat. Include rejected unauthorized administration and loss of PIN
-validation across reboot in that same flow. Upstream tests mock the secure channel;
-they supply command encodings but do not prove this platform integration.
+Next, extend the same lifecycle acceptance with PIN provisioning, a generated P-256
+signing key, certificate storage/retrieval, independently verified signing, and reboot.
+Keep unauthorized administration and loss of PIN validation across reset in that flow.
+The fixture is pinned to OpenFIPS201 `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
+Upstream tests mock the secure channel; they supply command encodings but do not prove
+this platform integration.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 

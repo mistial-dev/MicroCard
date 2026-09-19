@@ -15,6 +15,7 @@ mod ec;
 mod agreement;
 mod key_pair;
 mod signature;
+mod secure_channel;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
@@ -129,6 +130,9 @@ pub fn call(
     }
     if class == ClassId::KeyPair {
         return key_pair::call(method, signature, heap, host, frame, context, budget);
+    }
+    if class == ClassId::SecureChannel || class == ClassId::GPSystem && method == MethodId::getSecureChannel {
+        return secure_channel::call(class, method, heap, host, frame, context, jcre);
     }
     match (class, method) {
         (ClassId::KeyBuilder, MethodId::buildKey) => {
@@ -382,13 +386,6 @@ pub fn call(
 
         // GlobalPlatform, JCRE and GP 2.3 §6. The card content state is the applet's
         // lifecycle byte, which the runtime keeps rather than the applet.
-        (ClassId::GPSystem, MethodId::getSecureChannel) => {
-            // The transport's management channel is not an applet-owned channel.
-            // Refuse the unavailable service with a Java exception, never a dummy handle.
-            let exception = super::new_exception(heap, ClassId::SystemException, context)?;
-            heap.put_word(exception, super::REASON_FIELD, 5)?; // NO_RESOURCE
-            return Ok(Native::Threw(exception));
-        }
         (ClassId::GPSystem, MethodId::getCVM) => {
             let _kind = frame.pop_short()?;
             // No global PIN, JCRE leaves this optional and the applet null checks it.

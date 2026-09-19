@@ -52,13 +52,21 @@ board's reserved heap.
 
 - Prove a personalized OpenFIPS201 workflow on the Makerdiary JCVM build. P-256 keys,
   generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Remaining work includes
-  applet-required management services, ordinary PIV transport access, provisioning,
-  certificate storage, signing and reboot acceptance. Blank-card tests do not prove these.
-- Resolve Makerdiary boot/USB evidence and validate actual memory use. The JCVM dongle
-  currently links at 188,976 text bytes, 148 data bytes and 198,284 BSS bytes, within
+  complete applet secure-channel lifecycle services, ordinary PIV transport access,
+  PIN/signing-key provisioning, certificate storage, and signing/reboot acceptance.
+  Management-key creation/import and PIV challenge-response after reboot now pass
+  through the shared simulator path; they do not establish the remaining workflows.
+- Validate the current Makerdiary JCVM image and actual memory use. A connected board
+  answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
+  revision and engine are unknown. The current JCVM dongle links at 190,920 text bytes,
+  148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded
   passing budget report predates EC integration and must be refreshed for final release.
+  The latest checkpoint passed host, wallet, generated-artifact and fuzz-build stages,
+  then failed the board budget gate: MC04 hardware release text is 212,200 bytes against
+  212,000. All seven profile artifacts linked before budget comparison; optimization
+  ceilings remain unchanged.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
@@ -116,7 +124,8 @@ verify the engine, revision, artifact hashes, and `hardware_flashed: false` in i
 
 [Hardware smoke](HARDWARE_SMOKE.md) records earlier revision-specific DK observations;
 they do not validate this cleanup. The [dongle guide](DONGLE.md) records its unresolved
-boot evidence. Neither cross-linking nor host tests prove physical behavior.
+revision-unknown USB/APDU observation. Neither that observation nor host tests validate
+this JCVM build's physical behavior.
 
 Physical acceptance must cover both engine builds, CC310 independent vectors and
 forced failures, buffer aliasing, stack/heap peaks, latency and sustained throughput,

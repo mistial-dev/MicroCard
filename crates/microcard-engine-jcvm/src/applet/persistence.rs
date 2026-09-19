@@ -180,6 +180,9 @@ impl Card {
                     {
                         return Err(Error::Format);
                     }
+                    if class.id == ClassId::SecureChannel && (info.length != 6 || payload.iter().any(|byte| *byte != 0)) {
+                        return Err(Error::Format);
+                    }
                     if info.length == 6 {
                         let word =
                             |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);

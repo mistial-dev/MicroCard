@@ -5,7 +5,22 @@ use microcard_engine_jcvm::{Error, Result, host::Host};
 mod ecdsa;
 mod ec_parameters;
 
-pub struct Services<'a, P>(pub &'a mut P);
+pub struct Services<'a, P> {
+    provider: &'a mut P,
+    command: Option<&'a [u8]>,
+    security_level: u8,
+}
+
+impl<'a, P> Services<'a, P> {
+    pub fn new(provider: &'a mut P) -> Self {
+        Self { provider, command: None, security_level: 0 }
+    }
+
+    // Only the persistent session's Verified-command entry point grants this context.
+    pub(crate) fn verified(provider: &'a mut P, command: &'a [u8], level: u8) -> Self {
+        Self { provider, command: Some(command), security_level: 0x80 | level }
+    }
+}
 
 // Kept outside the host vtable until the P-256 applet bindings are enabled.
 impl<P: CryptoProvider> Services<'_, P> {
@@ -13,7 +28,7 @@ impl<P: CryptoProvider> Services<'_, P> {
     pub fn p256_public(&mut self, key: &[u8; 32], output: &mut [u8; 65]) -> Result<()> {
         output.fill(0);
         if !crate::crypto::p256_private_key_valid(key) { return Err(Error::Bounds); }
-        if self.0.p256_public_key_into(key, output).is_err() {
+        if self.provider.p256_public_key_into(key, output).is_err() {
             output.fill(0);
             return Err(Error::Unauthorized);
         }
@@ -30,7 +45,7 @@ impl<P: CryptoProvider> Services<'_, P> {
         let mut one = [0u8; 32];
         one[31] = 1;
         let mut scratch = zeroize::Zeroizing::new([0u8; 32]);
-        match self.0.p256_ecdh_into(&one, key, &mut scratch) {
+        match self.provider.p256_ecdh_into(&one, key, &mut scratch) {
             Ok(()) => Ok(true),
             Err(crate::Error::Authentication) => Ok(false),
             Err(_) => Err(Error::Unauthorized),
@@ -41,7 +56,7 @@ impl<P: CryptoProvider> Services<'_, P> {
     pub fn p256_agree(&mut self, key: &[u8; 32], peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
         output.fill(0);
         if !crate::crypto::p256_private_key_valid(key) || peer[0] != 4 { return Err(Error::Bounds); }
-        if let Err(error) = self.0.p256_ecdh_into(key, peer, output) {
+        if let Err(error) = self.provider.p256_ecdh_into(key, peer, output) {
             output.fill(0);
             return Err(if error == crate::Error::Authentication { Error::Bounds } else { Error::Unauthorized });
         }
@@ -54,7 +69,7 @@ impl<P: CryptoProvider> Services<'_, P> {
         private.fill(0);
         public.fill(0);
         let mut candidate = zeroize::Zeroizing::new([0u8; 32]);
-        crate::crypto::p256_generate_private_into(&mut candidate, |output| self.0.fill_entropy(output))
+        crate::crypto::p256_generate_private_into(&mut candidate, |output| self.provider.fill_entropy(output))
             .map_err(|_| Error::Unauthorized)?;
         self.p256_public(&candidate, public)?;
         *private = *candidate;
@@ -66,7 +81,7 @@ impl<P: CryptoProvider> Services<'_, P> {
         output.fill(0);
         if !crate::crypto::p256_private_key_valid(key) { return Err(Error::Bounds); }
         let mut raw = zeroize::Zeroizing::new([0u8; 64]);
-        self.0.p256_sign_hash_into(key, message, &mut raw).map_err(|_| Error::Unauthorized)?;
+        self.provider.p256_sign_hash_into(key, message, &mut raw).map_err(|_| Error::Unauthorized)?;
         if !crate::crypto::p256_private_key_valid(raw[..32].try_into().unwrap())
             || !crate::crypto::p256_private_key_valid(raw[32..].try_into().unwrap()) {
             return Err(Error::Format);
@@ -81,15 +96,30 @@ impl<P: CryptoProvider> Services<'_, P> {
         // Java Card accepts either S form; package canonicalization remains separate.
         if !crate::crypto::p256_private_key_valid(raw[..32].try_into().unwrap())
             || !crate::crypto::p256_private_key_valid(raw[32..].try_into().unwrap()) { return Ok(false); }
-        self.0.p256_verify_hash(key, message, &raw).map_err(|_| Error::Unauthorized)
+        self.provider.p256_verify_hash(key, message, &raw).map_err(|_| Error::Unauthorized)
     }
 
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn secure_channel_level(&self) -> u8 { self.security_level }
+
+    fn unwrap_secure_command(&mut self, command: &mut [u8]) -> Result<()> {
+        let Some(expected) = self.command.take() else {
+            self.security_level = 0;
+            return Err(Error::Unauthorized);
+        };
+        if command != expected {
+            self.security_level = 0;
+            return Err(Error::Unauthorized);
+        }
+        command[0] &= !0x04;
+        Ok(())
+    }
+
     fn sha256_stream(&mut self, state: &mut [u8; microcard_engine_jcvm::host::SHA256_STATE_BYTES],
         input: &[u8], mut output: Option<&mut [u8; 32]>) -> Result<()> {
-        let result = self.0.sha256_stream(state, input, output.as_deref_mut());
+        let result = self.provider.sha256_stream(state, input, output.as_deref_mut());
         if result.is_err() {
             state.fill(0);
             if let Some(output) = output { output.fill(0); }
@@ -141,9 +171,9 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 
     fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
         let result = if encrypt {
-            self.0.aes128_encrypt_block_in_place(key, block)
+            self.provider.aes128_encrypt_block_in_place(key, block)
         } else {
-            self.0.aes128_decrypt_block_in_place(key, block)
+            self.provider.aes128_decrypt_block_in_place(key, block)
         };
         if result.is_err() {
             block.fill(0);
@@ -153,7 +183,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn aes128_cbc(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> Result<()> {
-        if self.0.aes_cbc_in_place(key, iv, buffer, encrypt).is_err() {
+        if self.provider.aes_cbc_in_place(key, iv, buffer, encrypt).is_err() {
             buffer.fill(0);
             return Err(Error::Unauthorized);
         }
@@ -162,7 +192,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 
     fn random(&mut self, output: &mut [u8]) -> Result<()> {
         output.fill(0);
-        if self.0.fill_entropy(output).is_err() {
+        if self.provider.fill_entropy(output).is_err() {
             output.fill(0);
             return Err(Error::Unauthorized);
         }
@@ -176,7 +206,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         }
         let destination = output.get_mut(..32).ok_or(Error::Bounds)?;
         if self
-            .0
+            .provider
             .sha256_into(message, destination.try_into().unwrap())
             .is_err()
         {
@@ -267,9 +297,37 @@ mod tests {
     }
 
     #[test]
+    fn applet_command_authority_is_exact_and_single_use() {
+        let mut provider = Provider::default();
+        let command = [0x84, 0xdb, 0xff, 0xff, 2, 0x69, 0];
+        let mut host = Services::new(&mut provider);
+        assert_eq!(host.secure_channel_level(), 0);
+        assert_eq!(host.unwrap_secure_command(&mut command.clone()), Err(Error::Unauthorized));
+        for changed in 0..command.len() {
+            let mut host = Services::verified(&mut provider, &command, 3);
+            let mut altered = command;
+            altered[changed] ^= 1;
+            let before = altered;
+            assert_eq!(host.unwrap_secure_command(&mut altered), Err(Error::Unauthorized));
+            assert_eq!(altered, before);
+            assert_eq!(host.secure_channel_level(), 0);
+            assert_eq!(host.unwrap_secure_command(&mut command.clone()), Err(Error::Unauthorized));
+        }
+        let mut host = Services::verified(&mut provider, &command, 3);
+        let mut received = command;
+        assert_eq!(host.secure_channel_level(), 0x83);
+        host.unwrap_secure_command(&mut received).unwrap();
+        assert_eq!(received[0], 0x80);
+        assert_eq!(&received[1..], &command[1..]);
+        assert_eq!(host.unwrap_secure_command(&mut command.clone()), Err(Error::Unauthorized));
+        assert_eq!(host.secure_channel_level(), 0);
+        assert_eq!(provider.calls, 0, "the transport already performed cryptography");
+    }
+
+    #[test]
     fn p256_keys_validate_through_provider_and_generation_fails_without_partial_keys() {
         let mut provider = Provider::default();
-        let mut host = Services(&mut provider);
+        let mut host = Services::new(&mut provider);
         let mut one = [0; 32];
         one[31] = 1;
         assert_eq!(host.p256_parameter(3).unwrap(), crate::crypto::p256_public_key(&one).unwrap());
@@ -292,21 +350,21 @@ mod tests {
         assert_eq!(host.p256_public_valid(&off_curve), Ok(false));
         assert_eq!(Host::p256_agree(&mut host, &private, &off_curve, &mut shared), Err(Error::Bounds));
         assert_eq!(shared, [0;32]);
-        host.0.fail = true;
+        host.provider.fail = true;
         assert_eq!(host.p256_public_valid(&public), Err(Error::Unauthorized));
         assert_eq!(Host::p256_agree(&mut host, &private, &peer, &mut shared), Err(Error::Unauthorized));
         assert_eq!(shared, [0;32]);
         for (fail, fail_public, bad_entropy, expected_calls) in [(true,false,false,1), (false,true,false,2), (false,false,true,8)] {
-            host.0.fail = fail;
-            host.0.fail_public = fail_public;
-            host.0.bad_entropy = bad_entropy;
-            let before = host.0.calls;
+            host.provider.fail = fail;
+            host.provider.fail_public = fail_public;
+            host.provider.bad_entropy = bad_entropy;
+            let before = host.provider.calls;
             private.fill(0xaa);
             public.fill(0xaa);
             assert_eq!(Host::p256_generate(&mut host, &mut private, &mut public), Err(Error::Unauthorized));
             assert_eq!(private, [0;32]);
             assert_eq!(public, [0;65]);
-            assert_eq!(host.0.calls - before, expected_calls);
+            assert_eq!(host.provider.calls - before, expected_calls);
         }
     }
 
@@ -315,7 +373,7 @@ mod tests {
         let key = [1u8; 32];
         let public = crate::crypto::p256_public_key(&key).unwrap();
         let mut provider = Provider::default();
-        let mut host = Services(&mut provider);
+        let mut host = Services::new(&mut provider);
         let mut signature = [0xaa; 72];
         let mut state = [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES];
         let mut digest = [0; 32];
@@ -327,7 +385,7 @@ mod tests {
         assert_eq!(&signature[..written], p256::ecdsa::Signature::from_slice(&expected).unwrap().to_der().as_bytes());
         assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"message"), &signature[..written]), Ok(true));
         assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"changed"), &signature[..written]), Ok(false));
-        let calls = host.0.calls;
+        let calls = host.provider.calls;
         assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"message"), &signature[..written - 1]), Ok(false));
         let mut compressed = public;
         compressed[0] = 2;
@@ -335,12 +393,12 @@ mod tests {
         let valid_signature = signature;
         assert_eq!(Host::p256_sign_hash(&mut host, &[0;32], &crate::crypto::sha256(b"message"), &mut signature), Err(Error::Bounds));
         assert_eq!(signature, [0;72]);
-        assert_eq!(host.0.calls, calls);
-        host.0.fail = true;
+        assert_eq!(host.provider.calls, calls);
+        host.provider.fail = true;
         assert_eq!(Host::p256_sign_hash(&mut host, &key, &crate::crypto::sha256(b"message"), &mut signature), Err(Error::Unauthorized));
         assert_eq!(signature, [0;72]);
         assert_eq!(Host::p256_verify_hash(&mut host, &public, &crate::crypto::sha256(b"message"), &valid_signature[..written]), Err(Error::Unauthorized));
-        assert_eq!(host.0.calls, calls + 2);
+        assert_eq!(host.provider.calls, calls + 2);
         assert_eq!(Host::sha256_stream(&mut host, &mut state, b"x", Some(&mut digest)), Err(Error::Unauthorized));
         assert_eq!(state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
         assert_eq!(digest, [0; 32]);
@@ -349,12 +407,12 @@ mod tests {
     #[test]
     fn provider_routing_bounds_and_failures_never_leave_partial_output_or_retry() {
         let mut provider = Provider::default();
-        let mut host = Services(&mut provider);
+        let mut host = Services::new(&mut provider);
         let mut output = [0xaa; 64];
         assert_eq!(host.digest(4, b"message", &mut output), Ok(32));
         assert_eq!(output[..32], [0x42; 32]);
         assert_eq!(output[32..], [0; 32]);
-        assert_eq!(host.0.calls, 1);
+        assert_eq!(host.provider.calls, 1);
         for (algorithm, length, error) in [(5, 64, Error::Unsupported), (4, 31, Error::Bounds)] {
             output.fill(0xaa);
             assert_eq!(
@@ -362,11 +420,11 @@ mod tests {
                 Err(error)
             );
             assert!(output[..length].iter().all(|byte| *byte == 0));
-            assert_eq!(host.0.calls, 1);
+            assert_eq!(host.provider.calls, 1);
         }
         host.random(&mut output).unwrap();
         assert_eq!(output, [0x17; 64]);
-        host.0.fail = true;
+        host.provider.fail = true;
         assert_eq!(
             host.digest(4, b"message", &mut output),
             Err(Error::Unauthorized)
@@ -374,31 +432,31 @@ mod tests {
         assert_eq!(output, [0; 64]);
         assert_eq!(host.random(&mut output), Err(Error::Unauthorized));
         assert_eq!(output, [0; 64]);
-        assert_eq!(host.0.calls, 4);
-        host.0.fail = false;
+        assert_eq!(host.provider.calls, 4);
+        host.provider.fail = false;
         let mut block = [0; 16];
         host.aes128_block(&[0; 16], &mut block, true).unwrap();
         assert_eq!(block, [0x66, 0xe9, 0x4b, 0xd4, 0xef, 0x8a, 0x2c, 0x3b,
             0x88, 0x4c, 0xfa, 0x59, 0xca, 0x34, 0x2b, 0x2e]);
         host.aes128_block(&[0; 16], &mut block, false).unwrap();
         assert_eq!(block, [0; 16]);
-        host.0.fail = true;
+        host.provider.fail = true;
         for encrypt in [true, false] {
             assert_eq!(host.aes128_block(&[0; 16], &mut block, encrypt), Err(Error::Unauthorized));
             assert_eq!(block, [0; 16]);
         }
-        assert_eq!(host.0.calls, 8);
-        host.0.fail = false;
+        assert_eq!(host.provider.calls, 8);
+        host.provider.fail = false;
         host.aes128_cbc(&[0;16], &[0;16], &mut block, true).unwrap();
         assert_eq!(block, [0x66, 0xe9, 0x4b, 0xd4, 0xef, 0x8a, 0x2c, 0x3b,
             0x88, 0x4c, 0xfa, 0x59, 0xca, 0x34, 0x2b, 0x2e]);
         host.aes128_cbc(&[0;16], &[0;16], &mut block, false).unwrap();
         assert_eq!(block, [0;16]);
-        host.0.fail = true;
+        host.provider.fail = true;
         for encrypt in [true, false] {
             assert_eq!(host.aes128_cbc(&[0;16], &[0;16], &mut block, encrypt), Err(Error::Unauthorized));
             assert_eq!(block, [0;16]);
         }
-        assert_eq!(host.0.calls, 12);
+        assert_eq!(host.provider.calls, 12);
     }
 }

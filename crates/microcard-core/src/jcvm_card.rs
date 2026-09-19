@@ -469,12 +469,15 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
-        let result = self.selected.as_mut().ok_or(Error::Missing)?.1.process(
-            &verified.command().encode()?,
-            false,
-            &mut self.provider,
-            cancel,
-        );
+        let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
+        let instance = self.storage.registry.state()?.instances()
+            .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;
+        // The transport authenticates the ISD; it does not authenticate an SSD session.
+        let result = if instance.domain == Aid::isd() {
+            session.process_verified(verified, &mut self.provider, cancel)
+        } else {
+            session.process(&verified.command().encode()?, false, &mut self.provider, cancel)
+        };
         let response = match result {
             Ok(response) => response,
             Err(error) => {

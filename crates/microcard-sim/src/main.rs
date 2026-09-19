@@ -160,7 +160,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let sizes=microcard_engine_jcvm::applet::Sizes{heap_bytes:64*1024,frame_words:8192,..Default::default()};
   let mut card=microcard_engine_jcvm::applet::Card::new(&file,sizes).map_err(|e|format!("{e:?}"))?;
   let mut hardware=Hardware;
-  let mut host=microcard_core::jcvm_services::Services(&mut hardware);
+  let mut host=microcard_core::jcvm_services::Services::new(&mut hardware);
   // The standalone simulator installs under the module AID with no privileges.
   let module=file.applets().map_err(|e|format!("{e:?}"))?.iter().next().ok_or("No applet")?.aid;
   let parameters=microcard_core::globalplatform::ApplicationInstall {

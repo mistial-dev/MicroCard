@@ -65,14 +65,16 @@ class Client:
   cryptogram=kdf(self.mac,1,bits,context)[:self.width]
   b=bytes([0x84,0x82,level,0,2*self.width])+cryptogram;self.chain=cmac(self.mac,self.chain+b)
   assert self.raw(b+self.chain[:self.width])==b'\x90\x00'
- def encode(self,ins,data=b'',p1=0,p2=0,cla=0x84):
+ def encode(self,ins,data=b'',p1=0,p2=0,cla=0x84,le=None):
   self.counter+=1
   if self.level&2 and data:
    padded=data+b'\x80';padded+=bytes((-len(padded))%16)
    iv=aes(self.enc,modes.ECB(),self.counter.to_bytes(16,'big'));data=aes(self.enc,modes.CBC(iv),padded)
-  b=bytes([cla,ins,p1,p2,len(data)+self.width])+data;self.chain=cmac(self.mac,self.chain+b);return b+self.chain[:self.width]
- def command(self,ins,data=b'',status=0x9000,p1=0,p2=0,cla=0x84):
-  r=self.raw(self.encode(ins,data,p1,p2,cla));assert r[-2:]==status.to_bytes(2,'big'),(hex(ins),r.hex())
+  b=bytes([cla,ins,p1,p2,len(data)+self.width])+data;self.chain=cmac(self.mac,self.chain+b)
+  assert le is None or 1<=le<=256
+  return b+self.chain[:self.width]+(b'' if le is None else bytes([le%256]))
+ def command(self,ins,data=b'',status=0x9000,p1=0,p2=0,cla=0x84,le=None):
+  r=self.raw(self.encode(ins,data,p1,p2,cla,le));assert r[-2:]==status.to_bytes(2,'big'),(hex(ins),r.hex())
   if self.level&0x10 and (status==0x9000 or status>>8 in (0x62,0x63)): return self.unprotect(r)
   return r[:-2]
  def unprotect(self,r):

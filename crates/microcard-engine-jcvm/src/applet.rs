@@ -386,7 +386,12 @@ impl Card {
                 outer.pop_short()? as u16
             } else { 0 };
             let mut data = Vec::new();
-            if exception.is_none() {
+            // ISOException is also how applets finish a successful or chained response.
+            // Preserve bytes already sent with its status word; VM failures still discard them.
+            let iso_status = exception.is_some_and(|reference| machine.heap.info(reference).ok()
+                .and_then(|info| natives::api_class(info.class))
+                .is_some_and(|class| class.id == ClassId::ISOException));
+            if exception.is_none() || iso_status {
                 let response = machine.jcre.response_data()?;
                 data.try_reserve_exact(response.len()).map_err(|_| Error::Quota)?;
                 data.extend_from_slice(response);

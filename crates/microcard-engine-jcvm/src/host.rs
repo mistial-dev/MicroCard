@@ -10,6 +10,16 @@ pub const SHA256_STATE_BYTES: usize = 256;
 
 /// The services an applet's cryptography needs.
 pub trait Host {
+    /// Current command protection, in GlobalPlatform SecureChannel bit assignments.
+    /// A saved applet handle never supplies authority for a later command.
+    fn secure_channel_level(&self) -> u8 { 0 }
+
+    /// Consume the exact command already verified by the platform transport.
+    /// Implementations reject changed bytes and repeated unwrapping.
+    fn unwrap_secure_command(&mut self, _command: &mut [u8]) -> Result<()> {
+        Err(Error::Unauthorized)
+    }
+
     fn supports_digest(&self, _algorithm: u8) -> bool { false }
     fn supports_random(&self, _algorithm: u8) -> bool { false }
     fn supports_cipher(&self, _algorithm: u8) -> bool { false }

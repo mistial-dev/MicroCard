@@ -7,7 +7,7 @@ import tempfile
 
 from device_cbor import decode, jcvm_manifest
 from package_envelope import create
-from scp03_acceptance import Client, SIM, ROOT, sign_package, signer_public_key
+from scp03_acceptance import Client, SIM, ROOT, sign_package, signer_public_key, aes, modes
 
 
 def lv(*values):
@@ -53,6 +53,17 @@ def main():
         client.command(0xe6, install, p1=0x0c)
         selected = client.command(0xa4, instance, p1=4, cla=0x04)
         assert selected[:3] == bytes.fromhex("618192") and len(selected) == 149
+        # Provision the real applet through its administrative secure-channel API.
+        management_key = bytes(range(0x30, 0x40))
+        definition = bytes.fromhex("66128B019B8C017F8D01008E01088F0101900114")
+        client.connect(level=1)
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        client.command(0xdb, definition, p1=0xff, p2=0xff, status=0x6982)
+        client.connect()
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        client.command(0xdb, definition, p1=0xff, p2=0xff)
+        client.command(0x25, bytes.fromhex("80010830128010") + management_key,
+                       p1=1, p2=0x9b)
         # The interindustry class belongs to the applet, even for a GP instruction number.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance,
                        cla=0x04, status=0x6d00)
@@ -64,6 +75,20 @@ def main():
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]
         assert client.command(0xa4, instance, p1=4) == selected
+        # MAC-only transport supplies no applet administrative grant. Prove that
+        # the imported persistent key itself answers the PIV authentication flow.
+        client.connect(level=1)
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        for valid in (False, True):
+            challenge = client.command(0x87, bytes.fromhex("7C028100"), p1=8, p2=0x9b, cla=0x04, le=256)
+            assert len(challenge) == 20 and challenge[:4] == bytes.fromhex("7C128110"), challenge.hex()
+            cryptogram = bytearray(aes(management_key, modes.ECB(), challenge[4:]))
+            if not valid:
+                cryptogram[0] ^= 1
+            client.command(0x87, bytes.fromhex("7C128210") + cryptogram, p1=8, p2=0x9b,
+                           cla=0x04, status=0x9000 if valid else 0x6982)
+        client.connect()
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
         client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c4)
         # Direct command routing must not admit a command without its SCP03 MAC.
         assert client.raw(pin) == bytes.fromhex("6982")
@@ -92,7 +117,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: authenticated JCVM file-backed load/install/reboot/reclaim and fail-closed storage")
+    print("PASS: JCVM load, management-key provisioning/authentication after reboot, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":
