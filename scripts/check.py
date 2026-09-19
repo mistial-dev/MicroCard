@@ -9,8 +9,8 @@ from validation_quick import managed, rust, schemas
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", action="store_true", help="run full host and recovery acceptance")
-    parser.add_argument("--suite", choices=("all", "rust", "managed", "schemas", "analyzer", "wallet", "board"), default="all")
-    parser.add_argument("--jobs", type=int, default=1, help="managed build workers (default: 1)")
+    parser.add_argument("--suite", choices=("all", "rust", "managed", "schemas", "analyzer", "compiler", "wallet", "board"), default="all")
+    parser.add_argument("--jobs", type=int, default=1, help="bounded build and compiler-case workers (default: 1)")
     parser.add_argument("--timings", type=pathlib.Path, default=ROOT / "work/validation-timings.json")
     args = parser.parse_args()
     if args.jobs < 1:
@@ -22,7 +22,7 @@ def main():
             schemas()
         if args.checkpoint:
             from validation_checkpoint import run_checkpoint
-            run_checkpoint()
+            run_checkpoint(args.jobs)
             run("python3", "scripts/wallet_acceptance.py")
         else:
             if args.suite in ("all", "rust"):
@@ -32,6 +32,9 @@ def main():
             if args.suite == "analyzer":
                 from analyzer_cases import run_analyzer_cases
                 run_analyzer_cases()
+            if args.suite == "compiler":
+                from compiler_cases import run_compiler_cases
+                run_compiler_cases(args.jobs)
             if args.suite == "wallet":
                 run("python3", "scripts/wallet_acceptance.py")
             if args.suite == "board":

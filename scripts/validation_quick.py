@@ -27,6 +27,10 @@ def rust():
 
 def managed(jobs=1):
     build_managed(PROJECTS, jobs)
+    managed_checks()
+
+
+def managed_checks():
     run("dotnet", str(ROOT / "tests/DeviceFormats/bin/Release/net10.0/DeviceFormats.dll"), str(ROOT / "format/manifest-cbor-v1.json"))
     for project, assembly in REFERENCES:
         run("dotnet", str(ROOT / f"tests/{project}/bin/Release/net10.0/{assembly}.dll"))

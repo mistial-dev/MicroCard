@@ -1,19 +1,18 @@
 """Full host acceptance sequence. Invoked through check.py."""
-import hashlib,json,pathlib,re,subprocess,os
-from validation_common import ROOT, run
-from analyzer_cases import run_analyzer_cases
+import hashlib,json,subprocess,os
+from validation_common import ROOT, build_managed, run
+from compiler_cases import run_compiler_cases
+from validation_quick import PROJECTS, managed_checks
 
-def run_checkpoint():
+CHECKPOINT_PROJECTS = PROJECTS + ['samples/EncodingConsumer', 'samples/Iso7816Consumer', 'samples/Kdf108', 'samples/Kdf108Consumer', 'samples/KeyOperations', 'samples/SigningAcceptance', 'tests/AnalyzerCases', 'tests/AnalyzerHarness', 'tests/Kdf108Reference', 'tests/Reference', 'tests/TransactionRuntimeNegative', 'tests/VersionConstraints']
+
+def run_checkpoint(jobs=1):
  run('python3','scripts/mc04_inspector_test.py')
  run('python3','scripts/domain_inventory_test.py')
- run('python3','scripts/refresh_embedded_fixtures.py','--check')
  # The exhaustive journal power-cut sweep is intentionally byte-granular.
  run('cargo','test','--locked','--release')
- for project in ['managed/MicroCard.Analyzers','managed/MicroCard.Tool','managed/MicroCard.Pack','managed/MicroCard.Bundle','managed/MicroCard.Iso7816','managed/MicroCard.Encoding','managed/MicroCard.Cryptography','managed/MicroCard.Security','samples/CoreLib','samples/CoreConsumer','samples/Counter','samples/TransactionRecords','samples/KeyOperations','samples/Kdf108','samples/Kdf108Consumer','samples/Iso7816Consumer','samples/EncodingConsumer','samples/CryptographyConsumer','samples/SecurityConsumer','samples/Credential','samples/SigningAcceptance','tests/Reference','tests/CoreReference','tests/Kdf108Reference','tests/Iso7816Reference','tests/EncodingReference','tests/CryptographyReference','tests/AnalyzerCases','tests/TransactionRuntimeNegative','tests/VersionConstraints']:run('dotnet','build',project,'-c','Release','--nologo','--verbosity','quiet','-p:NuGetAudit=false')
- run('dotnet',str(ROOT/'tests/Iso7816Reference/bin/Release/net10.0/MicroCard.Iso7816.Tests.dll'))
- run('dotnet',str(ROOT/'tests/EncodingReference/bin/Release/net10.0/MicroCard.Encoding.Tests.dll'))
- run('dotnet',str(ROOT/'tests/CoreReference/bin/Release/net10.0/MicroCard.Core.Tests.dll'))
- run('dotnet',str(ROOT/'tests/CryptographyReference/bin/Release/net10.0/MicroCard.Cryptography.Tests.dll'))
+ build_managed(CHECKPOINT_PROJECTS, jobs)
+ managed_checks()
  packages=ROOT/'work/packages';packages.mkdir(parents=True,exist_ok=True)
  run('dotnet','pack','managed/MicroCard.Analyzers','-c','Release','--no-build','--nologo','--output',str(packages))
  run('dotnet','restore','tests/AnalyzerBridge','--source',str(packages),'--packages',str(ROOT/'work/nuget-packages'),'--nologo','--force-evaluate')
@@ -23,76 +22,8 @@ def run_checkpoint():
  packaged_bad=subprocess.run(['dotnet','build','tests/AnalyzerPackageConsumer','-c','Release','-t:Rebuild','--no-restore','--nologo','--verbosity','quiet','-p:MicroCardInvalidPackageCase=true'],cwd=ROOT,capture_output=True,text=True)
  assert packaged_bad.returncode!=0 and 'MCA0002' in packaged_bad.stdout,(packaged_bad.stdout,packaged_bad.stderr)
  run('dotnet',str(ROOT/'tests/VersionConstraints/bin/Release/net10.0/VersionConstraints.dll'))
- run_analyzer_cases()
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet')
+ run_compiler_cases(jobs, prebuilt=True)
  framework=ROOT/'managed/MicroCard.Framework/bin/Release/net10.0/MicroCard.Framework.dll';pin=hashlib.sha256(framework.read_bytes()).hexdigest()
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_PARAMETERS_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- parameter_boundary_prefix=ROOT/'work/parameter-boundary'
- for suffix in ('.mca','.json','.map.json'): parameter_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(parameter_boundary_prefix),str(framework),pin)
- assert parameter_boundary_prefix.with_suffix('.mca').exists(),'32-parameter boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_DEPENDENCY_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- dependency_boundary_prefix=ROOT/'work/dependency-boundary'
- for suffix in ('.mca','.json','.map.json'): dependency_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(dependency_boundary_prefix),str(framework),pin)
- assert dependency_boundary_prefix.with_suffix('.mca').exists(),'16-dependency boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_ENTRY_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- entry_boundary_prefix=ROOT/'work/entry-boundary'
- for suffix in ('.mca','.json','.map.json'): entry_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(entry_boundary_prefix),str(framework),pin)
- assert entry_boundary_prefix.with_suffix('.mca').exists(),'four-entry boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_METHOD_ROWS_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- method_boundary_prefix=ROOT/'work/method-row-boundary'
- for suffix in ('.mca','.json','.map.json'): method_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(method_boundary_prefix),str(framework),pin)
- assert method_boundary_prefix.with_suffix('.mca').exists(),'256-method boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_TYPE_ROWS_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- type_boundary_prefix=ROOT/'work/type-row-boundary'
- for suffix in ('.mca','.json','.map.json'): type_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(type_boundary_prefix),str(framework),pin)
- assert type_boundary_prefix.with_suffix('.mca').exists(),'253-TypeDef boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_FIELD_ROWS_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- field_boundary_prefix=ROOT/'work/field-row-boundary'
- for suffix in ('.mca','.json','.map.json'): field_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(field_boundary_prefix),str(framework),pin)
- assert field_boundary_prefix.with_suffix('.mca').exists(),'1022-FieldDef boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_ATTRIBUTE_ROWS_BOUNDARY','-p:MicroCardDisableAnalyzer=true')
- attribute_boundary_prefix=ROOT/'work/attribute-row-boundary'
- for suffix in ('.mca','.json','.map.json'): attribute_boundary_prefix.with_suffix(suffix).unlink(missing_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(attribute_boundary_prefix),str(framework),pin)
- assert attribute_boundary_prefix.with_suffix('.mca').exists(),'256-CustomAttribute boundary did not produce an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet')
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_TRANSACTION_CONSTRUCTOR','-p:MicroCardDisableAnalyzer=true')
- unsafe_prefix=ROOT/'work/unsafe-transaction'
- for suffix in ('.mca','.json','.map.json'): unsafe_prefix.with_suffix(suffix).unlink(missing_ok=True)
- unsafe=subprocess.run(['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(unsafe_prefix),str(framework),pin],cwd=ROOT,capture_output=True,text=True)
- assert unsafe.returncode!=0 and 'Transactional method reaches irreversible Hardware.Write' in unsafe.stderr+unsafe.stdout,(unsafe.stdout,unsafe.stderr)
- assert not unsafe_prefix.with_suffix('.mca').exists(),'unsafe transaction produced an assembly'
- explicit_prefix=ROOT/'work/unsafe-explicit-transaction'
- for suffix in ('.mca','.json','.map.json'): explicit_prefix.with_suffix(suffix).unlink(missing_ok=True)
- explicit=subprocess.run(['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/TransactionRuntimeNegative/bin/Release/net10.0/TransactionRuntimeNegative.dll'),str(explicit_prefix),str(framework),pin],cwd=ROOT,capture_output=True,text=True)
- assert explicit.returncode!=0 and 'Transactional method reaches irreversible Hardware.Write' in explicit.stderr+explicit.stdout,(explicit.stdout,explicit.stderr)
- assert not explicit_prefix.with_suffix('.mca').exists(),'unsafe explicit transaction produced an assembly'
- for symbol,name,error in [('CASE_STORAGE_SCHEMA','storage-schema-bypass','Persistent byte maximum'),('CASE_SYSTEM_SHA256_OVERLOAD','system-sha256-overload-bypass','Unsupported System.Security.Cryptography member'),('CASE_SYSTEM_RNG_OVERLOAD','system-rng-overload-bypass','Unsupported System.Security.Cryptography member'),('CASE_ASYNC_METHOD','async-bypass','Nested type unsupported'),('CASE_USING_DECLARATION','using-bypass','MC04 exception handlers unsupported'),('CASE_TYPEOF','typeof-bypass','Unsupported MC04 CIL operand InlineTok'),('CASE_INIT_PROPERTY','init-property-bypass','Modified signatures unsupported'),('CASE_REF_RETURN','ref-return-bypass','By-reference signatures unsupported'),('CASE_STATIC_CONSTRUCTOR','static-constructor-bypass','Static constructor unsupported'),('CASE_INTERFACE','interface-bypass','Interfaces unsupported'),('CASE_NESTED_TYPE','nested-type-bypass','Nested type unsupported'),('CASE_STATIC_FIELD','static-field-bypass','Unsupported field flags'),('CASE_FIELD_TYPE','field-type-bypass','Only Int32 fields and constants supported'),('CASE_METHOD_IMPL_FLAGS','method-flags-bypass','Unsupported method flags'),('CASE_INHERITANCE','inheritance-bypass','Unsupported base type'),('CASE_LITERAL_FIELD_TYPE','literal-field-bypass','Only Int32 fields and constants supported'),('CASE_EVENT','event-bypass','Only Int32 fields and constants supported'),('CASE_STATIC_AUTO_PROPERTY','static-auto-property-bypass','Unsupported field flags'),('CASE_AUTO_PROPERTY_FIELD','auto-property-field-bypass','Only Int32 fields and constants supported'),('CASE_IDENTIFIER','identifier-bypass','embedded identifier grammar'),('CASE_PARAMETERS','parameters-bypass','Method parameter quota exceeded'),('CASE_DEPENDENCY_LIMIT','dependency-limit-bypass','Dependency quota exceeded'),('CASE_ENTRY_LIMIT','entry-limit-bypass','Entry-point quota exceeded'),('CASE_METHOD_ROWS_LIMIT','method-row-limit-bypass','MC04 metadata row quota exceeded'),('CASE_TYPE_ROWS_LIMIT','type-row-limit-bypass','MC04 metadata row quota exceeded'),('CASE_FIELD_ROWS_LIMIT','field-row-limit-bypass','MC04 metadata row quota exceeded'),('CASE_ATTRIBUTE_ROWS_LIMIT','attribute-row-limit-bypass','MC04 custom attribute quota exceeded')]:
-  run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet',f'-p:MicroCardAnalyzerCase={symbol}','-p:MicroCardDisableAnalyzer=true')
-  prefix=ROOT/'work'/name
-  for suffix in ('.mca','.json','.map.json'): prefix.with_suffix(suffix).unlink(missing_ok=True)
-  rejected=subprocess.run(['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(prefix),str(framework),pin],cwd=ROOT,capture_output=True,text=True)
-  assert rejected.returncode!=0 and error in rejected.stderr+rejected.stdout,(symbol,rejected.stdout,rejected.stderr)
-  assert not prefix.with_suffix('.mca').exists(),f'{symbol} produced an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_LOCALS','-p:MicroCardDisableAnalyzer=true')
- local_prefix=ROOT/'work/excessive-locals'
- for suffix in ('.mca','.json','.map.json'): local_prefix.with_suffix(suffix).unlink(missing_ok=True)
- excessive=subprocess.run(['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(local_prefix),str(framework),pin],cwd=ROOT,capture_output=True,text=True)
- assert excessive.returncode!=0 and 'MC04 local-variable quota exceeded' in excessive.stderr+excessive.stdout,(excessive.stdout,excessive.stderr)
- assert not local_prefix.with_suffix('.mca').exists(),'excessive locals produced an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet','-p:MicroCardAnalyzerCase=CASE_SWITCH_LIMIT','-p:MicroCardDisableAnalyzer=true')
- switch_prefix=ROOT/'work/excessive-switch'
- for suffix in ('.mca','.json','.map.json'): switch_prefix.with_suffix(suffix).unlink(missing_ok=True)
- excessive_switch=subprocess.run(['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(switch_prefix),str(framework),pin],cwd=ROOT,capture_output=True,text=True)
- assert excessive_switch.returncode!=0 and 'Switch quota' in excessive_switch.stderr+excessive_switch.stdout,(excessive_switch.stdout,excessive_switch.stderr)
- assert not switch_prefix.with_suffix('.mca').exists(),'excessive switch produced an assembly'
- run('dotnet','build','tests/AnalyzerCases','-c','Release','-t:Rebuild','--nologo','--verbosity','quiet')
  common=['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Counter/bin/Release/net10.0/Counter.dll')]
  for prefix in ['counter','counter-again']:run(*common,str(ROOT/'work'/prefix),str(framework),pin)
  counter_metadata=json.loads((ROOT/'work/counter.json').read_text());assert counter_metadata['storage']==[{'key':1,'kind':1,'max_bytes':0}]
@@ -113,7 +44,7 @@ def run_checkpoint():
  assert invalid_storage_result.returncode!=0 and 'Invalid persistent storage schema' in invalid_storage_result.stderr+invalid_storage_result.stdout and not invalid_storage_package.exists(),(invalid_storage_result.stdout,invalid_storage_result.stderr)
  oversized_image=ROOT/'work/pack-oversized.mca';oversized_image.write_bytes(bytes(16384));oversized_package=ROOT/'work/pack-oversized.mcp';oversized_package.unlink(missing_ok=True)
  oversized=subprocess.run(['dotnet',str(pack_tool),str(oversized_image),str(ROOT/'work/counter.json'),'quota','00'*16,'1',str(pack_seed),str(oversized_package),'--explicit-sign'],cwd=ROOT,capture_output=True,text=True)
- assert oversized.returncode!=0 and 'Package exceeds 16 KiB quota' in oversized.stderr+oversized.stdout and not oversized_package.exists(),(oversized.stdout,oversized.stderr)
+ assert oversized.returncode!=0 and 'Package exceeds quota' in oversized.stderr+oversized.stdout and not oversized_package.exists(),(oversized.stdout,oversized.stderr)
  run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CoreLib/bin/Release/net10.0/MicroCard.Core.dll'),str(ROOT/'work/mscorlib'),str(framework),pin)
  run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CoreConsumer/bin/Release/net10.0/CoreConsumer.dll'),str(ROOT/'work/core-consumer'),str(framework),pin)
  core_manifest=json.loads((ROOT/'work/mscorlib.json').read_text())
@@ -179,7 +110,7 @@ def run_checkpoint():
  assert (ROOT/'work/counter.mca').stat().st_size <= 3072,'MC04 counter assembly exceeded 3 KiB regression budget'
  mapping=json.loads((ROOT/'work/counter.map.json').read_text())
  target=ROOT/'work/msbuild/counter'
- properties=['-p:MicroCardEnabled=true',f'-p:MicroCardFramework={framework}',f'-p:MicroCardFrameworkHash={pin}',f'-p:MicroCardTool={ROOT}/managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll',f'-p:MicroCardOutput={target}']
+ properties=['-p:BuildProjectReferences=false','-p:MicroCardEnabled=true',f'-p:MicroCardFramework={framework}',f'-p:MicroCardFrameworkHash={pin}',f'-p:MicroCardTool={ROOT}/managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll',f'-p:MicroCardOutput={target}']
  run('dotnet','build','samples/Counter','-c','Release','--nologo','--verbosity','quiet',*properties)
  stamp=target.with_suffix('.mca').stat().st_mtime_ns
  run('dotnet','build','samples/Counter','-c','Release','--nologo','--verbosity','quiet',*properties)

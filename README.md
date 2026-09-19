@@ -62,7 +62,7 @@ python3 scripts/check.py
 python3 scripts/check.py --checkpoint
 ```
 
-The quick gate builds Rust and managed code and runs structural checks. The checkpoint gate performs the security and interoperability suite and takes a long time. Sustained fuzzing is reserved for release checkpoints. Read [CONTRIBUTING.md](CONTRIBUTING.md) before a first change, because the gate enforces a documentation style rule that has surprised people. Rider consumes the standard Roslyn analyzer package. See [Rider authoring](docs/RIDER.md).
+The quick gate builds Rust and managed code and runs structural checks. The checkpoint adds security, recovery, interoperability, wallet, and board checks. Use `--suite compiler --jobs 2` for analyzer and preprocessor cases, or choose another [focused suite](docs/VALIDATION_CADENCE.md#focused-suites-and-timings). Sustained fuzzing runs separately. See [contributing](CONTRIBUTING.md) for setup and [Rider authoring](docs/RIDER.md) for the standard Roslyn analyzer package.
 
 Build one nRF52840 engine:
 

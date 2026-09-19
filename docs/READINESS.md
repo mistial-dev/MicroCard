@@ -121,7 +121,7 @@ For a hardware-only cross-link, run `cargo build --release --locked --no-default
 
 ## Validation gates
 
-[Validation cadence](VALIDATION_CADENCE.md) defines the focused, quick, and checkpoint commands. The quick gate uses one managed build graph. The analyzer suite runs the existing negative and boundary corpus in one compiler process, while checkpoint coverage retains real MSBuild integration tests.
+[Validation cadence](VALIDATION_CADENCE.md) defines the focused, quick, and checkpoint commands. Both gates use one managed build graph. The compiler suite runs 63 analyzer cases and emits 37 assemblies in one compiler process for 38 independent preprocessor checks. Checkpoint retains real MSBuild package-consumer and incremental integration tests. Against `acc6e84`, the warm compiler-case block falls from 27.615 to 3.862 seconds with one worker; the latter also includes analyzer diagnostics. This is a host timing sample, not a cold-build or full-checkpoint measurement.
 
 Acceptance requires host and wallet tests, exhaustive recovery, workspace Clippy, affected fuzz-target builds, and both engines' board links and size checks. Timing reports under `work/` describe the executed commands and failures. They are local evidence, not a release certification or a sustained fuzz campaign.
 

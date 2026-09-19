@@ -7,13 +7,15 @@ import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TIMINGS = []
+STARTED = time.monotonic()
 
 
 def run(*args, **kwargs):
     started = time.monotonic()
     code = None
     try:
-        result = subprocess.run(args, cwd=ROOT, check=True, **kwargs)
+        kwargs.setdefault("check", True)
+        result = subprocess.run(args, cwd=ROOT, **kwargs)
         code = result.returncode
         return result
     except subprocess.CalledProcessError as failure:
@@ -27,7 +29,11 @@ def run(*args, **kwargs):
 
 def write_timings(path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"format": 1, "stages": TIMINGS}, indent=2) + "\n")
+    path.write_text(json.dumps({
+        "format": 1,
+        "wall_seconds": round(time.monotonic() - STARTED, 3),
+        "stages": TIMINGS,
+    }, indent=2) + "\n")
 
 
 def build_managed(projects, jobs=1):
