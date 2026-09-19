@@ -50,12 +50,12 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
-- Complete JCVM P-256 key generation and signature bindings through shared
-  providers. P-256 key storage, raw ECDH, and AES-128 ECB/CBC are connected; unsupported algorithms
+- Complete JCVM P-256 signature bindings through shared
+  providers. P-256 key storage/generation, raw ECDH, and AES-128 ECB/CBC are connected; unsupported algorithms
   fail explicitly without software fallback.
-- Recover the JCVM flash budget after adding EC keys and agreement. The measured DK link is
-  172,620 text bytes against the unchanged 168,000-byte ceiling, with 148 data bytes
-  and 197,692 BSS bytes. The dongle links at 182,476 text bytes against 178,000.
+- Recover the JCVM flash budget after adding EC keys, generation, and agreement. The measured DK link is
+  174,848 text bytes against the unchanged 168,000-byte ceiling, with 148 data bytes
+  and 197,692 BSS bytes. The dongle links at 184,704 text bytes against 178,000.
   The board budget gate currently fails; the recorded passing
   budget report predates EC key storage. Final measurements must replace it.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;

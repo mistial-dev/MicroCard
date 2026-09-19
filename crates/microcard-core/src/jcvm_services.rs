@@ -88,6 +88,9 @@ impl<P: CryptoProvider> Services<'_, P> {
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
+    fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()> {
+        Services::p256_generate(self, private, public)
+    }
     fn p256_agree(&mut self, key: &[u8; 32], peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
         Services::p256_agree(self, key, peer, output)
     }
@@ -245,7 +248,7 @@ mod tests {
         assert_eq!(host.p256_parameter(5), None);
         let mut private = [0xaa;32];
         let mut public = [0xaa;65];
-        host.p256_generate(&mut private, &mut public).unwrap();
+        Host::p256_generate(&mut host, &mut private, &mut public).unwrap();
         assert_eq!(private, [0x17;32]);
         assert_eq!(public, crate::crypto::p256_public_key(&private).unwrap());
         assert_eq!(host.p256_public_valid(&public), Ok(true));
@@ -270,7 +273,7 @@ mod tests {
             let before = host.0.calls;
             private.fill(0xaa);
             public.fill(0xaa);
-            assert_eq!(host.p256_generate(&mut private, &mut public), Err(Error::Unauthorized));
+            assert_eq!(Host::p256_generate(&mut host, &mut private, &mut public), Err(Error::Unauthorized));
             assert_eq!(private, [0;32]);
             assert_eq!(public, [0;65]);
             assert_eq!(host.0.calls - before, expected_calls);

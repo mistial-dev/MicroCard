@@ -43,6 +43,7 @@ impl Signature {
     pub fn empty_parameters(self) -> bool { self.0 & 1 != 0 }
     pub fn init_vector(self) -> bool { self.0 & 2 != 0 }
     pub fn init_mode(self) -> bool { self.0 & 4 != 0 }
+    pub fn key_pair_references(self) -> bool { self.0 & 8 != 0 }
 }
 
 const SUPERS_A0000000620001_0: [ClassId; 0] = [];
@@ -790,7 +791,7 @@ const SUPERS_A0000000620102_16: [ClassId; 1] = [ClassId::Object];
 const METHODS_A0000000620102_16: [ApiMethod; 6] = [
     ApiMethod { token: 0, id: MethodId::Constructor, signature: Signature(0), is_static: false, static_token: true },
     ApiMethod { token: 0, id: MethodId::equals, signature: Signature(0), is_static: false, static_token: false },
-    ApiMethod { token: 1, id: MethodId::Constructor, signature: Signature(0), is_static: false, static_token: true },
+    ApiMethod { token: 1, id: MethodId::Constructor, signature: Signature(8), is_static: false, static_token: true },
     ApiMethod { token: 1, id: MethodId::genKeyPair, signature: Signature(1), is_static: false, static_token: false },
     ApiMethod { token: 2, id: MethodId::getPrivate, signature: Signature(0), is_static: false, static_token: false },
     ApiMethod { token: 3, id: MethodId::getPublic, signature: Signature(0), is_static: false, static_token: false },

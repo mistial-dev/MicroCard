@@ -20,7 +20,7 @@ fn flags(heap: &Heap, key: u16) -> Result<u8> {
     if material == NULL { Ok(0) } else { Ok(heap.byte_slice(material, 0, 1)?[0]) }
 }
 
-fn material(heap: &mut Heap, key: u16, context: heap::Context) -> Result<u16> {
+pub(super) fn material(heap: &mut Heap, key: u16, context: heap::Context) -> Result<u16> {
     let existing = heap.get_word(key, MATERIAL)?;
     if existing != NULL { return Ok(existing); }
     let kind = check_key(heap, key, context)?;

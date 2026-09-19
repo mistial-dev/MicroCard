@@ -96,19 +96,25 @@ impl<'a> Heap<'a> {
         &self.bytes[..self.next]
     }
 
-    fn allocate(&mut self, class: u16, length: u16, kind: u8, owner: Context) -> Result<Reference> {
-        let info = Info {
-            class,
-            length,
-            kind,
-            owner,
-            clear_event: 0,
-        };
-        // Preserve word alignment and the nonzero, 16-bit reference contract.
-        let range = microcard_memory::allocation_range(
-            self.next, HEADER, length as usize, info.element_size(), 2,
+    fn allocation_range(&self, next: usize, kind: u8, length: u16) -> Result<core::ops::Range<usize>> {
+        let info = Info { class: 0, length, kind, owner: 0, clear_event: 0 };
+        microcard_memory::allocation_range(
+            next, HEADER, length as usize, info.element_size(), 2,
             self.bytes.len().min(u16::MAX as usize),
-        ).ok_or(Error::Quota)?;
+        ).ok_or(Error::Quota)
+    }
+
+    /// Check a compound allocation before publishing any of its references.
+    pub(crate) fn check_allocations(&self, objects: &[(u8, u16)]) -> Result<()> {
+        let mut next = self.next;
+        for &(kind, length) in objects {
+            next = self.allocation_range(next, kind, length)?.end;
+        }
+        Ok(())
+    }
+
+    fn allocate(&mut self, class: u16, length: u16, kind: u8, owner: Context) -> Result<Reference> {
+        let range = self.allocation_range(self.next, kind, length)?;
         let at = range.start;
         let end = range.end;
         self.bytes[at..end].fill(0);

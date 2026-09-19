@@ -32,6 +32,13 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// Generate a complete pair; failure clears both outputs.
+    fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()> {
+        private.fill(0);
+        public.fill(0);
+        Err(Error::Unsupported)
+    }
+
     /// Raw P-256 ECDH x-coordinate; failure clears all output.
     fn p256_agree(&mut self, _key: &[u8; 32], _peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
         output.fill(0);

@@ -13,6 +13,7 @@ extern crate alloc;
 use zeroize::Zeroizing;
 mod ec;
 mod agreement;
+mod key_pair;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
@@ -121,6 +122,9 @@ pub fn call(
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
     if class == ClassId::KeyAgreement {
         if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? { return Ok(result); }
+    }
+    if class == ClassId::KeyPair {
+        return key_pair::call(method, signature, heap, host, frame, context, budget);
     }
     match (class, method) {
         (ClassId::KeyBuilder, MethodId::buildKey) => {
@@ -365,13 +369,6 @@ pub fn call(
                 heap.put_word(instance, PENDING, pending)?;
             }
             frame.push_reference(instance)?;
-        }
-        (ClassId::KeyPair, MethodId::Constructor) => {
-            let length = frame.pop_short()?;
-            let algorithm = frame.pop_short()?;
-            let this = frame.pop_reference()?;
-            heap.put_word(this, KIND, algorithm as u16)?;
-            heap.put_word(this, SIZE, length as u16)?;
         }
         (_, MethodId::getAlgorithm) => {
             let this = frame.pop_reference()?;
