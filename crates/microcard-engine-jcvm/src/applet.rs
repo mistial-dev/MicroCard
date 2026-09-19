@@ -124,6 +124,21 @@ impl Card {
     ) -> Result<()> {
         let applets = file.applets()?;
         let entry = applets.iter().next().ok_or(Error::Missing)?;
+        self.install_module(file, host, entry.aid, parameters)
+    }
+
+    /// Install the module named by the authenticated management request.
+    pub fn install_module(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        module_aid: &[u8],
+        parameters: &[u8],
+    ) -> Result<()> {
+        if self.installed() { return Err(Error::Inconsistent); }
+        if parameters.len() > u8::MAX as usize { return Err(Error::Bounds); }
+        let applets = file.applets()?;
+        let entry = applets.iter().find(|entry| entry.aid == module_aid).ok_or(Error::Missing)?;
         let install = entry.install_method_offset;
         let linked = Linked::new(file)?;
         linked.imports_resolve()?;
@@ -157,7 +172,7 @@ impl Card {
             // install takes the parameter array, its offset and its length.
             outer.push_reference(array)?;
             outer.push_short(0)?;
-            outer.push_short(parameters.len() as i16)?;
+            outer.push_short(i16::from(parameters.len() as u8 as i8))?;
             let thrown = invoke(&mut machine, install, &mut outer, &mut arena, &mut budget)?;
             (thrown, machine.jcre.instance)
         };
@@ -469,8 +484,15 @@ mod tests {
         let file = LoadFile::parse(&bytes).unwrap();
 
         let mut card = Card::new(&file, Sizes::default()).unwrap();
-        card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
+        let initial_heap = card.heap_used;
+        let module = file.applets().unwrap().iter().next().unwrap().aid;
+        assert_eq!(card.install_module(&file, &mut crate::host::NoHost, &[0; 5], &[]), Err(Error::Missing));
+        assert_eq!(card.install_module(&file, &mut crate::host::NoHost, module, &[0; 256]), Err(Error::Bounds));
+        assert_eq!(card.heap_used, initial_heap);
+        assert!(!card.installed());
+        card.install_module(&file, &mut crate::host::NoHost, module, &[]).unwrap();
         assert!(card.installed());
+        assert_eq!(card.install(&file, &mut crate::host::NoHost, &[]), Err(Error::Inconsistent));
 
         // SELECT, which the applet accepts.
         let response = card

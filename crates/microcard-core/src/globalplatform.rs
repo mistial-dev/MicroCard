@@ -145,10 +145,14 @@ pub fn ssd_install_aid<'a>(command: &'a crate::apdu::Command<'_>) -> Result<&'a 
 
 pub struct ApplicationInstall<'a> {
     pub load_aid: &'a [u8],
+    pub module_aid: &'a [u8],
     /// The AID this instance answers to. GlobalPlatform lets it differ from the module AID,
     /// and lets one module back several instances, which applets rely on to tell which
     /// instance of themselves they are.
     pub instance_aid: &'a [u8],
+    pub privileges: &'a [u8],
+    /// Decoded C9 application data; transport framing is excluded.
+    pub parameters: &'a [u8],
 }
 
 pub fn application_install<'a>(
@@ -180,12 +184,13 @@ pub fn application_install<'a>(
         [_] | [_, _, _] => return Err(Error::Unauthorized),
         _ => return Err(Error::Format),
     }
-    // Parsed so a malformed field is refused. The value reaches an applet's install method
-    // once an engine exists that has one to hand it to.
-    install_parameter_value(parameters)?;
+    let parameters = install_parameter_value(parameters)?;
     Ok(ApplicationInstall {
         load_aid,
+        module_aid,
         instance_aid,
+        privileges,
+        parameters,
     })
 }
 
@@ -511,7 +516,12 @@ mod tests {
                 data: data.into(),
                 le: None,
             })
-            .map(|parsed| parsed.instance_aid.to_vec())
+            .map(|parsed| {
+                assert_eq!(parsed.module_aid, module);
+                assert_eq!(parsed.privileges, privileges);
+                assert_eq!(parsed.parameters, parameters.get(2..).unwrap_or_default());
+                parsed.instance_aid.to_vec()
+            })
         };
         // An instance AID that differs from the module AID, which GlobalPlatform allows and
         // applets rely on to tell which instance of themselves they are.
