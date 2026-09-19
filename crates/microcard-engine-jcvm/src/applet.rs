@@ -698,6 +698,13 @@ mod tests {
         heap.put_word(pin, 2, persistent).unwrap();
         heap.put_word(pin, 3, 1).unwrap(); // Validated flag.
         heap.put_word(pin, 4, 2).unwrap(); // Remaining attempts are persistent.
+        let key = heap.new_object(native_class_of(ClassId::AESKey).unwrap(), 6, 1).unwrap();
+        let key_material = heap.new_transient_array(heap::KIND_BYTE, 17, 1, heap::CLEAR_ON_RESET).unwrap();
+        heap.byte_slice_mut(key_material, 0, 17).unwrap().fill(0x42);
+        heap.array_put(key_material, 0, 1).unwrap(); // Initialization lives with transient bytes.
+        heap.put_word(key, 0, 13).unwrap();
+        heap.put_word(key, 1, 128).unwrap();
+        heap.put_word(key, 2, key_material).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -710,18 +717,20 @@ mod tests {
         assert_eq!(recovered.array_get(persistent, 0), Ok(9));
         assert_eq!(recovered.get_word(pin, 3), Ok(0));
         assert_eq!(recovered.get_word(pin, 4), Ok(2));
+        assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
         assert_eq!(restored.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false).unwrap().data, [0x12, 0x34]);
         // Saving must not clear authorization or transient values in the live session.
         let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(live.array_get(transient, 0), Ok(7));
         assert_eq!(live.get_word(pin, 3), Ok(1));
-        for case in 0..5 {
+        for case in 0..6 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
                 1 => { invalid[transient as usize + heap::HEADER] = 1; instance }
                 2 => { invalid[pin as usize + heap::HEADER + 7] = 1; instance }
                 3 => { invalid[persistent as usize + 5] = 2; instance }
+                4 => { invalid[key_material as usize + 4] &= 0x0f; instance } // Old persistent-key layout.
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
@@ -732,9 +741,9 @@ mod tests {
         let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(heap.array_get(on_deselect, 0), Ok(0));
         assert_eq!(heap.array_get(transient, 0), Ok(7));
-        assert!(matches!(card.retain_volatile(5), Err(Error::Quota)));
-        let retained = card.retain_volatile(6).unwrap();
-        assert_eq!(retained.bytes(), 6);
+        assert!(matches!(card.retain_volatile(27), Err(Error::Quota)));
+        let retained = card.retain_volatile(28).unwrap();
+        assert_eq!(retained.bytes(), 28);
         // Deselection allocated an exception, so the older committed layout is stale.
         assert_eq!(restored.restore_volatile(&retained), Err(Error::Format));
         let mut suspended_heap = vec![0; card.persistent_heap_bytes()];
@@ -744,6 +753,8 @@ mod tests {
         assert_eq!(resumed.array_get(transient, 0), Ok(7));
         assert_eq!(resumed.array_get(on_deselect, 0), Ok(0));
         assert_eq!(resumed.get_word(pin, 3), Ok(0));
+        assert_eq!(resumed.array_get(key_material, 0), Ok(1));
+        assert_eq!(resumed.byte_slice(key_material, 1, 16).unwrap(), &[0x42; 16]);
         card.reset().unwrap();
         assert!(card.installed());
         assert!(card.words.iter().all(|word| *word == 0));

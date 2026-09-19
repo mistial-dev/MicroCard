@@ -14,6 +14,7 @@ use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
 mod security;
+pub(crate) use security::symmetric_key_clear_event;
 
 /// A class the card provides, encoded so it cannot collide with a class in a package.
 ///
@@ -624,6 +625,68 @@ mod tests {
                     assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, ClassId::SystemException);
                     assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 1);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn symmetric_keys_clear_material_and_initialization_with_their_lifetime() {
+        let signature = framework(ClassId::KeyBuilder, MethodId::buildKey, true).method.signature;
+        let invoke = |class, method, heap: &mut Heap, frame: &mut Frame| {
+            security::call(class, method, signature, heap, &mut crate::host::NoHost, frame, 1, &mut idle()).unwrap()
+        };
+        for (class, first) in [(ClassId::DESKey, 1), (ClassId::AESKey, 13), (ClassId::HMACKey, 19)] {
+            for lifetime in 0..3 {
+                let (mut slab, mut words, mut tags) = setup(0);
+                let mut heap = Heap::new(&mut slab).unwrap();
+                let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+                frame.push_short(first + lifetime).unwrap();
+                frame.push_short(128).unwrap();
+                frame.push_short(0).unwrap();
+                invoke(ClassId::KeyBuilder, MethodId::buildKey, &mut heap, &mut frame);
+                let key = frame.pop_reference().unwrap();
+                let input = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+                let output = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+                // Include a zero-valued key: readiness cannot be inferred from its bytes.
+                for event in [heap::CLEAR_ON_DESELECT, heap::CLEAR_ON_RESET] {
+                    let value = if event == heap::CLEAR_ON_DESELECT { 0x42 } else { 0 };
+                    heap.byte_slice_mut(input, 0, 16).unwrap().fill(value);
+                    frame.push_reference(key).unwrap();
+                    frame.push_reference(input).unwrap();
+                    frame.push_short(0).unwrap();
+                    if class == ClassId::HMACKey { frame.push_short(16).unwrap(); }
+                    invoke(class, MethodId::setKey, &mut heap, &mut frame);
+                    frame.push_reference(key).unwrap();
+                    invoke(class, MethodId::isInitialized, &mut heap, &mut frame);
+                    assert_eq!(frame.pop_short().unwrap(), 1);
+                    heap.clear_transient(event, 1).unwrap();
+                    let retained = lifetime == 2 || (lifetime == 0 && event == heap::CLEAR_ON_DESELECT);
+                    frame.push_reference(key).unwrap();
+                    invoke(class, MethodId::isInitialized, &mut heap, &mut frame);
+                    assert_eq!(frame.pop_short().unwrap(), i16::from(retained));
+                    heap.byte_slice_mut(output, 0, 16).unwrap().fill(0x55);
+                    frame.push_reference(key).unwrap();
+                    frame.push_reference(output).unwrap();
+                    frame.push_short(0).unwrap();
+                    let result = invoke(class, MethodId::getKey, &mut heap, &mut frame);
+                    if retained {
+                        assert!(matches!(result, Native::Returned));
+                        assert_eq!(frame.pop_short().unwrap(), 16);
+                        assert_eq!(heap.byte_slice(output, 0, 16).unwrap(), &[value; 16]);
+                    } else {
+                        let Native::Threw(exception) = result else { panic!("cleared key remained readable"); };
+                        assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 2);
+                        assert_eq!(heap.byte_slice(output, 0, 16).unwrap(), &[0x55; 16]);
+                        let material = heap.get_word(key, 2).unwrap();
+                        let length = heap.info(material).unwrap().length as usize;
+                        assert!(heap.byte_slice(material, 0, length).unwrap().iter().all(|byte| *byte == 0));
+                    }
+                }
+                frame.push_reference(key).unwrap();
+                invoke(class, MethodId::clearKey, &mut heap, &mut frame);
+                frame.push_reference(key).unwrap();
+                invoke(class, MethodId::isInitialized, &mut heap, &mut frame);
+                assert_eq!(frame.pop_short().unwrap(), 0);
             }
         }
     }

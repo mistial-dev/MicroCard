@@ -187,6 +187,12 @@ static length must match the load file, and the complete record must fit the jou
 payload capacity. Engine recovery validates object and reference structure and
 requires volatile values to be cleared. Unknown versions and trailing bytes fail.
 
+Transient symmetric key material is a byte array with its declared clear event and
+an internal one-byte initialization prefix. The key object's persistent readiness
+word remains zero. Persistent key arrays have no prefix and retain their readiness
+word. Recovery rejects mismatched clear events and the previous transient-key layout;
+it never reinterprets persisted key bytes as live transient data.
+
 Each heap key is the first 16 bytes of HMAC-SHA256 under the root heap key over
 `MicroCard JCVM heap key v1\0 || bank:u8 || installation_bytes16 || image_sha256_bytes32`.
 Only an unreferenced bank may be erased, including its local counters, and it must

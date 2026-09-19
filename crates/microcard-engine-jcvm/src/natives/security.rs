@@ -10,6 +10,7 @@ use crate::vm::frame::{Frame, NULL};
 use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 extern crate alloc;
+use zeroize::Zeroizing;
 
 /// Words every object here carries. The meaning of each is per class and documented where
 /// it is read, because these are not fields an applet can see.
@@ -38,9 +39,7 @@ pub(super) fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
 
 /// The class a `KeyBuilder` type code builds, JCRE Table 5-1.
 ///
-/// The transient variants build the same class as their persistent counterpart. Nothing
-/// here survives a reset yet, so the distinction is recorded in the type the key reports
-/// and is otherwise not acted on.
+/// Transient symmetric keys keep their initialized flag with their transient bytes.
 fn key_class(key_type: i16) -> Result<ClassId> {
     Ok(match key_type {
         1..=3 => ClassId::DESKey,
@@ -60,6 +59,22 @@ fn key_class(key_type: i16) -> Result<ClassId> {
             return Err(Error::Unsupported);
         }
     })
+}
+
+pub(crate) fn symmetric_key_clear_event(kind: u16) -> u8 {
+    match kind {
+        1 | 13 | 19 => heap::CLEAR_ON_RESET,
+        2 | 14 | 20 => heap::CLEAR_ON_DESELECT,
+        _ => 0,
+    }
+}
+
+fn key_initialized(heap: &Heap, key: u16) -> Result<bool> {
+    if symmetric_key_clear_event(word_field(heap, key, KIND)?) == 0 {
+        return Ok(word_field(heap, key, READY)? != 0);
+    }
+    let material = heap.get_word(key, MATERIAL)?;
+    Ok(material != NULL && heap.byte_slice(material, 0, 1)?[0] == 1)
 }
 
 /// Bytes a digest algorithm produces, JCRE §5.4.
@@ -111,7 +126,7 @@ pub fn call(
         }
         (name, MethodId::isInitialized) if name.is_security() => {
             let key = frame.pop_reference()?;
-            frame.push_short(word_field(heap, key, READY)? as i16)?;
+            frame.push_short(i16::from(key_initialized(heap, key)?))?;
         }
         (name, MethodId::clearKey) if name.is_security() => {
             let key = frame.pop_reference()?;
@@ -146,21 +161,30 @@ pub fn call(
             if offset < 0 || bytes == 0 || bytes > 64 {
                 return Err(Error::Bounds);
             }
-            let mut staging = [0u8; 64];
+            let mut staging = Zeroizing::new([0u8; 64]);
             staging[..bytes].copy_from_slice(heap.byte_slice(source, offset as usize, bytes)?);
+            let event = symmetric_key_clear_event(word_field(heap, this, KIND)?);
+            let prefix = usize::from(event != 0);
             let material = match heap.get_word(this, MATERIAL)? {
                 NULL => {
-                    let array = heap.new_array(heap::KIND_BYTE, bytes as u16, context)?;
+                    let array = if event == 0 {
+                        heap.new_array(heap::KIND_BYTE, bytes as u16, context)?
+                    } else {
+                        heap.new_transient_array(heap::KIND_BYTE, (bytes + prefix) as u16, context, event)?
+                    };
                     heap.put_word(this, MATERIAL, array)?;
                     array
                 }
                 array => array,
             };
-            heap.byte_slice_mut(material, 0, bytes)?
+            heap.byte_slice_mut(material, prefix, bytes)?
                 .copy_from_slice(&staging[..bytes]);
-            // The flag goes last, so a failure part way leaves a key that says it holds
-            // nothing rather than one that says it holds a key it does not have.
-            heap.put_word(this, READY, 1)?;
+            // The flag shares the clearing event and snapshot rules of the key bytes.
+            if event == 0 {
+                heap.put_word(this, READY, 1)?;
+            } else {
+                heap.byte_slice_mut(material, 0, 1)?[0] = 1;
+            }
         }
         (ClassId::AESKey, MethodId::getKey)
         | (ClassId::DESKey, MethodId::getKey)
@@ -169,18 +193,18 @@ pub fn call(
             let destination = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             heap.check_access(destination, context)?;
-            if word_field(heap, this, READY)? == 0 {
-                return Ok(Native::Threw(super::new_exception(
-                    heap,
-                    ClassId::CryptoException,
-                    context,
-                )?));
+            if !key_initialized(heap, this)? {
+                let exception = super::new_exception(heap, ClassId::CryptoException, context)?;
+                heap.put_word(exception, super::REASON_FIELD, 2)?; // UNINITIALIZED_KEY
+                return Ok(Native::Threw(exception));
             }
             let material = heap.get_word(this, MATERIAL)?;
-            let bytes = heap.info(material)?.length as usize;
-            let mut staging = [0u8; 64];
-            staging[..bytes].copy_from_slice(heap.byte_slice(material, 0, bytes)?);
-            heap.byte_slice_mut(destination, offset.max(0) as usize, bytes)?
+            let prefix = usize::from(symmetric_key_clear_event(word_field(heap, this, KIND)?) != 0);
+            let bytes = (heap.info(material)?.length as usize).checked_sub(prefix).ok_or(Error::Format)?;
+            if bytes > 64 || offset < 0 { return Err(Error::Bounds); }
+            let mut staging = Zeroizing::new([0u8; 64]);
+            staging[..bytes].copy_from_slice(heap.byte_slice(material, prefix, bytes)?);
+            heap.byte_slice_mut(destination, offset as usize, bytes)?
                 .copy_from_slice(&staging[..bytes]);
             frame.push_short(bytes as i16)?;
         }
@@ -395,7 +419,7 @@ pub fn call(
             };
             let key = frame.pop_reference()?;
             let this = frame.pop_reference()?;
-            if word_field(heap, key, READY)? == 0 {
+            if !key_initialized(heap, key)? {
                 // Initialising with a key that holds nothing would leave an instance that
                 // looks ready and is not.
                 return Ok(Native::Threw(super::new_exception(

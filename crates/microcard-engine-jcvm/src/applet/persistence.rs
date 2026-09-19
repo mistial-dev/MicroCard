@@ -201,8 +201,15 @@ impl Card {
                                 {
                                     return Err(Error::Format);
                                 }
-                            } else if length > 64 {
-                                return Err(Error::Bounds);
+                            } else {
+                                let event = natives::symmetric_key_clear_event(word(0));
+                                let prefix = u16::from(event != 0);
+                                if header[4] >> 4 != event || (event != 0 && word(3) != 0) {
+                                    return Err(Error::Format);
+                                }
+                                if length <= prefix || length > 64 + prefix {
+                                    return Err(Error::Bounds);
+                                }
                             }
                         }
                         if pin

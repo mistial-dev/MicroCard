@@ -236,6 +236,13 @@ plus cache usage still needs board measurement.
 
 ## Cryptography
 
+Symmetric key objects keep transient initialization flags beside their key bytes, so
+reset and deselection clear both together. Persistent keys retain both. This follows
+[KeyBuilder's lifetime contract](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacard/security/KeyBuilder.html).
+Snapshots sanitize transient key data; RAM suspension retains reset-scoped keys only.
+Restoration rejects the former layout that placed transient key material in persistent
+arrays. This storage support does not enable unsupported cipher or signature algorithms.
+
 The generated bindings describe Java Card API names; they do not establish algorithm support.
 The simulator's default JCVM host now uses the shared platform provider for SHA-256
 and entropy. The same adapter builds without MC04 or software crypto for the separate board
