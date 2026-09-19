@@ -13,11 +13,16 @@ impl Card {
         self.heap_used
     }
 
+    /// Immutable metadata accompanying the sanitized heap written by save_into.
+    pub fn persistent_metadata(&self) -> Result<(Reference, &[u8])> {
+        Ok((self.instance.ok_or(Error::Missing)?, &self.statics))
+    }
+
     /// Save into the caller's staging buffer, without copying execution frames or code.
     /// The buffer contains secrets and must be encrypted and cleared by its owner.
     pub fn save_into<'a>(&'a self, output: &'a mut [u8]) -> Result<PersistentState<'a>> {
         let result = (|| {
-            let instance = self.instance.ok_or(Error::Missing)?;
+            let (instance, _) = self.persistent_metadata()?;
             if output.len() != self.heap_used {
                 return Err(Error::Bounds);
             }

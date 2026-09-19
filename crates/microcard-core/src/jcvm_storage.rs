@@ -222,17 +222,27 @@ impl<F: Flash> Store<F> {
         if card.persistent_heap_bytes() > self.maximum {
             return Err(Error::Quota);
         }
-        let mut heap = crate::crypto::zeroizing_buffer(card.persistent_heap_bytes())?;
-        let state = card.save_into(&mut heap).map_err(|_| Error::Format)?;
-        let mut encoder = Encoder::new(self.maximum);
+        let (instance, statics) = card.persistent_metadata().map_err(|_| Error::Format)?;
+        // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
+        // appending statics cannot double a buffer already holding the heap.
+        let capacity = card
+            .persistent_heap_bytes()
+            .checked_add(statics.len())
+            .and_then(|length| length.checked_add(80))
+            .ok_or(Error::Quota)?;
+        let mut encoder = Encoder::with_capacity(self.maximum, capacity)?;
         encoder.array(7)?;
         encoder.unsigned(1)?;
         encoder.unsigned(1)?;
         encoder.bytes(&self.image)?;
         encoder.bytes(&self.installation)?;
-        encoder.unsigned(u64::from(state.instance))?;
-        encoder.bytes(state.heap)?;
-        encoder.bytes(state.statics)?;
+        encoder.unsigned(u64::from(instance))?;
+        encoder.bytes_with(card.persistent_heap_bytes(), |output| {
+            card.save_into(output)
+                .map(|_| ())
+                .map_err(|_| Error::Format)
+        })?;
+        encoder.bytes(statics)?;
         let snapshot = Zeroizing::new(encoder.finish());
         self.journal.commit_with(&snapshot, provider)
     }

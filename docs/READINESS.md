@@ -47,7 +47,7 @@ MJ01/MJ02 and simulator state without a nonce counter are rejected without migra
 - Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
 - Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.
 
-CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,404-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. Heap high-water and device latency remain unmeasured.
+CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,404-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. The JCVM lifecycle now has host allocation measurements in [its profile](JCVM_PROFILE.md#memory-placement). Device heap high-water and latency remain unmeasured.
 
 ## Crypto replacement measurements
 

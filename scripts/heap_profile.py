@@ -38,7 +38,8 @@ def main():
         for field in ("allocated_bytes", "host_microseconds"):
             stage[field] += sample[field]
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    report = {"format": 1, "source_revision": revision, "platform": platform.platform(), "command": command,
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+    report = {"format": 1, "source_revision": revision, "working_tree_dirty": dirty, "platform": platform.platform(), "command": command,
               "exit_code": result.returncode, "measurement": "host requested allocation bytes",
               "excludes": ["allocator metadata", "stack", "device latency"],
               "note": "Host file reads and pointer sizes differ from memory-mapped board flash.",

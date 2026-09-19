@@ -162,6 +162,16 @@ lock prevents simultaneous simulator writers. `scripts/jcvm_transport_acceptance
 exercises this path with the independent Python signer and SCP03 client; checkpoint
 and CI run it. Set `MICROCARD_BINARY=1` to replay the same cases over framed transport.
 
+The [heap profiling command](VALIDATION_CADENCE.md#heap-measurements) reuses that
+lifecycle workload. On the 64-bit macOS host, writing the sanitized heap directly into
+CBOR reduced peak requested allocation from 174,663 to 165,285 bytes. Allocation
+traffic across its three PIN commands fell from 78,346 to 35,530 bytes. The baseline
+is commit `ed0d5f2`; the encoded snapshot contract is unchanged. These figures exclude
+allocator internals and stack use and do not establish a safe board heap size.
+The direct writer adds 120 bytes to the JCVM software-reference firmware while
+removing that heap allocation and copy. The owned code image and retained execution
+buffers still occupy RAM.
+
 ## Verification
 
 Structural verification is mandatory and runs in one streaming pass at load. It covers the header magic and flags, directory tiling without gaps or overlaps, import resolution, applet offsets landing on method headers, class consistency through a bounded acyclic superclass walk, constant pool tags and token ranges, per-method stack and local bounds, exception handler ranges on instruction boundaries, and an instruction-boundary bitmap built by linear decode that every branch, switch and handler target is checked against.

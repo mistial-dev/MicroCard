@@ -143,11 +143,21 @@ impl Encoder {
         }
     }
 
-    fn append(&mut self, bytes: &[u8]) -> Result<()> {
-        if bytes.len() > self.maximum.saturating_sub(self.bytes.len()) {
+    /// Reserve a known payload estimate once; the same hard encoding limit applies.
+    pub fn with_capacity(maximum: usize, capacity: usize) -> Result<Self> {
+        let mut writer = Self::new(maximum);
+        writer
+            .bytes
+            .try_reserve_exact(capacity.min(maximum))
+            .map_err(|_| Error::Quota)?;
+        Ok(writer)
+    }
+
+    fn reserve(&mut self, additional: usize) -> Result<()> {
+        if additional > self.maximum.saturating_sub(self.bytes.len()) {
             return Err(Error::Quota);
         }
-        let needed = self.bytes.len() + bytes.len();
+        let needed = self.bytes.len() + additional;
         if needed > self.bytes.capacity() {
             // Snapshot buffers can contain keys. Wipe the old allocation before releasing it.
             let capacity = needed
@@ -161,6 +171,11 @@ impl Encoder {
             self.bytes.zeroize();
             self.bytes = replacement;
         }
+        Ok(())
+    }
+
+    fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        self.reserve(bytes.len())?;
         self.bytes.extend_from_slice(bytes);
         Ok(())
     }
@@ -195,6 +210,27 @@ impl Encoder {
     pub fn bytes(&mut self, bytes: &[u8]) -> Result<()> {
         self.argument(2, bytes.len() as u64)?;
         self.append(bytes)
+    }
+    /// Fill a byte string in the final encoding buffer. A rejected fill clears and
+    /// removes the entire field, so a partial secret cannot escape through finish.
+    pub fn bytes_with(
+        &mut self,
+        length: usize,
+        fill: impl FnOnce(&mut [u8]) -> Result<()>,
+    ) -> Result<()> {
+        let original = self.bytes.len();
+        let result = (|| {
+            self.argument(2, length as u64)?;
+            self.reserve(length)?;
+            let start = self.bytes.len();
+            self.bytes.resize(start + length, 0);
+            fill(&mut self.bytes[start..])
+        })();
+        if result.is_err() {
+            self.bytes[original..].zeroize();
+            self.bytes.truncate(original);
+        }
+        result
     }
     pub fn text(&mut self, text: &str) -> Result<()> {
         self.argument(3, text.len() as u64)?;
@@ -286,14 +322,40 @@ mod tests {
     #[test]
     fn records_borrow_strings_and_preserve_binary_values() {
         let expected = b"\x85\x01\x63ISD\x43\x00\xff\x80\xf5\xf6";
-        let mut writer = Encoder::new(expected.len());
-        writer.array(5).unwrap();
-        writer.unsigned(1).unwrap();
-        writer.text("ISD").unwrap();
-        writer.bytes(&[0, 255, 128]).unwrap();
-        writer.boolean(true).unwrap();
-        writer.null().unwrap();
-        assert_eq!(writer.finish(), expected);
+        for direct in [false, true] {
+            let mut writer = if direct {
+                Encoder::with_capacity(expected.len(), 100).unwrap()
+            } else {
+                Encoder::new(expected.len())
+            };
+            writer.array(5).unwrap();
+            writer.unsigned(1).unwrap();
+            writer.text("ISD").unwrap();
+            if direct {
+                assert_eq!(
+                    writer.bytes_with(2, |output| {
+                        output.fill(0xa5);
+                        Err(Error::Native)
+                    }),
+                    Err(Error::Native)
+                );
+                assert_eq!(
+                    writer.bytes_with(expected.len(), |_| panic!("over-limit fill ran")),
+                    Err(Error::Quota)
+                );
+                writer
+                    .bytes_with(3, |output| {
+                        output.copy_from_slice(&[0, 255, 128]);
+                        Ok(())
+                    })
+                    .unwrap();
+            } else {
+                writer.bytes(&[0, 255, 128]).unwrap();
+            }
+            writer.boolean(true).unwrap();
+            writer.null().unwrap();
+            assert_eq!(writer.finish(), expected);
+        }
         let mut reader = Decoder::new(expected);
         reader.record(5).unwrap();
         assert_eq!(reader.unsigned(), Ok(1));
