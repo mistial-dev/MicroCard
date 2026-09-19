@@ -124,9 +124,16 @@ These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E5993
 
 `Card.reset()` clears both transient array kinds, the APDU buffer, execution words and
 tags, and native OwnerPIN validation flags. It retains installed objects, persistent
-array values, and PIN retry counts. This is an in-memory lifecycle operation, not reboot
-recovery. Durable heap storage, recovery validation, complete deselection callbacks,
-and transaction undo still need integration before board delivery.
+array values, and PIN retry counts. `Card.save_into()` writes used heap bytes to a
+caller-owned buffer and removes volatile values from that copy. `Card.restore()`
+checks object boundaries, typed references, roots, ownership, and native PIN state
+without running installation again. The committed PIV applet test verifies that PIN
+retry counts survive restoration; saving does not clear the live session.
+
+These are engine APIs, not an authenticated storage format. Their caller must bind
+state to the verified code image, authenticate it, and protect the staging buffer.
+Durable heap storage, atomic activation, complete deselection callbacks, and transaction
+undo still need integration before board delivery.
 
 ## Cryptography
 

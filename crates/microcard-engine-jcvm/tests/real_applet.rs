@@ -1,9 +1,7 @@
 //! Install and drive a real applet, to see how far the engine gets.
 //!
-//! This is the test the whole engine exists to pass. It needs a Load File Data Block, which
-//! is a third-party build output and stays out of this repository, so it reports that it
-//! found nothing when `MICROCARD_JCVM_LOAD_FILES` is unset.
-use microcard_engine_jcvm::applet::{Card, Sizes};
+//! The committed applet runs by default. An external corpus can extend that coverage.
+use microcard_engine_jcvm::applet::{Card, Sizes, PersistentState};
 use microcard_engine_jcvm::cap::LoadFile;
 use microcard_engine_jcvm::host::Host;
 
@@ -51,7 +49,7 @@ impl Host for TestHost {
 
 fn load_files() -> Vec<(String, Vec<u8>)> {
     let Ok(directory) = std::env::var("MICROCARD_JCVM_LOAD_FILES") else {
-        return Vec::new();
+        return vec![(String::from("openfips201-standard-cs2"), include_bytes!("vectors/openfips201-standard-cs2.lfdb").to_vec())];
     };
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&directory).expect("load file directory") {
@@ -71,10 +69,7 @@ fn load_files() -> Vec<(String, Vec<u8>)> {
 #[test]
 fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
     let files = load_files();
-    if files.is_empty() {
-        eprintln!("MICROCARD_JCVM_LOAD_FILES is unset, so no real applet was run");
-        return;
-    }
+    assert!(!files.is_empty(), "the requested applet corpus is empty");
     let mut selected = 0;
     for (name, bytes) in &files {
         let file = LoadFile::parse(bytes).unwrap_or_else(|error| panic!("{name}: {error:?}"));
@@ -113,6 +108,19 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
                     Err(error) => eprintln!("{name}: GET DATA stopped at {error:?}"),
                 }
                 selected += 1;
+                let wrong_pin = [0x00, 0x20, 0x00, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 0xff, 0xff];
+                let before = card.process(&file, &mut host, &wrong_pin, false).unwrap();
+                assert_eq!(before.sw & 0xfff0, 0x63c0);
+                let mut bytes = vec![0; card.persistent_heap_bytes()];
+                let saved = card.save_into(&mut bytes).unwrap();
+                let instance = saved.instance;
+                let statics = saved.statics.to_vec();
+                drop(card);
+                let mut recovered = Card::restore(&file, sizes, PersistentState { heap: &bytes, statics: &statics, instance })
+                    .unwrap_or_else(|error| panic!("{name}: restore {error:?}"));
+                assert_eq!(recovered.process(&file, &mut host, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x9000);
+                let after = recovered.process(&file, &mut host, &wrong_pin, false).unwrap();
+                assert_eq!(after.sw + 1, before.sw, "PIN retry count did not survive recovery");
             }
             // The engine runs the applet's own install bytecode until it reaches
             // something this build does not do yet. That is the remaining work, and the

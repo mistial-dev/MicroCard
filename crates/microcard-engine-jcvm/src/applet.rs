@@ -18,6 +18,9 @@ use crate::vm::frame::{Frame, Reference};
 use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 use alloc::vec::Vec;
+use zeroize::Zeroize;
+mod persistence;
+pub use persistence::PersistentState;
 
 /// Status words the runtime environment produces itself, ISO 7816-4.
 pub const SW_SUCCESS: u16 = 0x9000;
@@ -58,6 +61,15 @@ pub struct Card {
     instance: Option<Reference>,
     context: heap::Context,
     sizes: Sizes,
+}
+
+impl Drop for Card {
+    fn drop(&mut self) {
+        self.heap.zeroize();
+        self.statics.zeroize();
+        self.words.zeroize();
+        self.tags.zeroize();
+    }
 }
 
 /// What a command produced.
@@ -479,9 +491,37 @@ mod tests {
         let pin = heap.new_object(native_class_of("javacard/framework/OwnerPIN").unwrap(), 6, 1).unwrap();
         heap.array_put(transient, 0, 7).unwrap();
         heap.array_put(persistent, 0, 9).unwrap();
+        heap.put_word(pin, 0, 3).unwrap();
+        heap.put_word(pin, 2, persistent).unwrap();
         heap.put_word(pin, 3, 1).unwrap(); // Validated flag.
         heap.put_word(pin, 4, 2).unwrap(); // Remaining attempts are persistent.
         card.heap_used = heap.used();
+        let mut saved_heap = vec![0; card.persistent_heap_bytes()];
+        let saved = card.save_into(&mut saved_heap).unwrap();
+        let instance = saved.instance;
+        let saved_statics = saved.statics.to_vec();
+        let mut restored = Card::restore(&file, Sizes::default(), saved).unwrap();
+        let recovered = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+        assert_eq!(recovered.array_get(transient, 0), Ok(0));
+        assert_eq!(recovered.array_get(persistent, 0), Ok(9));
+        assert_eq!(recovered.get_word(pin, 3), Ok(0));
+        assert_eq!(recovered.get_word(pin, 4), Ok(2));
+        assert_eq!(restored.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false).unwrap().data, [0x12, 0x34]);
+        // Saving must not clear authorization or transient values in the live session.
+        let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        assert_eq!(live.array_get(transient, 0), Ok(7));
+        assert_eq!(live.get_word(pin, 3), Ok(1));
+        for case in 0..5 {
+            let mut invalid = saved_heap.clone();
+            let root = match case {
+                0 => instance + 2, // A field is not an object handle.
+                1 => { invalid[transient as usize + heap::HEADER] = 1; instance }
+                2 => { invalid[pin as usize + heap::HEADER + 7] = 1; instance }
+                3 => { invalid[persistent as usize + 5] = 2; instance }
+                _ => { invalid.truncate(invalid.len() - 1); instance }
+            };
+            assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
+        }
         card.reset().unwrap();
         assert!(card.installed());
         assert!(card.words.iter().all(|word| *word == 0));
