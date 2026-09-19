@@ -6,8 +6,60 @@ mod ecdsa;
 
 pub struct Services<'a, P>(pub &'a mut P);
 
-// Kept outside the host vtable until the applet signature binding is enabled.
+// Kept outside the host vtable until the P-256 applet bindings are enabled.
 impl<P: CryptoProvider> Services<'_, P> {
+    /// Derive an uncompressed SEC1 key without retaining private material.
+    pub fn p256_public(&mut self, key: &[u8; 32], output: &mut [u8; 65]) -> Result<()> {
+        output.fill(0);
+        if !crate::crypto::p256_private_key_valid(key) { return Err(Error::Bounds); }
+        if self.0.p256_public_key_into(key, output).is_err() {
+            output.fill(0);
+            return Err(Error::Unauthorized);
+        }
+        if output[0] != 4 {
+            output.fill(0);
+            return Err(Error::Format);
+        }
+        Ok(())
+    }
+
+    /// Validate curve membership through the provider; malformed keys are not driver failures.
+    pub fn p256_public_valid(&mut self, key: &[u8; 65]) -> Result<bool> {
+        if key[0] != 4 { return Ok(false); }
+        let mut one = [0u8; 32];
+        one[31] = 1;
+        let mut scratch = zeroize::Zeroizing::new([0u8; 32]);
+        match self.0.p256_ecdh_into(&one, key, &mut scratch) {
+            Ok(()) => Ok(true),
+            Err(crate::Error::Authentication) => Ok(false),
+            Err(_) => Err(Error::Unauthorized),
+        }
+    }
+
+    /// Derive a raw P-256 shared secret, preserving the 65-byte public-key contract.
+    pub fn p256_agree(&mut self, key: &[u8; 32], peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
+        output.fill(0);
+        if !crate::crypto::p256_private_key_valid(key) || peer[0] != 4 { return Err(Error::Bounds); }
+        if let Err(error) = self.0.p256_ecdh_into(key, peer, output) {
+            output.fill(0);
+            return Err(if error == crate::Error::Authentication { Error::Bounds } else { Error::Unauthorized });
+        }
+        Ok(())
+    }
+
+    /// Publish a complete key pair only after entropy and public-key derivation succeed.
+    pub fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()>
+    where P: Entropy {
+        private.fill(0);
+        public.fill(0);
+        let mut candidate = zeroize::Zeroizing::new([0u8; 32]);
+        crate::crypto::p256_generate_private_into(&mut candidate, |output| self.0.fill_entropy(output))
+            .map_err(|_| Error::Unauthorized)?;
+        self.p256_public(&candidate, public)?;
+        *private = *candidate;
+        Ok(())
+    }
+
     /// Sign through the provider and emit minimal DER; failure leaves output zeroed.
     pub fn p256_sign(&mut self, key: &[u8; 32], message: &[u8], output: &mut [u8; 72]) -> Result<usize> {
         output.fill(0);
@@ -101,8 +153,20 @@ mod tests {
     struct Provider {
         calls: usize,
         fail: bool,
+        fail_public: bool,
+        bad_entropy: bool,
     }
     impl CryptoProvider for Provider {
+        fn p256_public_key_into(&mut self, key: &[u8; 32], output: &mut [u8; 65]) -> crate::Result<()> {
+            self.calls += 1;
+            if self.fail || self.fail_public { output.fill(0x42); return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.p256_public_key_into(key, output)
+        }
+        fn p256_ecdh_into(&mut self, key: &[u8; 32], peer: &[u8], output: &mut [u8; 32]) -> crate::Result<()> {
+            self.calls += 1;
+            if self.fail { output.fill(0x42); return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.p256_ecdh_into(key, peer, output)
+        }
         fn p256_ecdsa_sign_into(&mut self, key: &[u8; 32], message: &[u8], output: &mut [u8; 64]) -> crate::Result<()> {
             self.calls += 1;
             if self.fail { output.fill(0x42); return Err(crate::Error::Native); }
@@ -141,12 +205,50 @@ mod tests {
     impl Entropy for Provider {
         fn fill_entropy(&mut self, output: &mut [u8]) -> crate::Result<()> {
             self.calls += 1;
-            output.fill(0x17);
+            output.fill(if self.bad_entropy { 0 } else { 0x17 });
             if self.fail {
                 Err(crate::Error::Native)
             } else {
                 Ok(())
             }
+        }
+    }
+
+    #[test]
+    fn p256_keys_validate_through_provider_and_generation_fails_without_partial_keys() {
+        let mut provider = Provider::default();
+        let mut host = Services(&mut provider);
+        let mut private = [0xaa;32];
+        let mut public = [0xaa;65];
+        host.p256_generate(&mut private, &mut public).unwrap();
+        assert_eq!(private, [0x17;32]);
+        assert_eq!(public, crate::crypto::p256_public_key(&private).unwrap());
+        assert_eq!(host.p256_public_valid(&public), Ok(true));
+        let peer_private = [1;32];
+        let peer = crate::crypto::p256_public_key(&peer_private).unwrap();
+        let mut shared = [0xaa;32];
+        host.p256_agree(&private, &peer, &mut shared).unwrap();
+        assert_eq!(shared, crate::crypto::p256_ecdh(&peer_private, &public).unwrap());
+        let mut off_curve = [0;65];
+        off_curve[0] = 4;
+        assert_eq!(host.p256_public_valid(&off_curve), Ok(false));
+        assert_eq!(host.p256_agree(&private, &off_curve, &mut shared), Err(Error::Bounds));
+        assert_eq!(shared, [0;32]);
+        host.0.fail = true;
+        assert_eq!(host.p256_public_valid(&public), Err(Error::Unauthorized));
+        assert_eq!(host.p256_agree(&private, &peer, &mut shared), Err(Error::Unauthorized));
+        assert_eq!(shared, [0;32]);
+        for (fail, fail_public, bad_entropy, expected_calls) in [(true,false,false,1), (false,true,false,2), (false,false,true,8)] {
+            host.0.fail = fail;
+            host.0.fail_public = fail_public;
+            host.0.bad_entropy = bad_entropy;
+            let before = host.0.calls;
+            private.fill(0xaa);
+            public.fill(0xaa);
+            assert_eq!(host.p256_generate(&mut private, &mut public), Err(Error::Unauthorized));
+            assert_eq!(private, [0;32]);
+            assert_eq!(public, [0;65]);
+            assert_eq!(host.0.calls - before, expected_calls);
         }
     }
 

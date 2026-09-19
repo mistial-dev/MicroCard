@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 185852,
+      "text_bytes": 185848,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 211704,
+      "text_bytes": 211696,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {

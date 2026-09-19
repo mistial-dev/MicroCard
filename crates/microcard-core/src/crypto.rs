@@ -662,6 +662,22 @@ pub fn p256_private_key_valid(private_key: &[u8; 32]) -> bool {
     bool::from(!private_key.ct_eq(&[0; 32]) & (borrow as u8).ct_eq(&1))
 }
 
+/// Generate a scalar with bounded rejection sampling; every failure clears output.
+pub fn p256_generate_private_into(
+    output: &mut [u8; 32],
+    mut random: impl FnMut(&mut [u8]) -> Result<()>,
+) -> Result<()> {
+    output.zeroize();
+    let result = (|| {
+        for _ in 0..8 {
+            random(output)?;
+            if p256_private_key_valid(output) { return Ok(()); }
+        }
+        Err(Error::Native)
+    })();
+    clear_output_on_error(output, result)
+}
+
 /// Return an uncompressed SEC1 public key without exposing the private scalar.
 #[cfg(feature = "software-p256")]
 pub fn p256_public_key(private_key: &[u8; 32]) -> Result<[u8; 65]> {

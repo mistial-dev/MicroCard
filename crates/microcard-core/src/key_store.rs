@@ -222,17 +222,7 @@ impl KeyStore {
         };
         random(&mut entry.nonce)?;
         if algorithm == Algorithm::P256 {
-            let mut valid = false;
-            for _ in 0..8 {
-                random(&mut entry.key)?;
-                if crate::crypto::p256_private_key_valid(&entry.key) {
-                    valid = true;
-                    break;
-                }
-            }
-            if !valid {
-                return Err(Error::Native);
-            }
+            crate::crypto::p256_generate_private_into(&mut entry.key, &mut random)?;
         } else {
             random(if algorithm == Algorithm::Aes128 {
                 &mut entry.key[..16]
