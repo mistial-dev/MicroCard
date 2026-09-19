@@ -262,6 +262,7 @@ pub fn load_request<'a>(
 
 /// Parse the C4 Load File Data Block prefix from the first LOAD command.
 /// Later command data contains only the remaining value bytes.
+/// The receiver enforces its engine's size limit before staging any bytes.
 pub fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
     if data.first().copied() != Some(0xc4) {
         return Err(Error::Format);
@@ -288,9 +289,6 @@ pub fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
         }
         _ => return Err(Error::Format),
     };
-    if length > crate::staging::MAX_PACKAGE_BYTES {
-        return Err(Error::Quota);
-    }
     Ok((length, &data[header..]))
 }
 
@@ -305,6 +303,71 @@ pub enum Payload {
     Mp04,
     /// A Java Card package, whose load file leads with the Header component.
     JavaCard,
+}
+
+/// Ordered, bounded C4 reception shared by firmware engines. Authentication and
+/// activation belong to the caller; completion alone does not authorize code.
+pub struct LoadReceiver {
+    engine: Payload,
+    maximum: usize,
+    total: Option<usize>,
+    received: usize,
+    next_block: u16,
+    closed: bool,
+}
+
+impl LoadReceiver {
+    pub fn new(engine: Payload, maximum: usize) -> Self {
+        Self { engine, maximum, total: None, received: 0, next_block: 0, closed: false }
+    }
+
+    /// Returns true only for a complete load. Any error invalidates this receiver
+    /// and discards staging, including partially programmed flash uploads.
+    pub fn receive(
+        &mut self,
+        command: &crate::apdu::Command,
+        staging: &mut impl crate::staging::PackageStaging,
+    ) -> Result<bool> {
+        let result = self.receive_block(command, staging);
+        if result.is_err() {
+            self.closed = true;
+            staging.reset();
+        }
+        result
+    }
+
+    fn receive_block(
+        &mut self,
+        command: &crate::apdu::Command,
+        staging: &mut impl crate::staging::PackageStaging,
+    ) -> Result<bool> {
+        if self.closed || command.ins != 0xe8 || !matches!(command.p1, 0 | 0x80)
+            || command.data.is_empty() || self.next_block > u16::from(u8::MAX)
+            || u16::from(command.p2) != self.next_block || staging.len() != self.received
+        {
+            return Err(Error::Format);
+        }
+        let (total, chunk) = if self.next_block == 0 {
+            let (total, chunk) = load_file_data(&command.data)?;
+            if total > self.maximum { return Err(Error::Quota); }
+            if payload_kind(chunk)? != self.engine { return Err(Error::Unsupported); }
+            (total, chunk)
+        } else {
+            (self.total.ok_or(Error::Format)?, command.data.as_ref())
+        };
+        let end = self.received.checked_add(chunk.len()).ok_or(Error::Bounds)?;
+        if end > total { return Err(Error::Quota); }
+        let last = command.p1 == 0x80;
+        if (last && end != total) || (!last && (end == total || command.p2 == u8::MAX)) {
+            return Err(Error::Format);
+        }
+        staging.append(chunk)?;
+        self.total = Some(total);
+        self.received = end;
+        self.next_block += 1;
+        self.closed = last;
+        Ok(last)
+    }
 }
 
 /// Decide from the first bytes of a Load File Data Block which engine it belongs to.
@@ -590,5 +653,57 @@ mod tests {
         // The previous container format is no longer recognised as a payload at all.
         assert_eq!(payload_kind(b"MP03rest"), Err(Error::Format));
         assert_eq!(payload_kind(&[]), Err(Error::Format));
+    }
+
+    #[test]
+    fn load_receiver_bounds_engines_orders_blocks_and_discards_invalid_uploads() {
+        use crate::staging::{BoundedRamStaging, PackageStaging};
+        let command = |p1, p2, data: Vec<u8>| crate::apdu::Command {
+            cla: 0x80, ins: 0xe8, p1, p2, data: data.into(), le: None,
+        };
+        // A CAP larger than the MC04 limit takes the same ordered transport path.
+        let mut image = alloc::vec![0; 17 * 1024];
+        image[..7].copy_from_slice(&[1, 0, 0x13, 0xde, 0xca, 0xff, 0xed]);
+        let mut first = alloc::vec![0xc4, 0x82, 0x44, 0x00];
+        first.extend_from_slice(&image[..240]);
+        for (engine, maximum, expected) in [
+            (Payload::JavaCard, image.len(), Ok(false)),
+            (Payload::JavaCard, image.len() - 1, Err(Error::Quota)),
+            (Payload::Mp04, image.len(), Err(Error::Unsupported)),
+        ] {
+            let mut receiver = LoadReceiver::new(engine, maximum);
+            let mut staging = BoundedRamStaging::<65535>::default();
+            assert_eq!(receiver.receive(&command(0, 0, first.clone()), &mut staging), expected);
+            if expected.is_err() {
+                assert!(staging.is_empty());
+                continue;
+            }
+            let chunks = image[240..].chunks(240);
+            let count = chunks.len();
+            for (index, chunk) in chunks.enumerate() {
+                let last = index + 1 == count;
+                assert_eq!(receiver.receive(
+                    &command(if last { 0x80 } else { 0 }, (index + 1) as u8, chunk.to_vec()),
+                    &mut staging,
+                ), Ok(last));
+            }
+            assert_eq!(staging.as_slice(), Some(image.as_slice()));
+            assert_eq!(receiver.receive(&command(0x80, 0, first.clone()), &mut staging), Err(Error::Format));
+            assert!(staging.is_empty());
+        }
+        // A failed continuation closes the stream; a correct block cannot revive it.
+        for (p1, p2, bytes, error) in [
+            (0, 0, &b"x"[..], Error::Format), // repeated block
+            (0x80, 1, &b"x"[..], Error::Format), // premature last marker
+            (0, 1, &b"xy"[..], Error::Format), // missing last marker
+            (0x80, 1, &b"xyz"[..], Error::Quota), // exceeds declared total
+        ] {
+            let mut receiver = LoadReceiver::new(Payload::Mp04, 6);
+            let mut staging = BoundedRamStaging::<6>::default();
+            assert_eq!(receiver.receive(&command(0, 0, b"\xc4\x06MP05".to_vec()), &mut staging), Ok(false));
+            assert_eq!(receiver.receive(&command(p1, p2, bytes.to_vec()), &mut staging), Err(error));
+            assert!(staging.is_empty());
+            assert_eq!(receiver.receive(&command(0x80, 1, b"xy".to_vec()), &mut staging), Err(Error::Format));
+        }
     }
 }

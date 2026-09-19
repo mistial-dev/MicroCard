@@ -19,12 +19,15 @@ pub trait PackageStaging {
     fn reset(&mut self);
 }
 
+pub type RamStaging = BoundedRamStaging<MAX_PACKAGE_BYTES>;
+pub type FlashStaging<S> = BoundedFlashStaging<S, MAX_PACKAGE_BYTES>;
+
 #[derive(Default)]
-pub struct RamStaging {
+pub struct BoundedRamStaging<const MAX: usize> {
     pub(crate) bytes: Vec<u8>,
 }
 
-impl PackageStaging for RamStaging {
+impl<const MAX: usize> PackageStaging for BoundedRamStaging<MAX> {
     fn len(&self) -> usize {
         self.bytes.len()
     }
@@ -48,7 +51,7 @@ impl PackageStaging for RamStaging {
             .len()
             .checked_add(bytes.len())
             .ok_or(Error::Quota)?;
-        if end > MAX_PACKAGE_BYTES {
+        if end > MAX {
             return Err(Error::Quota);
         }
         self.bytes
@@ -68,7 +71,7 @@ impl PackageStaging for RamStaging {
     }
 
     fn restore(&mut self, bytes: Vec<u8>) -> Result<()> {
-        if !self.bytes.is_empty() || bytes.len() > MAX_PACKAGE_BYTES {
+        if !self.bytes.is_empty() || bytes.len() > MAX {
             return Err(Error::Storage);
         }
         self.bytes = bytes;
@@ -80,13 +83,13 @@ impl PackageStaging for RamStaging {
     }
 }
 
-pub struct FlashStaging<S> {
+pub struct BoundedFlashStaging<S, const MAX: usize> {
     flash: S,
     len: usize,
     prepared: bool,
 }
 
-impl<S> FlashStaging<S> {
+impl<S, const MAX: usize> BoundedFlashStaging<S, MAX> {
     pub const fn new(flash: S) -> Self {
         Self {
             flash,
@@ -100,7 +103,7 @@ impl<S> FlashStaging<S> {
     }
 }
 
-impl<S: StagingFlash> PackageStaging for FlashStaging<S> {
+impl<S: StagingFlash, const MAX: usize> PackageStaging for BoundedFlashStaging<S, MAX> {
     fn len(&self) -> usize {
         self.len
     }
@@ -121,7 +124,7 @@ impl<S: StagingFlash> PackageStaging for FlashStaging<S> {
 
     fn append(&mut self, bytes: &[u8]) -> Result<()> {
         let end = self.len.checked_add(bytes.len()).ok_or(Error::Quota)?;
-        if end > MAX_PACKAGE_BYTES || end > self.flash.capacity() {
+        if end > MAX || end > self.flash.capacity() {
             return Err(Error::Quota);
         }
         if !self.prepared {

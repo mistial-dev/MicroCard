@@ -25,6 +25,12 @@ signature, and key-agreement requests now fail at their factories.
 
 Two delivery paths are also absent. A GlobalPlatform LOAD does not reach the engine, so a load file arrives only as a file path given to `microcard-sim serve-jcvm`. The engine is also absent from the board image.
 
+The shared C4 receiver now enforces engine identity, an engine-specific size limit,
+ordered blocks, and exact completion. A rejected block closes the upload and resets
+staging. MC04 uses this receiver today; JCVM still needs authenticated activation and
+the durable management adapter. RAM and flash staging accept compile-time limits,
+so the MC04 16 KiB bound does not constrain a future JCVM profile.
+
 ## What holds this claim up
 
 One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, with its MIT notice, the applet revision it was built from and the digests of both the CAP and the block. Twelve PIV commands and their expected status words are committed beside it. `scripts/piv_vector_acceptance.py` replays them with no argument, and the checkpoint gate and CI both run it.
@@ -100,7 +106,9 @@ One detail that only real packages show. The Directory records a size for the De
 
 ## Memory placement
 
-The journaled state caps a snapshot at 49,152 bytes and holds packages inside it, so neither a load file nor a Java Card heap can live there. Code images and heaps get dedicated flash regions with A and B banks, and the journaled state holds only descriptors.
+MC04 now journals image descriptors and stores code in dedicated flash slots. JCVM
+has an authenticated applet-state journal bound to its image and installation, but
+its image and heap regions still need board allocation and atomic management activation.
 
 ## Verification
 

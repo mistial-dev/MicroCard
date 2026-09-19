@@ -1795,10 +1795,7 @@ struct GlobalPlatformLoad {
     /// only the received bytes can settle it.
     load_aid: RegistryAid,
     hash: Option<[u8; 32]>,
-    total: Option<usize>,
-    next_block: u16,
-    /// Which engine the block is for, decided from the first block's own bytes.
-    payload: Option<crate::globalplatform::Payload>,
+    receiver: crate::globalplatform::LoadReceiver,
 }
 
 pub struct Card<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging = RamStaging> {
@@ -2229,9 +2226,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 domain_aid,
                 load_aid,
                 hash: request.hash,
-                total: None,
-                next_block: 0,
-                payload: None,
+                receiver: crate::globalplatform::LoadReceiver::new(
+                    crate::globalplatform::Payload::Mp04, MAX_PACKAGE_BYTES,
+                ),
             });
             return fallible_filled(1, 0);
         }
@@ -2360,50 +2357,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         command: &crate::apdu::Command,
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
-        if command.ins != 0xe8 || !matches!(command.p1, 0 | 0x80) || command.data.is_empty() {
-            return Err(Error::Format);
-        }
         let load = self.globalplatform_load.as_mut().ok_or(Error::Format)?;
-        if load.next_block > u16::from(u8::MAX) || command.p2 != load.next_block as u8 {
-            return Err(Error::Format);
-        }
-        let chunk = if load.next_block == 0 {
-            let (total, value) = crate::globalplatform::load_file_data(&command.data)?;
-            load.total = Some(total);
-            // The first block is where a load file says which engine it belongs to, so the
-            // card decides once and from the bytes themselves.
-            let payload = crate::globalplatform::payload_kind(value)?;
-            if payload == crate::globalplatform::Payload::JavaCard {
-                // The Java Card engine runs a load file the simulator hands it directly.
-                // Nothing delivers one through GlobalPlatform yet, so refusing here keeps
-                // the card from staging bytes it has no way to activate.
-                return Err(Error::Unsupported);
-            }
-            load.payload = Some(payload);
-            value
-        } else {
-            &command.data
-        };
-        let total = load.total.ok_or(Error::Format)?;
-        let end = self
-            .staging
-            .len()
-            .checked_add(chunk.len())
-            .ok_or(Error::Bounds)?;
-        if end > total || end > MAX_PACKAGE_BYTES {
-            return Err(Error::Quota);
-        }
-        self.staging.append(chunk)?;
-        load.next_block += 1;
-        let last = command.p1 == 0x80;
-        if !last {
-            if end == total || command.p2 == u8::MAX {
-                return Err(Error::Format);
-            }
+        if !load.receiver.receive(command, &mut self.staging)? {
             return fallible_filled(1, 0);
-        }
-        if end != total {
-            return Err(Error::Format);
         }
         let result = self.manage_with_cancel(
             Verified {

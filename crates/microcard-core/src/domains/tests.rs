@@ -353,9 +353,9 @@ fn globalplatform_ssd_creation_and_deletion_are_durable_and_aid_addressed() {
         domain_aid: RegistryAid::new(&requested).unwrap(),
         load_aid: RegistryAid::synthetic(0x4c, &[7; 32]),
         hash: Some([7; 32]),
-        total: Some(1),
-        next_block: 1,
-        payload: Some(crate::globalplatform::Payload::Mp04),
+        receiver: crate::globalplatform::LoadReceiver::new(
+            crate::globalplatform::Payload::Mp04, MAX_PACKAGE_BYTES,
+        ),
     });
     reopened.staging.bytes.push(0xaa);
     let delete = Verified {
