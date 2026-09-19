@@ -41,3 +41,10 @@ vector = json.loads((Path(__file__).resolve().parents[1] / "format/snapshot-cbor
 assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
 print("PASS: internal snapshot CBOR Rust/Python golden vector")
+
+state = [1, 1, 0, [[bytes.fromhex("a000000151000000"), bytes([1] * 16), None], None, None, None],
+         [None] * 8, [None] * 8]
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-registry-cbor-v1.json").read_text())
+assert encode(state).hex() == vector["hex"]
+assert decode(bytes.fromhex(vector["hex"])) == state
+print("PASS: JCVM registry CBOR Rust/Python golden vector")

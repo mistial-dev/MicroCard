@@ -63,6 +63,8 @@ pub mod jcvm_services;
 pub mod jcvm_storage;
 #[cfg(feature = "jcvm")]
 pub mod jcvm_package;
+#[cfg(feature = "jcvm")]
+pub mod jcvm_registry;
 
 pub mod key_store;
 

@@ -121,6 +121,35 @@ metadata descriptor activates an image. Current and pending descriptors protect 
 from erasure; unreferenced partial uploads can be reclaimed after reboot. An uncertain
 metadata commit keeps its candidate slots protected until ownership is resolved.
 
+## JCVM registry journal
+
+The metadata store uses its own journal key and this six-field record:
+
+```
+[1, 1, reserved_scp03_sequence, domains[4], loads[8], instances[8]]
+domain   = [aid, incarnation_bytes16, signer_hash_bytes32_or_null]
+load     = [domain_aid, package_aid, rollback_version, image_or_null]
+image    = [slot, length, package_sha256_bytes32]
+instance = [domain_aid, package_aid, module_aid, instance_aid,
+            installation_bytes16, heap_bank]
+```
+
+Unused slots are null. Slot zero in `domains` is the ISD. AIDs are 5–16 bytes;
+registry AIDs, active image slots, installation identities, and heap banks cannot
+collide. Every load belongs to an owned domain, and every instance references a
+loaded package in that domain. The record is bounded to 4,096 bytes. The SCP03
+reservation is at most `0xffffff` and must commit before any reserved value is used.
+
+Deleting a load clears its image descriptor but retains its rollback version. A new
+activation must advance that version. Child domains inherit the ISD signer; fresh
+domain and installation identities come from the platform, not the package author.
+Physical storage may impose lower quotas than these registry limits.
+
+The store resolves uncertain commits with the reboot scan and disables state access
+if recovery fails. Its caller must verify referenced image and heap storage before
+execution, and must not reclaim formerly referenced storage before metadata commits.
+The [registry vector](../format/jcvm-registry-cbor-v1.json) is checked by Rust and Python.
+
 ## Dedicated JCVM state journal
 
 The JCVM store uses a separate journal region and key, with plaintext:

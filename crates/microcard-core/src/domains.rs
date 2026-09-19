@@ -1185,48 +1185,7 @@ impl DomainPolicy {
         Ok((identifier, policy))
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-
-struct RegistryAid {
-    bytes: [u8; 16],
-    len: u8,
-}
-
-impl RegistryAid {
-    fn new(value: &[u8]) -> Result<Self> {
-        if !(5..=16).contains(&value.len()) {
-            return Err(Error::Format);
-        }
-        let mut bytes = [0; 16];
-        bytes[..value.len()].copy_from_slice(value);
-        Ok(Self {
-            bytes,
-            len: value.len() as u8,
-        })
-    }
-
-    fn isd() -> Self {
-        Self::new(&crate::globalplatform::ISD_AID).unwrap()
-    }
-
-    fn synthetic(kind: u8, stable: &[u8]) -> Self {
-        Self {
-            bytes: crate::globalplatform::synthetic_aid(kind, stable),
-            len: 16,
-        }
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        &self.bytes[..usize::from(self.len)]
-    }
-
-    fn valid(&self) -> bool {
-        (5..=16).contains(&self.len)
-            && self.bytes[usize::from(self.len)..]
-                .iter()
-                .all(|byte| *byte == 0)
-    }
-}
+use crate::globalplatform::Aid as RegistryAid;
 
 #[derive(Clone, PartialEq, Eq)]
 struct Instances(Vec<(String, Rc<str>)>);
@@ -1722,8 +1681,8 @@ fn registry_domain_aid(domain_id: &str, domain: &Domain) -> ([u8; 16], usize) {
         (aid, crate::globalplatform::ISD_AID.len())
     } else {
         (
-            domain.registry_aid.bytes,
-            usize::from(domain.registry_aid.len),
+            domain.registry_aid.padded(),
+            domain.registry_aid.as_slice().len(),
         )
     }
 }

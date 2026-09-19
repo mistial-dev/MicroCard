@@ -1,0 +1,771 @@
+//! Bounded management metadata. Images and applet heaps live in separate storage.
+use crate::{
+    cbor::{Decoder, Encoder},
+    globalplatform::Aid,
+    image_store::Descriptor,
+    jcvm_package::Package,
+    Error, Result,
+};
+use alloc::vec::Vec;
+
+pub const MAX_DOMAINS: usize = 4;
+pub const MAX_PACKAGES: usize = 8;
+pub const MAX_INSTANCES: usize = 8;
+pub const MAX_SNAPSHOT_BYTES: usize = 4096;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Domain {
+    pub aid: Aid,
+    pub incarnation: [u8; 16],
+    pub owner: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Load {
+    pub domain: Aid,
+    pub aid: Aid,
+    /// Retained after deletion, so removing an image cannot reset rollback policy.
+    pub version: u32,
+    pub image: Option<Descriptor>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Instance {
+    pub domain: Aid,
+    pub load: Aid,
+    pub module: Aid,
+    pub aid: Aid,
+    pub identity: [u8; 16],
+    pub heap_bank: u8,
+}
+
+/// Copying this bounded metadata is permitted for an atomic journal update; it
+/// contains no code, applet heap, execution frames, credentials, or private keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Registry {
+    domains: [Option<Domain>; MAX_DOMAINS],
+    loads: [Option<Load>; MAX_PACKAGES],
+    instances: [Option<Instance>; MAX_INSTANCES],
+    sequence: u32,
+}
+
+impl Registry {
+    pub fn new(incarnation: [u8; 16], owner: Option<[u8; 32]>) -> Self {
+        let mut domains = [None; MAX_DOMAINS];
+        domains[0] = Some(Domain {
+            aid: Aid::isd(),
+            incarnation,
+            owner,
+        });
+        Self {
+            domains,
+            loads: [None; MAX_PACKAGES],
+            instances: [None; MAX_INSTANCES],
+            sequence: 0,
+        }
+    }
+
+    pub fn domains(&self) -> impl Iterator<Item = &Domain> {
+        self.domains.iter().flatten()
+    }
+    pub fn loads(&self) -> impl Iterator<Item = &Load> {
+        self.loads.iter().flatten()
+    }
+    pub fn instances(&self) -> impl Iterator<Item = &Instance> {
+        self.instances.iter().flatten()
+    }
+    pub fn protected_images(&self) -> impl Iterator<Item = Descriptor> + '_ {
+        self.loads().filter_map(|load| load.image)
+    }
+
+    fn in_use(&self, aid: Aid) -> bool {
+        self.domains().any(|d| d.aid == aid)
+            || self.loads().any(|p| p.aid == aid)
+            || self.instances().any(|i| i.aid == aid)
+    }
+
+    pub fn add_domain(&mut self, aid: Aid, incarnation: [u8; 16]) -> Result<()> {
+        if self.in_use(aid) {
+            return Err(Error::Busy);
+        }
+        let owner = self.domains[0]
+            .and_then(|domain| domain.owner)
+            .ok_or(Error::Unauthorized)?;
+        let slot = self
+            .domains
+            .iter_mut()
+            .find(|slot| slot.is_none())
+            .ok_or(Error::Quota)?;
+        *slot = Some(Domain {
+            aid,
+            incarnation,
+            owner: Some(owner),
+        });
+        Ok(())
+    }
+
+    pub fn remove_domain(&mut self, aid: Aid) -> Result<()> {
+        if aid == Aid::isd() {
+            return Err(Error::Unauthorized);
+        }
+        let slot = self
+            .domains
+            .iter_mut()
+            .find(|slot| slot.is_some_and(|d| d.aid == aid))
+            .ok_or(Error::Missing)?;
+        *slot = None;
+        for slot in &mut self.loads {
+            if slot.is_some_and(|p| p.domain == aid) {
+                *slot = None;
+            }
+        }
+        for slot in &mut self.instances {
+            if slot.is_some_and(|i| i.domain == aid) {
+                *slot = None;
+            }
+        }
+        Ok(())
+    }
+
+    /// Commit this registry before issuing any reserved SCP03 challenge counter.
+    pub fn reserve_sequences(&mut self, count: u32) -> Result<core::ops::RangeInclusive<u32>> {
+        let end = self.sequence.checked_add(count).ok_or(Error::Quota)?;
+        if count == 0 || end > 0xffffff {
+            return Err(Error::Quota);
+        }
+        let start = self.sequence + 1;
+        self.sequence = end;
+        Ok(start..=end)
+    }
+
+    /// Call only with a verified package and a verified, staged image descriptor.
+    /// Persist the resulting metadata before reclaiming any formerly protected slot.
+    pub fn activate(&mut self, package: &Package<'_>, image: Descriptor) -> Result<()> {
+        let domain = Aid::new(package.manifest.domain)?;
+        let aid = Aid::new(package.manifest.package)?;
+        let domain_slot = self
+            .domains
+            .iter()
+            .position(|entry| entry.is_some_and(|d| d.aid == domain))
+            .ok_or(Error::Missing)?;
+        let authority = self.domains[domain_slot].unwrap();
+        if authority.incarnation != package.manifest.incarnation {
+            return Err(Error::Domain);
+        }
+        if authority
+            .owner
+            .is_some_and(|owner| owner != package.envelope.signer)
+        {
+            return Err(Error::KeyMismatch);
+        }
+        let length = crate::envelope::OVERHEAD_BYTES
+            + package.envelope.manifest.len()
+            + package.envelope.image.len();
+        if image.digest != package.envelope.package_digest
+            || image.length as usize != length
+            || image.slot >= 64
+        {
+            return Err(Error::Authentication);
+        }
+        let existing = self
+            .loads
+            .iter()
+            .position(|entry| entry.is_some_and(|p| p.aid == aid));
+        if let Some(index) = existing {
+            let previous = self.loads[index].unwrap();
+            if previous.domain != domain {
+                return Err(Error::Domain);
+            }
+            if package.manifest.version < previous.version {
+                return Err(Error::Rollback);
+            }
+            if package.manifest.version == previous.version {
+                return if previous.image == Some(image) {
+                    Ok(())
+                } else {
+                    Err(Error::Rollback)
+                };
+            }
+            if self.instances().any(|instance| instance.load == aid) {
+                return Err(Error::Busy);
+            }
+        } else if self.in_use(aid) {
+            return Err(Error::Busy);
+        }
+        if self
+            .loads()
+            .any(|p| p.aid != aid && p.image.is_some_and(|old| old.slot == image.slot))
+        {
+            return Err(Error::Busy);
+        }
+        let index = existing
+            .or_else(|| self.loads.iter().position(Option::is_none))
+            .ok_or(Error::Quota)?;
+        self.loads[index] = Some(Load {
+            domain,
+            aid,
+            version: package.manifest.version,
+            image: Some(image),
+        });
+        self.domains[domain_slot].as_mut().unwrap().owner = Some(package.envelope.signer);
+        Ok(())
+    }
+
+    pub fn remove_load(&mut self, aid: Aid) -> Result<()> {
+        if self.instances().any(|instance| instance.load == aid) {
+            return Err(Error::Busy);
+        }
+        let load = self
+            .loads
+            .iter_mut()
+            .flatten()
+            .find(|load| load.aid == aid)
+            .ok_or(Error::Missing)?;
+        if load.image.take().is_none() {
+            return Err(Error::Missing);
+        }
+        Ok(())
+    }
+
+    /// The applet heap must already have a durable snapshot bound to `identity`.
+    pub fn register(
+        &mut self,
+        package: &Package<'_>,
+        module: Aid,
+        aid: Aid,
+        identity: [u8; 16],
+        heap_bank: u8,
+    ) -> Result<()> {
+        let load = Aid::new(package.manifest.package)?;
+        let domain = Aid::new(package.manifest.domain)?;
+        if !self.loads().any(|p| {
+            p.aid == load
+                && p.domain == domain
+                && p.image
+                    .is_some_and(|image| image.digest == package.envelope.package_digest)
+        }) {
+            return Err(Error::Missing);
+        }
+        if self.in_use(aid)
+            || self
+                .instances()
+                .any(|i| i.heap_bank == heap_bank || i.identity == identity)
+        {
+            return Err(Error::Busy);
+        }
+        if heap_bank >= MAX_INSTANCES as u8 {
+            return Err(Error::Quota);
+        }
+        let file = microcard_engine_jcvm::cap::LoadFile::parse(package.envelope.image)
+            .map_err(|_| Error::Format)?;
+        if !file
+            .applets()
+            .map_err(|_| Error::Format)?
+            .iter()
+            .any(|entry| entry.aid == module.as_slice())
+        {
+            return Err(Error::Missing);
+        }
+        let slot = self
+            .instances
+            .iter_mut()
+            .find(|slot| slot.is_none())
+            .ok_or(Error::Quota)?;
+        *slot = Some(Instance {
+            domain,
+            load,
+            module,
+            aid,
+            identity,
+            heap_bank,
+        });
+        Ok(())
+    }
+
+    pub fn remove_instance(&mut self, aid: Aid) -> Result<()> {
+        let slot = self
+            .instances
+            .iter_mut()
+            .find(|slot| slot.is_some_and(|i| i.aid == aid))
+            .ok_or(Error::Missing)?;
+        *slot = None;
+        Ok(())
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        self.validate()?;
+        let mut e = Encoder::new(MAX_SNAPSHOT_BYTES);
+        e.array(6)?;
+        e.unsigned(1)?;
+        e.unsigned(1)?;
+        e.unsigned(u64::from(self.sequence))?;
+        e.array(MAX_DOMAINS)?;
+        for domain in self.domains {
+            let Some(d) = domain else {
+                e.null()?;
+                continue;
+            };
+            e.array(3)?;
+            e.bytes(d.aid.as_slice())?;
+            e.bytes(&d.incarnation)?;
+            if let Some(owner) = d.owner {
+                e.bytes(&owner)?;
+            } else {
+                e.null()?;
+            }
+        }
+        e.array(MAX_PACKAGES)?;
+        for load in self.loads {
+            let Some(p) = load else {
+                e.null()?;
+                continue;
+            };
+            e.array(4)?;
+            e.bytes(p.domain.as_slice())?;
+            e.bytes(p.aid.as_slice())?;
+            e.unsigned(u64::from(p.version))?;
+            if let Some(image) = p.image {
+                e.array(3)?;
+                e.unsigned(u64::from(image.slot))?;
+                e.unsigned(u64::from(image.length))?;
+                e.bytes(&image.digest)?;
+            } else {
+                e.null()?;
+            }
+        }
+        e.array(MAX_INSTANCES)?;
+        for instance in self.instances {
+            let Some(i) = instance else {
+                e.null()?;
+                continue;
+            };
+            e.array(6)?;
+            for aid in [i.domain, i.load, i.module, i.aid] {
+                e.bytes(aid.as_slice())?;
+            }
+            e.bytes(&i.identity)?;
+            e.unsigned(u64::from(i.heap_bank))?;
+        }
+        Ok(e.finish())
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > MAX_SNAPSHOT_BYTES {
+            return Err(Error::Format);
+        }
+        let mut d = Decoder::new(bytes);
+        d.record(6).map_err(|_| Error::IncompatibleState)?;
+        if d.unsigned()? != 1 || d.unsigned()? != 1 {
+            return Err(Error::IncompatibleState);
+        }
+        let mut state = Self::new([0; 16], None);
+        state.sequence = d.number()?;
+        d.record(MAX_DOMAINS)?;
+        for slot in &mut state.domains {
+            if d.null() {
+                *slot = None;
+                continue;
+            }
+            d.record(3)?;
+            *slot = Some(Domain {
+                aid: Aid::new(d.bytes(16)?)?,
+                incarnation: d.fixed()?,
+                owner: if d.null() { None } else { Some(d.fixed()?) },
+            });
+        }
+        d.record(MAX_PACKAGES)?;
+        for slot in &mut state.loads {
+            if d.null() {
+                continue;
+            }
+            d.record(4)?;
+            let domain = Aid::new(d.bytes(16)?)?;
+            let aid = Aid::new(d.bytes(16)?)?;
+            let version = d.number()?;
+            let image = if d.null() {
+                None
+            } else {
+                d.record(3)?;
+                Some(Descriptor {
+                    slot: d.number()?,
+                    length: d.number()?,
+                    digest: d.fixed()?,
+                })
+            };
+            *slot = Some(Load {
+                domain,
+                aid,
+                version,
+                image,
+            });
+        }
+        d.record(MAX_INSTANCES)?;
+        for slot in &mut state.instances {
+            if d.null() {
+                continue;
+            }
+            d.record(6)?;
+            *slot = Some(Instance {
+                domain: Aid::new(d.bytes(16)?)?,
+                load: Aid::new(d.bytes(16)?)?,
+                module: Aid::new(d.bytes(16)?)?,
+                aid: Aid::new(d.bytes(16)?)?,
+                identity: d.fixed()?,
+                heap_bank: d.number()?,
+            });
+        }
+        d.finish()?;
+        state.validate()?;
+        Ok(state)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.domains[0].is_none_or(|d| d.aid != Aid::isd()) || self.sequence > 0xffffff {
+            return Err(Error::Format);
+        }
+        for (index, domain) in self
+            .domains
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| d.map(|d| (i, d)))
+        {
+            if self.domains[..index]
+                .iter()
+                .flatten()
+                .any(|d| d.aid == domain.aid)
+            {
+                return Err(Error::Format);
+            }
+        }
+        for (index, load) in self
+            .loads
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.map(|p| (i, p)))
+        {
+            if load.version == 0
+                || !self
+                    .domains()
+                    .any(|d| d.aid == load.domain && d.owner.is_some())
+                || self.domains().any(|d| d.aid == load.aid)
+                || self.loads[..index].iter().flatten().any(|p| {
+                    p.aid == load.aid
+                        || p.image
+                            .zip(load.image)
+                            .is_some_and(|(a, b)| a.slot == b.slot)
+                })
+                || load.image.is_some_and(|image| {
+                    image.slot >= 64
+                        || image.length as usize <= crate::envelope::OVERHEAD_BYTES
+                        || image.length as usize > crate::jcvm_package::MAX_PACKAGE_BYTES
+                })
+            {
+                return Err(Error::Format);
+            }
+        }
+        for (index, instance) in self
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.map(|p| (i, p)))
+        {
+            if instance.heap_bank >= MAX_INSTANCES as u8
+                || !self.loads().any(|p| {
+                    p.aid == instance.load && p.domain == instance.domain && p.image.is_some()
+                })
+                || self.domains().any(|d| d.aid == instance.aid)
+                || self.loads().any(|p| p.aid == instance.aid)
+                || self.instances[..index].iter().flatten().any(|i| {
+                    i.aid == instance.aid
+                        || i.heap_bank == instance.heap_bank
+                        || i.identity == instance.identity
+                })
+            {
+                return Err(Error::Format);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The small metadata journal owns activation. A failed write may have committed;
+/// recovery resolves it before the caller can query state or stage another image.
+pub struct Store<F: crate::journal::Flash> {
+    journal: crate::journal::Journal<F>,
+    state: Registry,
+    recovery_required: bool,
+}
+
+impl<F: crate::journal::Flash> Store<F> {
+    pub fn open(
+        flash: F,
+        key: impl Into<crate::journal::JournalKey>,
+        initial: Registry,
+        provider: &mut impl crate::crypto::CryptoProvider,
+    ) -> Result<Self> {
+        let (mut journal, snapshot) = crate::journal::Journal::open_with(flash, key, provider)?;
+        let state = if let Some(snapshot) = snapshot {
+            Registry::decode(&snapshot)?
+        } else {
+            journal.commit_with(&initial.encode()?, provider)?;
+            initial
+        };
+        Ok(Self {
+            journal,
+            state,
+            recovery_required: false,
+        })
+    }
+
+    pub fn state(&self) -> Result<&Registry> {
+        if self.recovery_required {
+            return Err(Error::Storage);
+        }
+        Ok(&self.state)
+    }
+
+    pub fn recover(&mut self, provider: &mut impl crate::crypto::CryptoProvider) -> Result<()> {
+        self.recovery_required = true;
+        let snapshot = self.journal.recover_with(provider)?.ok_or(Error::Storage)?;
+        self.state = Registry::decode(&snapshot)?;
+        self.recovery_required = false;
+        Ok(())
+    }
+
+    pub fn commit(
+        &mut self,
+        next: Registry,
+        provider: &mut impl crate::crypto::CryptoProvider,
+    ) -> Result<()> {
+        self.state()?;
+        let result = self.journal.commit_with(&next.encode()?, provider);
+        match result {
+            Ok(()) => {
+                self.state = next;
+                Ok(())
+            }
+            Err(error) => {
+                self.recover(provider)?;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn into_flash(self) -> F {
+        self.journal.into_flash()
+    }
+}
+
+#[cfg(all(test, feature = "software-crypto"))]
+mod tests {
+    use super::*;
+    use crate::{
+        crypto::{self, SoftwareCrypto},
+        envelope, jcvm_package,
+        journal::MemoryFlash,
+    };
+    use microcard_engine_jcvm::{applet::Sizes, cap::LoadFile};
+
+    fn signed(version: u32, incarnation: u8, private: u8) -> Vec<u8> {
+        let image = include_bytes!(
+            "../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
+        );
+        let header = LoadFile::parse(image).unwrap().header().unwrap();
+        let manifest = jcvm_package::Manifest {
+            domain: &crate::globalplatform::ISD_AID,
+            incarnation: [incarnation; 16],
+            package: header.package_aid,
+            package_version: [header.package_major, header.package_minor],
+            version,
+            sizes: Sizes {
+                heap_bytes: 65536,
+                frame_words: 8192,
+                ..Sizes::default()
+            },
+        }
+        .encode()
+        .unwrap();
+        let key = crypto::p256_public_key(&[private; 32]).unwrap();
+        let mut raw = envelope::signing_prefix_bounded(
+            &manifest,
+            image.len(),
+            &crypto::sha256(image),
+            &key,
+            jcvm_package::MAX_PACKAGE_BYTES,
+        )
+        .unwrap();
+        raw.extend(crypto::p256_ecdsa_sign_package(&[private; 32], &raw).unwrap());
+        raw.extend(image);
+        raw
+    }
+
+    #[test]
+    fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
+        let initial = Registry::new([1; 16], None);
+        let vector: serde_json::Value =
+            serde_json::from_str(include_str!("../../../format/jcvm-registry-cbor-v1.json"))
+                .unwrap();
+        let hex = vector["hex"].as_str().unwrap();
+        let expected: Vec<_> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect();
+        assert_eq!(initial.encode().unwrap(), expected);
+        assert_eq!(Registry::decode(&expected).unwrap(), initial);
+        assert!(core::mem::size_of::<Registry>() <= MAX_SNAPSHOT_BYTES);
+        let mut counters = initial;
+        assert_eq!(counters.reserve_sequences(2).unwrap(), 1..=2);
+        assert_eq!(
+            Registry::decode(&counters.encode().unwrap())
+                .unwrap()
+                .reserve_sequences(1)
+                .unwrap(),
+            3..=3
+        );
+        assert_eq!(counters.reserve_sequences(0), Err(Error::Quota));
+        assert_eq!(counters.reserve_sequences(0xffffff), Err(Error::Quota));
+        let mut store = Store::open(
+            MemoryFlash::new(4096),
+            [3; 16],
+            initial,
+            &mut SoftwareCrypto,
+        )
+        .unwrap();
+        let raw = signed(7, 1, 7);
+        let mut scratch = alloc::vec![0; 16384];
+        let package = Package::verify(&raw, &mut SoftwareCrypto, &mut scratch).unwrap();
+        let image = Descriptor {
+            slot: 0,
+            length: raw.len() as u32,
+            digest: package.envelope.package_digest,
+        };
+        let mut next = *store.state().unwrap();
+        next.activate(&package, image).unwrap();
+        store.commit(next, &mut SoftwareCrypto).unwrap();
+        assert_eq!(
+            store.state().unwrap().domains[0].unwrap().owner,
+            Some(package.envelope.signer)
+        );
+        for (version, incarnation, private, error) in [
+            (6, 1, 7, Error::Rollback),
+            (8, 2, 7, Error::Domain),
+            (8, 1, 8, Error::KeyMismatch),
+        ] {
+            let raw = signed(version, incarnation, private);
+            let package = Package::verify(&raw, &mut SoftwareCrypto, &mut scratch).unwrap();
+            let mut candidate = next;
+            assert_eq!(
+                candidate.activate(
+                    &package,
+                    Descriptor {
+                        slot: 1,
+                        length: raw.len() as u32,
+                        digest: package.envelope.package_digest
+                    }
+                ),
+                Err(error)
+            );
+            assert_eq!(candidate, next);
+        }
+
+        let raw = signed(8, 1, 7);
+        let package = Package::verify(&raw, &mut SoftwareCrypto, &mut scratch).unwrap();
+        let mut newer = next;
+        newer
+            .activate(
+                &package,
+                Descriptor {
+                    slot: 1,
+                    length: raw.len() as u32,
+                    digest: package.envelope.package_digest,
+                },
+            )
+            .unwrap();
+        store.journal.flash_mut().fail_after = Some(0);
+        assert_eq!(
+            store.commit(newer, &mut SoftwareCrypto),
+            Err(Error::Storage)
+        );
+        assert_eq!(store.state().unwrap(), &next);
+        // Burn nonce, mark reclaim, erase, write authenticated record and markers;
+        // fail the anchor update after the new image has become authoritative.
+        store.journal.flash_mut().fail_after =
+            Some(4 + 1 + 4096 + 24 + newer.encode().unwrap().len() + 16 + 1 + 1);
+        assert_eq!(
+            store.commit(newer, &mut SoftwareCrypto),
+            Err(Error::Storage)
+        );
+        assert_eq!(store.state(), Err(Error::Storage));
+        store.journal.flash_mut().fail_after = None;
+        store.recover(&mut SoftwareCrypto).unwrap();
+        assert_eq!(store.state().unwrap(), &newer);
+        assert_eq!(
+            store
+                .state()
+                .unwrap()
+                .protected_images()
+                .next()
+                .unwrap()
+                .slot,
+            1
+        );
+
+        let aid = Aid::new(&[0xf0, 1, 2, 3, 4]).unwrap();
+        let file = LoadFile::parse(package.envelope.image).unwrap();
+        let module = Aid::new(file.applets().unwrap().iter().next().unwrap().aid).unwrap();
+        newer.register(&package, module, aid, [4; 16], 0).unwrap();
+        store.commit(newer, &mut SoftwareCrypto).unwrap();
+        store.recover(&mut SoftwareCrypto).unwrap();
+        assert_eq!(store.state().unwrap().instances().next().unwrap().aid, aid);
+        let load = Aid::new(package.manifest.package).unwrap();
+        assert_eq!(newer.remove_load(load), Err(Error::Busy));
+        newer.remove_instance(aid).unwrap();
+        newer.remove_load(load).unwrap();
+        store.commit(newer, &mut SoftwareCrypto).unwrap();
+        let mut reopened =
+            Store::open(store.into_flash(), [3; 16], initial, &mut SoftwareCrypto).unwrap();
+        let mut tombstone = *reopened.state().unwrap();
+        assert_eq!(
+            tombstone.activate(
+                &package,
+                Descriptor {
+                    slot: 1,
+                    length: raw.len() as u32,
+                    digest: package.envelope.package_digest
+                }
+            ),
+            Err(Error::Rollback)
+        );
+        assert_eq!(tombstone.loads().next().unwrap().version, 8);
+        assert_eq!(tombstone.protected_images().count(), 0);
+        reopened.recover(&mut SoftwareCrypto).unwrap();
+
+        let mut duplicate = initial;
+        duplicate.domains[1] = duplicate.domains[0];
+        assert_eq!(duplicate.encode(), Err(Error::Format));
+        let child = Aid::new(&[0xf0, 5, 6, 7, 8]).unwrap();
+        assert_eq!(
+            {
+                let mut unclaimed = initial;
+                unclaimed.add_domain(child, [2; 16])
+            },
+            Err(Error::Unauthorized)
+        );
+        tombstone.add_domain(child, [2; 16]).unwrap();
+        assert_eq!(
+            tombstone.domains().find(|d| d.aid == child).unwrap().owner,
+            tombstone.domains[0].unwrap().owner
+        );
+        assert_eq!(
+            tombstone.remove_domain(Aid::isd()),
+            Err(Error::Unauthorized)
+        );
+        tombstone.remove_domain(child).unwrap();
+        let mut old = expected.clone();
+        old[2] = 0;
+        assert_eq!(Registry::decode(&old), Err(Error::IncompatibleState));
+        let mut trailing = expected;
+        trailing.push(0);
+        assert_eq!(Registry::decode(&trailing), Err(Error::Format));
+    }
+}

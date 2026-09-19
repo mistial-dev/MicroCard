@@ -7,6 +7,53 @@ use alloc::vec::Vec;
 
 pub const ISD_AID: [u8; 8] = [0xa0, 0x00, 0x00, 0x01, 0x51, 0x00, 0x00, 0x00];
 pub const MAX_AID_BYTES: usize = 16;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+
+pub struct Aid {
+    bytes: [u8; 16],
+    len: u8,
+}
+
+impl Aid {
+    pub fn new(value: &[u8]) -> Result<Self> {
+        if !(5..=16).contains(&value.len()) {
+            return Err(Error::Format);
+        }
+        let mut bytes = [0; 16];
+        bytes[..value.len()].copy_from_slice(value);
+        Ok(Self {
+            bytes,
+            len: value.len() as u8,
+        })
+    }
+
+    pub fn isd() -> Self {
+        Self::new(&crate::globalplatform::ISD_AID).unwrap()
+    }
+
+    pub fn synthetic(kind: u8, stable: &[u8]) -> Self {
+        Self {
+            bytes: crate::globalplatform::synthetic_aid(kind, stable),
+            len: 16,
+        }
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+
+    #[cfg(feature = "mc04")]
+    pub(crate) fn padded(&self) -> [u8; 16] { self.bytes }
+
+    #[cfg(feature = "mc04")]
+    pub(crate) fn valid(&self) -> bool {
+        (5..=16).contains(&self.len)
+            && self.bytes[usize::from(self.len)..]
+                .iter()
+                .all(|byte| *byte == 0)
+    }
+}
+
 const SSD_PACKAGE_AID: &[u8] = &[0xa0, 0x00, 0x00, 0x01, 0x51, 0x53, 0x50];
 const SSD_MODULE_AID: &[u8] = &[0xa0, 0x00, 0x00, 0x01, 0x51, 0x53, 0x50, 0x41];
 // GP 2.3.1 Appendix H, format 1. The final OID announces the SCP03 i parameter this

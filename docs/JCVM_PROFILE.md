@@ -47,8 +47,10 @@ back mutations.
 The session accepts parsed GlobalPlatform installation requests, checks the load-file
 AID, and frames instance AID, privileges, and C9 application data for the applet.
 Explicit `Applet.register` calls must use the requested instance AID. Empty or short
-registration AIDs and repeated registration are rejected. The management adapter
-still needs to persist registry ownership and dispatch selection by that AID.
+registration AIDs and repeated registration are rejected. The bounded registry journal
+now persists ownership, rollback history, image references, and installation identities.
+The management adapter still needs to coordinate those records with image and heap
+activation and dispatch selection by instance AID.
 
 ## What holds this claim up
 
