@@ -290,6 +290,7 @@ dependencies = [
  "cmac",
  "hmac",
  "microcard-engine-jcvm",
+ "microcard-memory",
  "p256",
  "serde",
  "serde_json",
@@ -302,9 +303,14 @@ dependencies = [
 name = "microcard-engine-jcvm"
 version = "0.1.0-wip"
 dependencies = [
+ "microcard-memory",
  "sha2",
  "zeroize",
 ]
+
+[[package]]
+name = "microcard-memory"
+version = "0.1.0-wip"
 
 [[package]]
 name = "microcard-sim"

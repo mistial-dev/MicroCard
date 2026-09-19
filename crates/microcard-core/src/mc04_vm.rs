@@ -124,23 +124,16 @@ impl Heap {
         }
     }
 
-    fn reserve(&mut self, size: usize) -> Result<()> {
+    fn allocation_end(&self, count: usize, element_bytes: usize) -> Result<usize> {
         if self.objects.len() >= MAX_TRANSIENT_OBJECTS {
             return Err(Error::Quota);
         }
-        let used = self.used.checked_add(size).ok_or(Error::Quota)?;
-        if used > MAX_TRANSIENT_BYTES {
-            return Err(Error::Quota);
-        }
-        self.used = used;
-        Ok(())
+        microcard_memory::allocation_range(self.used, 16, count, element_bytes, 1, MAX_TRANSIENT_BYTES)
+            .map(|range| range.end).ok_or(Error::Quota)
     }
 
     fn allocate(&mut self, bytes: bool, length: usize) -> Result<RuntimeValue> {
-        let size = length
-            .checked_mul(if bytes { 1 } else { 4 })
-            .and_then(|n| n.checked_add(16))
-            .ok_or(Error::Quota)?;
+        let end = self.allocation_end(length, if bytes { 1 } else { 4 })?;
         self.objects.try_reserve(1).map_err(|_| Error::Quota)?;
         let object = if bytes {
             let mut values = Vec::new();
@@ -157,40 +150,40 @@ impl Heap {
             values.resize(length, 0i32);
             Object::Ints(values)
         };
-        self.reserve(size)?;
         self.objects.push(object);
+        self.used = end;
         Ok(RuntimeValue::Ref(self.objects.len()))
     }
     fn allocate_struct(&mut self, unit: usize, owner: u16, fields: usize) -> Result<RuntimeValue> {
-        let size = fields
-            .checked_mul(TRANSIENT_VALUE_BYTES)
-            .and_then(|n| n.checked_add(16))
-            .ok_or(Error::Quota)?;
+        let end = self.allocation_end(fields, TRANSIENT_VALUE_BYTES)?;
         self.objects.try_reserve(1).map_err(|_| Error::Quota)?;
         let mut values = Vec::new();
         values
             .try_reserve_exact(fields)
             .map_err(|_| Error::Quota)?;
-        self.reserve(size)?;
         values.resize(fields, RuntimeValue::Int(0));
         self.objects.push(Object::Struct {
             unit,
             owner,
             fields: values,
         });
+        self.used = end;
         Ok(RuntimeValue::Ref(self.objects.len()))
     }
     pub fn allocate_bytes(&mut self, mut values: Vec<u8>) -> Result<RuntimeValue> {
-        let size = values.len().checked_add(16).ok_or(Error::Quota)?;
+        let end = match self.allocation_end(values.len(), 1) {
+            Ok(end) => end,
+            Err(error) => {
+                values.zeroize();
+                return Err(error);
+            }
+        };
         if self.objects.try_reserve(1).is_err() {
             values.zeroize();
             return Err(Error::Quota);
         }
-        if let Err(error) = self.reserve(size) {
-            values.zeroize();
-            return Err(error);
-        }
         self.objects.push(Object::Bytes(values));
+        self.used = end;
         Ok(RuntimeValue::Ref(self.objects.len()))
     }
     pub fn bytes(&self, value: RuntimeValue) -> Result<&[u8]> {
@@ -1113,6 +1106,14 @@ mod tests {
             objects: Vec::new(),
             used: 0,
         };
+        // Quota rejection must precede backing allocations and leave the heap unchanged.
+        for length in [MAX_TRANSIENT_BYTES, usize::MAX] {
+            assert_eq!(heap.allocate(true, length), Err(Error::Quota));
+            assert_eq!(heap.allocate(false, length), Err(Error::Quota));
+            assert_eq!(heap.allocate_struct(0, 0, length), Err(Error::Quota));
+            assert_eq!(heap.objects.capacity(), 0);
+            assert_eq!(heap.used, 0);
+        }
         for _ in 0..MAX_TRANSIENT_OBJECTS {
             heap.allocate(true, 0).unwrap();
         }

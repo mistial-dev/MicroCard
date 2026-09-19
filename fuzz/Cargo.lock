@@ -333,6 +333,7 @@ dependencies = [
  "ccm",
  "cmac",
  "hmac",
+ "microcard-memory",
  "p256",
  "serde",
  "sha2",
@@ -348,6 +349,10 @@ dependencies = [
  "microcard-core",
  "serde_json",
 ]
+
+[[package]]
+name = "microcard-memory"
+version = "0.1.0-wip"
 
 [[package]]
 name = "p256"

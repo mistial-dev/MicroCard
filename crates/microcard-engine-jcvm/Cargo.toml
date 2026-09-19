@@ -8,6 +8,7 @@ license.workspace = true
 # cost flash and nothing on the card prints them.
 diagnostics = []
 [dependencies]
+microcard-memory = { path = "../microcard-memory" }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 # The test host answers digests with a real implementation, so the engine is exercised

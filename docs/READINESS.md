@@ -113,6 +113,14 @@ deselect callbacks, ordinary-write rollback, and retry counts across reboot. The
 adds 984 development text bytes against `9ee4205`; it is a correctness change, not a
 size optimization.
 
+Both heaps now share checked allocation sizing through `microcard-memory`, with no
+dependency on either interpreter. MC04 checks byte and object quotas before requesting
+backing memory and publishes accounting only after allocation succeeds. Existing quota
+tests cover overflow rejection, unchanged accounting, and JCVM alignment. Against
+`62d0a5f`, development text falls by 36 bytes for MC04 and rises by 24 for JCVM; static
+RAM is unchanged. MC04 still uses separate object buffers and its existing allocation
+charges. Compact storage and revised analyzer accounting remain implementation work.
+
 ## Crypto replacement measurements
 
 `python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 187,188 text bytes, SHA-256 replacement 189,876, SHA-256 plus P-256 203,904, and all hardware providers 213,124. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.

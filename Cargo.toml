@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/microcard-core", "crates/microcard-engine-jcvm", "crates/microcard-sim"]
+members = ["crates/microcard-core", "crates/microcard-engine-jcvm", "crates/microcard-memory", "crates/microcard-sim"]
 exclude = ["board/nrf52840"]
 resolver = "2"
 [workspace.package]

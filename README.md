@@ -83,6 +83,7 @@ The quickest hardware to talk to is a USB dongle, which needs no debug probe. Se
 
 - `crates/microcard-core`: portable `no_std` verifier, CIL interpreter, domains, storage, secure messaging, and native services.
 - `crates/microcard-engine-jcvm`: portable `no_std` Java Card engine, covering the CAP container, structural verification, the object heap, linking, the interpreter and the native API classes.
+- `crates/microcard-memory`: checked allocation arithmetic shared by the two engines.
 - `crates/microcard-sim`: persistent desktop simulator, package inspection, and the Java Card serving mode.
 - `managed`: framework assemblies, Roslyn analyzers, preprocessor, packager, and bundle tools.
 - `wallet`: Java 21 client using GlobalPlatformPro.

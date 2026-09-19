@@ -104,16 +104,13 @@ impl<'a> Heap<'a> {
             owner,
             clear_event: 0,
         };
-        let data = (length as usize)
-            .checked_mul(info.element_size())
-            .ok_or(Error::Quota)?;
-        // Objects stay word aligned so a short field never straddles two words.
-        let size = (HEADER + data).next_multiple_of(2);
-        let at = self.next;
-        let end = at.checked_add(size).ok_or(Error::Quota)?;
-        if end > self.bytes.len() || end > u16::MAX as usize {
-            return Err(Error::Quota);
-        }
+        // Preserve word alignment and the nonzero, 16-bit reference contract.
+        let range = microcard_memory::allocation_range(
+            self.next, HEADER, length as usize, info.element_size(), 2,
+            self.bytes.len().min(u16::MAX as usize),
+        ).ok_or(Error::Quota)?;
+        let at = range.start;
+        let end = range.end;
         self.bytes[at..end].fill(0);
         self.bytes[at..at + 2].copy_from_slice(&class.to_be_bytes());
         self.bytes[at + 2..at + 4].copy_from_slice(&length.to_be_bytes());
@@ -478,8 +475,15 @@ mod tests {
     fn a_heap_that_runs_out_refuses_rather_than_overwriting() {
         let mut bytes = vec![0; 32];
         let mut heap = Heap::new(&mut bytes).unwrap();
-        heap.new_array(KIND_BYTE, 16, 1).unwrap();
+        heap.new_array(KIND_BYTE, 15, 1).unwrap();
+        assert_eq!(heap.used(), 24); // Header and odd byte payload round to a word.
+        let before = heap.image().to_vec();
         assert_eq!(heap.new_array(KIND_BYTE, 16, 1), Err(Error::Quota));
+        assert_eq!(heap.new_array(KIND_INT, u16::MAX, 1), Err(Error::Quota));
+        assert_eq!(heap.image(), before);
+        assert_eq!(heap.new_array(KIND_BYTE, 2, 1).unwrap(), 24);
+        assert_eq!(heap.used(), 32);
+        assert_eq!(heap.new_object(1, 0, 1), Err(Error::Quota));
         // The slab has to hold at least one header.
         let mut tiny = vec![0; 4];
         assert!(Heap::new(&mut tiny).is_err());
