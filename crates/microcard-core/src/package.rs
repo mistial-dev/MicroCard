@@ -17,7 +17,7 @@ pub(crate) fn valid_identifier(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AssemblyEntry {
     pub aid: String,
@@ -27,7 +27,7 @@ pub struct AssemblyEntry {
     pub select: Option<u16>,
     pub deselect: Option<u16>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub domain: String,
@@ -129,7 +129,7 @@ impl Dependency {
     pub fn matches_view(&self, provider: &PackageView<'_>) -> bool {
         self.matches_parts(&provider.manifest, provider.signer, provider.digest)
     }
-    fn matches_parts(&self, manifest: &Manifest, signer: [u8; 32], digest: [u8; 32]) -> bool {
+    pub(crate) fn matches_parts(&self, manifest: &Manifest, signer: [u8; 32], digest: [u8; 32]) -> bool {
         self.assembly == manifest.assembly
             && self
                 .ranges
@@ -153,7 +153,7 @@ impl Dependency {
         shape_valid
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
     pub arena: u32,

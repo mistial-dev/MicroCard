@@ -1220,7 +1220,7 @@ fn run_loaded(
     let calls = card.state.domain(domain).unwrap().imports[assembly].clone();
     let package = PackageView::verify(&raw)?;
     let units = [ExecutionUnit {
-        package,
+        package: (&package).into(),
         bindings: &bindings,
         calls: &calls,
     }];
@@ -1359,14 +1359,13 @@ fn execution_unit_queue_is_deduplicated_and_bounded() {
     );
 
     let isd = &card.state.isd;
-    let raw = isd.assemblies.get("mscorlib").unwrap();
     let bindings = isd.bindings.get("mscorlib").unwrap();
     let calls = isd.imports.get("mscorlib").unwrap();
     let mut full = Vec::new();
     full.try_reserve_exact(MAX_EXECUTION_UNITS).unwrap();
     for _ in 0..MAX_EXECUTION_UNITS {
         full.push(ExecutionUnit {
-            package: PackageView::verify(raw).unwrap(),
+            package: isd.package("mscorlib").unwrap(),
             bindings,
             calls,
         });
@@ -1380,10 +1379,11 @@ fn execution_unit_queue_is_deduplicated_and_bounded() {
 #[test]
 fn linked_verifier_rejects_working_sets_before_unbounded_growth() {
     let raw = counter_package("a", [0; 16], 1, 7);
+    let package = PackageView::verify(&raw).unwrap();
     let mut units = Vec::new();
     for _ in 0..=MAX_EXECUTION_UNITS {
         units.push(ExecutionUnit {
-            package: PackageView::verify(&raw).unwrap(),
+            package: (&package).into(),
             bindings: &[],
             calls: &[],
         });
@@ -2409,7 +2409,7 @@ fn issuer_dependency_code_cannot_reach_caller_domain_storage() {
     );
     let package = PackageView::verify(&raw).unwrap();
     let calls = [ResolvedCall { member: 1, target: CallTarget::Native(3) }];
-    let units = [ExecutionUnit { package, bindings: &[], calls: &calls }];
+    let units = [ExecutionUnit { package: (&package).into(), bindings: &[], calls: &calls }];
     let schema = [StorageDeclaration { key: 1, kind: 1, max_bytes: 0 }];
     let mut store = IntStore::new();
     let mut blobs = BlobStore::new();
@@ -3576,6 +3576,18 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     let package = library_package("ISD", card.state.isd.incarnation, "mscorlib", 1, 42);
     load(&mut card, &package).unwrap();
     assert_eq!(calls.get(), [1, 1]);
+
+    let metadata = card.state.isd.packages.get("mscorlib").unwrap();
+    let candidate = card.state.try_clone().unwrap();
+    assert!(Rc::ptr_eq(metadata, candidate.isd.packages.get("mscorlib").unwrap()));
+    let units = execution_units(&card.state, "ISD", "mscorlib").unwrap();
+    assert!(core::ptr::eq(units[0].package.manifest, &metadata.manifest));
+    visit_registry(&card.state, 0x10, |aid, entry| {
+        registry_record(0x10, aid, entry).map(|_| ())
+    }).unwrap();
+    assert_eq!(calls.get(), [1, 1]);
+    drop(units);
+    drop(candidate);
 
     let flash = card.into_flash();
     let platform = TrackingPlatform {

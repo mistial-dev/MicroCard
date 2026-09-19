@@ -44,6 +44,10 @@ const MAX_MANAGED_RESPONSE_WITH_STATUS: usize = MAX_MANAGED_RESPONSE_BYTES + 2;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NameMap<V>(Vec<(Rc<str>, V)>);
 
+impl<V> Default for NameMap<V> {
+    fn default() -> Self { Self::new() }
+}
+
 impl<V> NameMap<V> {
     fn new() -> Self {
         Self(Vec::new())
@@ -1206,8 +1210,7 @@ fn resolve_calls(
             let (dependency, binding) = binding.ok_or(Error::Missing)?;
             let (_, provider_name, provider) =
                 state.assembly_by_digest(&binding.digest)?;
-            let provider_raw = provider.assemblies.get(provider_name).ok_or(Error::Missing)?;
-            let provider = PackageView::verify(provider_raw)?;
+            let provider = provider.package(provider_name)?;
             if provider.digest != binding.digest
                 || reference.name != provider.manifest.assembly
                 || reference.version != provider.manifest.assembly_version
@@ -1241,7 +1244,7 @@ fn resolve_calls(
 }
 
 struct ExecutionUnit<'a> {
-    package: PackageView<'a>,
+    package: StoredPackageView<'a>,
     bindings: &'a [ResolvedDependency],
     calls: &'a [ResolvedCall],
 }
@@ -1268,7 +1271,7 @@ fn push_execution_unit<'a>(
         return Err(Error::Quota);
     }
     let source = state.domain(domain).ok_or(Error::Domain)?;
-    let package = PackageView::verify(source.assemblies.get(assembly).ok_or(Error::Missing)?)?;
+    let package = source.package(assembly)?;
     if expected_digest.is_some_and(|digest| digest != package.digest) {
         return Err(Error::Unauthorized);
     }
@@ -1581,10 +1584,9 @@ fn resolve_dependency(
     let mut ambiguous = false;
     let mut consider = |domain: Option<&Domain>| {
         if let Some(provider) = domain
-            .and_then(|d| d.assemblies.get(dependency.assembly.as_str()))
-            .and_then(|raw| PackageView::verify(raw).ok())
+            .and_then(|d| d.package(dependency.assembly.as_str()).ok())
             .filter(|provider| {
-                dependency.matches_view(provider)
+                dependency.matches_parts(provider.manifest, provider.signer, provider.digest)
                     && provider
                         .manifest
                         .export
@@ -1937,6 +1939,50 @@ impl<'de> Deserialize<'de> for Instances {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct StoredPackage {
+    manifest: Manifest,
+    image: core::ops::Range<usize>,
+    signer: [u8; 32],
+    digest: [u8; 32],
+}
+
+impl StoredPackage {
+    fn from_verified(package: PackageView<'_>) -> Self {
+        let start = package.image.as_ptr() as usize - package.raw.as_ptr() as usize;
+        Self {
+            image: start..start + package.image.len(),
+            manifest: package.manifest,
+            signer: package.signer,
+            digest: package.digest,
+        }
+    }
+}
+
+struct StoredPackageView<'a> {
+    #[cfg(test)]
+    raw: &'a [u8],
+    manifest: &'a Manifest,
+    image: &'a [u8],
+    signer: [u8; 32],
+    digest: [u8; 32],
+}
+
+#[cfg(test)]
+impl<'a> From<&'a PackageView<'a>> for StoredPackageView<'a> {
+    fn from(package: &'a PackageView<'a>) -> Self {
+        Self { raw: package.raw, manifest: &package.manifest, image: package.image,
+            signer: package.signer, digest: package.digest }
+    }
+}
+
+impl PackageData for StoredPackageView<'_> {
+    fn manifest(&self) -> &Manifest { self.manifest }
+    fn image(&self) -> &[u8] { self.image }
+    fn digest(&self) -> [u8; 32] { self.digest }
+    fn key(&self) -> [u8; 32] { self.signer }
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Domain {
@@ -1945,6 +1991,8 @@ struct Domain {
     key: Option<[u8; 32]>,
     #[serde(with = "package_map")]
     assemblies: NameMap<Rc<Vec<u8>>>,
+    #[serde(skip)]
+    packages: NameMap<Rc<StoredPackage>>,
     bindings: NameMap<Vec<ResolvedDependency>>,
     imports: NameMap<Vec<ResolvedCall>>,
     versions: NameMap<(u32, [u8; 32])>,
@@ -1966,12 +2014,26 @@ impl Drop for Domain {
     }
 }
 impl Domain {
+    fn package(&self, name: &str) -> Result<StoredPackageView<'_>> {
+        let metadata = self.packages.get(name).ok_or(Error::Missing)?;
+        let raw = self.assemblies.get(name).ok_or(Error::Storage)?;
+        Ok(StoredPackageView {
+            #[cfg(test)]
+            raw,
+            manifest: &metadata.manifest,
+            image: raw.get(metadata.image.clone()).ok_or(Error::Storage)?,
+            signer: metadata.signer,
+            digest: metadata.digest,
+        })
+    }
+
     fn new(incarnation: [u8; 16], registry_aid: RegistryAid, policy: DomainPolicy) -> Self {
         Self {
             incarnation,
             registry_aid,
             key: None,
             assemblies: NameMap::new(),
+            packages: NameMap::new(),
             bindings: NameMap::new(),
             imports: NameMap::new(),
             versions: NameMap::new(),
@@ -1996,6 +2058,7 @@ impl Domain {
             assemblies: self
                 .assemblies
                 .try_clone_with(context, |_, package| Ok(Rc::clone(package)))?,
+            packages: self.packages.try_clone_with(context, |_, metadata| Ok(Rc::clone(metadata)))?,
             bindings: self.bindings.try_clone_with(context, |context, bindings| {
                 context.clone_vec(bindings)
             })?,
@@ -2124,7 +2187,6 @@ enum RegistryEntry<'a> {
         domain_id: &'a str,
         domain: &'a Domain,
         assembly: &'a str,
-        raw: &'a [u8],
     },
 }
 
@@ -2174,7 +2236,7 @@ fn visit_registry<'a>(
                     .iter()
                     .map(|(id, domain)| (id.as_str(), domain)),
             ) {
-                for (assembly, raw) in domain.assemblies.iter() {
+                for assembly in domain.assemblies.keys() {
                     let digest = domain.versions.get(assembly).ok_or(Error::Storage)?.1;
                     let aid = crate::globalplatform::synthetic_aid(0x4c, &digest);
                     visit(
@@ -2183,7 +2245,6 @@ fn visit_registry<'a>(
                             domain_id,
                             domain,
                             assembly,
-                            raw,
                         },
                     )?;
                 }
@@ -2231,9 +2292,8 @@ fn registry_record(p1: u8, aid: &[u8], entry: RegistryEntry<'_>) -> Result<Vec<u
             domain_id,
             domain,
             assembly,
-            raw,
         } => {
-            let package = PackageView::verify(raw)?;
+            let package = domain.package(assembly)?;
             if package.manifest.assembly != assembly {
                 return Err(Error::Storage);
             }
@@ -2414,7 +2474,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         staging: S,
     ) -> Result<Self> {
         let (mut journal, data) = Journal::open_with(flash, storage_key, &mut platform)?;
-        let state: State = match data {
+        let mut state: State = match data {
             Some(d) => {
                 if d.len() > 49152 {
                     return Err(Error::Storage);
@@ -2470,6 +2530,12 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
         linked_roots
             .try_reserve_exact(MAX_TOTAL_ASSEMBLIES)
             .map_err(|_| Error::Quota)?;
+        for domain in core::iter::once(&mut state.isd).chain(state.domains.values_mut()) {
+            for (name, raw) in domain.assemblies.iter() {
+                let verified = PackageView::verify_with(raw, &mut platform)?;
+                domain.packages.insert(Rc::clone(name), Rc::new(StoredPackage::from_verified(verified)))?;
+            }
+        }
         let mut total_bytes = 0usize;
         let mut instance_count = 0usize;
         for (id, d) in core::iter::once(("ISD", &state.isd))
@@ -2528,7 +2594,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             for (name, raw) in d.assemblies.iter() {
                 total_bytes += raw.len();
                 domain_package_bytes += raw.len();
-                let p = PackageView::verify_with(raw, &mut platform)?;
+                let p = d.package(name)?;
                 if p.image.starts_with(b"MC04") {
                     linked_roots.push((id, name.as_ref()));
                 }
@@ -2580,11 +2646,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 {
                     return Err(Error::Storage);
                 }
-                let raw = d
-                    .assemblies
-                    .get(assembly.as_ref())
-                    .ok_or(Error::Storage)?;
-                let p = PackageView::verify_with(raw, &mut platform)?;
+                let p = d.package(assembly.as_ref())?;
                 if !p.manifest.entry_points.iter().any(|a| &a.aid == aid) {
                     return Err(Error::Storage);
                 }
@@ -3360,17 +3422,19 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 d.bindings.reserve_for(p.manifest.assembly.as_str())?;
                 d.imports.reserve_for(p.manifest.assembly.as_str())?;
                 d.assemblies.reserve_for(p.manifest.assembly.as_str())?;
+                d.packages.reserve_for(p.manifest.assembly.as_str())?;
                 let signing_key = p.signer;
                 let version = p.manifest.version;
                 let digest = p.digest;
                 let activated_domain = fallible_string(&p.manifest.domain)?;
                 let activated_assembly: Rc<str> = Rc::from(p.manifest.assembly.as_str());
-                drop(p);
+                let metadata = Rc::new(StoredPackage::from_verified(p));
 
                 let raw = Rc::new(match materialized {
                     Some(raw) => raw,
                     None => self.staging.take()?,
                 });
+                d.packages.insert(Rc::clone(&activated_assembly), metadata)?;
                 d.key = Some(signing_key);
                 d.versions
                     .insert(Rc::clone(&activated_assembly), (version, digest))?;
@@ -3421,9 +3485,8 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 let units = if c.ins == 0xec {
                     let source = self.state.domain(args.0).ok_or(Error::Domain)?;
                     let assembly = source
-                        .assemblies
+                        .packages
                         .values()
-                        .filter_map(|raw| PackageView::verify(raw).ok())
                         .find(|package| {
                             package
                                 .manifest
@@ -3431,9 +3494,9 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                                 .iter()
                                 .any(|entry| entry.aid == args.1)
                         })
-                        .map(|package| package.manifest.assembly)
+                        .map(|package| package.manifest.assembly.as_str())
                         .ok_or(Error::Missing)?;
-                    Some(execution_units(&self.state, args.0, &assembly)?)
+                    Some(execution_units(&self.state, args.0, assembly)?)
                 } else if c.ins == 0xee {
                     let source = self.state.domain(args.0).ok_or(Error::Domain)?;
                     let assembly = source.instances.get(args.1).ok_or(Error::Missing)?;
@@ -3451,6 +3514,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                         return Err(Error::Busy);
                     }
                     d.assemblies.remove(args.1).ok_or(Error::Missing)?;
+                    d.packages.remove(args.1).ok_or(Error::Storage)?;
                     d.bindings.remove(args.1).ok_or(Error::Storage)?;
                     d.imports.remove(args.1).ok_or(Error::Storage)?;
                 } else if c.ins == 0xec {
