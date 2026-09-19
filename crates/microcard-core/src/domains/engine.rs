@@ -22,7 +22,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
     fn globalplatform_load_active(&self) -> bool {
         Card::globalplatform_load_active(self)
     }
-    fn get_status_record(&self, kind: u8, index: usize, filter: &[u8]) -> Result<(Vec<u8>, bool)> {
+    fn get_status_record(&mut self, kind: u8, index: usize, filter: &[u8]) -> Result<(Vec<u8>, bool)> {
         Card::get_status_record(self, kind, index, filter)
     }
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {

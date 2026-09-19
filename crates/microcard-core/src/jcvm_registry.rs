@@ -544,11 +544,45 @@ impl<F: crate::journal::Flash> Store<F> {
         provider: &mut impl crate::crypto::CryptoProvider,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Descriptor> {
+        self.load_inner(images, raw, None, scratch, provider, cancel)
+    }
+
+    /// Bind authenticated C4 reception to the requested load and security domain.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_requested<I: crate::image_store::ImageFlash>(
+        &mut self,
+        images: &mut crate::image_store::Images<I>,
+        raw: &[u8],
+        request: &crate::globalplatform::LoadRequest<'_>,
+        scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Descriptor> {
+        self.load_inner(images, raw, Some(request), scratch, provider, cancel)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_inner<I: crate::image_store::ImageFlash>(
+        &mut self,
+        images: &mut crate::image_store::Images<I>,
+        raw: &[u8],
+        request: Option<&crate::globalplatform::LoadRequest<'_>>,
+        scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Descriptor> {
         self.state()?;
         if cancel() {
             return Err(Error::Cancelled);
         }
         let package = Package::verify(raw, provider, scratch)?;
+        if request.is_some_and(|request| {
+            request.load_aid != package.manifest.package
+                || request.domain_aid != package.manifest.domain
+                || request.hash.is_some_and(|hash| hash != package.envelope.package_digest)
+        }) {
+            return Err(Error::Signature);
+        }
         self.state.activation_slots(&package)?;
         let mut protected = [Descriptor {
             slot: 0,

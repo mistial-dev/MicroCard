@@ -13,19 +13,22 @@ session reset, cancellation, and response protection; engine adapters receive ve
 commands and raw AIDs. The core's `mc04` feature includes its loader and interpreter.
 Disabling it leaves transport, journal, crypto, and hardware contracts available without
 compiling MC04. Quick validation exercises that configuration with an independent test
-engine. This boundary does not yet supply JCVM's durable management adapter or board profile.
+engine. JCVM now implements this boundary with authenticated loading, installation,
+status records, selection, invocation, and deletion. A real SCP03/PIV lifecycle test
+checks recovery across reboot; persistent simulator and board backends remain unfinished.
 
 The independent `jcvm` core feature exposes SHA-256 and entropy through the shared
 provider adapter, now used by the simulator. Unsupported JCVM crypto factories raise
-explicit Java Card exceptions. P-256/AES bindings, authenticated package loading, and
-durable applet state still need integration before a JCVM firmware artifact is ready.
+explicit Java Card exceptions. Its durable registry and dedicated applet journals
+are integrated in core. P-256/AES applet bindings, full SELECT responses, direct applet
+APDUs, and deselection callbacks still need integration before board delivery.
 
 MC04 stores immutable packages in separate image slots and commits only descriptors
 in its version-2 metadata snapshot. Recovery verifies image hashes and package
 signatures. Interrupted activation protects both committed and uncertain candidate
 images. Both board layouts reserve eight 16 KiB image slots; the simulator uses files.
-Runtime package views still occupy RAM. JCVM heap partitioning and its management
-adapter remain unfinished.
+Runtime package views still occupy RAM. JCVM heap partitioning remains unfinished;
+its core management adapter commits heaps before publishing instance metadata.
 
 MJ03 reserves a durable nonce before each encryption attempt, separately from the
 committed generation. Recovery tests track nonce uniqueness across interrupted writes,

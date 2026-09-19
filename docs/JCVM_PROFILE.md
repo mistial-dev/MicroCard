@@ -23,13 +23,18 @@ and answers the checked PIV commands through `microcard-sim serve-jcvm`. PIN ret
 persist between commands. Other variants require separate evidence; unsupported cipher,
 signature, and key-agreement requests now fail at their factories.
 
-Two delivery paths are also absent. A GlobalPlatform LOAD does not reach the engine, so a load file arrives only as a file path given to `microcard-sim serve-jcvm`. The engine is also absent from the board image.
+The shared core now connects authenticated GlobalPlatform loading and installation to
+JCVM through `jcvm_card::Card` and `transport::Endpoint`. The host lifecycle test sends
+real SCP03 messages, installs the committed PIV applet, selects it, checks PIN retries
+across reboot, and deletes it. The simulator command still accepts raw load-file paths;
+its persistent transport backend and the separate board image remain delivery gaps.
 
 The shared C4 receiver now enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
-staging. MC04 uses this receiver today; JCVM still needs it connected to the shared
-authenticated transport and registry loader. RAM and flash staging accept compile-time limits,
-so the MC04 16 KiB bound does not constrain a future JCVM profile. The JCVM package
+staging. Both core adapters use the receiver. JCVM checks that the signed manifest
+matches the requested load AID, security domain, and optional package hash before
+writing an image. RAM and flash staging accept compile-time limits,
+so the MC04 16 KiB bound does not constrain the JCVM profile. The JCVM package
 verifier uses MP05 and its own [bounded signed manifest](DEVICE_CBOR.md#jcvm-manifest-version-1),
 with a 60 KiB package limit. Raw CAP input remains a simulator convenience, not a signed package.
 
@@ -54,8 +59,11 @@ unreferenced slots, verifies readback, and commits activation metadata. It prote
 the old image through write failures and cancellation. Package reads verify both flash
 and the current registry binding. Installation now commits a dedicated heap before
 publishing its instance, using a fresh derived key even after an interrupted attempt.
-Reopening verifies the committed image and heap without reinstalling. Authenticated
-management dispatch and board storage partitions still need integration.
+Reopening verifies every committed image and heap without reinstalling. The adapter
+serves GP status records, domain discovery, and the existing authenticated SELECT and
+INS 10 application tunnel. SELECT invokes the applet but currently returns only its
+success status; direct applet APDUs, full SELECT responses, and deselection callbacks
+remain incomplete. Management and transport reset discard the live applet session.
 
 ## What holds this claim up
 
@@ -134,7 +142,7 @@ One detail that only real packages show. The Directory records a size for the De
 
 MC04 now journals image descriptors and stores code in dedicated flash slots. JCVM
 has an authenticated applet-state journal bound to its image and installation, but
-its image and heap regions still need board allocation and management dispatch.
+its image and heap regions still need board allocation and persistent simulator backends.
 
 ## Verification
 
@@ -167,7 +175,7 @@ retry counts survive restoration; saving does not clear the live session.
 The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
 binding the snapshot to the exact code image and installation identity using the
 [JCVM state contract](DEVICE_CBOR.md#dedicated-jcvm-state-journal). Board flash
-partitioning, authenticated management dispatch, complete deselection callbacks, and transaction
+partitioning, persistent simulator integration, complete deselection callbacks, and transaction
 undo still need integration before board delivery.
 
 ## Cryptography

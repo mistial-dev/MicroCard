@@ -43,7 +43,7 @@ That replays twelve PIV commands through `microcard-sim serve-jcvm` and compares
 - Dependencies must already exist. Both provider and consumer policies constrain versions, signers, digests, and scope.
 - Package signatures authorize .NET code, as P-256 ECDSA over SHA-256. SCP03 authorizes management commands. Both checks are required.
 - A package carries its signer as a 65-byte uncompressed key. What a domain binds to is that key's SHA-256 digest. A compressed key is refused, and so is the malleable twin of a signature, so one signed package has exactly one encoding.
-- A Java Card package carries no signature of its own, so on-card verification and the secure channel are the whole safety boundary for it. This is a deliberate difference from the .NET engine and [the Java Card profile](docs/JCVM_PROFILE.md) explains it.
+- JCVM device loading requires a signed MP05 package, the same envelope used by .NET, with a JCVM-specific manifest and verified CAP image. Raw CAP files remain a simulator input. See [the Java Card profile](docs/JCVM_PROFILE.md) for the delivery gaps.
 - Rust verifies the reduced CIL before activation and enforces domain identity, memory limits, call targets, transactions, key ownership, and native-call budgets.
 - Private keys are opaque native handles. Managed code receives only approved cryptographic operations.
 - Persistent updates use an authenticated transactional journal. Interrupted activation exposes either the old state or the complete new state.

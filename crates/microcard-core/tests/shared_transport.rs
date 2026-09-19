@@ -38,7 +38,7 @@ impl CardEngine for TestEngine {
     fn globalplatform_load_active(&self) -> bool {
         false
     }
-    fn get_status_record(&self, _: u8, _: usize, _: &[u8]) -> Result<(Vec<u8>, bool)> {
+    fn get_status_record(&mut self, _: u8, _: usize, _: &[u8]) -> Result<(Vec<u8>, bool)> {
         panic!("unauthenticated registry request");
     }
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {

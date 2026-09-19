@@ -1,0 +1,443 @@
+//! JCVM management and execution behind the shared authenticated transport.
+use crate::{
+    apdu::Command,
+    crypto::CryptoProvider,
+    engine::CardEngine,
+    globalplatform::{self as gp, Aid, LoadReceiver, Payload},
+    hal::Entropy,
+    image_store::{ImageFlash, Images},
+    jcvm_package::MAX_PACKAGE_BYTES,
+    jcvm_registry::{Registry, Store},
+    jcvm_storage::{HeapBanks, Session},
+    journal::{Flash, JournalKey},
+    scp03::Verified,
+    staging::PackageStaging,
+    Error, Result,
+};
+use alloc::vec::Vec;
+
+pub struct Storage<F: Flash, I: ImageFlash, H: HeapBanks> {
+    pub registry: Store<F>,
+    pub images: Images<I>,
+    pub heaps: H,
+    pub heap_key: JournalKey,
+}
+
+struct Upload {
+    load: Aid,
+    domain: Aid,
+    hash: Option<[u8; 32]>,
+    receiver: LoadReceiver,
+}
+
+pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
+    storage: Storage<F, I, H>,
+    provider: P,
+    staging: S,
+    scratch: Vec<u8>,
+    upload: Option<Upload>,
+    selected: Option<Session<H::Bank>>,
+    #[cfg(feature = "scp03-pseudo-random")]
+    sequences: Option<core::ops::RangeInclusive<u32>>,
+}
+
+impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: PackageStaging>
+    Card<F, I, H, P, S>
+{
+    /// Verify all committed references on boot. Recovery never repairs missing heaps
+    /// by running install, and each temporary session is dropped before opening another.
+    pub fn open(
+        mut storage: Storage<F, I, H>,
+        mut provider: P,
+        mut staging: S,
+        mut scratch: Vec<u8>,
+    ) -> Result<Self> {
+        staging.reset();
+        for load in storage
+            .registry
+            .state()?
+            .loads()
+            .filter(|load| load.image.is_some())
+        {
+            storage.registry.with_package(
+                load.aid,
+                &storage.images,
+                &mut scratch,
+                &mut provider,
+                |_| Ok(()),
+            )?;
+        }
+        for instance in storage.registry.state()?.instances() {
+            storage.registry.open_session(
+                instance.aid,
+                &storage.images,
+                &mut storage.heaps,
+                &storage.heap_key,
+                &mut scratch,
+                &mut provider,
+            )?;
+        }
+        Ok(Self {
+            storage,
+            provider,
+            staging,
+            scratch,
+            upload: None,
+            selected: None,
+            #[cfg(feature = "scp03-pseudo-random")]
+            sequences: None,
+        })
+    }
+
+    pub fn into_storage(self) -> Storage<F, I, H> {
+        self.storage
+    }
+
+    fn commit(&mut self, next: Registry, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        self.storage.registry.commit(next, &mut self.provider)
+    }
+
+    fn receive(&mut self, command: &Command, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        let upload = self.upload.as_mut().ok_or(Error::Format)?;
+        if !upload.receiver.receive(command, &mut self.staging)? {
+            return receipt();
+        }
+        let upload = self.upload.take().ok_or(Error::Format)?;
+        let raw = self.staging.take()?;
+        self.staging.reset();
+        self.storage.registry.load_requested(
+            &mut self.storage.images,
+            &raw,
+            &gp::LoadRequest {
+                load_aid: upload.load.as_slice(),
+                domain_aid: upload.domain.as_slice(),
+                hash: upload.hash,
+            },
+            &mut self.scratch,
+            &mut self.provider,
+            cancel,
+        )?;
+        receipt()
+    }
+
+    fn manage_gp(
+        &mut self,
+        command: &Command,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<u8>> {
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        if command.ins == 0xe8 {
+            return self.receive(command, cancel);
+        }
+        self.abort_staging();
+        if command.ins == 0xe6 && command.p1 == 2 {
+            let request = gp::load_request(command)?;
+            let domain = Aid::new(request.domain_aid)?;
+            let load = Aid::new(request.load_aid)?;
+            let registry = self.storage.registry.state()?;
+            if !registry.domains().any(|d| d.aid == domain) {
+                return Err(Error::Missing);
+            }
+            if registry.domains().any(|d| d.aid == load)
+                || registry.instances().any(|i| i.aid == load)
+            {
+                return Err(Error::Busy);
+            }
+            self.upload = Some(Upload {
+                load,
+                domain,
+                hash: request.hash,
+                receiver: LoadReceiver::new(Payload::SignedPackage, MAX_PACKAGE_BYTES),
+            });
+            return receipt();
+        }
+        if command.ins == 0xe6 && command.p1 == 0x0c {
+            if let Ok(aid) = gp::ssd_install_aid(command) {
+                let mut next = *self.storage.registry.state()?;
+                let mut incarnation = [0; 16];
+                self.provider.fill_entropy(&mut incarnation)?;
+                next.add_domain(Aid::new(aid)?, incarnation)?;
+                self.commit(next, cancel)?;
+                return Ok(Vec::new());
+            }
+            let request = gp::application_install(command)?;
+            self.storage.registry.install(
+                &request,
+                &self.storage.images,
+                &mut self.storage.heaps,
+                &self.storage.heap_key,
+                &mut self.scratch,
+                &mut self.provider,
+                cancel,
+            )?;
+            return receipt();
+        }
+        let aid = Aid::new(gp::delete_aid(command)?)?;
+        let mut next = *self.storage.registry.state()?;
+        if next.domains().any(|d| d.aid == aid) {
+            next.remove_domain(aid)?;
+        } else if next.instances().any(|i| i.aid == aid) {
+            next.remove_instance(aid)?;
+        } else {
+            next.remove_load(aid)?;
+        }
+        self.commit(next, cancel)?;
+        Ok(Vec::new())
+    }
+}
+
+impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: PackageStaging>
+    CardEngine for Card<F, I, H, P, S>
+{
+    type Provider = P;
+    fn crypto_provider(&mut self) -> &mut P {
+        &mut self.provider
+    }
+    fn random(&mut self, output: &mut [u8]) -> Result<()> {
+        self.provider.fill_entropy(output)
+    }
+    #[cfg(feature = "scp03-pseudo-random")]
+    fn next_secure_channel_sequence(&mut self) -> Result<u32> {
+        if let Some(value) = self.sequences.as_mut().and_then(Iterator::next) {
+            return Ok(value);
+        }
+        let mut next = *self.storage.registry.state()?;
+        let range = next.reserve_sequences(32)?;
+        self.storage.registry.commit(next, &mut self.provider)?;
+        self.sequences = Some(range);
+        self.sequences
+            .as_mut()
+            .and_then(Iterator::next)
+            .ok_or(Error::Storage)
+    }
+    fn abort_staging(&mut self) {
+        self.staging.reset();
+        self.upload = None;
+    }
+    fn abort_transaction(&mut self) {
+        self.selected = None;
+    }
+    fn globalplatform_load_active(&self) -> bool {
+        self.upload.is_some()
+    }
+
+    fn get_status_record(
+        &mut self,
+        kind: u8,
+        index: usize,
+        filter: &[u8],
+    ) -> Result<(Vec<u8>, bool)> {
+        use gp::{push_tlv, template};
+        let registry = self.storage.registry.state()?;
+        let mut count = 0;
+        let mut chosen = None;
+        let mut visit = |aid: Aid| {
+            if kind == 0x80 || gp::aid_matches(aid.as_slice(), filter) {
+                if count == index {
+                    chosen = Some(aid);
+                }
+                count += 1;
+            }
+        };
+        match kind {
+            0x80 => visit(Aid::isd()),
+            0x40 => {
+                for domain in registry.domains().filter(|d| d.aid != Aid::isd()) {
+                    visit(domain.aid);
+                }
+                for instance in registry.instances() {
+                    visit(instance.aid);
+                }
+            }
+            0x20 | 0x10 => {
+                for load in registry.loads().filter(|l| l.image.is_some()) {
+                    visit(load.aid);
+                }
+            }
+            _ => return Err(Error::Format),
+        }
+        let aid = chosen.ok_or(Error::Missing)?;
+        let mut body = Vec::new();
+        push_tlv(&mut body, &[0x4f], aid.as_slice())?;
+        if let Some(domain) = registry.domains().find(|d| d.aid == aid) {
+            push_tlv(
+                &mut body,
+                &[0x9f, 0x70],
+                &[if domain.owner.is_some() { 0x0f } else { 1 }],
+            )?;
+            push_tlv(&mut body, &[0xc5], &[0x80, 0, 0])?;
+            if aid != Aid::isd() {
+                push_tlv(&mut body, &[0xcc], &gp::ISD_AID)?;
+            }
+        } else if let Some(instance) = registry.instances().find(|i| i.aid == aid) {
+            push_tlv(&mut body, &[0x9f, 0x70], &[7])?;
+            push_tlv(&mut body, &[0xc5], &[0, 0, 0])?;
+            push_tlv(&mut body, &[0xc4], instance.load.as_slice())?;
+            push_tlv(&mut body, &[0xcc], instance.domain.as_slice())?;
+        } else {
+            self.storage.registry.with_package(
+                aid,
+                &self.storage.images,
+                &mut self.scratch,
+                &mut self.provider,
+                |package| {
+                    push_tlv(&mut body, &[0x9f, 0x70], &[1])?;
+                    push_tlv(&mut body, &[0xce], &package.manifest.package_version)?;
+                    if kind == 0x10 {
+                        let file =
+                            microcard_engine_jcvm::cap::LoadFile::parse(package.envelope.image)
+                                .map_err(|_| Error::Storage)?;
+                        for module in file.applets().map_err(|_| Error::Storage)?.iter() {
+                            push_tlv(&mut body, &[0x84], module.aid)?;
+                        }
+                    }
+                    push_tlv(&mut body, &[0xcc], package.manifest.domain)
+                },
+            )?;
+        }
+        Ok((template(body)?, count > index + 1))
+    }
+
+    fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        self.selected = None;
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        Ok(())
+    }
+
+    fn select_aid_with_cancel(
+        &mut self,
+        aid: &[u8],
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        self.selected = None;
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        let aid = Aid::new(aid)?;
+        let mut session = self.storage.registry.open_session(
+            aid,
+            &self.storage.images,
+            &mut self.storage.heaps,
+            &self.storage.heap_key,
+            &mut self.scratch,
+            &mut self.provider,
+        )?;
+        let command = Command {
+            cla: 0,
+            ins: 0xa4,
+            p1: 4,
+            p2: 0,
+            data: aid.as_slice().into(),
+            le: Some(256),
+        }
+        .encode()?;
+        let response = session.process(&command, true, &mut self.provider, cancel)?;
+        if response.sw != 0x9000 {
+            return Err(Error::Unauthorized);
+        }
+        self.selected = Some(session);
+        Ok(())
+    }
+
+    fn manage_globalplatform_with_cancel(
+        &mut self,
+        verified: Verified,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<u8>> {
+        self.selected = None;
+        if verified.level() & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
+            return Err(Error::Unauthorized);
+        }
+        let result = self.manage_gp(verified.command(), cancel);
+        if result.is_err() {
+            self.abort_staging();
+        }
+        result
+    }
+
+    fn manage_with_cancel(
+        &mut self,
+        verified: Verified,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<u8>> {
+        if verified.level() & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
+            return Err(Error::Unauthorized);
+        }
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        let command = verified.command();
+        // Domain discovery is bounded and identifies this engine and schema explicitly.
+        if command.ins != 0xe2 || command.p1 != 0 || command.p2 != 0 || command.data.len() != 1 {
+            return Err(Error::Unsupported);
+        }
+        let registry = self.storage.registry.state()?;
+        let index = usize::from(command.data[0]);
+        let domain = registry.domains().nth(index).ok_or(Error::Missing)?;
+        let mut wire = crate::cbor::Encoder::new(128);
+        wire.array(9)?;
+        for value in [2, 1, registry.domains().count() as u64, index as u64] {
+            wire.unsigned(value)?;
+        }
+        wire.bytes(domain.aid.as_slice())?;
+        wire.bytes(&domain.incarnation)?;
+        match domain.owner {
+            Some(owner) => wire.bytes(&owner)?,
+            None => wire.null()?,
+        }
+        wire.unsigned(
+            registry
+                .loads()
+                .filter(|l| l.domain == domain.aid && l.image.is_some())
+                .count() as u64,
+        )?;
+        wire.unsigned(
+            registry
+                .instances()
+                .filter(|i| i.domain == domain.aid)
+                .count() as u64,
+        )?;
+        Ok(wire.finish())
+    }
+
+    fn process_verified_with_cancel(
+        &mut self,
+        verified: Verified,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<u8>> {
+        let result = self.selected.as_mut().ok_or(Error::Missing)?.process(
+            &verified.command().data,
+            false,
+            &mut self.provider,
+            cancel,
+        );
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => {
+                self.selected = None;
+                return Err(error);
+            }
+        };
+        let mut data = response.data;
+        data.try_reserve_exact(2).map_err(|_| Error::Quota)?;
+        data.extend_from_slice(&response.sw.to_be_bytes());
+        Ok(data)
+    }
+}
+
+fn receipt() -> Result<Vec<u8>> {
+    let mut value = Vec::new();
+    value.try_reserve_exact(1).map_err(|_| Error::Quota)?;
+    value.push(0);
+    Ok(value)
+}
+
+#[cfg(all(test, feature = "software-crypto"))]
+mod tests;

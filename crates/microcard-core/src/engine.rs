@@ -13,7 +13,7 @@ pub trait CardEngine {
     fn abort_staging(&mut self);
     fn abort_transaction(&mut self);
     fn globalplatform_load_active(&self) -> bool;
-    fn get_status_record(&self, kind: u8, index: usize, filter: &[u8]) -> Result<(Vec<u8>, bool)>;
+    fn get_status_record(&mut self, kind: u8, index: usize, filter: &[u8]) -> Result<(Vec<u8>, bool)>;
     fn select_isd_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()>;
     fn select_aid_with_cancel(
         &mut self,

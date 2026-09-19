@@ -65,6 +65,10 @@ pub mod jcvm_storage;
 pub mod jcvm_package;
 #[cfg(feature = "jcvm")]
 pub mod jcvm_registry;
+#[cfg(feature = "jcvm")]
+pub mod jcvm_card;
+#[cfg(all(test, feature = "jcvm", feature = "software-crypto"))]
+mod jcvm_test;
 
 pub mod key_store;
 

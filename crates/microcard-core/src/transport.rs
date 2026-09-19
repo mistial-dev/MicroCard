@@ -40,6 +40,11 @@ impl<C: CardEngine> Endpoint<C> {
         self.exchange_with_cancel(raw, &mut || false)
     }
 
+    pub fn into_card(mut self) -> C {
+        self.reset();
+        self.card
+    }
+
     /// Drop all transport-scoped authority and volatile application work.
     pub fn reset(&mut self) {
         self.session = None;

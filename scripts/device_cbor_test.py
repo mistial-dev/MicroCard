@@ -48,3 +48,9 @@ vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-registry
 assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
 print("PASS: JCVM registry CBOR Rust/Python golden vector")
+
+state = [2, 1, 1, 0, bytes.fromhex("a000000151000000"), bytes([1] * 16), None, 0, 0]
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-domain-cbor-v2.json").read_text())
+assert encode(state).hex() == vector["hex"]
+assert decode(bytes.fromhex(vector["hex"])) == state
+print("PASS: JCVM domain discovery CBOR Rust/Python golden vector")

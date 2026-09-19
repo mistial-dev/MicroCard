@@ -156,6 +156,21 @@ if recovery fails. Its caller must verify referenced image and heap storage befo
 execution, and must not reclaim formerly referenced storage before metadata commits.
 The [registry vector](../format/jcvm-registry-cbor-v1.json) is checked by Rust and Python.
 
+### JCVM domain discovery
+
+Authenticated INS `E2`, P1/P2 zero, and one domain-index byte return:
+
+```
+[2, 1, domain_count, domain_index, domain_aid, incarnation_bytes16,
+ signer_hash_bytes32_or_null, active_load_count, instance_count]
+```
+
+Version 2 and engine 1 distinguish this from MC04's earlier discovery record. Domains
+use registry slot order, with the ISD at index zero; indexes outside the current count
+fail. Counts have the registry bounds above and the response is at most 128 bytes.
+Use the returned AID and incarnation when signing a package for that domain.
+The [discovery vector](../format/jcvm-domain-cbor-v2.json) is checked by Rust and Python.
+
 ## Dedicated JCVM state journal
 
 The JCVM store uses a separate journal region and key, with plaintext:
@@ -180,8 +195,8 @@ receive a fresh installation identity and derived key before reuse.
 `jcvm_storage::Session` rolls back live mutations through authenticated recovery on
 failure. The registry coordinator verifies code, commits installation before metadata,
 and reopens only the committed heap. Missing or incompatible committed state fails
-without reinstalling. Board partitioning and authenticated management dispatch still
-need integration.
+without reinstalling. The core transport adapter connects this coordinator to
+authenticated GlobalPlatform management. Board partitioning remains incomplete.
 
 ## Migration status
 
