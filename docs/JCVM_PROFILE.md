@@ -34,9 +34,13 @@ so the MC04 16 KiB bound does not constrain a future JCVM profile.
 Installation, selection, and processing expose cancellation callbacks, checked before
 execution and at each instruction boundary. Cancellation escapes as an engine error;
 an applet cannot catch it or turn it into a successful response. Native calls finish
-before the next poll. The durable adapter must restore committed state after an engine
-error and check cancellation again before committing. Cancellation itself does not
-roll back mutations.
+before the next poll. The durable applet session checks cancellation again before
+committing and reloads authenticated state after an execution or persistence error.
+If recovery fails, commands remain disabled until explicit recovery succeeds. Reloading
+clears volatile state, so the transport adapter must discard selection on errors.
+The session uses the reboot journal scan to resolve uncertain writes; a failed reply
+can still correspond to a committed command. The raw engine API alone does not roll
+back mutations.
 
 ## What holds this claim up
 

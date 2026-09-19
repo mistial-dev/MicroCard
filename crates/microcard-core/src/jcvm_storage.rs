@@ -6,11 +6,14 @@ use crate::{
     journal::{Flash, Journal, JournalKey},
     Error, Result,
 };
+use alloc::vec::Vec;
 use microcard_engine_jcvm::{
     applet::{Card, PersistentState, Sizes},
     cap::LoadFile,
 };
 use zeroize::Zeroizing;
+mod session;
+pub use session::Session;
 
 pub struct Store<F: Flash> {
     journal: Journal<F>,
@@ -151,39 +154,21 @@ impl<F: Flash> Store<F> {
         sizes: Sizes,
         provider: &mut impl CryptoProvider,
     ) -> Result<(Self, Option<Card>)> {
-        let maximum = flash.slot_size().checked_sub(crate::journal::OVERHEAD).ok_or(Error::Storage)?;
+        let maximum = flash
+            .slot_size()
+            .checked_sub(crate::journal::OVERHEAD)
+            .ok_or(Error::Storage)?;
         let mut image = [0; 32];
         provider.sha256_into(verified_image, &mut image)?;
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
         let (journal, snapshot) = Journal::open_with(flash, key, provider)?;
-        let card = snapshot
-            .as_ref()
-            .map(|bytes| {
-                let mut decoder = Decoder::new(bytes);
-                decoder.record(7).map_err(|_| Error::IncompatibleState)?;
-                if decoder.unsigned()? != 1 || decoder.unsigned()? != 1 {
-                    return Err(Error::IncompatibleState);
-                }
-                if decoder.fixed::<32>()? != image || decoder.fixed::<16>()? != installation {
-                    return Err(Error::KeyMismatch);
-                }
-                let instance = decoder.number()?;
-                let heap = decoder.bytes(sizes.heap_bytes)?;
-                let statics = decoder
-                    .bytes(file.static_fields().map_err(|_| Error::Format)?.image_size as usize)?;
-                decoder.finish()?;
-                Card::restore(
-                    &file,
-                    sizes,
-                    PersistentState {
-                        heap,
-                        statics,
-                        instance,
-                    },
-                )
-                .map_err(|_| Error::Format)
-            })
-            .transpose()?;
+        let card = decode_card(
+            snapshot.as_deref().map(Vec::as_slice),
+            &file,
+            sizes,
+            image,
+            installation,
+        )?;
         Ok((
             Self {
                 journal,
@@ -193,6 +178,29 @@ impl<F: Flash> Store<F> {
             },
             card,
         ))
+    }
+
+    /// Rebuild volatile state from the newest authenticated committed record.
+    pub fn recover(
+        &mut self,
+        verified_image: &[u8],
+        sizes: Sizes,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<Option<Card>> {
+        let mut digest = [0; 32];
+        provider.sha256_into(verified_image, &mut digest)?;
+        if digest != self.image {
+            return Err(Error::KeyMismatch);
+        }
+        let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
+        let snapshot = self.journal.recover_with(provider)?;
+        decode_card(
+            snapshot.as_deref().map(Vec::as_slice),
+            &file,
+            sizes,
+            self.image,
+            self.installation,
+        )
     }
 
     /// Commit state of the applet installed from the image passed to `open`.
@@ -219,4 +227,40 @@ impl<F: Flash> Store<F> {
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }
+}
+
+fn decode_card(
+    snapshot: Option<&[u8]>,
+    file: &LoadFile,
+    sizes: Sizes,
+    image: [u8; 32],
+    installation: [u8; 16],
+) -> Result<Option<Card>> {
+    snapshot
+        .map(|bytes| {
+            let mut decoder = Decoder::new(bytes);
+            decoder.record(7).map_err(|_| Error::IncompatibleState)?;
+            if decoder.unsigned()? != 1 || decoder.unsigned()? != 1 {
+                return Err(Error::IncompatibleState);
+            }
+            if decoder.fixed::<32>()? != image || decoder.fixed::<16>()? != installation {
+                return Err(Error::KeyMismatch);
+            }
+            let instance = decoder.number()?;
+            let heap = decoder.bytes(sizes.heap_bytes)?;
+            let statics = decoder
+                .bytes(file.static_fields().map_err(|_| Error::Format)?.image_size as usize)?;
+            decoder.finish()?;
+            Card::restore(
+                file,
+                sizes,
+                PersistentState {
+                    heap,
+                    statics,
+                    instance,
+                },
+            )
+            .map_err(|_| Error::Format)
+        })
+        .transpose()
 }

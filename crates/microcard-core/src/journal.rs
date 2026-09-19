@@ -75,11 +75,23 @@ impl<F: Flash> Journal<F> {
     }
 
     pub fn open_with(
-        mut flash: F,
+        flash: F,
         key: impl Into<JournalKey>,
         provider: &mut impl CryptoProvider,
     ) -> Result<(Self, Option<Zeroizing<Vec<u8>>>)> {
-        let key = key.into();
+        let mut journal = Self {
+            flash, generation: 0, active: None, slot_count: 0, poisoned: true, key: key.into(),
+        };
+        let data = journal.recover_with(provider)?;
+        Ok((journal, data))
+    }
+
+    /// Reconcile uncertain writes using the same authenticated scan as reboot.
+    /// A failed recovery keeps commits disabled until recovery succeeds.
+    pub fn recover_with(&mut self, provider: &mut impl CryptoProvider) -> Result<Option<Zeroizing<Vec<u8>>>> {
+        self.poisoned = true;
+        let flash = &mut self.flash;
+        let key = &self.key;
         let slot_count = flash.slot_count();
         if !(2..=8).contains(&slot_count) {
             return Err(Error::Storage);
@@ -178,17 +190,11 @@ impl<F: Flash> Journal<F> {
         if generation == next_anchored {
             flash.advance_monotonic(generation)?;
         }
-        Ok((
-            Self {
-                flash,
-                generation,
-                active,
-                slot_count,
-                poisoned: false,
-                key,
-            },
-            data,
-        ))
+        self.generation = generation;
+        self.active = active;
+        self.slot_count = slot_count;
+        self.poisoned = false;
+        Ok(data)
     }
     #[cfg(feature = "software-crypto")]
     pub fn commit(&mut self, data: &[u8]) -> Result<()> {
@@ -267,7 +273,7 @@ impl<F: Flash> Journal<F> {
         let Self { flash, .. } = self;
         flash
     }
-    #[cfg(feature = "mc04")]
+    #[cfg(any(feature = "mc04", all(test, feature = "jcvm", feature = "software-crypto")))]
     pub(crate) fn flash_mut(&mut self) -> &mut F {
         &mut self.flash
     }
@@ -683,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_anchor_advance_poisoned_journal_recovers_on_reopen() {
+    fn failed_anchor_advance_poisoned_journal_requires_successful_recovery() {
         let mut flash = MemoryFlash::new(128);
         // nonce reservation(4) + erase(128) + record(43) + commit marker(1).
         flash.fail_after = Some(176);
@@ -691,11 +697,15 @@ mod tests {
         assert_eq!(journal.commit(b"one"), Err(Error::Storage));
         assert_eq!(journal.commit(b"two"), Err(Error::Storage));
 
-        let mut flash = journal.into_flash();
-        flash.fail_after = None;
-        let (journal, recovered) = Journal::open(flash, KEY).unwrap();
+        assert_eq!(journal.recover_with(&mut SoftwareCrypto), Err(Error::Storage));
+        assert_eq!(journal.commit(b"two"), Err(Error::Storage));
+        journal.flash.fail_after = None;
+        let recovered = journal.recover_with(&mut SoftwareCrypto).unwrap();
         assert_eq!(recovered.as_deref().map(|data| data.as_slice()), Some(b"one".as_slice()));
         assert_eq!(journal.flash.monotonic_generation().unwrap(), 1);
+        journal.commit(b"two").unwrap();
+        let (_, reopened) = Journal::open(journal.into_flash(), KEY).unwrap();
+        assert_eq!(reopened.as_deref().map(|data| data.as_slice()), Some(b"two".as_slice()));
     }
 
     #[test]
