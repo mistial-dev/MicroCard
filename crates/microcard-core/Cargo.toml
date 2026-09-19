@@ -39,3 +39,19 @@ zeroize = { version = "1", default-features = false, features = ["alloc", "deriv
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[[test]]
+name = "runtime"
+required-features = ["mc04", "software-crypto"]
+
+[[test]]
+name = "package_profile"
+required-features = ["mc04", "software-crypto"]
+
+[[test]]
+name = "signed_malformed"
+required-features = ["mc04", "software-crypto"]
+
+[[test]]
+name = "ecdsa_p256"
+required-features = ["software-p256"]
