@@ -1,7 +1,7 @@
 """Focused validation suites used by the everyday gate."""
 from validation_common import ROOT, build_managed, run
 
-PROJECTS = ['managed/MicroCard.Analyzers', 'managed/MicroCard.Tool', 'managed/MicroCard.Pack', 'managed/MicroCard.Bundle', 'managed/MicroCard.Iso7816', 'managed/MicroCard.Encoding', 'managed/MicroCard.Cryptography', 'managed/MicroCard.Security', 'samples/CoreLib', 'samples/CoreConsumer', 'samples/Counter', 'samples/TransactionRecords', 'samples/CryptographyConsumer', 'samples/SecurityConsumer', 'samples/Credential', 'tests/CoreReference', 'tests/Iso7816Reference', 'tests/EncodingReference', 'tests/CryptographyReference']
+PROJECTS = ['tests/DeviceFormats', 'managed/MicroCard.Analyzers', 'managed/MicroCard.Tool', 'managed/MicroCard.Pack', 'managed/MicroCard.Bundle', 'managed/MicroCard.Iso7816', 'managed/MicroCard.Encoding', 'managed/MicroCard.Cryptography', 'managed/MicroCard.Security', 'samples/CoreLib', 'samples/CoreConsumer', 'samples/Counter', 'samples/TransactionRecords', 'samples/CryptographyConsumer', 'samples/SecurityConsumer', 'samples/Credential', 'tests/CoreReference', 'tests/Iso7816Reference', 'tests/EncodingReference', 'tests/CryptographyReference']
 REFERENCES = (
     ("Iso7816Reference", "MicroCard.Iso7816.Tests"),
     ("EncodingReference", "MicroCard.Encoding.Tests"),
@@ -23,5 +23,6 @@ def rust():
 
 def managed(jobs=1):
     build_managed(PROJECTS, jobs)
+    run("dotnet", str(ROOT / "tests/DeviceFormats/bin/Release/net10.0/DeviceFormats.dll"), str(ROOT / "format/manifest-cbor-v1.json"))
     for project, assembly in REFERENCES:
         run("dotnet", str(ROOT / f"tests/{project}/bin/Release/net10.0/{assembly}.dll"))

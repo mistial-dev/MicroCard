@@ -1,0 +1,249 @@
+[
+  {
+    "manifest": {
+      "domain": "ISD",
+      "incarnation": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "assembly": "Counter",
+      "assembly_version": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "version": 1,
+      "export": {
+        "access": 0,
+        "key": null
+      },
+      "entry_points": [],
+      "dependencies": [],
+      "capabilities": [],
+      "storage": [],
+      "limits": {
+        "arena": 16384,
+        "stack": 256,
+        "frames": 32,
+        "instructions": 100000
+      }
+    },
+    "hex": "8c0163495344500000000000000000000000000000000067436f756e7465728401000000018200f6808040808419400019010018201a000186a0"
+  },
+  {
+    "manifest": {
+      "domain": "payments",
+      "incarnation": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "assembly": "Counter",
+      "assembly_version": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "version": 4294967295,
+      "export": {
+        "access": 3,
+        "key": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      "entry_points": [
+        {
+          "aid": "F04D430001",
+          "process": 65535,
+          "install": 0,
+          "uninstall": null,
+          "select": 24,
+          "deselect": 256
+        }
+      ],
+      "dependencies": [
+        {
+          "assembly": "Library",
+          "ranges": [
+            {
+              "min": null,
+              "min_inclusive": false,
+              "max": [
+                1,
+                0,
+                0,
+                0
+              ],
+              "max_inclusive": false
+            },
+            {
+              "min": [
+                2,
+                0,
+                0,
+                0
+              ],
+              "min_inclusive": true,
+              "max": null,
+              "max_inclusive": false
+            }
+          ],
+          "package_version": 24,
+          "signer": [
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85
+          ],
+          "digest": [
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170,
+            170
+          ],
+          "scope": 2
+        }
+      ],
+      "capabilities": [
+        1,
+        2,
+        35
+      ],
+      "storage": [
+        {
+          "key": 0,
+          "kind": 1,
+          "max_bytes": 0
+        },
+        {
+          "key": 2147483647,
+          "kind": 2,
+          "max_bytes": 2048
+        }
+      ],
+      "limits": {
+        "arena": 16384,
+        "stack": 256,
+        "frames": 32,
+        "instructions": 100000
+      }
+    },
+    "hex": "8c01687061796d656e747350000102030405060708090a0b0c0d0e0f67436f756e74657284010000001affffffff82035820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f818645f04d43000119ffff00f618181901008186674c6962726172798284f6f48401000000f4848402000000f5f6f41818582055555555555555555555555555555555555555555555555555555555555555555820aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa02430102238283000100831a7fffffff021908008419400019010018201a000186a0"
+  }
+]

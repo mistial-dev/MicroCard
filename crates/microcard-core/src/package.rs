@@ -1,3 +1,4 @@
+mod manifest_cbor;
 use crate::{Error, Result, crypto::CryptoProvider};
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
@@ -235,36 +236,7 @@ impl<'a> PackageView<'a> {
         provider.sha256_into(&key, &mut signer)?;
         let manifest: Manifest = serde_json::from_slice(&bytes[HEADER_BYTES..HEADER_BYTES + n])
             .map_err(|_| Error::Format)?;
-        if !valid_identifier(&manifest.assembly)
-            || !valid_identifier(&manifest.domain)
-            || manifest.version == 0
-            || manifest.assembly_version == [0; 4]
-            || !manifest.export.valid()
-            || manifest.entry_points.len() > 4
-            || manifest.dependencies.len() > 16
-            || !manifest
-                .dependencies
-                .windows(2)
-                .all(|pair| pair[0].assembly < pair[1].assembly)
-            || manifest.capabilities.len() > 35
-            || !manifest
-                .capabilities
-                .windows(2)
-                .all(|pair| pair[0] < pair[1])
-            || manifest.storage.len() > MAX_STORAGE_DECLARATIONS
-            || !manifest.storage.iter().all(StorageDeclaration::valid)
-            || !manifest
-                .storage
-                .windows(2)
-                .all(|pair| pair[0].key < pair[1].key)
-        {
-            return Err(Error::Format);
-        }
-        for dependency in &manifest.dependencies {
-            if !dependency.valid(&manifest.assembly) {
-                return Err(Error::Format);
-            }
-        }
+        manifest.validate_shape()?;
         if manifest.limits.arena != 16384
             || manifest.limits.stack != 256
             || manifest.limits.frames != 32
@@ -289,7 +261,7 @@ impl<'a> PackageView<'a> {
         {
             return Err(Error::Unauthorized);
         }
-        for (i, a) in manifest.entry_points.iter().enumerate() {
+        for a in &manifest.entry_points {
             if a.aid.len() < 10
                 || a.aid.len() > 32
                 || !a.aid.len().is_multiple_of(2)
@@ -297,7 +269,6 @@ impl<'a> PackageView<'a> {
                     .aid
                     .bytes()
                     .all(|x| x.is_ascii_hexdigit() && !x.is_ascii_lowercase())
-                || manifest.entry_points[..i].iter().any(|b| b.aid == a.aid)
             {
                 return Err(Error::Format);
             }

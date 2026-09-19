@@ -2,7 +2,7 @@
 """Compare the Python device encoder with shared wire vectors."""
 import json
 from pathlib import Path
-from device_cbor import management_names
+from device_cbor import management_names, manifest
 
 for vector in json.loads((Path(__file__).resolve().parents[1] / "format/management-names-v1.json").read_text()):
     assert management_names(vector["first"], vector["second"]).hex() == vector["hex"]
@@ -13,3 +13,7 @@ for invalid in ("", "x" * 65, "bad/name", "é", None):
         continue
     raise AssertionError(f"accepted invalid identifier: {invalid!r}")
 print("PASS: management CBOR shared vectors and identifier bounds")
+
+for vector in json.loads((Path(__file__).resolve().parents[1] / "format/manifest-cbor-v1.json").read_text()):
+    assert manifest(vector["manifest"]).hex() == vector["hex"]
+print("PASS: manifest CBOR shared vectors")

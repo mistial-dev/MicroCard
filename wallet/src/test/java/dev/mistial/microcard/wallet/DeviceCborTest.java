@@ -9,6 +9,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class DeviceCborTest {
     @Test
+    void manifestRecordsMatchSharedVectors() throws Exception {
+        Path vectors = Path.of(System.getProperty("basedir"), "../format/manifest-cbor-v1.json");
+        for (var item : JsonParser.parseString(Files.readString(vectors)).getAsJsonArray()) {
+            var vector = item.getAsJsonObject();
+            assertArrayEquals(HexFormat.of().parseHex(vector.get("hex").getAsString()),
+                ManifestCbor.encode(vector.getAsJsonObject("manifest")));
+        }
+    }
+
+    @Test
     void managementRecordsMatchSharedVectors() throws Exception {
         Path vectors = Path.of(System.getProperty("basedir"), "../format/management-names-v1.json");
         for (var item : JsonParser.parseString(Files.readString(vectors)).getAsJsonArray()) {
