@@ -20,6 +20,14 @@ provider adapter, now used by the simulator. Unsupported JCVM crypto factories r
 explicit Java Card exceptions. P-256/AES bindings, authenticated package loading, and
 durable applet state still need integration before a JCVM firmware artifact is ready.
 
+The shared image-store primitive stages bytes into independently erasable slots and
+verifies readback through the crypto provider before returning a slot/length/digest
+descriptor. Callers must protect all descriptors reachable from committed and pending
+state, then activate the new descriptor through authenticated metadata. Interrupted
+writes leave an unreferenced slot reclaimable without touching protected images.
+This primitive is tested, but MC04 snapshots still contain packages and board flash
+partitions have not yet been connected to it.
+
 ## Required implementation work
 
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
