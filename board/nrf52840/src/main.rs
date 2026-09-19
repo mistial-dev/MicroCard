@@ -75,7 +75,11 @@ type BoardCcidClass = usb_ccid::CcidClass<'static>;
 static APDU_CHANNEL: usb_ccid::ApduChannel = interchange::Channel::new();
 
 #[cfg(feature = "usb-ccid")]
-fn initialize_usb() -> Option<(BoardUsbDevice, BoardCcidClass, usb_ccid::ApduResponder<'static>)> {
+fn initialize_usb() -> Option<(
+    BoardUsbDevice,
+    BoardCcidClass,
+    usb_ccid::ApduResponder<'static>,
+)> {
     let peripherals = pac::Peripherals::take()?;
     // Taking the external oscillator by value is what lets `UsbPeripheral` exist at all,
     // so an image that forgets the crystal fails to compile rather than to enumerate.
@@ -509,6 +513,34 @@ mod cc310 {
         }
     }
 
+    #[cfg(feature = "cc310-ccm")]
+    pub(super) fn aes128_ccm_decrypt_in_place(
+        key: &[u8; 16],
+        nonce: &[u8; 13],
+        aad: &[u8],
+        ciphertext: &mut [u8],
+    ) -> i32 {
+        let Some(length) = ciphertext.len().checked_sub(16) else {
+            return 1;
+        };
+        // Pass one buffer through FFI without constructing aliased Rust references.
+        let pointer = ciphertext.as_mut_ptr();
+        unsafe {
+            microcard_cc310_aes128_ccm_decrypt(
+                key.as_ptr(),
+                key.len(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                pointer,
+                ciphertext.len(),
+                pointer,
+                length,
+            )
+        }
+    }
+
     #[cfg(feature = "cc310-p256")]
     pub(super) fn p256_public_key(private_key: &[u8; 32], output: &mut [u8; 65]) -> bool {
         unsafe {
@@ -786,8 +818,7 @@ impl Hardware {
                     &mut plaintext,
                 )?;
                 ciphertext.fill(0);
-                if plaintext_length != PLAINTEXT.len()
-                    || plaintext[..plaintext_length] != PLAINTEXT
+                if plaintext_length != PLAINTEXT.len() || plaintext[..plaintext_length] != PLAINTEXT
                 {
                     plaintext.fill(0);
                     return Err(Error::Native);
@@ -1012,11 +1043,12 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         if output.len() < length {
             return Err(Error::Bounds);
         }
-        let result = if cc310::aes128_ccm_encrypt(key, nonce, aad, plaintext, &mut output[..length]) == 0 {
-            Ok(length)
-        } else {
-            Err(Error::Native)
-        };
+        let result =
+            if cc310::aes128_ccm_encrypt(key, nonce, aad, plaintext, &mut output[..length]) == 0 {
+                Ok(length)
+            } else {
+                Err(Error::Native)
+            };
         microcard_core::crypto::clear_output_on_error(output, result)
     }
 
@@ -1032,16 +1064,46 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
     ) -> Result<usize> {
         output.fill(0);
         self.ensure_cc310()?;
-        let length = ciphertext.len().checked_sub(16).ok_or(Error::Authentication)?;
+        let length = ciphertext
+            .len()
+            .checked_sub(16)
+            .ok_or(Error::Authentication)?;
         if output.len() < length {
             return Err(Error::Bounds);
         }
-        let result = match cc310::aes128_ccm_decrypt(key, nonce, aad, ciphertext, &mut output[..length]) {
-            0 => Ok(length),
-            1 => Err(Error::Authentication),
-            _ => Err(Error::Native),
-        };
+        let result =
+            match cc310::aes128_ccm_decrypt(key, nonce, aad, ciphertext, &mut output[..length]) {
+                0 => Ok(length),
+                1 => Err(Error::Authentication),
+                _ => Err(Error::Native),
+            };
         microcard_core::crypto::clear_output_on_error(output, result)
+    }
+
+    #[cfg(feature = "cc310-ccm")]
+    fn aes_ccm_decrypt_in_place(
+        &mut self,
+        key: &[u8; 16],
+        nonce: &[u8; 13],
+        aad: &[u8],
+        ciphertext: &mut [u8],
+    ) -> Result<usize> {
+        let result = (|| {
+            self.ensure_cc310()?;
+            let length = ciphertext
+                .len()
+                .checked_sub(16)
+                .ok_or(Error::Authentication)?;
+            match cc310::aes128_ccm_decrypt_in_place(key, nonce, aad, ciphertext) {
+                0 => {
+                    ciphertext[length..].fill(0);
+                    Ok(length)
+                }
+                1 => Err(Error::Authentication),
+                _ => Err(Error::Native),
+            }
+        })();
+        microcard_core::crypto::clear_output_on_error(ciphertext, result)
     }
 
     #[cfg(feature = "cc310-p256")]
@@ -1081,11 +1143,7 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         self.sha256_into(message, &mut hash)?;
         let success = cc310::p256_sign_hash(private_key, &hash, output);
         hash.fill(0);
-        let result = if success {
-            Ok(())
-        } else {
-            Err(Error::Native)
-        };
+        let result = if success { Ok(()) } else { Err(Error::Native) };
         microcard_core::crypto::clear_output_on_error(output, result)
     }
 
@@ -1311,7 +1369,10 @@ impl StagingNvm {
     const BANKS: usize = 4;
 
     const fn new() -> Self {
-        Self { bank: None, next_bank: 0 }
+        Self {
+            bank: None,
+            next_bank: 0,
+        }
     }
     fn bank_base(&self) -> Result<usize> {
         self.bank
@@ -1399,9 +1460,11 @@ impl Flash for Nvm {
     }
     fn is_erased(&self, slot: usize) -> Result<bool> {
         let base = Self::base(slot)?;
-        Ok(unsafe { core::slice::from_raw_parts(base as *const u8, 65536) }
-            .iter()
-            .all(|byte| *byte == 0xff))
+        Ok(
+            unsafe { core::slice::from_raw_parts(base as *const u8, 65536) }
+                .iter()
+                .all(|byte| *byte == 0xff),
+        )
     }
     fn read(&self, slot: usize, offset: usize, output: &mut [u8]) -> Result<()> {
         Self::read_region(Self::base(slot)?, 65536, offset, output)
@@ -1680,10 +1743,7 @@ fn main() -> ! {
         && Nvm::program_ownership_marker().is_err()
     {
         let deadline = transport.deadline_after(1_000_000);
-        let _ = transport.write_raw(
-            b"MicroCard: ownership marker write failed\r\n",
-            deadline,
-        );
+        let _ = transport.write_raw(b"MicroCard: ownership marker write failed\r\n", deadline);
         drop(storage_key);
         drop(keys);
         loop {
@@ -1722,8 +1782,11 @@ fn main() -> ! {
         cortex_m::asm::isb();
     }
     #[cfg(feature = "usb-ccid")]
-    let mut usb_stack: Option<(BoardUsbDevice, BoardCcidClass, usb_ccid::ApduResponder<'static>)> =
-        None;
+    let mut usb_stack: Option<(
+        BoardUsbDevice,
+        BoardCcidClass,
+        usb_ccid::ApduResponder<'static>,
+    )> = None;
     #[cfg(feature = "usb-ccid")]
     let mut usb_was_powered = false;
     let mut command = [0; MAX_SHORT_COMMAND_BYTES];

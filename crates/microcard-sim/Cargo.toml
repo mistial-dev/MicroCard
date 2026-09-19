@@ -12,7 +12,7 @@ scp03-renc = ["microcard-core/scp03-renc"]
 scp03-s16 = ["microcard-core/scp03-s16"]
 scp03-pseudo-random = ["microcard-core/scp03-pseudo-random"]
 [dependencies]
-microcard-core = { path = "../microcard-core", default-features = false, features = ["hal-conformance"] }
+microcard-core = { path = "../microcard-core", default-features = false, features = ["hal-conformance", "software-crypto"] }
 microcard-engine-jcvm = { path = "../microcard-engine-jcvm" }
 serde_json.workspace = true
 getrandom = "0.2"

@@ -1,19 +1,26 @@
 //! Primitives from RustCrypto; SCP03 v1.1.2 §§4.1.4–4.1.5.
 use crate::{Error, Result};
+#[cfg(feature = "software-aes")]
 use aes::{
     cipher::{BlockDecrypt, BlockEncrypt, KeyInit},
     Aes128,
 };
 use alloc::vec::Vec;
-use cmac::{Cmac, Mac};
-use sha2::{Digest, Sha256};
+#[cfg(feature = "software-aes")]
+use cmac::Cmac;
+#[cfg(feature = "software-aes")]
+use cmac::Mac;
+#[cfg(all(feature = "software-hmac", not(feature = "software-aes")))]
+use hmac::Mac;
+#[cfg(feature = "software-sha256")]
+use sha2::Digest;
+#[cfg(any(feature = "software-sha256", feature = "software-hmac"))]
+use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
 pub(crate) fn zeroizing_buffer(length: usize) -> Result<Zeroizing<Vec<u8>>> {
     let mut output = Zeroizing::new(Vec::new());
-    output
-        .try_reserve_exact(length)
-        .map_err(|_| Error::Quota)?;
+    output.try_reserve_exact(length).map_err(|_| Error::Quota)?;
     output.resize(length, 0);
     Ok(output)
 }
@@ -27,21 +34,34 @@ pub fn clear_output_on_error<T>(output: &mut [u8], result: Result<T>) -> Result<
     result
 }
 
+// A disabled software backend makes its primitive mandatory on the platform provider.
+macro_rules! software_method {
+    ($feature:literal, fn $name:ident(&mut self $(, $arg:ident: $ty:ty)* $(,)?) -> $result:ty $body:block) => {
+        #[cfg(feature = $feature)]
+        fn $name(&mut self $(, $arg: $ty)*) -> $result $body
+        #[cfg(not(feature = $feature))]
+        fn $name(&mut self $(, $arg: $ty)*) -> $result;
+    };
+}
+
 /// Native cryptographic operations available to the portable runtime.
 ///
 /// Board implementations override supported operations with hardware-backed
-/// implementations. Default methods provide the native Rust fallback and keep
-/// provider selection outside managed code.
+/// implementations. Enabled software features supply reference implementations. Without a software
+/// feature, the platform must implement that primitive at compile time.
+/// Fixed-size provider outputs use caller-owned storage so hardware backends
+/// do not need a second bridge buffer. Callers initialize output to zero;
+/// errors must not expose a partial result and must leave it all-zero.
+/// The same rule applies to every variable-size output buffer below.
 pub trait CryptoProvider {
-    /// Fixed-size provider outputs use caller-owned storage so hardware backends
-    /// do not need a second bridge buffer. Callers initialize output to zero;
-    /// errors must not expose a partial result and must leave it all-zero.
-    /// The same rule applies to every variable-size output buffer below.
-    fn sha256_into(&mut self, data: &[u8], output: &mut [u8; 32]) -> Result<()> {
-        let value = sha256(data);
-        *output = value;
-        Ok(())
-    }
+    software_method!(
+        "software-sha256",
+        fn sha256_into(&mut self, data: &[u8], output: &mut [u8; 32]) -> Result<()> {
+            let value = sha256(data);
+            *output = value;
+            Ok(())
+        }
+    );
 
     fn sha256(&mut self, data: &[u8]) -> Result<[u8; 32]> {
         let mut output = [0; 32];
@@ -49,16 +69,19 @@ pub trait CryptoProvider {
         Ok(output)
     }
 
-    fn hmac_sha256_into(
-        &mut self,
-        key: &[u8],
-        data: &[u8],
-        output: &mut [u8; 32],
-    ) -> Result<()> {
-        let value = Zeroizing::new(hmac(key, data));
-        *output = *value;
-        Ok(())
-    }
+    software_method!(
+        "software-hmac",
+        fn hmac_sha256_into(
+            &mut self,
+            key: &[u8],
+            data: &[u8],
+            output: &mut [u8; 32],
+        ) -> Result<()> {
+            let value = Zeroizing::new(hmac(key, data));
+            *output = *value;
+            Ok(())
+        }
+    );
 
     fn hmac_sha256(&mut self, key: &[u8], data: &[u8]) -> Result<[u8; 32]> {
         let mut output = Zeroizing::new([0; 32]);
@@ -66,25 +89,23 @@ pub trait CryptoProvider {
         Ok(*output)
     }
 
-    fn aes_cmac_into(
-        &mut self,
-        key: &[u8; 16],
-        data: &[u8],
-        output: &mut [u8; 16],
-    ) -> Result<()> {
+    fn aes_cmac_into(&mut self, key: &[u8; 16], data: &[u8], output: &mut [u8; 16]) -> Result<()> {
         self.aes_cmac_parts_into(key, &[data], output)
     }
 
-    fn aes_cmac_parts_into(
-        &mut self,
-        key: &[u8; 16],
-        parts: &[&[u8]],
-        output: &mut [u8; 16],
-    ) -> Result<()> {
-        let value = Zeroizing::new(cmac_parts(key, parts));
-        *output = *value;
-        Ok(())
-    }
+    software_method!(
+        "software-aes",
+        fn aes_cmac_parts_into(
+            &mut self,
+            key: &[u8; 16],
+            parts: &[&[u8]],
+            output: &mut [u8; 16],
+        ) -> Result<()> {
+            let value = Zeroizing::new(cmac_parts(key, parts));
+            *output = *value;
+            Ok(())
+        }
+    );
 
     fn aes_cmac(&mut self, key: &[u8; 16], data: &[u8]) -> Result<[u8; 16]> {
         let mut output = Zeroizing::new([0; 16]);
@@ -92,15 +113,18 @@ pub trait CryptoProvider {
         Ok(*output)
     }
 
-    fn aes128_encrypt_block_in_place(
-        &mut self,
-        key: &[u8; 16],
-        block: &mut [u8; 16],
-    ) -> Result<()> {
-        let value = Zeroizing::new(crate::crypto::block(key, *block));
-        *block = *value;
-        Ok(())
-    }
+    software_method!(
+        "software-aes",
+        fn aes128_encrypt_block_in_place(
+            &mut self,
+            key: &[u8; 16],
+            block: &mut [u8; 16],
+        ) -> Result<()> {
+            let value = Zeroizing::new(crate::crypto::block(key, *block));
+            *block = *value;
+            Ok(())
+        }
+    );
 
     fn aes128_encrypt_block(&mut self, key: &[u8; 16], mut block: [u8; 16]) -> Result<[u8; 16]> {
         let mut output = Zeroizing::new(block);
@@ -109,72 +133,91 @@ pub trait CryptoProvider {
         Ok(*output)
     }
 
-    fn aes_cbc_encrypt(
-        &mut self,
-        key: &[u8; 16],
-        iv: [u8; 16],
-        data: &[u8],
-        output: &mut [u8],
-    ) -> Result<usize> {
-        let result = encrypt_into(key, iv, data, output);
-        clear_output_on_error(output, result)
-    }
+    software_method!(
+        "software-aes",
+        fn aes_cbc_encrypt(
+            &mut self,
+            key: &[u8; 16],
+            iv: [u8; 16],
+            data: &[u8],
+            output: &mut [u8],
+        ) -> Result<usize> {
+            let result = encrypt_into(key, iv, data, output);
+            clear_output_on_error(output, result)
+        }
+    );
 
-    fn aes_cbc_decrypt(
-        &mut self,
-        key: &[u8; 16],
-        iv: [u8; 16],
-        data: &[u8],
-        output: &mut [u8],
-    ) -> Result<usize> {
-        let result = decrypt_into(key, iv, data, output);
-        clear_output_on_error(output, result)
-    }
+    software_method!(
+        "software-aes",
+        fn aes_cbc_decrypt(
+            &mut self,
+            key: &[u8; 16],
+            iv: [u8; 16],
+            data: &[u8],
+            output: &mut [u8],
+        ) -> Result<usize> {
+            let result = decrypt_into(key, iv, data, output);
+            clear_output_on_error(output, result)
+        }
+    );
 
-    fn aes_ccm_encrypt(
-        &mut self,
-        key: &[u8; 16],
-        nonce: &[u8; 13],
-        aad: &[u8],
-        plaintext: &[u8],
-        output: &mut [u8],
-    ) -> Result<usize> {
-        let result = ccm_encrypt_into(key, nonce, aad, plaintext, output);
-        clear_output_on_error(output, result)
-    }
+    software_method!(
+        "software-aes",
+        fn aes_ccm_encrypt(
+            &mut self,
+            key: &[u8; 16],
+            nonce: &[u8; 13],
+            aad: &[u8],
+            plaintext: &[u8],
+            output: &mut [u8],
+        ) -> Result<usize> {
+            let result = ccm_encrypt_into(key, nonce, aad, plaintext, output);
+            clear_output_on_error(output, result)
+        }
+    );
 
-    fn aes_ccm_decrypt(
-        &mut self,
-        key: &[u8; 16],
-        nonce: &[u8; 13],
-        aad: &[u8],
-        ciphertext: &[u8],
-        output: &mut [u8],
-    ) -> Result<usize> {
-        let result = ccm_decrypt_into(key, nonce, aad, ciphertext, output);
-        clear_output_on_error(output, result)
-    }
+    software_method!(
+        "software-aes",
+        fn aes_ccm_decrypt(
+            &mut self,
+            key: &[u8; 16],
+            nonce: &[u8; 13],
+            aad: &[u8],
+            ciphertext: &[u8],
+            output: &mut [u8],
+        ) -> Result<usize> {
+            let result = ccm_decrypt_into(key, nonce, aad, ciphertext, output);
+            clear_output_on_error(output, result)
+        }
+    );
 
-    fn aes_ccm_decrypt_in_place(
-        &mut self,
-        key: &[u8; 16],
-        nonce: &[u8; 13],
-        aad: &[u8],
-        ciphertext: &mut [u8],
-    ) -> Result<usize> {
-        ccm_decrypt_in_place(key, nonce, aad, ciphertext)
-    }
+    software_method!(
+        "software-aes",
+        fn aes_ccm_decrypt_in_place(
+            &mut self,
+            key: &[u8; 16],
+            nonce: &[u8; 13],
+            aad: &[u8],
+            ciphertext: &mut [u8],
+        ) -> Result<usize> {
+            let result = ccm_decrypt_in_place(key, nonce, aad, ciphertext);
+            clear_output_on_error(ciphertext, result)
+        }
+    );
 
-    fn p256_public_key_into(
-        &mut self,
-        private_key: &[u8; 32],
-        output: &mut [u8; 65],
-    ) -> Result<()> {
-        output.fill(0);
-        let value = p256_public_key(private_key)?;
-        *output = value;
-        Ok(())
-    }
+    software_method!(
+        "software-p256",
+        fn p256_public_key_into(
+            &mut self,
+            private_key: &[u8; 32],
+            output: &mut [u8; 65],
+        ) -> Result<()> {
+            output.fill(0);
+            let value = p256_public_key(private_key)?;
+            *output = value;
+            Ok(())
+        }
+    );
 
     fn p256_public_key(&mut self, private_key: &[u8; 32]) -> Result<[u8; 65]> {
         let mut output = [0; 65];
@@ -182,17 +225,20 @@ pub trait CryptoProvider {
         Ok(output)
     }
 
-    fn p256_ecdsa_sign_into(
-        &mut self,
-        private_key: &[u8; 32],
-        message: &[u8],
-        output: &mut [u8; 64],
-    ) -> Result<()> {
-        output.fill(0);
-        let value = p256_ecdsa_sign(private_key, message)?;
-        *output = value;
-        Ok(())
-    }
+    software_method!(
+        "software-p256",
+        fn p256_ecdsa_sign_into(
+            &mut self,
+            private_key: &[u8; 32],
+            message: &[u8],
+            output: &mut [u8; 64],
+        ) -> Result<()> {
+            output.fill(0);
+            let value = p256_ecdsa_sign(private_key, message)?;
+            *output = value;
+            Ok(())
+        }
+    );
 
     fn p256_ecdsa_sign(&mut self, private_key: &[u8; 32], message: &[u8]) -> Result<[u8; 64]> {
         let mut output = [0; 64];
@@ -200,32 +246,34 @@ pub trait CryptoProvider {
         Ok(output)
     }
 
-    fn p256_ecdsa_verify(
-        &mut self,
-        public_key: &[u8],
-        message: &[u8],
-        signature: &[u8],
-    ) -> Result<bool> {
-        Ok(p256_ecdsa_verify(public_key, message, signature))
-    }
+    software_method!(
+        "software-p256",
+        fn p256_ecdsa_verify(
+            &mut self,
+            public_key: &[u8],
+            message: &[u8],
+            signature: &[u8],
+        ) -> Result<bool> {
+            Ok(p256_ecdsa_verify(public_key, message, signature))
+        }
+    );
 
-    fn p256_ecdh_into(
-        &mut self,
-        private_key: &[u8; 32],
-        peer_public_key: &[u8],
-        output: &mut [u8; 32],
-    ) -> Result<()> {
-        output.fill(0);
-        let value = Zeroizing::new(p256_ecdh(private_key, peer_public_key)?);
-        *output = *value;
-        Ok(())
-    }
+    software_method!(
+        "software-p256",
+        fn p256_ecdh_into(
+            &mut self,
+            private_key: &[u8; 32],
+            peer_public_key: &[u8],
+            output: &mut [u8; 32],
+        ) -> Result<()> {
+            output.fill(0);
+            let value = Zeroizing::new(p256_ecdh(private_key, peer_public_key)?);
+            *output = *value;
+            Ok(())
+        }
+    );
 
-    fn p256_ecdh(
-        &mut self,
-        private_key: &[u8; 32],
-        peer_public_key: &[u8],
-    ) -> Result<[u8; 32]> {
+    fn p256_ecdh(&mut self, private_key: &[u8; 32], peer_public_key: &[u8]) -> Result<[u8; 32]> {
         let mut output = Zeroizing::new([0; 32]);
         self.p256_ecdh_into(private_key, peer_public_key, &mut output)?;
         Ok(*output)
@@ -233,18 +281,23 @@ pub trait CryptoProvider {
 }
 
 /// Portable native provider used by the simulator and as the board fallback.
+#[cfg(feature = "software-crypto")]
 #[derive(Default)]
 pub struct SoftwareCrypto;
 
+#[cfg(feature = "software-crypto")]
 impl CryptoProvider for SoftwareCrypto {}
 
+#[cfg(feature = "software-sha256")]
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     Sha256::digest(data).into()
 }
+#[cfg(feature = "software-aes")]
 pub fn cmac(key: &[u8; 16], data: &[u8]) -> [u8; 16] {
     cmac_parts(key, &[data])
 }
 
+#[cfg(feature = "software-aes")]
 pub fn cmac_parts(key: &[u8; 16], parts: &[&[u8]]) -> [u8; 16] {
     let mut m = <Cmac<Aes128> as Mac>::new_from_slice(key).unwrap();
     for part in parts {
@@ -252,11 +305,13 @@ pub fn cmac_parts(key: &[u8; 16], parts: &[&[u8]]) -> [u8; 16] {
     }
     m.finalize().into_bytes().into()
 }
+#[cfg(feature = "software-hmac")]
 pub fn hmac(key: &[u8], data: &[u8]) -> [u8; 32] {
     let mut m = <hmac::Hmac<Sha256> as Mac>::new_from_slice(key).unwrap();
     m.update(data);
     m.finalize().into_bytes().into()
 }
+#[cfg(feature = "software-aes")]
 pub fn block(key: &[u8; 16], mut b: [u8; 16]) -> [u8; 16] {
     Aes128::new(key.into()).encrypt_block((&mut b).into());
     b
@@ -281,10 +336,13 @@ pub fn cbc_pad_into(data: &[u8], output: &mut [u8]) -> Result<usize> {
 }
 
 pub fn cbc_unpad_in_place(output: &mut [u8]) -> Result<usize> {
-    let index = output.iter().rposition(|value| *value != 0).ok_or_else(|| {
-        output.zeroize();
-        Error::Authentication
-    })?;
+    let index = output
+        .iter()
+        .rposition(|value| *value != 0)
+        .ok_or_else(|| {
+            output.zeroize();
+            Error::Authentication
+        })?;
     if output[index] != 0x80 {
         output.zeroize();
         return Err(Error::Authentication);
@@ -293,6 +351,7 @@ pub fn cbc_unpad_in_place(output: &mut [u8]) -> Result<usize> {
     Ok(index)
 }
 
+#[cfg(feature = "software-aes")]
 pub fn encrypt_into(
     key: &[u8; 16],
     mut iv: [u8; 16],
@@ -311,6 +370,7 @@ pub fn encrypt_into(
     Ok(required)
 }
 
+#[cfg(feature = "software-aes")]
 pub fn encrypt(key: &[u8; 16], mut iv: [u8; 16], data: &[u8]) -> Result<Vec<u8>> {
     let padded = data
         .len()
@@ -331,6 +391,7 @@ pub fn encrypt(key: &[u8; 16], mut iv: [u8; 16], data: &[u8]) -> Result<Vec<u8>>
     Ok(core::mem::take(&mut *out))
 }
 
+#[cfg(feature = "software-aes")]
 pub fn decrypt_into(
     key: &[u8; 16],
     mut iv: [u8; 16],
@@ -357,6 +418,7 @@ pub fn decrypt_into(
     cbc_unpad_in_place(out)
 }
 
+#[cfg(feature = "software-aes")]
 pub fn decrypt(key: &[u8; 16], iv: [u8; 16], data: &[u8]) -> Result<Vec<u8>> {
     let mut out = zeroizing_buffer(data.len())?;
     let length = decrypt_into(key, iv, data, &mut out)?;
@@ -364,6 +426,7 @@ pub fn decrypt(key: &[u8; 16], iv: [u8; 16], data: &[u8]) -> Result<Vec<u8>> {
     Ok(core::mem::take(&mut *out))
 }
 /// GP SCP03 §4.1.5, counter-mode CMAC KDF with one output block.
+#[cfg(feature = "software-aes")]
 pub fn derive(key: &[u8; 16], constant: u8, bits: u16, context: &[u8]) -> [u8; 16] {
     let mut prefix = [0; 16];
     prefix[11] = constant;
@@ -373,6 +436,7 @@ pub fn derive(key: &[u8; 16], constant: u8, bits: u16, context: &[u8]) -> [u8; 1
 }
 
 /// AES-CCM, 13-byte nonce and 16-byte tag. Nonces must be unique per key.
+#[cfg(feature = "software-aes")]
 pub fn ccm_encrypt(
     key: &[u8; 16],
     nonce: &[u8; 13],
@@ -385,6 +449,7 @@ pub fn ccm_encrypt(
     Ok(core::mem::take(&mut *output))
 }
 
+#[cfg(feature = "software-aes")]
 pub fn ccm_encrypt_into(
     key: &[u8; 16],
     nonce: &[u8; 13],
@@ -412,6 +477,7 @@ pub fn ccm_encrypt_into(
     output[plaintext.len()..required].copy_from_slice(&tag);
     Ok(required)
 }
+#[cfg(feature = "software-aes")]
 pub fn ccm_decrypt(
     key: &[u8; 16],
     nonce: &[u8; 13],
@@ -427,6 +493,7 @@ pub fn ccm_decrypt(
     Ok(core::mem::take(&mut *output))
 }
 
+#[cfg(feature = "software-aes")]
 pub fn ccm_decrypt_into(
     key: &[u8; 16],
     nonce: &[u8; 13],
@@ -463,6 +530,7 @@ pub fn ccm_decrypt_into(
     Ok(length)
 }
 
+#[cfg(feature = "software-aes")]
 pub fn ccm_decrypt_in_place(
     key: &[u8; 16],
     nonce: &[u8; 13],
@@ -480,17 +548,14 @@ pub fn ccm_decrypt_in_place(
         .ok_or(Error::Authentication)?;
     let (message, tag) = ciphertext.split_at_mut(length);
     let c = AesCcm::new(key.into());
-    if c.decrypt_in_place_detached(
-        nonce.into(),
-        aad,
-        message,
-        Tag::<AesCcm>::from_slice(tag),
-    )
-    .is_err()
+    if c.decrypt_in_place_detached(nonce.into(), aad, message, Tag::<AesCcm>::from_slice(tag))
+        .is_err()
     {
         message.zeroize();
+        tag.zeroize();
         return Err(Error::Authentication);
     }
+    tag.zeroize();
     Ok(length)
 }
 
@@ -514,6 +579,7 @@ const P256_HALF_ORDER: [u8; 32] = [
 /// A package carries the whole uncompressed key so verification needs no point
 /// decompression. What persists is this digest, which keeps every stored identity the width
 /// it has always been.
+#[cfg(feature = "software-sha256")]
 pub fn signer_identity(public_key: &[u8; P256_PUBLIC_KEY_BYTES]) -> [u8; 32] {
     sha256(public_key)
 }
@@ -531,6 +597,7 @@ const P256_ORDER: [u8; 32] = [
 /// encodings with two digests, and a registry identity is derived from that digest, so the
 /// same package could be installed twice under different names. Every packager has to agree
 /// on this, in every language.
+#[cfg(feature = "software-p256")]
 pub fn p256_ecdsa_sign_package(private_key: &[u8; 32], message: &[u8]) -> Result<[u8; 64]> {
     let mut signature = p256_ecdsa_sign(private_key, message)?;
     if signature[32..] > P256_HALF_ORDER[..] {
@@ -568,14 +635,15 @@ pub fn p256_private_key_valid(private_key: &[u8; 32]) -> bool {
     // Subtract the order across every byte. A final borrow means the scalar is smaller.
     let mut borrow = 0u16;
     for index in (0..32).rev() {
-        let difference = u16::from(private_key[index])
-            .wrapping_sub(u16::from(P256_ORDER[index]) + borrow);
+        let difference =
+            u16::from(private_key[index]).wrapping_sub(u16::from(P256_ORDER[index]) + borrow);
         borrow = difference >> 15;
     }
     bool::from(!private_key.ct_eq(&[0; 32]) & (borrow as u8).ct_eq(&1))
 }
 
 /// Return an uncompressed SEC1 public key without exposing the private scalar.
+#[cfg(feature = "software-p256")]
 pub fn p256_public_key(private_key: &[u8; 32]) -> Result<[u8; 65]> {
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     let secret = p256::SecretKey::from_slice(private_key).map_err(|_| Error::Storage)?;
@@ -588,6 +656,7 @@ pub fn p256_public_key(private_key: &[u8; 32]) -> Result<[u8; 65]> {
 }
 
 /// Produce a fixed-width IEEE P1363 ECDSA/SHA-256 signature.
+#[cfg(feature = "software-p256")]
 pub fn p256_ecdsa_sign(private_key: &[u8; 32], message: &[u8]) -> Result<[u8; 64]> {
     use p256::ecdsa::{signature::Signer, Signature, SigningKey};
     let signing_key = SigningKey::from_slice(private_key).map_err(|_| Error::Storage)?;
@@ -596,6 +665,7 @@ pub fn p256_ecdsa_sign(private_key: &[u8; 32], message: &[u8]) -> Result<[u8; 64
 }
 
 /// Verify an uncompressed or compressed SEC1 key and fixed-width signature.
+#[cfg(feature = "software-p256")]
 pub fn p256_ecdsa_verify(public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
     use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
     VerifyingKey::from_sec1_bytes(public_key)
@@ -605,10 +675,11 @@ pub fn p256_ecdsa_verify(public_key: &[u8], message: &[u8], signature: &[u8]) ->
 }
 
 /// Derive the raw 32-byte P-256 ECDH shared secret.
+#[cfg(feature = "software-p256")]
 pub fn p256_ecdh(private_key: &[u8; 32], peer_public_key: &[u8]) -> Result<[u8; 32]> {
     let secret = p256::SecretKey::from_slice(private_key).map_err(|_| Error::Storage)?;
-    let peer = p256::PublicKey::from_sec1_bytes(peer_public_key)
-        .map_err(|_| Error::Authentication)?;
+    let peer =
+        p256::PublicKey::from_sec1_bytes(peer_public_key).map_err(|_| Error::Authentication)?;
     let shared = p256::ecdh::diffie_hellman(secret.to_nonzero_scalar(), peer.as_affine());
     let mut output = [0; 32];
     output.copy_from_slice(shared.raw_secret_bytes());
@@ -636,15 +707,11 @@ mod p256_tests {
 
     #[test]
     fn standards_known_answers_cover_native_symmetric_primitives() {
-        let key: [u8; 16] = hex("2b7e151628aed2a6abf7158809cf4f3c")
-            .try_into()
-            .unwrap();
-        let message = hex(
-            "6bc1bee22e409f96e93d7e117393172a\
+        let key: [u8; 16] = hex("2b7e151628aed2a6abf7158809cf4f3c").try_into().unwrap();
+        let message = hex("6bc1bee22e409f96e93d7e117393172a\
              ae2d8a571e03ac9c9eb76fac45af8e51\
              30c81c46a35ce411e5fbc1191a0a52ef\
-             f69f2445df4f9b17ad2b417be66c3710",
-        );
+             f69f2445df4f9b17ad2b417be66c3710");
 
         // FIPS 180-4 SHA-256 example and RFC 4231 section 4.2.
         assert_eq!(
@@ -676,37 +743,29 @@ mod p256_tests {
             block(&key, plaintext).as_slice(),
             hex("3ad77bb40d7a3660a89ecaf32466ef97")
         );
-        let iv: [u8; 16] = hex("000102030405060708090a0b0c0d0e0f")
-            .try_into()
-            .unwrap();
+        let iv: [u8; 16] = hex("000102030405060708090a0b0c0d0e0f").try_into().unwrap();
         let mut ciphertext = [0; 32];
         let encrypted = encrypt_into(&key, iv, &plaintext, &mut ciphertext).unwrap();
         assert_eq!(encrypted, 32);
         assert_eq!(encrypt(&key, iv, &plaintext).unwrap(), ciphertext);
-        assert_eq!(
-            &ciphertext[..16],
-            hex("7649abac8119b246cee98e9b12e9197d")
-        );
+        assert_eq!(&ciphertext[..16], hex("7649abac8119b246cee98e9b12e9197d"));
         let mut recovered = [0; 32];
         let recovered_length =
             decrypt_into(&key, iv, &ciphertext[..encrypted], &mut recovered).unwrap();
         assert_eq!(&recovered[..recovered_length], plaintext);
 
         // NIST CAVP CCM-VADT AES-128, Alen=0, Count=0.
-        let ccm_key: [u8; 16] = hex("d24a3d3dde8c84830280cb87abad0bb3")
-            .try_into()
-            .unwrap();
-        let nonce: [u8; 13] = hex("f1100035bb24a8d26004e0e24b")
-            .try_into()
-            .unwrap();
+        let ccm_key: [u8; 16] = hex("d24a3d3dde8c84830280cb87abad0bb3").try_into().unwrap();
+        let nonce: [u8; 13] = hex("f1100035bb24a8d26004e0e24b").try_into().unwrap();
         let payload = hex("7c86135ed9c2a515aaae0e9a208133897269220f30870006");
-        let expected = hex(
-            "1faeb0ee2ca2cd52f0aa3966578344f24e69b742c4ab37ab\
-             1123301219c70599b7c373ad4b3ad67b",
-        );
+        let expected = hex("1faeb0ee2ca2cd52f0aa3966578344f24e69b742c4ab37ab\
+             1123301219c70599b7c373ad4b3ad67b");
         let encrypted = ccm_encrypt(&ccm_key, &nonce, &[], &payload).unwrap();
         assert_eq!(encrypted, expected);
-        assert_eq!(ccm_decrypt(&ccm_key, &nonce, &[], &encrypted).unwrap(), payload);
+        assert_eq!(
+            ccm_decrypt(&ccm_key, &nonce, &[], &encrypted).unwrap(),
+            payload
+        );
     }
 
     #[test]
@@ -768,11 +827,7 @@ mod p256_tests {
                 block.fill(7);
                 Ok(())
             }
-            fn p256_public_key_into(
-                &mut self,
-                _: &[u8; 32],
-                output: &mut [u8; 65],
-            ) -> Result<()> {
+            fn p256_public_key_into(&mut self, _: &[u8; 32], output: &mut [u8; 65]) -> Result<()> {
                 self.calls += 1;
                 output.fill(4);
                 Ok(())
@@ -803,9 +858,15 @@ mod p256_tests {
         assert_eq!(provider.sha256(b"input").unwrap(), [1; 32]);
         assert_eq!(provider.hmac_sha256(b"key", b"input").unwrap(), [2; 32]);
         assert_eq!(provider.aes_cmac(&[0; 16], b"input").unwrap(), [3; 16]);
-        assert_eq!(provider.aes128_encrypt_block(&[0; 16], [0; 16]).unwrap(), [7; 16]);
+        assert_eq!(
+            provider.aes128_encrypt_block(&[0; 16], [0; 16]).unwrap(),
+            [7; 16]
+        );
         assert_eq!(provider.p256_public_key(&[1; 32]).unwrap(), [4; 65]);
-        assert_eq!(provider.p256_ecdsa_sign(&[1; 32], b"input").unwrap(), [5; 64]);
+        assert_eq!(
+            provider.p256_ecdsa_sign(&[1; 32], b"input").unwrap(),
+            [5; 64]
+        );
         assert_eq!(provider.p256_ecdh(&[1; 32], &[2; 65]).unwrap(), [6; 32]);
         assert_eq!(provider.calls, 7);
     }
@@ -835,11 +896,10 @@ mod p256_tests {
 
     #[test]
     fn rfc6979_p256_signature_and_ecdh() {
-        let private: [u8; 32] = hex(
-            "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
-        )
-        .try_into()
-        .unwrap();
+        let private: [u8; 32] =
+            hex("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721")
+                .try_into()
+                .unwrap();
         assert!(p256_private_key_valid(&private));
         assert!(!p256_private_key_valid(&[0; 32]));
         assert!(!p256_private_key_valid(&[0xff; 32]));
@@ -878,17 +938,27 @@ mod signature_shape_tests {
         let mut one = [0; 32];
         one[31] = 1;
         for (value, expected) in [
-            ([0; 32], false), (one, true), (below, true),
-            (P256_ORDER, false), (above, false), ([0xff; 32], false),
+            ([0; 32], false),
+            (one, true),
+            (below, true),
+            (P256_ORDER, false),
+            (above, false),
+            ([0xff; 32], false),
         ] {
             assert_eq!(p256_private_key_valid(&value), expected);
-            assert_eq!(p256_private_key_valid(&value), p256::SecretKey::from_slice(&value).is_ok());
+            assert_eq!(
+                p256_private_key_valid(&value),
+                p256::SecretKey::from_slice(&value).is_ok()
+            );
         }
         for index in 0..32 {
             for byte in 0..=255 {
                 let mut value = P256_ORDER;
                 value[index] = byte;
-                assert_eq!(p256_private_key_valid(&value), p256::SecretKey::from_slice(&value).is_ok());
+                assert_eq!(
+                    p256_private_key_valid(&value),
+                    p256::SecretKey::from_slice(&value).is_ok()
+                );
             }
         }
     }

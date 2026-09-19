@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [features]
-default = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
+default = ["software-crypto", "scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
+software-crypto = ["software-sha256", "software-hmac", "software-aes", "software-p256"]
+software-sha256 = ["dep:sha2"]
+software-hmac = ["dep:hmac", "dep:sha2"]
+software-aes = ["dep:aes", "dep:cmac", "dep:ccm"]
+software-p256 = ["dep:p256"]
 fuzzing = []
 hal-conformance = []
 # Optional SCP03 capabilities. The advertised i parameter and the accepted security
@@ -21,11 +26,11 @@ scp03-pseudo-random = []
 base64ct.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
-p256.workspace = true
-aes = { version = "0.8", default-features = false }
-cmac = { version = "0.7", default-features = false }
-hmac = { version = "0.12", default-features = false }
-ccm = { version = "0.5", default-features = false }
+sha2 = { workspace = true, optional = true }
+p256 = { workspace = true, optional = true }
+aes = { version = "0.8", default-features = false, optional = true }
+cmac = { version = "0.7", default-features = false, optional = true }
+hmac = { version = "0.12", default-features = false, optional = true }
+ccm = { version = "0.5", default-features = false, optional = true }
 subtle = { version = "2", default-features = false }
 zeroize = { version = "1", default-features = false, features = ["alloc", "derive"] }

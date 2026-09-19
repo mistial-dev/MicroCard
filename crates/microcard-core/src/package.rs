@@ -187,6 +187,7 @@ impl<'a> PackageView<'a> {
     /// Verify a package while retaining its signed envelope and assembly as
     /// borrowed slices. The manifest remains owned because JSON decoding
     /// unescapes strings and builds bounded dependency records.
+    #[cfg(feature = "software-crypto")]
     pub fn verify(bytes: &'a [u8]) -> Result<Self> {
         let mut provider = crate::crypto::SoftwareCrypto;
         Self::verify_with(bytes, &mut provider)
@@ -333,6 +334,7 @@ impl<'a> PackageView<'a> {
 }
 
 impl Package {
+    #[cfg(feature = "software-crypto")]
     pub fn verify(bytes: &[u8]) -> Result<Self> {
         let verified = PackageView::verify(bytes)?;
         let image_start = (verified.image.as_ptr() as usize)

@@ -1,6 +1,8 @@
 //! Authenticated rotating journal. Commit marker is programmed last; the old slot survives.
+#[cfg(feature = "software-crypto")]
+use crate::crypto::SoftwareCrypto;
 use crate::{
-    crypto::{CryptoProvider, SoftwareCrypto},
+    crypto::CryptoProvider,
     Error, Result,
 };
 use alloc::{vec, vec::Vec};
@@ -55,6 +57,7 @@ pub struct Journal<F: Flash> {
     key: JournalKey,
 }
 impl<F: Flash> Journal<F> {
+    #[cfg(feature = "software-crypto")]
     pub fn open(
         flash: F,
         key: impl Into<JournalKey>,
@@ -174,6 +177,7 @@ impl<F: Flash> Journal<F> {
             data,
         ))
     }
+    #[cfg(feature = "software-crypto")]
     pub fn commit(&mut self, data: &[u8]) -> Result<()> {
         self.commit_with(data, &mut SoftwareCrypto)
     }

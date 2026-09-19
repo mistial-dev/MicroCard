@@ -4,8 +4,14 @@ version = "0.1.0-wip"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 [features]
-default = ["development-debug"]
+default = ["development-debug", "software-crypto"]
 development-debug = []
+cc310 = ["cc310-sha256", "cc310-entropy", "cc310-cmac", "cc310-hmac", "cc310-aes", "cc310-cbc", "cc310-ccm", "cc310-p256"]
+software-crypto = ["microcard-core/software-crypto"]
+software-sha256 = ["microcard-core/software-sha256"]
+software-hmac = ["microcard-core/software-hmac"]
+software-aes = ["microcard-core/software-aes"]
+software-p256 = ["microcard-core/software-p256"]
 usb-ccid = ["dep:nrf52840-hal", "dep:usb-device", "dep:usbd-ccid", "dep:heapless", "dep:interchange"]
 # The Makerdiary nRF52840 MDK USB Dongle flash map, which links above that board's
 # bootloader and SoftDevice. It carries USB CCID as its only management transport, because
@@ -27,7 +33,7 @@ cc310-ccm = ["cc310-aes"]
 cc310-p256 = ["cc310-entropy"]
 
 [dependencies]
-microcard-core = { path = "../../crates/microcard-core" }
+microcard-core = { path = "../../crates/microcard-core", default-features = false, features = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"] }
 cortex-m = {version="0.7", features=["critical-section-single-core"]}
 cortex-m-rt = "0.7"
 embedded-alloc = "0.6"

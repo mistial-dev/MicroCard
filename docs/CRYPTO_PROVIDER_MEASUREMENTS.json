@@ -1,0 +1,77 @@
+{
+  "format": 1,
+  "target": "thumbv7em-none-eabihf",
+  "device_latency_measured": false,
+  "stages": {
+    "software": {
+      "text_bytes": 264372,
+      "data_bytes": 0,
+      "bss_bytes": 196636,
+      "software_dependencies": [
+        "aes",
+        "ccm",
+        "cmac",
+        "ecdsa",
+        "elliptic-curve",
+        "hmac",
+        "p256",
+        "sha2"
+      ],
+      "features": [
+        "development-debug",
+        "software-crypto"
+      ]
+    },
+    "sha256": {
+      "text_bytes": 272404,
+      "data_bytes": 128,
+      "bss_bytes": 196668,
+      "software_dependencies": [
+        "aes",
+        "ccm",
+        "cmac",
+        "ecdsa",
+        "elliptic-curve",
+        "hmac",
+        "p256",
+        "sha2"
+      ],
+      "features": [
+        "development-debug",
+        "cc310-sha256",
+        "software-hmac",
+        "software-aes",
+        "software-p256"
+      ]
+    },
+    "p256": {
+      "text_bytes": 286492,
+      "data_bytes": 144,
+      "bss_bytes": 197692,
+      "software_dependencies": [
+        "aes",
+        "ccm",
+        "cmac",
+        "hmac",
+        "sha2"
+      ],
+      "features": [
+        "development-debug",
+        "cc310-sha256",
+        "cc310-p256",
+        "software-hmac",
+        "software-aes"
+      ]
+    },
+    "hardware": {
+      "text_bytes": 295196,
+      "data_bytes": 148,
+      "bss_bytes": 197692,
+      "software_dependencies": [],
+      "features": [
+        "development-debug",
+        "cc310"
+      ]
+    }
+  }
+}

@@ -1,7 +1,9 @@
 //! SCP03 1.1.2 S8, §§6.2.1–6.2.6. Basic logical channel only.
+#[cfg(feature = "software-crypto")]
+use crate::crypto::SoftwareCrypto;
 use crate::{
     apdu::Command,
-    crypto::{CryptoProvider, SoftwareCrypto},
+    crypto::CryptoProvider,
     journal::JournalKey,
     Error, Result,
 };
@@ -57,6 +59,7 @@ pub struct Keys {
     pub mac: [u8; 16],
 }
 impl Keys {
+    #[cfg(feature = "software-crypto")]
     pub fn storage_key(&self) -> JournalKey {
         self.storage_key_with(&mut SoftwareCrypto).unwrap()
     }
@@ -96,6 +99,7 @@ impl Verified<'_> {
     }
 }
 impl Session {
+    #[cfg(feature = "software-crypto")]
     pub fn initiate(
         keys: &Keys,
         host: [u8; CHALLENGE_BYTES],
@@ -138,6 +142,7 @@ impl Session {
             crypt,
         ))
     }
+    #[cfg(feature = "software-crypto")]
     pub fn authenticate(&mut self, c: &Command<'_>) -> Result<()> {
         self.authenticate_with(c, &mut SoftwareCrypto)
     }
@@ -193,6 +198,7 @@ impl Session {
         self.chain = mac;
         Ok(n)
     }
+    #[cfg(feature = "software-crypto")]
     pub fn unwrap<'a>(&mut self, c: Command<'a>) -> Result<Verified<'a>> {
         self.unwrap_with(c, &mut SoftwareCrypto)
     }
@@ -242,6 +248,7 @@ impl Session {
         }
         result
     }
+    #[cfg(feature = "software-crypto")]
     pub fn response(&mut self, data: &[u8], sw: u16) -> Result<Vec<u8>> {
         self.response_with(data, sw, &mut SoftwareCrypto)
     }

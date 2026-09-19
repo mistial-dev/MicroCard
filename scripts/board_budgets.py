@@ -37,7 +37,7 @@ def main():
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     variants = {
-        "production": measure(["--no-default-features"]),
+        "production": measure(["--no-default-features", "--features", "software-crypto"]),
         "development_debug": measure([]),
         "usb_ccid": measure(["--features", "usb-ccid"]),
  "dongle": measure(["--features", "dongle"]),

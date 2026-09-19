@@ -12,9 +12,15 @@ JCVM runs the supported applet corpus in the simulator. It still needs the board
 
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
 - Replace device JSON manifests, management payloads, and journal snapshots. Prefer deterministic CBOR where it provides a compact bounded representation. Move immutable images and the JCVM heap out of the metadata journal.
-- Enable CC310 providers while excluding their software replacements from board images. Provider failures must remain fatal to the operation.
+- Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
 - Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
 - Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.
+
+## Crypto replacement measurements
+
+`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 264,372 text bytes, SHA-256 replacement 272,404, SHA-256 plus P-256 286,492, and all hardware providers 295,196. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
+
+For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
 
 ## Validation gates
 
