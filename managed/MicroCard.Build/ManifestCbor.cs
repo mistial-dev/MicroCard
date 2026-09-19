@@ -7,6 +7,61 @@ namespace MicroCard.Build;
 /// <summary>Fixed-field version-1 manifest CBOR for the next package envelope.</summary>
 internal static class ManifestCbor
 {
+    public static JsonElement Decode(byte[] bytes)
+    {
+        if (bytes.Length > 16384) throw new FormatException("Manifest quota exceeded");
+        int offset = 0;
+        byte[] Take(int count)
+        {
+            if (count < 0 || count > bytes.Length - offset) throw new FormatException("Truncated CBOR");
+            var result = bytes.AsSpan(offset, count).ToArray(); offset += count; return result;
+        }
+        object? Read(int depth)
+        {
+            if (depth > 16) throw new FormatException("CBOR nesting exceeded");
+            byte initial = Take(1)[0];
+            if (initial == 0xf4) return false; if (initial == 0xf5) return true; if (initial == 0xf6) return null;
+            int major = initial >> 5, additional = initial & 31;
+            if (major is not (0 or 2 or 3 or 4) || additional > 27) throw new FormatException("Unsupported CBOR");
+            ulong value = (ulong)additional;
+            if (additional >= 24)
+            {
+                int width = 1 << (additional - 24); value = 0;
+                foreach (byte b in Take(width)) value = (value << 8) | b;
+                if (value < (width == 1 ? 24UL : 1UL << (width * 4))) throw new FormatException("Noncanonical CBOR");
+            }
+            if (major == 0) return value;
+            int count = checked((int)value);
+            if (count > bytes.Length - offset) throw new FormatException("CBOR length exceeds input");
+            if (major == 2) return Take(count).Select(b => (int)b).ToArray();
+            if (major == 3) return new UTF8Encoding(false, true).GetString(Take(count));
+            var array = new object?[count]; for (int i = 0; i < count; i++) array[i] = Read(depth + 1); return array;
+        }
+        var r = JsonSerializer.SerializeToElement(Read(0));
+        if (offset != bytes.Length || r.GetArrayLength() != 12 || r[0].GetInt32() != 1) throw new FormatException("Invalid manifest record");
+        static Dictionary<string, JsonElement> Fields(JsonElement record, params string[] names)
+        {
+            if (record.GetArrayLength() != names.Length) throw new FormatException("Invalid record width");
+            return names.Select((name, i) => (name, value: record[i])).ToDictionary(item => item.name, item => item.value);
+        }
+        var result = JsonSerializer.SerializeToElement(new {
+            domain = r[1], incarnation = r[2], assembly = r[3], assembly_version = r[4], version = r[5],
+            export = Fields(r[6], "access", "key"),
+            entry_points = r[7].EnumerateArray().Select(e => new {
+                aid = Convert.ToHexString(e[0].EnumerateArray().Select(b => b.GetByte()).ToArray()),
+                process = e[1], install = e[2], uninstall = e[3], select = e[4], deselect = e[5]
+            }).ToArray(),
+            dependencies = r[8].EnumerateArray().Select(d => new {
+                assembly = d[0], ranges = d[1].EnumerateArray().Select(v => Fields(v, "min", "min_inclusive", "max", "max_inclusive")).ToArray(),
+                package_version = d[2], signer = d[3], digest = d[4], scope = d[5]
+            }).ToArray(),
+            capabilities = r[9], storage = r[10].EnumerateArray().Select(v => Fields(v, "key", "kind", "max_bytes")).ToArray(),
+            limits = Fields(r[11], "arena", "stack", "frames", "instructions")
+        });
+        if (!Encode(result).AsSpan().SequenceEqual(bytes)) throw new FormatException("Manifest record shape mismatch");
+        return result;
+    }
+
     public static byte[] Encode(JsonElement value)
     {
         using var output = new MemoryStream();

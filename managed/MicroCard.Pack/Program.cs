@@ -25,6 +25,7 @@ try {
   j.WriteStartObject("limits");j.WriteNumber("arena",16384);j.WriteNumber("stack",256);j.WriteNumber("frames",32);j.WriteNumber("instructions",100000);j.WriteEndObject();j.WriteEndObject();
  }
  seed=File.ReadAllBytes(args[5]);if(seed.Length!=32)throw new Exception("P-256 seed must be 32 bytes");
- using var package=new MemoryStream();using var writer=new BinaryWriter(package);writer.Write("MP04"u8);writer.Write("MicroCard signed package v4\0"u8);writer.Write(checked((uint)manifest.Length));writer.Write(checked((uint)image.Length));writer.Write(manifest.ToArray());writer.Write(image);writer.Write(PackageSignatures.PublicKey(seed));
- var bytes=package.ToArray();writer.Write(PackageSignatures.Sign(seed,bytes));if(package.Length>16384)throw new Exception("Package exceeds 16 KiB quota");File.WriteAllBytes(args[6],package.ToArray());return 0;
+ using var document=JsonDocument.Parse(manifest.ToArray());
+ var package=PackageEnvelope.Create(ManifestCbor.Encode(document.RootElement),image,seed);
+ File.WriteAllBytes(args[6],package);return 0;
 } catch(Exception e){Console.Error.WriteLine(e.Message);return 1;} finally {if(seed!=null)CryptographicOperations.ZeroMemory(seed);}

@@ -78,22 +78,23 @@ fn signed_with_storage(image: &[u8], storage: Vec<StorageDeclaration>) -> Vec<u8
             instructions: 100000,
         },
     };
-    let metadata = serde_json::to_vec(&manifest).unwrap();
+    let metadata = manifest.encode_cbor_unchecked().unwrap();
     signed_metadata(image, &metadata)
 }
 
 fn signed_metadata(image: &[u8], metadata: &[u8]) -> Vec<u8> {
     let private = [0x5a; 32];
-    let mut package = b"MP04".to_vec();
+    let mut package = b"MP05".to_vec();
     package.extend(CONTEXT);
     package.extend((metadata.len() as u32).to_le_bytes());
     package.extend((image.len() as u32).to_le_bytes());
     package.extend_from_slice(metadata);
-    package.extend(image);
+    package.extend(microcard_core::crypto::sha256(image));
     package.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
     let signature =
         microcard_core::crypto::p256_ecdsa_sign_package(&private, &package).unwrap();
     package.extend(signature);
+    package.extend(image);
     package
 }
 
@@ -134,11 +135,11 @@ fn persistent_schema_is_covered_by_the_package_signature() {
         vec![StorageDeclaration { key: 1, kind: 1, max_bytes: 0 }],
     );
     let offset = package
-        .windows(6)
-        .position(|window| window == b"key\":1")
+        .windows(5)
+        .position(|window| window == [0x81, 0x83, 1, 1, 0])
         .unwrap()
-        + 5;
-    package[offset] = b'2';
+        + 2;
+    package[offset] = 2;
     assert!(matches!(
         Package::verify(&package),
         Err(microcard_core::Error::Signature)
@@ -151,10 +152,12 @@ fn packages_without_persistent_schema_have_no_compatibility_path() {
     let package = signed_with_storage(&image, Vec::new());
     let manifest_length = u32::from_le_bytes(package[32..36].try_into().unwrap()) as usize;
     let metadata = &package[40..40 + manifest_length];
-    let marker = b",\"storage\":[]";
-    let offset = metadata.windows(marker.len()).position(|window| window == marker).unwrap();
     let mut retired = metadata.to_vec();
-    retired.drain(offset..offset + marker.len());
+    // The fixed limits record is 14 bytes; the preceding empty array is storage.
+    let offset = retired.len() - 15;
+    assert_eq!(retired[offset], 0x80);
+    retired.remove(offset);
+    retired[0] = 0x8b;
     assert!(matches!(
         Package::verify(&signed_metadata(&image, &retired)),
         Err(microcard_core::Error::Format)

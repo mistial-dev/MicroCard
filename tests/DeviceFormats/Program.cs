@@ -7,6 +7,7 @@ foreach (var vector in vectors.RootElement.EnumerateArray())
 {
     var expected = Convert.FromHexString(vector.GetProperty("hex").GetString()!);
     var actual = ManifestCbor.Encode(vector.GetProperty("manifest"));
+    if (!ManifestCbor.Encode(ManifestCbor.Decode(actual)).AsSpan().SequenceEqual(expected)) throw new Exception("CBOR decode differs from shared vector");
     if (!actual.AsSpan().SequenceEqual(expected)) throw new Exception("CBOR manifest differs from shared vector");
 }
 Console.WriteLine("PASS: .NET manifest CBOR shared vectors");

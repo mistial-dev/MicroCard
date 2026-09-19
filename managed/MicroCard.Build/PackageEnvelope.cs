@@ -12,7 +12,7 @@ internal static class PackageEnvelope
 
     public static byte[] Create(byte[] manifest, byte[] image, byte[] seed)
     {
-        if ((long)OverheadBytes + manifest.Length + image.Length > 16384) throw new InvalidDataException("Package exceeds quota");
+        if ((long)OverheadBytes + manifest.Length + image.Length > 16384) throw new InvalidDataException("Package exceeds 16 KiB quota");
         using var output = new MemoryStream(); using var writer = new BinaryWriter(output);
         writer.Write(Prefix); writer.Write((uint)manifest.Length); writer.Write((uint)image.Length);
         writer.Write(manifest); writer.Write(SHA256.HashData(image)); writer.Write(PackageSignatures.PublicKey(seed));

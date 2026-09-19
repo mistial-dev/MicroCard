@@ -39,17 +39,11 @@ E1 data is: version `01`, identifier length u8, UTF-8 identifier, capability bit
 
 Only an empty, unbound SSD accepts E1. A later E1 may replace its policy until first successful load. After signer binding it returns a state error. Activation rejects packages whose native capabilities or package storage exceed policy. Installation, recovery, Int32/byte storage, and framework-key creation enforce their corresponding limits. See [domain policy](DOMAIN_POLICY.md).
 
-## Signed package MP04
+## Signed package MP05
 
-Little-endian header: magic `MP04`, fixed ASCII context `MicroCard signed package v4` followed by a zero byte, manifest length u32, assembly length u32. Then canonical UTF-8 manifest JSON, complete embedded assembly, 65-byte uncompressed SEC1 P-256 public key, and 64-byte P1363 ECDSA signature over SHA-256. The signed message is the single contiguous package slice from the magic through the public key. Keeping the context inside that slice provides protocol separation without constructing a second package-sized verification buffer. Earlier package magics and contexts are rejected. Here is no conversion or upgrade path.
+The [MP05 envelope and manifest contract](DEVICE_CBOR.md) defines exact field order, binary widths, count bounds, and canonical encoding. The signature covers the contiguous header, CBOR manifest, SHA-256 image digest, and 65-byte uncompressed SEC1 signer key. The 64-byte low-S P1363 signature precedes the image. The verifier authenticates the descriptor, checks the image digest, then validates the manifest and MC04 image. It does not parse or re-encode JSON.
 
-Two shapes are refused before the signature is checked at all, so that a software and a hardware provider answer identically. A compressed SEC1 key is refused, because the card's hardware path accepts only the uncompressed form. A signature whose `s` is above half the group order is refused, because ECDSA admits two signatures for every message and accepting both would give one signed package two encodings, two digests and therefore two registry identities. Every packager produces the low form.
-
-What a domain binds to is the SHA-256 digest of that 65-byte key rather than the key itself, which keeps every stored identity 32 bytes wide.
-
-Manifest field order is fixed: `domain`, `incarnation` (16 JSON byte numbers), `assembly`, `assembly_version` (four u16 values), `version`, `export`, `entry_points`, `dependencies`, `capabilities`, `limits`. Export field order is `access`, `key`. Access is private (0), any signer (1), same signer (2), or the exact 32-byte caller key (3). Entry-point field order is `aid`, `process`, `install`, `uninstall`, `select`, `deselect`. Missing optional hooks are null. Dependency field order is `assembly`, `ranges`, `package_version`, `signer`, `digest`, `scope`. Version ranges carry bounded four-part minimum/maximum tuples and inclusivity flags. Limits order is `arena`, `stack`, `frames`, `instructions`. No whitespace or unknown fields. Dependencies and capabilities are strictly increasing and unique. Device verification reserializes to enforce the canonical representation.
-
-Prior manifest schemas are rejected. There is no compatibility alias, decoder, conversion or upgrade route.
+Compressed signer keys and non-low-S signatures are rejected before provider dispatch. Domain identity remains SHA-256 of the 65-byte signer key. Earlier package magics, contexts, and JSON manifests are rejected. Packages must be rebuilt; there is no legacy device decoder or automatic persistent-state conversion.
 
 Maximum package 16 KiB, aggregate active package bytes 24 KiB, persistent serialized snapshot 48 KiB. These conservative checkpoint quotas are smaller than the transport field widths. Versions are positive u32 values. Same-version identical packages are retries. Any changed content at that version is rejected. Deleting an SSD is the only operation that removes its signing binding and version history.
 
@@ -61,7 +55,7 @@ The public preprocessor, MSBuild integration, ISD bootstrap, signed loader accep
 
 The device verifies all signed type metadata and method flags, instruction boundaries, branch targets, stack types at every control-flow join, local/argument access, direct-call signatures, constructor receivers, array operations, object layouts, field-owner/index bounds and exact native-service signatures before activation. A transactional method's complete local call graph is rejected if it reaches irreversible hardware output. The same verifier runs during persistent-state recovery and immediately before VM execution. Every pre-MC04 format is refused. No compatibility decoder exists.
 
-The authoritative opcode table is generated from `spec/mc04-opcodes.json`. Debug method maps are separate `.map.json` files. The preprocessor resolves direct calls in the input assembly and rejects external calls outside the pinned framework ABI and declared verified dependencies.
+The authoritative opcode table is generated from `format/mc04-opcodes.json`. Debug method maps are separate `.map.json` files. The preprocessor resolves direct calls in the input assembly and rejects external calls outside the pinned framework ABI and declared verified dependencies.
 
 Older experimental assembly formats are unsupported. Their parsers, executors, simulator commands, and fuzz entry points have been removed. Signed rejection tests retain representative old-format byte strings.
 

@@ -16,7 +16,7 @@ import java.nio.file.*;
 import java.io.*;
 import java.util.*;
 
-/** MP04 canonical envelope. See docs/PROTOCOL.md; runtime verification remains authoritative. */
+/** MP05 CBOR envelope. See docs/PROTOCOL.md; runtime verification remains authoritative. */
 final class Packages {
     static final Gson JSON = new GsonBuilder().disableHtmlEscaping().serializeNulls().create();
     static byte[] seed(int value) { byte[] result = new byte[32]; Arrays.fill(result, (byte)value); return result; }
@@ -93,14 +93,7 @@ final class Packages {
         limits.addProperty("arena", 16384); limits.addProperty("stack", 256);
         limits.addProperty("frames", 32); limits.addProperty("instructions", 100000);
         manifest.add("limits", limits);
-        byte[] meta = JSON.toJson(manifest).getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream message = new ByteArrayOutputStream();
-        message.write("MP04MicroCard signed package v4\0".getBytes(StandardCharsets.US_ASCII));
-        message.write(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putInt(meta.length).putInt(image.length).array());
-        message.write(meta); message.write(image); message.write(publicKey(seed));
-        message.write(signature(seed, message.toByteArray()));
-        if (message.size() > 16384) throw new IOException("Package exceeds device bound");
-        return message.toByteArray();
+        return PackageEnvelope.create(ManifestCbor.encode(manifest), image, seed);
     }
 
     static void upload(CardConnection card, byte[] bytes) throws Exception {

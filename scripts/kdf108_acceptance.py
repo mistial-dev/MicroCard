@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Host acceptance for the signed Kdf108 ISD/SSD assembly pair."""
-from device_cbor import management_names
+from device_cbor import management_names, decode_manifest, manifest as encode_manifest
+from package_envelope import verify as verify_envelope
 import json, os, pathlib, subprocess, tempfile
 from domain_inventory import inventory
 from scp03_acceptance import (Client, bootstrap_isd, ensure_assembly, sign_package,
@@ -11,7 +12,7 @@ PACK = ROOT / "managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll"
 # The identity a domain binds to, which is the digest of the signer's uncompressed key.
 KDF_PUBLIC = bytes.fromhex("2bad0fd610d99eae443e932a26142bca1e5fa995b4518452827e78ef1f317ff0")
 SSD_PUBLIC = bytes.fromhex("6fc66a90486171ca69b512be185d66a763a68ff2d34cda639e78cff9e98caeab")
-CONTEXT = b"MicroCard signed package v4\0"
+CONTEXT = b"MicroCard signed package v5\0"
 HEADER = 12 + len(CONTEXT)
 
 def verify_package(path, expected_identity):
@@ -21,23 +22,14 @@ def verify_package(path, expected_identity):
     from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
     from cryptography.hazmat.primitives import hashes
     raw = path.read_bytes()
-    assert raw[:4] == b"MP04" and raw[4:4 + len(CONTEXT)] == CONTEXT
-    manifest_length = int.from_bytes(raw[4 + len(CONTEXT):8 + len(CONTEXT)], "little")
-    image_length = int.from_bytes(raw[8 + len(CONTEXT):HEADER], "little")
-    signed_end = HEADER + manifest_length + image_length + 65
-    assert signed_end + 64 == len(raw)
-    key = raw[signed_end - 65:signed_end]
-    assert key[0] == 0x04, "a package carries an uncompressed point"
+    def verify_signature(key, message, signature):
+        r, s = int.from_bytes(signature[:32], "big"), int.from_bytes(signature[32:], "big")
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), key).verify(
+            encode_dss_signature(r, s), message, ec.ECDSA(hashes.SHA256()))
+        return True
+    metadata, image, key = verify_envelope(raw, verify_signature)
     assert hashlib.sha256(key).digest() == expected_identity
-    signature = raw[signed_end:]
-    r = int.from_bytes(signature[:32], "big")
-    s = int.from_bytes(signature[32:], "big")
-    order = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
-    assert 0 < s <= order // 2, "a package carries the low signature"
-    ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), key).verify(
-        encode_dss_signature(r, s), raw[:signed_end], ec.ECDSA(hashes.SHA256()))
-    manifest = json.loads(raw[HEADER:HEADER + manifest_length])
-    image = raw[HEADER + manifest_length:HEADER + manifest_length + image_length]
+    manifest = decode_manifest(metadata)
     return raw, manifest, image
 
 def signed_type_confusion_package(incarnation, seed):
@@ -64,14 +56,14 @@ def signed_type_confusion_package(incarnation, seed):
         assembly_version=[0, 1, 0, 0], version=1, export=dict(access=1, key=None),
         entry_points=[], dependencies=[], capabilities=[],
         limits=dict(arena=16384, stack=256, frames=32, instructions=100000))
-    meta = json.dumps(manifest, separators=(",", ":")).encode()
-    raw = b"MP04" + CONTEXT + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + image
-    raw += signer_public_key(seed)
-    return raw + sign_package(seed, raw)
+    manifest["storage"] = []
+    from scp03_acceptance import package_envelope
+    return package_envelope(encode_manifest(manifest), bytes(image), seed)
+
 
 def main():
     subprocess.run(["dotnet", "build", str(ROOT / "tests/Kdf108Reference"), "-c", "Release",
-                    "--nologo", "--verbosity", "quiet"], check=True)
+                    "--nologo", "--verbosity", "quiet", "-m:1"], check=True)
     subprocess.run(["dotnet", str(ROOT / "tests/Kdf108Reference/bin/Release/net10.0/Kdf108Reference.dll")], check=True)
     kdf_image, kdf_metadata_path = ensure_assembly("samples/Kdf108", "kdf108")
     consumer_image, consumer_metadata_path = ensure_assembly(
@@ -107,13 +99,15 @@ def main():
         assert bytes(dependency["signer"]) == KDF_PUBLIC and dependency["scope"] == 1
         import hashlib as _hashlib
         assert KDF_PUBLIC != SSD_PUBLIC
-        assert _hashlib.sha256(consumer_raw[-129:-64]).digest() == SSD_PUBLIC
+        manifest_length = int.from_bytes(consumer_raw[32:36], "little")
+        key_start = HEADER + manifest_length + 32
+        assert _hashlib.sha256(consumer_raw[key_start:key_start+65]).digest() == SSD_PUBLIC
         from cryptography.exceptions import InvalidSignature
-        tampered = bytearray(consumer_raw); tampered[-130] ^= 1
+        tampered = bytearray(consumer_raw); tampered[-1] ^= 1
         tampered_path = directory / "tampered.mcp"; tampered_path.write_bytes(bytes(tampered))
         try:
             verify_package(tampered_path, SSD_PUBLIC)
-        except InvalidSignature:
+        except (InvalidSignature, ValueError):
             pass
         else:
             raise AssertionError("tampered package signature accepted")

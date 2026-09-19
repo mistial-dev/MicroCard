@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check MicroCard discovery data with an explicitly supplied GlobalPlatformPro jar."""
+from device_cbor import manifest as encode_manifest
 import argparse
 import hashlib
 import json
@@ -50,9 +51,10 @@ def package_for(project, output, domain, incarnation, signing_seed):
         ],
         dependencies=generated["dependencies"],
         capabilities=generated["capabilities"],
+        storage=generated["storage"],
         limits=dict(arena=16384, stack=256, frames=32, instructions=100000),
     )
-    metadata = json.dumps(manifest, separators=(",", ":")).encode()
+    metadata = encode_manifest(manifest)
     return package_envelope(metadata, image, signing_seed)
 
 

@@ -22,15 +22,16 @@ fn rejected(c: &mut Card<MemoryFlash, TestPlatform>, raw: &[u8], expected: Optio
 
 fn signed(meta: &[u8], image: &[u8], seed: u8, context: &[u8]) -> Vec<u8> {
     let private = [seed; 32];
-    let mut raw = b"MP04".to_vec();
+    let mut raw = b"MP05".to_vec();
     raw.extend(context);
     raw.extend((meta.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(meta);
-    raw.extend(image);
+    raw.extend(crate::crypto::sha256(image));
     raw.extend(crate::crypto::p256_public_key(&private).unwrap());
     let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
+    raw.extend(image);
     raw
 }
 
@@ -110,7 +111,7 @@ fn rewritten(raw: &[u8], seed: u8, change: impl FnOnce(&mut Manifest)) -> Vec<u8
             .copy_from_slice(&part.to_le_bytes());
     }
     signed(
-        &serde_json::to_vec(&package.manifest).unwrap(),
+        &package.manifest.encode_cbor_unchecked().unwrap(),
         &image,
         seed,
         CONTEXT,
@@ -337,7 +338,7 @@ fn signed_invalid_content_never_activates_or_binds() {
     for bound in [false, true] {
         let (mut c, inc) = fixture(bound);
         let p = Package::verify(&package("a", inc, "candidate", 1, 7, &[0x2a])).unwrap();
-        let meta = serde_json::to_vec(&p.manifest).unwrap();
+        let meta = p.manifest.encode_cbor_unchecked().unwrap();
         let mut maximum_entries = p.manifest.clone();
         maximum_entries.entry_points = (0..4)
             .map(|index| {
@@ -347,7 +348,7 @@ fn signed_invalid_content_never_activates_or_binds() {
             })
             .collect();
         assert!(Package::verify(&signed(
-            &serde_json::to_vec(&maximum_entries).unwrap(),
+            &maximum_entries.encode_cbor_unchecked().unwrap(),
             p.image(),
             7,
             CONTEXT,
@@ -397,14 +398,10 @@ fn signed_invalid_content_never_activates_or_binds() {
             &signed(&meta, &too_many_attributes, 7, CONTEXT),
             Some(Error::Quota),
         );
-        let mut noncanonical = meta.clone();
-        noncanonical.push(b' ');
-        let mut unknown = meta.clone();
-        unknown.pop();
-        unknown.extend(br#","extra":0}"#);
-        let mut duplicate = meta.clone();
-        duplicate.pop();
-        duplicate.extend(br#","version":1}"#);
+        let mut noncanonical = alloc::vec![0x98, 12];
+        noncanonical.extend_from_slice(&meta[1..]);
+        let mut unknown = meta.clone(); unknown[1] = 2;
+        let mut duplicate = meta.clone(); duplicate[0] = 0x8d;
         for bad in [b"{".to_vec(), noncanonical, unknown, duplicate] {
             rejected(
                 &mut c,
@@ -501,7 +498,7 @@ fn signed_invalid_content_never_activates_or_binds() {
             };
             rejected(
                 &mut c,
-                &signed(&serde_json::to_vec(&m).unwrap(), p.image(), 7, CONTEXT),
+                &signed(&m.encode_cbor_unchecked().unwrap(), p.image(), 7, CONTEXT),
                 Some(expected),
             );
         }
@@ -509,7 +506,7 @@ fn signed_invalid_content_never_activates_or_binds() {
         m.capabilities.push(255);
         rejected(
             &mut c,
-            &signed(&serde_json::to_vec(&m).unwrap(), p.image(), 7, CONTEXT),
+            &signed(&m.encode_cbor_unchecked().unwrap(), p.image(), 7, CONTEXT),
             None,
         );
         rejected(&mut c, &signed(&meta, b"bad-image", 7, CONTEXT), None);
@@ -518,7 +515,7 @@ fn signed_invalid_content_never_activates_or_binds() {
         rejected(
             &mut c,
             &signed(
-                &serde_json::to_vec(&semantic).unwrap(),
+                &semantic.encode_cbor_unchecked().unwrap(),
                 p.image(),
                 7,
                 CONTEXT,
@@ -531,7 +528,7 @@ fn signed_invalid_content_never_activates_or_binds() {
             rejected(
                 &mut c,
                 &signed(
-                    &serde_json::to_vec(&semantic).unwrap(),
+                    &semantic.encode_cbor_unchecked().unwrap(),
                     p.image(),
                     7,
                     CONTEXT,

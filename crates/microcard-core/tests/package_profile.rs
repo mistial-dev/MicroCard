@@ -5,17 +5,19 @@ use microcard_core::{
 
 fn signed(image: &[u8]) -> Vec<u8> {
     let metadata = br#"{"domain":"test","incarnation":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"assembly":"Legacy","assembly_version":[1,0,0,0],"version":1,"export":{"access":0,"key":null},"entry_points":[],"dependencies":[],"capabilities":[],"storage":[],"limits":{"arena":16384,"stack":256,"frames":32,"instructions":100000}}"#;
+    let metadata = serde_json::from_slice::<microcard_core::package::Manifest>(metadata).unwrap().encode_cbor().unwrap();
     let private = [0x41; 32];
-    let mut package = b"MP04".to_vec();
+    let mut package = b"MP05".to_vec();
     package.extend(CONTEXT);
     package.extend((metadata.len() as u32).to_le_bytes());
     package.extend((image.len() as u32).to_le_bytes());
     package.extend(metadata);
-    package.extend(image);
+    package.extend(microcard_core::crypto::sha256(image));
     package.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
     let signature =
         microcard_core::crypto::p256_ecdsa_sign_package(&private, &package).unwrap();
     package.extend(signature);
+    package.extend(image);
     package
 }
 

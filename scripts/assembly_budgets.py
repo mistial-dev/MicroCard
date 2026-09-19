@@ -6,8 +6,9 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-# 40 byte header, a 65 byte uncompressed SEC1 signer key and a 64 byte signature.
-PACKAGE_FIXED_BYTES = 169
+# Header, signed image digest, uncompressed SEC1 key, and P1363 signature.
+from package_envelope import OVERHEAD as PACKAGE_FIXED_BYTES
+from device_cbor import manifest as encode_manifest
 sys.path.insert(0, str(ROOT / "scripts"))
 import mcinspect
 
@@ -66,7 +67,7 @@ def main():
             "version": 1,
             "limits": {"arena": 16384, "stack": 256, "frames": 32, "instructions": 100000},
         }
-        manifest_bytes = len(json.dumps(manifest, separators=(",", ":")).encode())
+        manifest_bytes = len(encode_manifest(manifest))
         package_bytes = PACKAGE_FIXED_BYTES + manifest_bytes + len(raw)
         assert len(raw) <= assembly_ceiling, f"{expected_name} exceeds MC04 ceiling"
         assert package_bytes <= package_ceiling, f"{expected_name} exceeds package ceiling"

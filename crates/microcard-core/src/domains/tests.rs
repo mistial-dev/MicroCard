@@ -922,19 +922,7 @@ fn signed_package_with_storage(
             instructions: 100000,
         },
     };
-    let meta = serde_json::to_vec(&m).unwrap();
-    let image = test_assembly(name, code);
-    let private = [seed; 32];
-    let mut raw = Vec::from(b"MP04" as &[u8]);
-    raw.extend(CONTEXT);
-    raw.extend((meta.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(meta);
-    raw.extend(image);
-    raw.extend(crate::crypto::p256_public_key(&private).unwrap());
-    let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
-    raw
+    signed_compiled_package(&m, &test_assembly(name, code), seed)
 }
 
 fn counter_package(id: &str, inc: [u8; 16], version: u32, seed: u8) -> Vec<u8> {
@@ -1186,17 +1174,12 @@ fn key_operations_package_with_storage(
 }
 
 fn signed_compiled_package(manifest: &Manifest, image: &[u8], seed: u8) -> Vec<u8> {
-    let meta = serde_json::to_vec(manifest).unwrap();
+    let meta = manifest.encode_cbor_unchecked().unwrap();
     let private = [seed; 32];
-    let mut raw = Vec::from(b"MP04" as &[u8]);
-    raw.extend(CONTEXT);
-    raw.extend((meta.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(meta);
-    raw.extend(image);
-    raw.extend(crate::crypto::p256_public_key(&private).unwrap());
+    let key = crate::crypto::p256_public_key(&private).unwrap();
+    let mut raw = crate::package::envelope::signing_prefix(&meta, image.len(), &crate::crypto::sha256(image), &key).unwrap();
     let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
+    raw.extend(signature); raw.extend(image);
     raw
 }
 fn load<P: Platform>(c: &mut Card<MemoryFlash, P>, p: &[u8]) -> Result<Vec<u8>> {
@@ -1319,11 +1302,14 @@ fn signed_forged_platform_identity_is_rejected_before_binding() {
             .collect::<Vec<_>>();
         assert_eq!(positions.len(), 1);
         package[positions[0]] ^= 1;
-        let signed_length = package.len() - 64;
-        let signature =
-            crate::crypto::p256_ecdsa_sign_package(&[seed; 32], &package[..signed_length])
-                .unwrap();
-        package[signed_length..].copy_from_slice(&signature);
+        let manifest_length = u32::from_le_bytes(package[32..36].try_into().unwrap()) as usize;
+        let image_start = crate::package::envelope::OVERHEAD_BYTES + manifest_length;
+        let digest = crate::crypto::sha256(&package[image_start..]);
+        let digest_start = crate::package::HEADER_BYTES + manifest_length;
+        package[digest_start..digest_start + 32].copy_from_slice(&digest);
+        let signed_length = image_start - 64;
+        let signature = crate::crypto::p256_ecdsa_sign_package(&[seed; 32], &package[..signed_length]).unwrap();
+        package[signed_length..image_start].copy_from_slice(&signature);
 
         assert_eq!(load(&mut card, &package), Err(Error::Unauthorized));
         let domain = &card.state.domains[identifier];
@@ -2859,17 +2845,7 @@ fn failed_install_is_invisible_and_durable() {
     let inc = create(&mut c, "a");
     let mut p = Package::verify(&package("a", inc, "one", 1, 7, &[0x2b, 0xfe])).unwrap();
     p.manifest.entry_points[0].install = Some(0);
-    let meta = serde_json::to_vec(&p.manifest).unwrap();
-    let mut raw = Vec::from(b"MP04" as &[u8]);
-    raw.extend(CONTEXT);
-    raw.extend((meta.len() as u32).to_le_bytes());
-    raw.extend((p.image().len() as u32).to_le_bytes());
-    raw.extend(meta);
-    raw.extend(p.image());
-    let private = [7; 32];
-    raw.extend(crate::crypto::p256_public_key(&private).unwrap());
-    let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
+    let raw = signed_compiled_package(&p.manifest, p.image(), 7);
     load(&mut c, &raw).unwrap();
     assert_eq!(
         c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())),
@@ -3560,7 +3536,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     let mut card = Card::open(MemoryFlash::new(16384), platform, STORAGE_KEY).unwrap();
     let package = library_package("ISD", card.state.isd.incarnation, "mscorlib", 1, 42);
     load(&mut card, &package).unwrap();
-    assert_eq!(calls.get(), [1, 1]);
+    assert_eq!(calls.get(), [3, 1]);
 
     let metadata = card.state.isd.packages.get("mscorlib").unwrap();
     let candidate = card.state.try_clone().unwrap();
@@ -3570,7 +3546,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     visit_registry(&card.state, 0x10, |aid, entry| {
         registry_record(0x10, aid, entry).map(|_| ())
     }).unwrap();
-    assert_eq!(calls.get(), [1, 1]);
+    assert_eq!(calls.get(), [3, 1]);
     drop(units);
     drop(candidate);
 
@@ -3583,7 +3559,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     // Digest and signature again on reopening. A stored identity is the digest of a
     // key rather than a key, so there is nothing left for recovery to revalidate as a
     // curve point. A package whose key is wrong fails its signature instead.
-    assert_eq!(calls.get(), [2, 2]);
+    assert_eq!(calls.get(), [6, 2]);
 }
 
 #[test]

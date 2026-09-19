@@ -62,3 +62,60 @@ def manifest(value):
                    dependencies, bytes(value["capabilities"]),
                    [[s["key"], s["kind"], s["max_bytes"]] for s in value["storage"]],
                    [value["limits"][name] for name in ("arena", "stack", "frames", "instructions")]])
+
+
+def decode(data):
+    """Decode the bounded device subset and require preferred encodings."""
+    offset = 0
+    def take(length):
+        nonlocal offset
+        if length > len(data) - offset:
+            raise ValueError("truncated CBOR")
+        value = data[offset:offset + length]
+        offset += length
+        return value
+    def item(depth=0):
+        if depth > 16:
+            raise ValueError("CBOR nesting exceeded")
+        initial = take(1)[0]
+        if initial in (0xf4, 0xf5, 0xf6):
+            return {0xf4: False, 0xf5: True, 0xf6: None}[initial]
+        major, additional = initial >> 5, initial & 31
+        if major not in (0, 1, 2, 3, 4) or additional > 27:
+            raise ValueError("unsupported CBOR type")
+        if additional < 24:
+            argument = additional
+        else:
+            width = 1 << (additional - 24)
+            argument = int.from_bytes(take(width), "big")
+            if argument < (24 if width == 1 else 1 << (width * 4)):
+                raise ValueError("noncanonical CBOR argument")
+        if major == 0: return argument
+        if major == 1: return -1 - argument
+        if argument > len(data) - offset:
+            raise ValueError("CBOR length exceeds input")
+        if major == 2: return bytes(take(argument))
+        if major == 3: return take(argument).decode("utf-8")
+        return [item(depth + 1) for _ in range(argument)]
+    if len(data) > 16384:
+        raise ValueError("CBOR input quota exceeded")
+    value = item()
+    if offset != len(data): raise ValueError("trailing CBOR data")
+    return value
+
+
+def decode_manifest(data):
+    r = decode(data)
+    if not isinstance(r, list) or len(r) != 12 or r[0] != 1:
+        raise ValueError("unsupported manifest version")
+    def binary(value): return None if value is None else list(value)
+    result = dict(domain=r[1], incarnation=binary(r[2]), assembly=r[3], assembly_version=r[4], version=r[5],
+                  export=dict(access=r[6][0], key=binary(r[6][1])),
+                  entry_points=[dict(zip(("aid", "process", "install", "uninstall", "select", "deselect"), [e[0].hex().upper(), *e[1:]])) for e in r[7]],
+                  dependencies=[dict(assembly=d[0], ranges=[dict(zip(("min", "min_inclusive", "max", "max_inclusive"), v)) for v in d[1]],
+                                     package_version=d[2], signer=binary(d[3]), digest=binary(d[4]), scope=d[5]) for d in r[8]],
+                  capabilities=binary(r[9]), storage=[dict(zip(("key", "kind", "max_bytes"), v)) for v in r[10]],
+                  limits=dict(zip(("arena", "stack", "frames", "instructions"), r[11])))
+    if manifest(result) != data:
+        raise ValueError("manifest record shape mismatch")
+    return result

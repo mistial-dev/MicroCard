@@ -2,7 +2,8 @@
 """Independent host-side SCP03 implementation, GP 1.1.2 §§4.1.5, 6.2.
 Uses Python cryptography/OpenSSL, not the Rust implementation. Development acceptance only.
 """
-from device_cbor import management_names
+from device_cbor import management_names, manifest as encode_manifest
+from package_envelope import create as create_envelope, PREFIX as PACKAGE_PREFIX
 import hashlib, json, os, pathlib, subprocess, tempfile
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -120,10 +121,9 @@ def ensure_assembly(project, output):
  subprocess.run(['dotnet',tool,assembly,ROOT/'work'/output,framework,pin],cwd=ROOT,check=True)
  return image,metadata
 
-# MP04 packages are signed with P-256 ECDSA over SHA-256. The signer key travels as an
+# MP05 packages are signed with P-256 ECDSA over SHA-256. The signer key travels as an
 # uncompressed SEC1 point and what a domain binds to is that point's digest.
 P256_ORDER=0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
-PACKAGE_PREFIX=b'MP04MicroCard signed package v4\0'
 
 def signing_key(seed):
  return ec.derive_private_key(int.from_bytes(seed,'big'),ec.SECP256R1())
@@ -148,9 +148,7 @@ def new_seed():
   if 0<int.from_bytes(candidate,'big')<P256_ORDER: return candidate
 
 def package_envelope(meta,image,seed):
- raw=PACKAGE_PREFIX+len(meta).to_bytes(4,'little')+len(image).to_bytes(4,'little')+meta+image
- raw+=signer_public_key(seed)
- return raw+sign_package(seed,raw)
+ return create_envelope(meta,image,signer_public_key(seed),lambda prefix: sign_package(seed,prefix))
 
 
 def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
@@ -162,7 +160,7 @@ def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
  manifest=dict(domain='ISD',incarnation=list(incarnation),assembly=generated['assembly'],assembly_version=generated['assembly_version'],version=1,
                export=generated['export'],entry_points=generated['entry_points'],dependencies=generated['dependencies'],capabilities=generated['capabilities'],storage=generated['storage'],
                limits=dict(arena=16384,stack=256,frames=32,instructions=100000))
- meta=json.dumps(manifest,separators=(',',':')).encode()
+ meta=encode_manifest(manifest)
  raw=package_envelope(meta,image,signing_seed)
  c.command(0xe6)
  for offset in range(0,len(raw),200):c.command(0xe8,offset.to_bytes(4,'little')+raw[offset:offset+200])

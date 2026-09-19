@@ -3,10 +3,9 @@ pub mod envelope;
 use crate::{Error, Result, crypto::CryptoProvider};
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
-pub const CONTEXT: &[u8] = b"MicroCard signed package v4\0";
-pub const HEADER_BYTES: usize = 12 + CONTEXT.len();
-/// The uncompressed SEC1 signer key and the P1363 signature that follow the image.
-pub const SUFFIX_BYTES: usize = crate::crypto::P256_PUBLIC_KEY_BYTES + crate::crypto::P256_SIGNATURE_BYTES;
+pub use envelope::{CONTEXT, HEADER_BYTES};
+/// The image digest, uncompressed SEC1 key, and P1363 signature in the descriptor.
+pub const SUFFIX_BYTES: usize = envelope::OVERHEAD_BYTES - HEADER_BYTES;
 pub const MAX_PACKAGE_BYTES: usize = 16 * 1024;
 pub const MAX_STORAGE_DECLARATIONS: usize = 64;
 pub const MAX_DECLARED_BLOB_BYTES: u16 = 2048;
@@ -187,8 +186,7 @@ pub struct PackageView<'a> {
 
 impl<'a> PackageView<'a> {
     /// Verify a package while retaining its signed envelope and assembly as
-    /// borrowed slices. The manifest remains owned because JSON decoding
-    /// unescapes strings and builds bounded dependency records.
+    /// borrowed slices. The bounded CBOR manifest owns only its metadata records.
     #[cfg(feature = "software-crypto")]
     pub fn verify(bytes: &'a [u8]) -> Result<Self> {
         let mut provider = crate::crypto::SoftwareCrypto;
@@ -207,37 +205,11 @@ impl<'a> PackageView<'a> {
         provider: &mut impl CryptoProvider,
         expected_digest: Option<&[u8; 32]>,
     ) -> Result<Self> {
-        if bytes.len() < HEADER_BYTES + SUFFIX_BYTES
-            || bytes.len() > MAX_PACKAGE_BYTES
-            || &bytes[..4] != b"MP04"
-            || &bytes[4..4 + CONTEXT.len()] != CONTEXT
-        {
-            return Err(Error::Format);
-        }
-        let lengths = 4 + CONTEXT.len();
-        let n = u32::from_le_bytes(bytes[lengths..lengths + 4].try_into().unwrap()) as usize;
-        let k = u32::from_le_bytes(bytes[lengths + 4..HEADER_BYTES].try_into().unwrap()) as usize;
-        if n > 16384 || k > 65536 || HEADER_BYTES + n + k + SUFFIX_BYTES != bytes.len() {
-            return Err(Error::Format);
-        }
-        let end = HEADER_BYTES + n + k;
-        let signed = end + crate::crypto::P256_PUBLIC_KEY_BYTES;
-        let key: [u8; crate::crypto::P256_PUBLIC_KEY_BYTES] =
-            bytes[end..signed].try_into().unwrap();
-        // Pin the encoding and reject the malleable signature before dispatching, so a
-        // software and a hardware provider answer this identically.
-        if !crate::crypto::p256_signature_acceptable(&key, &bytes[signed..]) {
-            return Err(Error::Signature);
-        }
-        // The argument order differs from the signature scheme this replaced.
-        if !provider.p256_ecdsa_verify(&key, &bytes[..signed], &bytes[signed..])? {
-            return Err(Error::Signature);
-        }
-        let mut signer = [0; 32];
-        provider.sha256_into(&key, &mut signer)?;
-        let manifest: Manifest = serde_json::from_slice(&bytes[HEADER_BYTES..HEADER_BYTES + n])
-            .map_err(|_| Error::Format)?;
-        manifest.validate_shape()?;
+        let authenticated = envelope::Envelope::verify(bytes, provider)?;
+        let key = authenticated.key;
+        let signer = authenticated.signer;
+        let digest = authenticated.package_digest;
+        let manifest = Manifest::decode_cbor(authenticated.manifest)?;
         if manifest.limits.arena != 16384
             || manifest.limits.stack != 256
             || manifest.limits.frames != 32
@@ -245,12 +217,7 @@ impl<'a> PackageView<'a> {
         {
             return Err(Error::Quota);
         }
-        if serde_json::to_vec(&manifest).map_err(|_| Error::Format)?
-            != bytes[HEADER_BYTES..HEADER_BYTES + n]
-        {
-            return Err(Error::Format);
-        }
-        let image_bytes = &bytes[HEADER_BYTES + n..end];
+        let image_bytes = authenticated.image;
         if !image_bytes.starts_with(b"MC04") {
             return Err(Error::Format);
         }
@@ -290,7 +257,6 @@ impl<'a> PackageView<'a> {
             crate::native_abi::signature(*c)?;
         }
         assembly.validate_imports(&manifest.capabilities)?;
-        let digest = provider.sha256(bytes)?;
         if expected_digest.is_some_and(|expected| *expected != digest) {
             return Err(Error::Signature);
         }
@@ -349,14 +315,9 @@ mod tests {
     /// An envelope whose key and signature are the right shape, so verification reaches the
     /// provider rather than stopping at the shape check before it.
     fn envelope() -> Vec<u8> {
-        let mut bytes = Vec::from(b"MP04" as &[u8]);
-        bytes.extend_from_slice(CONTEXT);
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.resize(HEADER_BYTES, 0);
         let mut key = [0x11; crate::crypto::P256_PUBLIC_KEY_BYTES];
         key[0] = 0x04;
-        bytes.extend_from_slice(&key);
+        let mut bytes = envelope::signing_prefix(&[], 0, &[0; 32], &key).unwrap();
         bytes.extend_from_slice(&[0x11; crate::crypto::P256_SIGNATURE_BYTES]);
         bytes
     }
@@ -364,7 +325,7 @@ mod tests {
     #[test]
     fn a_previous_format_container_is_refused_by_its_magic() {
         let mut bytes = envelope();
-        bytes[..4].copy_from_slice(b"MP03");
+        bytes[..4].copy_from_slice(b"MP04");
         assert!(matches!(
             PackageView::verify_with(&bytes, &mut SignatureProvider(Ok(true))),
             Err(Error::Format)
@@ -375,13 +336,13 @@ mod tests {
     fn a_misshapen_key_or_signature_never_reaches_the_provider() {
         // A provider that would answer yes. The shape check has to refuse first.
         let mut compressed = envelope();
-        compressed[HEADER_BYTES] = 0x02;
+        compressed[HEADER_BYTES + 32] = 0x02;
         assert!(matches!(
             PackageView::verify_with(&compressed, &mut SignatureProvider(Ok(true))),
             Err(Error::Signature)
         ));
         let mut high = envelope();
-        high[HEADER_BYTES + crate::crypto::P256_PUBLIC_KEY_BYTES + 32] = 0xff;
+        high[HEADER_BYTES + 32 + crate::crypto::P256_PUBLIC_KEY_BYTES + 32] = 0xff;
         assert!(matches!(
             PackageView::verify_with(&high, &mut SignatureProvider(Ok(true))),
             Err(Error::Signature)

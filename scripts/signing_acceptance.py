@@ -2,7 +2,7 @@
 """Adversarial signed loading over SCP03; optional DK reset, no firmware writes.
 Creates and deletes only a fresh test SSD. Never deletes a pre-existing SSD.
 """
-from device_cbor import management_names
+from device_cbor import management_names, manifest as encode_manifest
 import argparse
 import hashlib
 import json
@@ -34,7 +34,7 @@ class StrictSerial(StrictReplies, SerialClient):
 class StrictBinary(StrictReplies, BinaryClient):
     pass
 
-CONTEXT = b"MicroCard signed package v4\0"
+CONTEXT = b"MicroCard signed package v5\0"
 HEADER = 12 + len(CONTEXT)
 AID = "F04D43EE01"
 
@@ -60,10 +60,10 @@ def encode(value):
 
 def package(meta, seed, image=None, context=CONTEXT):
     if image is None: image = acceptance_image()
-    meta = encode(meta) if isinstance(meta, dict) else meta
-    raw = b"MP04" + context + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + image
+    meta = encode_manifest(meta) if isinstance(meta, dict) else meta
+    raw = b"MP05" + context + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + hashlib.sha256(image).digest()
     raw += signer_public_key(seed)
-    return raw + sign_package(seed, raw)
+    return raw + sign_package(seed, raw) + image
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -137,10 +137,11 @@ def main():
                 args.report.write_text(json.dumps(dict(result="IN_PROGRESS", test_domain=domain, checks=results), indent=2)+"\n")
             key = new_seed(); other = new_seed()
             meta = manifest(domain, inc); raw = package(meta, key)
-            bad = bytearray(raw); bad[-1] ^= 1
+            signature_offset = HEADER + len(encode_manifest(meta)) + 32 + 65
+            bad = bytearray(raw); bad[signature_offset] ^= 1
             reject("invalid signature", bytes(bad))
-            reject("unsigned", raw[:-64])
-            for name, offset in [("metadata tamper", HEADER + 8), ("image tamper", len(raw)-130), ("public-key substitution", len(raw)-129)]:
+            reject("unsigned", raw[:signature_offset] + raw[signature_offset+64:])
+            for name, offset in [("metadata tamper", HEADER + 8), ("image tamper", len(raw)-1), ("public-key substitution", signature_offset-65)]:
                 bad = bytearray(raw); bad[offset] ^= 1; reject(name, bytes(bad))
             reject("wrong context", package(meta, key, context=b"Other protocol"))
             for name, field, value in [("wrong SSD", "domain", "missing-"+domain),
@@ -150,7 +151,7 @@ def main():
                                        ("invalid version", "version", 0)]:
                 badmeta = dict(meta); badmeta[field] = value; reject(name, package(badmeta, key))
             reject("invalid image", package(meta, key, image=b"bad"))
-            reject("noncanonical metadata", package(encode(meta)+b" ", key))
+            reject("noncanonical metadata", package(encode_manifest(meta)+b"\x00", key))
             # Successful first load under another signer demonstrates failures did not pin the first key.
             raw = package(meta, other); upload(raw)
             results.append("failed first loads did not bind signer")

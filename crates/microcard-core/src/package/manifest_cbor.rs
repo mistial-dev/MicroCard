@@ -229,6 +229,16 @@ impl Manifest {
 
     pub fn encode_cbor(&self) -> Result<Vec<u8>> {
         self.validate_shape()?;
+        self.encode_cbor_fields()
+    }
+
+    /// Host reference tooling can sign intentionally invalid manifests for decoder tests.
+    #[cfg(feature = "software-crypto")]
+    pub fn encode_cbor_unchecked(&self) -> Result<Vec<u8>> {
+        self.encode_cbor_fields()
+    }
+
+    fn encode_cbor_fields(&self) -> Result<Vec<u8>> {
         let mut e = Encoder::new(MAX_PACKAGE_BYTES);
         e.array(12)?;
         e.unsigned(1)?;

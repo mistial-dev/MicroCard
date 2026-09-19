@@ -6,7 +6,7 @@ MicroCard has a working simulator path from annotated C# source to verified exec
 
 - Compact MC04 assemblies retaining recognizable ECMA-335 metadata, signatures, tokens, and supported CIL.
 - Host Roslyn diagnostics, metadata-only preprocessing, deterministic packaging, and independent Rust verification.
-- P-256-signed MP04 packages with exact domain, incarnation, signer, dependency, version, capability, and resource binding.
+- P-256-signed MP05 packages with exact domain, incarnation, signer, dependency, version, capability, and resource binding.
 - Permanent ISD ownership and SSD signer binding, transactional activation, rollback protection, and dependency linking.
 - Bounded interpreter execution with typed verification, stack/frame/arena/fuel limits, native work budgets, and transaction safety.
 - Domain stores, opaque keys, PIN/PUK retry floors, SHA-256, HMAC, AES-CMAC/CBC/CCM, P-256 ECDSA verification, and P-256 operations.

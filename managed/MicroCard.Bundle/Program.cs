@@ -90,20 +90,9 @@ static List<PackageRecord> LoadPackages(string[] paths, byte[] requiredSigner)
 static PackageRecord ReadPackage(string path)
 {
     var bytes = File.ReadAllBytes(path);
-    var packageContext = "MicroCard signed package v4\0"u8;
-    const int fixedHeader = 4 + 28 + 8;
-    if (bytes.Length < fixedHeader + 129 || !bytes.AsSpan(0, 4).SequenceEqual("MP04"u8) ||
-        !bytes.AsSpan(4, packageContext.Length).SequenceEqual(packageContext))
-        throw new InvalidDataException($"Invalid package: {path}");
-    var manifestLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4 + packageContext.Length, 4)));
-    var imageLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8 + packageContext.Length, 4)));
-    var signedLength = checked(fixedHeader + manifestLength + imageLength + 65);
-    if (signedLength + 64 != bytes.Length) throw new InvalidDataException($"Invalid package length: {path}");
-    var signer = bytes.AsSpan(signedLength - 65, 65).ToArray();
-    if (!PackageSignatures.Verify(signer, bytes.AsSpan(0, signedLength).ToArray(), bytes.AsSpan(signedLength, 64).ToArray()))
-        throw new InvalidDataException($"Invalid package signature: {path}");
-    using var document = JsonDocument.Parse(bytes.AsMemory(fixedHeader, manifestLength));
-    var root = document.RootElement;
+    var verified = PackageEnvelope.Verify(bytes);
+    var signer = verified.Key;
+    var root = ManifestCbor.Decode(verified.Manifest);
     var version = root.GetProperty("assembly_version").EnumerateArray().Select(value => checked((ushort)value.GetInt32())).ToArray();
     if (version.Length != 4) throw new InvalidDataException($"Invalid assembly version: {path}");
     var dependencies = root.GetProperty("dependencies").EnumerateArray()
@@ -119,7 +108,7 @@ static PackageRecord ReadPackage(string path)
         checked((uint)root.GetProperty("version").GetInt64()),
         dependencies,
         signer,
-        SHA256.HashData(bytes.AsSpan(fixedHeader + manifestLength, imageLength)),
+        SHA256.HashData(verified.Image),
         SHA256.HashData(bytes));
 }
 

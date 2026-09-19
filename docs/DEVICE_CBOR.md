@@ -43,4 +43,4 @@ Envelope authentication does not establish that a manifest or image is supported
 
 ## Migration status
 
-Only management-name payloads currently use this contract on the wire. Manifest and MP05 envelope codecs have cross-language vectors; activating them still requires coordinated package-reader and signed-fixture updates. Other management payloads and journal snapshots also remain to migrate. JSON remains permitted for host authoring, reports, and test-vector files.
+MP05 packages and management-name payloads use these contracts on the wire. The loader rejects MP04 and earlier envelopes. Rebuild all packages and use matching clients; an existing snapshot containing old packages fails recovery rather than being erased or upgraded. Other management payloads and journal snapshots remain to migrate. JSON remains permitted for host authoring, reports, and test-vector files.
