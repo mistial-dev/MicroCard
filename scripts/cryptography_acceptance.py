@@ -46,7 +46,7 @@ def main():
     assert provider["assembly"] == "MicroCard.Cryptography"
     assert provider["entry_points"] == []
     assert provider["capabilities"] == [
-        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49, 50, 51]
+        20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49, 50, 51]
     dependency = consumer["dependencies"][0]
     assert dependency["assembly"] == "MicroCard.Cryptography"
     assert dependency["scope"] == 1 and bytes(dependency["signer"]) == ISD_PUBLIC
