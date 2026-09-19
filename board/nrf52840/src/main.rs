@@ -149,6 +149,9 @@ mod cc310 {
     };
 
     unsafe extern "C" {
+        #[cfg(feature = "cc310-p256")]
+        pub(super) fn microcard_cc310_sha256_stream(state: *mut u8, state_size: usize,
+            input: *const u8, input_size: usize, output: *mut u8) -> i32;
         fn nrf_cc3xx_platform_set_abort(apis: *const AbortApis);
         #[cfg(feature = "cc310-entropy")]
         fn nrf_cc3xx_platform_init() -> i32;
@@ -659,6 +662,15 @@ impl Hardware {
             if digest != ABC_DIGEST {
                 return Err(Error::Native);
             }
+            #[cfg(feature = "cc310-p256")]
+            {
+                let mut state = [0; microcard_core::crypto::SHA256_STATE_BYTES];
+                self.sha256_stream(&mut state, &FLASH_INPUT[..1], None)?;
+                self.sha256_stream(&mut state, &ram_input[1..], Some(&mut digest))?;
+                if digest != ABC_DIGEST || state.iter().any(|byte| *byte != 0) {
+                    return Err(Error::Native);
+                }
+            }
             #[cfg(feature = "cc310-entropy")]
             {
                 let mut first = [0; 32];
@@ -945,6 +957,24 @@ impl Hardware {
 }
 
 impl microcard_core::crypto::CryptoProvider for Hardware {
+    #[cfg(feature = "cc310-p256")]
+    fn sha256_stream(&mut self, state: &mut [u8; microcard_core::crypto::SHA256_STATE_BYTES],
+        input: &[u8], mut output: Option<&mut [u8; 32]>) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        let result = (|| {
+            self.ensure_cc310()?;
+            let pointer = output.as_mut().map_or(core::ptr::null_mut(), |value| value.as_mut_ptr());
+            let status = unsafe { cc310::microcard_cc310_sha256_stream(
+                state.as_mut_ptr(), state.len(), input.as_ptr(), input.len(), pointer) };
+            if status == 0 { Ok(()) } else { Err(Error::Native) }
+        })();
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+        }
+        result
+    }
+
     #[cfg(feature = "cc310-sha256")]
     fn sha256_into(&mut self, data: &[u8], output: &mut [u8; 32]) -> Result<()> {
         output.fill(0);

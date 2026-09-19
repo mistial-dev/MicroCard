@@ -1,4 +1,10 @@
 //! Primitives from RustCrypto; SCP03 v1.1.2 §§4.1.4–4.1.5.
+#[cfg(feature = "software-sha256")]
+mod streaming_sha256;
+
+/// Opaque provider state, transient only; zero initializes a new SHA-256 operation.
+pub const SHA256_STATE_BYTES: usize = 256;
+
 use crate::{Error, Result};
 #[cfg(feature = "software-aes")]
 use aes::{
@@ -54,6 +60,20 @@ macro_rules! software_method {
 /// errors must not expose a partial result and must leave it all-zero.
 /// The same rule applies to every variable-size output buffer below.
 pub trait CryptoProvider {
+    /// Update opaque transient state; Some(output) finalizes and clears the state.
+    fn sha256_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
+        mut output: Option<&mut [u8; 32]>) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        #[cfg(feature = "software-sha256")]
+        { streaming_sha256::run(state, input, output) }
+        #[cfg(not(feature = "software-sha256"))]
+        {
+            let _ = input;
+            state.fill(0);
+            Err(Error::Native)
+        }
+    }
+
     software_method!(
         "software-sha256",
         fn sha256_into(&mut self, data: &[u8], output: &mut [u8; 32]) -> Result<()> {

@@ -1,5 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include "cc3xx_psa_hash.h"
 
 #include "psa/crypto.h"
 #include "cc3xx_psa_asymmetric_signature.h"
@@ -152,4 +154,45 @@ int32_t microcard_cc310_p256_ecdh(const uint8_t *private_key,
         return status == PSA_ERROR_INVALID_ARGUMENT ? 1 : -1;
     }
     return 0;
+}
+
+
+// The pinned driver's clone is a 240-byte copy, with no address fixups.
+_Static_assert(sizeof(cc3xx_hash_operation_t) == 240u, "CC310 hash context changed");
+int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
+    const uint8_t *input, size_t input_size, uint8_t *output)
+{
+    if (state == NULL || state_size != 256u || (input == NULL && input_size != 0u)) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    cc3xx_hash_operation_t operation = {0};
+    psa_status_t status = PSA_SUCCESS;
+    if (state[0] == 0u) {
+        for (size_t i = 0; i < state_size; ++i) {
+            if (state[i] != 0u) { status = PSA_ERROR_BAD_STATE; break; }
+        }
+        if (status == PSA_SUCCESS) { status = cc3xx_hash_setup(&operation, PSA_ALG_SHA_256); }
+    } else if (state[0] == 1u) {
+        memcpy(&operation, state + 8u, sizeof(operation));
+    } else {
+        status = PSA_ERROR_BAD_STATE;
+    }
+    if (status == PSA_SUCCESS && input_size != 0u) {
+        status = cc3xx_hash_update(&operation, input, input_size);
+    }
+    if (status == PSA_SUCCESS && output != NULL) {
+        size_t written = 0u;
+        status = cc3xx_hash_finish(&operation, output, 32u, &written);
+        if (status == PSA_SUCCESS && written != 32u) { status = PSA_ERROR_CORRUPTION_DETECTED; }
+    }
+    microcard_wipe(state, state_size);
+    if (status == PSA_SUCCESS && output == NULL) {
+        state[0] = 1u;
+        memcpy(state + 8u, &operation, sizeof(operation));
+    } else {
+        (void)cc3xx_hash_abort(&operation);
+    }
+    if (status != PSA_SUCCESS && output != NULL) { microcard_wipe(output, 32u); }
+    microcard_wipe(&operation, sizeof(operation));
+    return status;
 }

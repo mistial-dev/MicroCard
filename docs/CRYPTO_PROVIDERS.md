@@ -45,6 +45,14 @@ SCP03 storage-key derivation, session KDF, command and response MACs, command IV
 
 AES-CMAC accepts a bounded list of borrowed input slices. SCP03 passes its chaining value, fixed header, command data and status bytes as separate slices, so storage-key derivation, session derivation, command MAC and response MAC do not allocate concatenation buffers. The software provider streams the slices through one CMAC state. Hardware providers must produce the same result for every segmentation of identical bytes.
 
+Streaming SHA-256 keeps 256 opaque transient bytes per operation; an all-zero state
+starts a new message, and finalization or failure clears it. The optional software reference
+uses RustCrypto compression. The CC310 P-256 profile uses the pinned driver's 240-byte
+context, copied through an aligned local object; its clone implementation is a plain copy.
+The C bridge's measured local stack frame is capped at 272 bytes. These bytes must never
+be accepted as an external format or written into durable applet state. The board boot
+check hashes split flash/RAM input, but physical execution remains unverified.
+
 Prehashed P-256 operations accept exactly one 32-byte SHA-256 digest and never hash it
 again. They share the hardware signing/verification path with message operations, allowing
 streaming clients to retain a hash context instead of complete messages. The software

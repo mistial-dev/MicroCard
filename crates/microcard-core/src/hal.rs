@@ -400,6 +400,18 @@ pub mod conformance {
         require(p256_signature == expected_signature)?;
         let mut sample_hash = [0; 32];
         provider.sha256_into(b"sample", &mut sample_hash)?;
+        let mut stream = [0; crate::crypto::SHA256_STATE_BYTES];
+        provider.sha256_stream(&mut stream, b"sa", None)?;
+        let mut resumed = stream;
+        let mut streamed_hash = [0; 32];
+        provider.sha256_stream(&mut stream, b"mple", Some(&mut streamed_hash))?;
+        require(streamed_hash == sample_hash && stream.iter().all(|byte| *byte == 0))?;
+        provider.sha256_stream(&mut resumed, b"mple", Some(&mut streamed_hash))?;
+        require(streamed_hash == sample_hash && resumed.iter().all(|byte| *byte == 0))?;
+        stream[0] = 2;
+        require(provider.sha256_stream(&mut stream, b"", Some(&mut streamed_hash)).is_err())?;
+        require(stream.iter().all(|byte| *byte == 0) && streamed_hash == [0; 32])?;
+
         provider.p256_sign_hash_into(&private_key, &sample_hash, &mut p256_signature)?;
         require(p256_signature == expected_signature)?;
         require(provider.p256_verify_hash(&derived_public_key, &sample_hash, &p256_signature)?)?;

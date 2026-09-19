@@ -423,6 +423,7 @@ fn configure_cc310_psa(
                 ("microcard_cc310_p256_sign_hash", 80),
                 ("microcard_cc310_p256_verify_hash", 80),
                 ("microcard_cc310_p256_ecdh", 88),
+                ("microcard_cc310_sha256_stream", 272),
             ],
         );
         shims.push(shim);
