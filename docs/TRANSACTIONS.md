@@ -7,9 +7,11 @@ and credentials for its owning domain. It borrows immutable package metadata and
 other domains untouched. Selection stages at most the old and new domains, reusing
 one stage when both callbacks share a domain. Both callbacks commit together;
 failure preserves the previous selection and live fields. Domain creation/deletion,
-policy updates, and SCP03 sequence reservation use small undo records. Package
-activation and instance installation/removal still copy the complete state;
-removing those copies remains release work.
+policy updates, and SCP03 sequence reservation use small undo records. Instance
+installation/removal stages the bounded instance registry and optional callback data
+together. Both installation interfaces use the same implementation. Package
+activation/removal still copy the complete state; removing those copies remains
+release work.
 Successful execution journals the candidate
 before publishing it. A journal error restores live mutable fields; after an uncertain
 write, reboot recovery may select either complete committed generation, never a partial

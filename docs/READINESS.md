@@ -69,8 +69,9 @@ CBOR removes device JSON parsing and canonical re-encoding. The snapshot migrati
 MC04 invocation and pending transactions now stage only the owning domain's mutable
 records, keys, and credentials. Retry-floor commits stage only credentials. Selection
 now stages at most two affected domains. Domain creation/deletion, policy changes,
-and SCP03 counter reservation use small undo records. Package and instance lifecycle
-changes still need conversion. Against `cadef33`, the same 21-invocation
+and SCP03 counter reservation use small undo records. Instance installation/removal
+stages the bounded registry and callback data together. Package activation/removal
+still need conversion. Against `cadef33`, the same 21-invocation
 credential acceptance workload reduces invocation peak host allocation from 41,310 to
 39,473 bytes and allocation traffic by 44,681 bytes, with unchanged live bytes.
 Overall workload peak falls from 41,310 to 40,496 bytes. Development firmware text
@@ -85,6 +86,12 @@ same workload, peak requested bytes fall from 28,167 to 25,616 for secure-channe
 setup, 23,248 to 21,711 for domain creation, and 25,903 to 24,271 for deletion.
 Overall workload peak remains 40,496 bytes. One failure-injection test covers live
 undo and subsequent retry for all four converted metadata mutations.
+Against `dcaf0ce`, instance lifecycle staging reduces the same workload's overall
+peak from 40,496 to 39,578 requested bytes. Its two installations allocate 5,318
+fewer bytes in total, with installation peak falling from 40,496 to 38,709 bytes.
+Development text increases by 708 bytes. The existing lifecycle test also covers
+failed installation/removal commits restoring both the registry and callback data;
+no additional test fixture or suite is needed.
 
 ## Crypto replacement measurements
 

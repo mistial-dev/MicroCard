@@ -18,6 +18,7 @@ mod snapshot;
 mod engine;
 mod application;
 mod metadata;
+mod lifecycle;
 use application::{ApplicationChanges, ApplicationView, StagedApplication};
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
@@ -2330,6 +2331,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         aid: &str,
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        if should_cancel() { return Err(Error::Cancelled); }
         let (aid_bytes, aid_len) = decode_aid(aid)?;
         if self
             .state
@@ -2375,31 +2377,24 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .iter()
             .find(|entry| entry.aid == aid)
             .ok_or(Error::Missing)?;
-        let mut next = self.state.try_clone()?;
-        let domain = next.domain_mut(domain_id).ok_or(Error::Domain)?;
+        let owner = source.registry_aid;
         let instance_aid = fallible_string(aid)?;
-        domain.instances.reserve_entry()?;
+        let mut instances = source.instances.try_clone_with(&mut crate::fallible_clone::CloneContext::new())?;
+        instances.reserve_entry()?;
+        let mut application = None;
         if let Some(method) = entry.install {
-            run_context_with_cancel(
-                domain,
-                package,
-                Some(&units),
-                method,
-                InvocationInput {
-                    data: &[],
-                    level: 0,
-                },
-                &mut self.platform,
-                should_cancel,
+            let mut staged = StagedApplication::new(source)?;
+            run_application_with_metrics_and_cancel(
+                staged.view(source), package, Some(&units), method,
+                InvocationInput { data: &[], level: 0 }, &mut self.platform, should_cancel,
             )?;
+            application = Some(staged);
         }
-        let canonical = domain
-            .assemblies
-            .get_key_value(assembly)
-            .map(|(name, _)| Rc::clone(name))
-            .ok_or(Error::Storage)?;
-        domain.instances.insert(instance_aid, canonical)?;
-        self.commit(next)
+        let canonical = source.assemblies.get_key_value(assembly)
+            .map(|(name, _)| Rc::clone(name)).ok_or(Error::Storage)?;
+        instances.insert(instance_aid, canonical)?;
+        if should_cancel() { return Err(Error::Cancelled); }
+        self.commit_instance_lifecycle(owner, instances, application)
     }
 
     pub fn into_flash(self) -> F {
@@ -2782,128 +2777,30 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 Ok(Vec::new())
             }
             0xec | 0xee | 0xf0 => {
-                let args = management_names(&c.data)?;
-                if c.ins == 0xf0 && args.0 == "ISD" && args.1 == "mscorlib" {
-                    return Err(Error::Unauthorized);
-                }
-                let mut next = self.state.try_clone()?;
-                if c.ins == 0xf0 && next.provider_in_use(args.0, args.1) {
-                    return Err(Error::Busy);
-                }
-                let count = core::iter::once(&next.isd)
-                    .chain(next.domains.values())
-                    .map(|domain| domain.instances.len())
-                    .sum::<usize>();
+                let (domain_id, name) = management_names(&c.data)?;
                 if c.ins == 0xec {
-                    let (aid, aid_len) = decode_aid(args.1)?;
-                    if self
-                        .state
-                        .registry_aid_in_use(RegistryAid::new(&aid[..aid_len])?)
-                    {
-                        return Err(Error::Busy);
-                    }
-                }
-                let units = if c.ins == 0xec {
-                    let source = self.state.domain(args.0).ok_or(Error::Domain)?;
-                    let assembly = source
-                        .packages
-                        .values()
-                        .find(|package| {
-                            package
-                                .manifest
-                                .entry_points
-                                .iter()
-                                .any(|entry| entry.aid == args.1)
-                        })
-                        .map(|package| package.manifest.assembly.as_str())
-                        .ok_or(Error::Missing)?;
-                    Some(execution_units(&self.state, args.0, assembly)?)
+                    let domain = self.state.domain(domain_id).ok_or(Error::Domain)?;
+                    let package = domain.packages.values().find(|package| {
+                        package.manifest.entry_points.iter().any(|entry| entry.aid == name)
+                    }).ok_or(Error::Missing)?;
+                    let load = RegistryAid::synthetic(0x4c, &package.digest);
+                    self.install_instance_exact(load, name, should_cancel)?;
                 } else if c.ins == 0xee {
-                    let source = self.state.domain(args.0).ok_or(Error::Domain)?;
-                    let assembly = source.instances.get(args.1).ok_or(Error::Missing)?;
-                    Some(execution_units(&self.state, args.0, assembly)?)
+                    self.uninstall_instance(domain_id, name, should_cancel)?;
                 } else {
-                    None
-                };
-                let d = next.domain_mut(args.0).ok_or(Error::Domain)?;
-                if c.ins == 0xf0 {
-                    if d
-                        .instances
-                        .values()
-                        .any(|assembly| assembly.as_ref() == args.1)
-                    {
+                    if domain_id == "ISD" && name == "mscorlib" { return Err(Error::Unauthorized); }
+                    if self.state.provider_in_use(domain_id, name) { return Err(Error::Busy); }
+                    let mut next = self.state.try_clone()?;
+                    let domain = next.domain_mut(domain_id).ok_or(Error::Domain)?;
+                    if domain.instances.values().any(|assembly| assembly.as_ref() == name) {
                         return Err(Error::Busy);
                     }
-                    d.assemblies.remove(args.1).ok_or(Error::Missing)?;
-                    d.packages.remove(args.1).ok_or(Error::Storage)?;
-                    d.bindings.remove(args.1).ok_or(Error::Storage)?;
-                    d.imports.remove(args.1).ok_or(Error::Storage)?;
-                } else if c.ins == 0xec {
-                    if count >= MAX_TOTAL_INSTANCES {
-                        return Err(Error::Quota);
-                    }
-                    if d.instances.len() >= d.policy.max_instances as usize {
-                        return Err(Error::Quota);
-                    }
-                    if d.instances.contains_key(args.1) {
-                        return Err(Error::Busy);
-                    }
-                    let units = units.as_deref().ok_or(Error::Storage)?;
-                    let p = &units[0].package;
-                    let a = p
-                        .manifest
-                        .entry_points
-                        .iter()
-                        .find(|a| a.aid == args.1)
-                        .unwrap();
-                    let instance_aid = fallible_string(args.1)?;
-                    d.instances.reserve_entry()?;
-                    if let Some(entry) = a.install {
-                        run_context_with_cancel(
-                            d,
-                            p,
-                            Some(units),
-                            entry,
-                            InvocationInput {
-                                data: &[],
-                                level: 0,
-                            },
-                            &mut self.platform,
-                            should_cancel,
-                        )?;
-                    }
-                    let canonical = d
-                        .assemblies
-                        .get_key_value(p.manifest.assembly.as_str())
-                        .map(|(name, _)| Rc::clone(name))
-                        .ok_or(Error::Storage)?;
-                    d.instances.insert(instance_aid, canonical)?;
-                } else {
-                    let units = units.as_deref().ok_or(Error::Storage)?;
-                    let p = &units[0].package;
-                    let a = p
-                        .manifest
-                        .entry_points
-                        .iter()
-                        .find(|a| a.aid == args.1)
-                        .ok_or(Error::Missing)?;
-                    if let Some(entry) = a.uninstall {
-                        run_context_with_cancel(
-                            d,
-                            p,
-                            Some(units),
-                            entry,
-                            InvocationInput {
-                                data: &[],
-                                level: 0,
-                            },
-                            &mut self.platform,
-                            should_cancel,
-                        )?;
-                    }
-                    d.instances.remove(args.1);
+                    domain.assemblies.remove(name).ok_or(Error::Missing)?;
+                    domain.packages.remove(name).ok_or(Error::Storage)?;
+                    domain.bindings.remove(name).ok_or(Error::Storage)?;
+                    domain.imports.remove(name).ok_or(Error::Storage)?;
+                    self.commit(next)?;
                 }
-                self.commit(next)?;
                 Ok(Vec::new())
             }
             _ => Err(Error::Unsupported),
@@ -3209,42 +3106,16 @@ fn run_context(
     platform: &mut impl Platform,
     level: u8,
 ) -> Result<Vec<u8>> {
-    run_context_with_cancel(
-        d,
+    run_application_with_metrics_and_cancel(
+        d.application_view(),
         p,
         units,
         entry,
         InvocationInput { data, level },
         platform,
         &mut || false,
-    )
+    ).map(|(output, _)| output)
 }
-fn run_context_with_cancel(
-    d: &mut Domain,
-    p: &impl PackageData,
-    units: Option<&[ExecutionUnit]>,
-    entry: u16,
-    input: InvocationInput<'_>,
-    platform: &mut impl Platform,
-    should_cancel: &mut dyn FnMut() -> bool,
-) -> Result<Vec<u8>> {
-    run_context_with_metrics_and_cancel(d, p, units, entry, input, platform, should_cancel)
-        .map(|(output, _)| output)
-}
-fn run_context_with_metrics_and_cancel(
-    d: &mut Domain,
-    p: &impl PackageData,
-    units: Option<&[ExecutionUnit]>,
-    entry: u16,
-    input: InvocationInput<'_>,
-    platform: &mut impl Platform,
-    should_cancel: &mut dyn FnMut() -> bool,
-) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
-    run_application_with_metrics_and_cancel(
-        d.application_view(), p, units, entry, input, platform, should_cancel,
-    )
-}
-
 fn run_application_with_metrics_and_cancel(
     d: ApplicationView<'_>,
     p: &impl PackageData,

@@ -1756,7 +1756,7 @@ fn selected_identity_buffers_are_reused_across_processing() {
 }
 
 #[test]
-fn selection_callbacks_share_staging_and_roll_back_both_domains() {
+fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
     let mut card = card();
     for (name, aid) in [("first", "F04D431001"), ("second", "F04D431002")] {
         let incarnation = create(&mut card, name);
@@ -1766,6 +1766,7 @@ fn selection_callbacks_share_staging_and_roll_back_both_domains() {
         manifest.entry_points[0].aid = aid.into();
         manifest.entry_points[0].select = Some(1);
         manifest.entry_points[0].deselect = Some(1);
+        manifest.entry_points[0].uninstall = Some(1);
         load(&mut card, &signed_compiled_package(&manifest, view.image, 7)).unwrap();
         card.manage(command(0xec, &management_names_wire(name, aid).unwrap())).unwrap();
     }
@@ -1799,8 +1800,19 @@ fn selection_callbacks_share_staging_and_roll_back_both_domains() {
     assert_eq!(card.state.domains["second"].store.get(&1), Some(&1));
     card.select_isd_with_cancel(&mut || false).unwrap();
     assert!(card.selected.is_none());
+    // Registry publication and callback writes must roll back as one change.
+    for instruction in [0xee, 0xec] {
+        let before = card.state.encode_snapshot().unwrap().to_vec();
+        let request = management_names_wire("first", "F04D431001").unwrap();
+        card.journal.flash_mut().fail_after = Some(0);
+        assert_eq!(card.manage(command(instruction, &request)), Err(Error::Storage));
+        card.journal.flash_mut().fail_after = None;
+        assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
+        card.manage(command(instruction, &request)).unwrap();
+    }
     let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
-    assert_eq!(reopened.state.domains["first"].store.get(&1), Some(&4));
+    assert!(reopened.state.domains["first"].instances.contains_key("F04D431001"));
+    assert_eq!(reopened.state.domains["first"].store.get(&1), Some(&0));
     assert_eq!(reopened.state.domains["second"].store.get(&1), Some(&2));
 }
 

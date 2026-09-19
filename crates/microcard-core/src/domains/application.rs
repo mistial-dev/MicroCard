@@ -11,6 +11,7 @@ pub(super) struct ApplicationView<'a> {
     pub(super) policy: &'a DomainPolicy,
 }
 
+#[cfg(test)]
 impl Domain {
     pub(super) fn application_view(&mut self) -> ApplicationView<'_> {
         ApplicationView {
@@ -88,7 +89,7 @@ impl StagedApplication {
             && self.credentials == domain.credentials
     }
 
-    fn swap(&mut self, domain: &mut Domain) {
+    pub(super) fn swap(&mut self, domain: &mut Domain) {
         core::mem::swap(&mut self.store, &mut domain.store);
         core::mem::swap(&mut self.blobs, &mut domain.blobs);
         core::mem::swap(&mut self.keys, &mut domain.keys);
