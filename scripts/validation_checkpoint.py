@@ -1,10 +1,10 @@
 """Full host acceptance sequence. Invoked through check.py."""
-import hashlib,json,subprocess,os
-from validation_common import ROOT, build_managed, run
+import hashlib,json,subprocess
+from validation_common import ROOT, build_managed, run, run_acceptance
 from compiler_cases import run_compiler_cases
 from validation_quick import PROJECTS, managed_checks
 
-CHECKPOINT_PROJECTS = PROJECTS + ['samples/EncodingConsumer', 'samples/Iso7816Consumer', 'samples/Kdf108', 'samples/Kdf108Consumer', 'samples/KeyOperations', 'samples/SigningAcceptance', 'tests/AnalyzerCases', 'tests/AnalyzerHarness', 'tests/Kdf108Reference', 'tests/Reference', 'tests/TransactionRuntimeNegative', 'tests/VersionConstraints']
+CHECKPOINT_PROJECTS = PROJECTS + ['samples/WalletPersonal', 'samples/WalletWork', 'samples/EncodingConsumer', 'samples/Iso7816Consumer', 'samples/Kdf108', 'samples/Kdf108Consumer', 'samples/KeyOperations', 'samples/SigningAcceptance', 'tests/AnalyzerCases', 'tests/AnalyzerHarness', 'tests/Kdf108Reference', 'tests/Reference', 'tests/TransactionRuntimeNegative', 'tests/VersionConstraints']
 
 def run_checkpoint(jobs=1):
  run('python3','scripts/mc04_inspector_test.py')
@@ -136,22 +136,16 @@ def run_checkpoint(jobs=1):
  run('python3','scripts/mc04_output_test.py')
  run('python3','scripts/assembly_budgets.py','--check')
  run('python3','scripts/mc04_execute_test.py')
- run('python3','scripts/kdf108_acceptance.py')
- run('python3','scripts/iso7816_acceptance.py')
- run('python3','scripts/iso7816_acceptance.py',env={**os.environ,'MICROCARD_BINARY':'1'})
- run('python3','scripts/encoding_acceptance.py')
- run('python3','scripts/encoding_acceptance.py',env={**os.environ,'MICROCARD_BINARY':'1'})
- run('python3','scripts/cryptography_acceptance.py')
- run('python3','scripts/cryptography_acceptance.py',env={**os.environ,'MICROCARD_BINARY':'1'})
- run('python3','scripts/security_acceptance.py')
- run('python3','scripts/security_acceptance.py',env={**os.environ,'MICROCARD_BINARY':'1'})
- run('python3','scripts/default_bundle_acceptance.py')
- run('python3','scripts/core_library_acceptance.py')
- run('python3','scripts/credential_acceptance.py')
+ # These consumers only read the just-built artifacts. Their card state, packages,
+ # wallet assets and logs live in separate directories for each invocation.
+ suites = [('kdf108_acceptance', False)]
+ for script in ('iso7816_acceptance', 'encoding_acceptance', 'cryptography_acceptance',
+                'security_acceptance', 'scp03_acceptance'):
+  suites.extend((script, binary) for binary in (False, True))
+ suites.extend((script, False) for script in ('default_bundle_acceptance',
+  'core_library_acceptance', 'credential_acceptance', 'serial_adapter_test',
+  'signing_acceptance', 'wallet_acceptance'))
+ run_acceptance(suites, jobs)
  print('PASS: deterministic MC04 preprocessing and managed differential execution')
- run('python3','scripts/scp03_acceptance.py')
- run('python3','scripts/scp03_acceptance.py',env={**os.environ,'MICROCARD_BINARY':'1'})
- run('python3','scripts/serial_adapter_test.py')
- run('python3','scripts/signing_acceptance.py')
  run('cargo','check','--manifest-path','fuzz/Cargo.toml','--bins','--locked')
  run('python3','scripts/board_budgets.py','--check')

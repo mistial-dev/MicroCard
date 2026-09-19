@@ -6,6 +6,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+from validation_common import prebuilt, require_artifacts
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -36,7 +37,10 @@ def main() -> None:
     env = environment()
     simulator_name = "microcard-sim.exe" if os.name == "nt" else "microcard-sim"
     wrapper_name = "mvnw.cmd" if os.name == "nt" else "mvnw"
-    run(["cargo", "build", "-p", "microcard-sim"], env=env)
+    if prebuilt():
+        require_artifacts(ROOT / "target/debug" / simulator_name)
+    else:
+        run(["cargo", "build", "-p", "microcard-sim"], env=env)
     run([ROOT / "wallet" / wrapper_name, "-f", ROOT / "wallet/pom.xml",
          f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"],
         env=env, cwd=ROOT / "wallet")

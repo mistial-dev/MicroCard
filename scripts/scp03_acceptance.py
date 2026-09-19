@@ -5,6 +5,7 @@ Uses Python cryptography/OpenSSL, not the Rust implementation. Development accep
 from device_cbor import management_names, manifest as encode_manifest
 from package_envelope import create as create_envelope, PREFIX as PACKAGE_PREFIX
 import hashlib, json, os, pathlib, subprocess, tempfile
+from validation_common import prebuilt, require_artifacts
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
@@ -107,6 +108,9 @@ def domain_policy(identifier,capabilities,max_assemblies=4,max_instances=4,max_i
 
 def ensure_assembly(project, output):
  image=ROOT/'work'/f'{output}.mca'; metadata=ROOT/'work'/f'{output}.json'
+ if prebuilt():
+  require_artifacts(image, metadata)
+  return image, metadata
  inputs=[ROOT/'build/MicroCard.targets']
  for source_root in (ROOT/project,ROOT/'managed/MicroCard.Tool',ROOT/'managed/MicroCard.Framework'):
   inputs.extend(path for path in source_root.rglob('*') if path.suffix in ('.cs','.csproj'))
@@ -168,7 +172,11 @@ def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
  return incarnation
 
 def main():
- subprocess.run(['cargo','build','-q',*BUILD],cwd=ROOT,check=True)
+ if prebuilt():
+  if BUILD: raise ValueError('Prebuilt acceptance cannot change simulator features')
+  require_artifacts(SIM)
+ else:
+  subprocess.run(['cargo','build','-q',*BUILD],cwd=ROOT,check=True)
  ensure_assembly('samples/Counter','counter')
  ensure_assembly('samples/KeyOperations','keys')
  with tempfile.TemporaryDirectory(prefix='microcard-') as td:

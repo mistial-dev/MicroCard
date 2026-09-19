@@ -5,6 +5,7 @@ import hashlib
 import pathlib
 import shutil
 import subprocess
+from validation_common import build_managed, prebuilt, require_artifacts
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIGURATION = "Release"
@@ -29,17 +30,16 @@ def main() -> None:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
-    run("dotnet", "build", "managed/MicroCard.Framework", "-c", CONFIGURATION,
-        "--nologo", "--verbosity", "quiet")
-    run("dotnet", "build", "managed/MicroCard.Tool", "-c", CONFIGURATION,
-        "--nologo", "--verbosity", "quiet")
+    if not prebuilt():
+        build_managed(["managed/MicroCard.Tool", *[project for project, _, _ in ASSEMBLIES]])
     framework = ROOT / "managed/MicroCard.Framework/bin" / CONFIGURATION / TFM / "MicroCard.Framework.dll"
     tool = ROOT / "managed/MicroCard.Tool/bin" / CONFIGURATION / TFM / "MicroCard.Tool.dll"
+    require_artifacts(framework, tool)
     framework_hash = hashlib.sha256(framework.read_bytes()).hexdigest()
 
     for project, assembly_name, stem in ASSEMBLIES:
-        run("dotnet", "build", project, "-c", CONFIGURATION, "--nologo", "--verbosity", "quiet")
         assembly = ROOT / project / "bin" / CONFIGURATION / TFM / f"{assembly_name}.dll"
+        require_artifacts(assembly)
         prefix = output / stem
         for suffix in (".mca", ".json", ".map.json"):
             candidate = pathlib.Path(str(prefix) + suffix)

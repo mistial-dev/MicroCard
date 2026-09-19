@@ -3,6 +3,7 @@
 from device_cbor import management_names, decode_manifest, manifest as encode_manifest
 from package_envelope import verify as verify_envelope
 import json, os, pathlib, subprocess, tempfile
+from validation_common import prebuilt, require_artifacts
 from domain_inventory import inventory
 from scp03_acceptance import (Client, bootstrap_isd, ensure_assembly, sign_package,
                               signer_identity, signer_public_key)
@@ -62,8 +63,11 @@ def signed_type_confusion_package(incarnation, seed):
 
 
 def main():
-    subprocess.run(["dotnet", "build", str(ROOT / "tests/Kdf108Reference"), "-c", "Release",
-                    "--nologo", "--verbosity", "quiet", "-m:1"], check=True)
+    if prebuilt():
+        require_artifacts(ROOT / "tests/Kdf108Reference/bin/Release/net10.0/Kdf108Reference.dll")
+    else:
+        subprocess.run(["dotnet", "build", str(ROOT / "tests/Kdf108Reference"), "-c", "Release",
+                        "--nologo", "--verbosity", "quiet", "-m:1"], check=True)
     subprocess.run(["dotnet", str(ROOT / "tests/Kdf108Reference/bin/Release/net10.0/Kdf108Reference.dll")], check=True)
     kdf_image, kdf_metadata_path = ensure_assembly("samples/Kdf108", "kdf108")
     consumer_image, consumer_metadata_path = ensure_assembly(
