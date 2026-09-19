@@ -4287,14 +4287,6 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
             (7, [Opaque(3), Int(key)]) => scalar(self.call(7, &[0, *key])?),
             (8, [Opaque(3), Int(key), Int(value)]) => scalar(self.call(8, &[0, *key, *value])?),
             (20, [input]) => self.buffers(20, &[heap.bytes(*input)?])?,
-            (21, [public_key, data, signature]) => self.buffers(
-                21,
-                &[
-                    heap.bytes(*public_key)?,
-                    heap.bytes(*data)?,
-                    heap.bytes(*signature)?,
-                ],
-            )?,
             (22, [Opaque(2), Int(slot), Int(algorithm)]) => self.key_call(
                 22,
                 &[
@@ -4554,7 +4546,7 @@ impl<P: Platform> Host<'_, P> {
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
                     native_range(args[5].bytes()?, args[6].int()?, args[7].int()?)?,
                     (args[4].int()?, args[8].int()?),
-                    |bytes| self.platform.random(bytes),
+                    self.platform,
                 )?;
                 BufferResult::Void
             }
@@ -4566,6 +4558,7 @@ impl<P: Platform> Host<'_, P> {
                             self.owner,
                             slot,
                             native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
+                            self.platform,
                         )?;
                 if verified {
                     self.authorized_credentials.insert(slot)?;
@@ -4587,7 +4580,7 @@ impl<P: Platform> Host<'_, P> {
                     self.owner,
                     slot,
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
-                    |bytes| self.platform.random(bytes),
+                    self.platform,
                 )?;
                 BufferResult::Void
             }
@@ -4598,7 +4591,7 @@ impl<P: Platform> Host<'_, P> {
                     slot,
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
                     native_range(args[4].bytes()?, args[5].int()?, args[6].int()?)?,
-                    |bytes| self.platform.random(bytes),
+                    self.platform,
                 )?;
                 if unblocked {
                     self.authorized_credentials.insert(slot)?;

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use crate::{crypto::CryptoProvider, hal::Entropy};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -219,7 +219,7 @@ impl CredentialStore {
         pin: &[u8],
         puk: &[u8],
         retries: (i32, i32),
-        random: impl FnOnce(&mut [u8]) -> Result<()>,
+        provider: &mut (impl CryptoProvider + Entropy),
     ) -> Result<()> {
         validate_secret(pin, MIN_PIN_BYTES)?;
         validate_secret(puk, MIN_PUK_BYTES)?;
@@ -233,13 +233,13 @@ impl CredentialStore {
         }
         self.0.reserve_entry()?;
         let mut salts = Zeroizing::new([0u8; 32]);
-        random(&mut *salts)?;
+        provider.fill_entropy(&mut *salts)?;
         let mut pin_salt = Zeroizing::new([0; 16]);
         pin_salt.copy_from_slice(&salts[..16]);
         let mut puk_salt = Zeroizing::new([0; 16]);
         puk_salt.copy_from_slice(&salts[16..]);
-        let mut pin_digest = Zeroizing::new(credential_digest(owner, slot, 1, &pin_salt, pin));
-        let mut puk_digest = Zeroizing::new(credential_digest(owner, slot, 2, &puk_salt, puk));
+        let mut pin_digest = Zeroizing::new(credential_digest(owner, slot, 1, &pin_salt, pin, provider)?);
+        let mut puk_digest = Zeroizing::new(credential_digest(owner, slot, 2, &puk_salt, puk, provider)?);
         let entry = Entry {
             slot,
             owner,
@@ -260,6 +260,7 @@ impl CredentialStore {
         owner: [u8; 16],
         slot: i32,
         candidate: &[u8],
+        provider: &mut impl CryptoProvider,
     ) -> Result<bool> {
         validate_secret(candidate, MIN_PIN_BYTES)?;
         let entry = self.entry_mut(owner, slot)?;
@@ -272,7 +273,8 @@ impl CredentialStore {
             1,
             &entry.pin_salt,
             candidate,
-        ));
+            provider,
+        )?);
         if bool::from(candidate.ct_eq(&entry.pin_digest)) {
             entry.pin_retries = entry.pin_max_retries;
             Ok(true)
@@ -287,12 +289,12 @@ impl CredentialStore {
         owner: [u8; 16],
         slot: i32,
         new_pin: &[u8],
-        random: impl FnOnce(&mut [u8]) -> Result<()>,
+        provider: &mut (impl CryptoProvider + Entropy),
     ) -> Result<()> {
         validate_secret(new_pin, MIN_PIN_BYTES)?;
         let mut salt = Zeroizing::new([0; 16]);
-        random(&mut *salt)?;
-        let digest = Zeroizing::new(credential_digest(owner, slot, 1, &salt, new_pin));
+        provider.fill_entropy(&mut *salt)?;
+        let digest = Zeroizing::new(credential_digest(owner, slot, 1, &salt, new_pin, provider)?);
         let entry = self.entry_mut(owner, slot)?;
         entry.pin_salt.zeroize();
         entry.pin_digest.zeroize();
@@ -308,7 +310,7 @@ impl CredentialStore {
         slot: i32,
         puk: &[u8],
         new_pin: &[u8],
-        random: impl FnOnce(&mut [u8]) -> Result<()>,
+        provider: &mut (impl CryptoProvider + Entropy),
     ) -> Result<bool> {
         validate_secret(puk, MIN_PUK_BYTES)?;
         validate_secret(new_pin, MIN_PIN_BYTES)?;
@@ -316,14 +318,14 @@ impl CredentialStore {
         if entry.puk_retries == 0 {
             return Ok(false);
         }
-        let candidate = Zeroizing::new(credential_digest(owner, slot, 2, &entry.puk_salt, puk));
+        let candidate = Zeroizing::new(credential_digest(owner, slot, 2, &entry.puk_salt, puk, provider)?);
         if !bool::from(candidate.ct_eq(&entry.puk_digest)) {
             entry.puk_retries -= 1;
             return Ok(false);
         }
         let mut salt = Zeroizing::new([0; 16]);
-        random(&mut *salt)?;
-        let digest = Zeroizing::new(credential_digest(owner, slot, 1, &salt, new_pin));
+        provider.fill_entropy(&mut *salt)?;
+        let digest = Zeroizing::new(credential_digest(owner, slot, 1, &salt, new_pin, provider)?);
         let entry = self.entry_mut(owner, slot)?;
         entry.pin_salt.zeroize();
         entry.pin_digest.zeroize();
@@ -384,15 +386,15 @@ fn credential_digest(
     purpose: u8,
     salt: &[u8; 16],
     secret: &[u8],
-) -> [u8; 32] {
-    let mut hash = Sha256::new();
-    hash.update(DIGEST_CONTEXT);
-    hash.update(owner);
-    hash.update(slot.to_be_bytes());
-    hash.update([purpose]);
-    hash.update(salt);
-    hash.update(secret);
-    hash.finalize().into()
+    provider: &mut impl CryptoProvider,
+) -> Result<[u8; 32]> {
+    let mut input = Zeroizing::new([0; DIGEST_CONTEXT.len() + 16 + 4 + 1 + 16 + MAX_SECRET_BYTES]);
+    let mut cursor = 0;
+    for part in [DIGEST_CONTEXT, &owner, &slot.to_be_bytes(), &[purpose], salt, secret] {
+        input[cursor..cursor + part.len()].copy_from_slice(part);
+        cursor += part.len();
+    }
+    provider.sha256(&input[..cursor])
 }
 
 fn validate_secret(secret: &[u8], minimum: usize) -> Result<()> {
@@ -419,16 +421,22 @@ mod tests {
     use super::*;
     use alloc::collections::BTreeMap;
 
+    struct TestProvider<F>(F);
+    impl<F> CryptoProvider for TestProvider<F> {}
+    impl<F: FnMut(&mut [u8]) -> Result<()>> Entropy for TestProvider<F> {
+        fn fill_entropy(&mut self, output: &mut [u8]) -> Result<()> { (self.0)(output) }
+    }
+
     const OWNER: [u8; 16] = [7; 16];
 
     fn create(store: &mut CredentialStore) {
         store
-            .create(OWNER, 1, b"1234", b"12345678", (3, 2), |out| {
+            .create(OWNER, 1, b"1234", b"12345678", (3, 2), &mut TestProvider(|out: &mut [u8]| {
                 for (index, byte) in out.iter_mut().enumerate() {
                     *byte = index as u8;
                 }
                 Ok(())
-            })
+            }))
             .unwrap();
     }
 
@@ -437,17 +445,17 @@ mod tests {
         let mut store = CredentialStore::default();
         for slot in (0..MAX_SLOTS as i32).rev() {
             store
-                .create(OWNER, slot, b"1234", b"12345678", (3, 2), |out| {
+                .create(OWNER, slot, b"1234", b"12345678", (3, 2), &mut TestProvider(|out: &mut [u8]| {
                     out.fill(slot as u8 + 1);
                     Ok(())
-                })
+                }))
                 .unwrap();
         }
         let pointer = store.0.0.as_ptr();
         assert_eq!(
-            store.create(OWNER, 8, b"1234", b"12345678", (3, 2), |_| {
+            store.create(OWNER, 8, b"1234", b"12345678", (3, 2), &mut TestProvider(|_: &mut [u8]| {
                 panic!("quota must be checked before entropy")
-            }),
+            })),
             Err(Error::Quota)
         );
         assert_eq!(store.0.0.as_ptr(), pointer);
@@ -481,33 +489,33 @@ mod tests {
     fn retry_block_unblock_and_pin_change_are_transaction_ready() {
         let mut store = CredentialStore::default();
         create(&mut store);
-        assert!(!store.verify_pin(OWNER, 1, b"9999").unwrap());
-        assert!(!store.verify_pin(OWNER, 1, b"9999").unwrap());
-        assert!(!store.verify_pin(OWNER, 1, b"9999").unwrap());
-        assert!(!store.verify_pin(OWNER, 1, b"1234").unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"1234", &mut crate::crypto::SoftwareCrypto).unwrap());
         assert_eq!(store.retries(OWNER, 1).unwrap(), (0, 2));
 
         assert!(!store
-            .unblock(OWNER, 1, b"00000000", b"5678", |out| {
+            .unblock(OWNER, 1, b"00000000", b"5678", &mut TestProvider(|out: &mut [u8]| {
                 out.fill(4);
                 Ok(())
-            })
+            }))
             .unwrap());
         assert!(store
-            .unblock(OWNER, 1, b"12345678", b"5678", |out| {
+            .unblock(OWNER, 1, b"12345678", b"5678", &mut TestProvider(|out: &mut [u8]| {
                 out.fill(5);
                 Ok(())
-            })
+            }))
             .unwrap());
-        assert!(store.verify_pin(OWNER, 1, b"5678").unwrap());
+        assert!(store.verify_pin(OWNER, 1, b"5678", &mut crate::crypto::SoftwareCrypto).unwrap());
         store
-            .change_pin(OWNER, 1, b"2468", |out| {
+            .change_pin(OWNER, 1, b"2468", &mut TestProvider(|out: &mut [u8]| {
                 out.fill(6);
                 Ok(())
-            })
+            }))
             .unwrap();
-        assert!(!store.verify_pin(OWNER, 1, b"5678").unwrap());
-        assert!(store.verify_pin(OWNER, 1, b"2468").unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"5678", &mut crate::crypto::SoftwareCrypto).unwrap());
+        assert!(store.verify_pin(OWNER, 1, b"2468", &mut crate::crypto::SoftwareCrypto).unwrap());
         assert_eq!(store.retries(OWNER, 1).unwrap(), (3, 2));
     }
 
@@ -515,21 +523,63 @@ mod tests {
     fn validation_and_entropy_failure_preserve_state() {
         let mut store = CredentialStore::default();
         assert_eq!(
-            store.create(OWNER, 1, b"1234", b"12345678", (3, 2), |_| {
+            store.create(OWNER, 1, b"1234", b"12345678", (3, 2), &mut TestProvider(|_: &mut [u8]| {
                 Err(Error::Native)
-            }),
+            })),
             Err(Error::Native)
         );
         assert!(store.is_empty());
         create(&mut store);
         let before = store.clone();
         assert_eq!(
-            store.change_pin(OWNER, 1, b"5678", |_| Err(Error::Native)),
+            store.change_pin(OWNER, 1, b"5678", &mut TestProvider(|_: &mut [u8]| Err(Error::Native))),
             Err(Error::Native)
         );
         assert!(store == before);
         assert!(store.validate(OWNER).is_ok());
-        assert_eq!(store.verify_pin([8; 16], 1, b"1234"), Err(Error::Unauthorized));
+        assert_eq!(store.verify_pin([8; 16], 1, b"1234", &mut crate::crypto::SoftwareCrypto), Err(Error::Unauthorized));
+    }
+
+    #[test]
+    fn provider_hash_failure_preserves_credentials_and_retry_counts() {
+        struct FailedHash;
+        impl CryptoProvider for FailedHash {
+            fn sha256_into(&mut self, _: &[u8], output: &mut [u8; 32]) -> Result<()> {
+                output.fill(0);
+                Err(Error::Native)
+            }
+        }
+        impl Entropy for FailedHash {
+            fn fill_entropy(&mut self, output: &mut [u8]) -> Result<()> {
+                output.fill(0x5a);
+                Ok(())
+            }
+        }
+        let mut store = CredentialStore::default();
+        assert_eq!(store.create(OWNER, 1, b"1234", b"12345678", (3, 2), &mut FailedHash), Err(Error::Native));
+        assert!(store.is_empty());
+        create(&mut store);
+        let before = store.clone();
+        assert_eq!(store.verify_pin(OWNER, 1, b"1234", &mut FailedHash), Err(Error::Native));
+        assert_eq!(store.change_pin(OWNER, 1, b"5678", &mut FailedHash), Err(Error::Native));
+        assert_eq!(store.unblock(OWNER, 1, b"12345678", b"5678", &mut FailedHash), Err(Error::Native));
+        assert!(store == before);
+    }
+
+    #[test]
+    fn provider_digest_keeps_the_existing_credential_encoding() {
+        use sha2::{Digest, Sha256};
+        let secret = [0x35; MAX_SECRET_BYTES];
+        let salt = [0x79; 16];
+        let mut reference = Sha256::new();
+        reference.update(DIGEST_CONTEXT);
+        reference.update(OWNER);
+        reference.update(3i32.to_be_bytes());
+        reference.update([2]);
+        reference.update(salt);
+        reference.update(secret);
+        let expected: [u8; 32] = reference.finalize().into();
+        assert_eq!(credential_digest(OWNER, 3, 2, &salt, &secret, &mut crate::crypto::SoftwareCrypto).unwrap(), expected);
     }
 
     #[test]

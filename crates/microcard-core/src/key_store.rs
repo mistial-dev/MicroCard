@@ -214,7 +214,7 @@ impl KeyStore {
             if nonces[..nonce_count].contains(&entry.nonce)
                 || (entry.algorithm == Algorithm::Aes128 && entry.key[16..] != [0; 16])
                 || (entry.algorithm == Algorithm::P256
-                    && p256::SecretKey::from_slice(&entry.key).is_err())
+                    && !crate::crypto::p256_private_key_valid(&entry.key))
             {
                 return Err(Error::Storage);
             }
@@ -252,7 +252,7 @@ impl KeyStore {
             let mut valid = false;
             for _ in 0..8 {
                 random(&mut entry.key)?;
-                if p256::SecretKey::from_slice(&entry.key).is_ok() {
+                if crate::crypto::p256_private_key_valid(&entry.key) {
                     valid = true;
                     break;
                 }

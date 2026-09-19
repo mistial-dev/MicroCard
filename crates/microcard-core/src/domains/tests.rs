@@ -2535,10 +2535,7 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
             b"1234",
             b"12345678",
             (3, 3),
-            |bytes| {
-                bytes.fill(0xa5);
-                Ok(())
-            },
+            &mut TestPlatform(0xa4),
         )
         .unwrap();
     assert!(serde_json::to_vec(&card.state).unwrap().len() <= 49152);
@@ -2641,10 +2638,7 @@ fn maximum_container_state_clone_is_fallible_and_atomic() {
     for slot in 0..8 {
         domain
             .keys
-            .generate(incarnation, slot, 1, |output| {
-                output.fill(slot as u8 + 1);
-                Ok(())
-            })
+            .generate(incarnation, slot, 1, |output| { output.fill(slot as u8 + 1); Ok(()) })
             .unwrap();
         domain
             .credentials
@@ -2654,10 +2648,7 @@ fn maximum_container_state_clone_is_fallible_and_atomic() {
                 b"1234",
                 b"12345678",
                 (3, 3),
-                |output| {
-                    output.fill(slot as u8 + 1);
-                    Ok(())
-                },
+                &mut TestPlatform(slot as u8),
             )
             .unwrap();
     }
@@ -3213,10 +3204,7 @@ fn credential_retry_floor_is_committed_and_recovers_after_invocation_failure() {
             b"1234",
             b"12345678",
             (3, 2),
-            |out| {
-                out.fill(0x5a);
-                Ok(())
-            },
+            &mut TestPlatform(0x59),
         )
         .unwrap();
     card.commit(next).unwrap();
@@ -3264,10 +3252,7 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
             b"1234",
             b"12345678",
             (3, 2),
-            |out| {
-                out.fill(0x5a);
-                Ok(())
-            },
+            &mut TestPlatform(0x59),
         )
         .unwrap();
     card.commit(initial).unwrap();
