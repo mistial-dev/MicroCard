@@ -14,3 +14,5 @@ Initial development release:
 - SCP03 implementation option `0x71`, adding S16 mode, a derived card challenge and R-ENCRYPTION, with the advertised option and the accepted security levels both derived from the enabled cargo features.
 - a Java Card virtual machine in `crates/microcard-engine-jcvm`, covering the CAP container, structural verification of a whole package, an object heap with firewall checks, linking, the bytecode interpreter and the native API classes.
 - OpenFIPS201 installing, registering, accepting a SELECT and answering PIV commands in the simulator, with its own PIN retry counter persisting across commands.
+- MP04 packages, signed with P-256 ECDSA over SHA-256 instead of Ed25519. This removes `ed25519-dalek`, `curve25519-dalek` and the software SHA-512 from the firmware, which was 46,538 bytes of a 337,748-byte image, and puts package verification on a CryptoCell path that already exists. The managed `Ed25519` verification facade and its native call are removed with it.
+- A cancellation closure taken as a trait object rather than a generic, which stopped the whole command path being compiled twice and removed a further 18,472 bytes.

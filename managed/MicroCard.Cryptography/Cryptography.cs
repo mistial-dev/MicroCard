@@ -14,13 +14,6 @@ public static class SHA256
             destinationOffset);
 }
 
-public static class Ed25519
-{
-    // Match the desktop .NET argument order while the framework preserves the native ABI order.
-    public static bool Verify(byte[] signature, byte[] data, byte[] publicKey) =>
-        Framework.Cryptography.VerifyEd25519(publicKey, data, signature);
-}
-
 public static class KeyFactory
 {
     public static KeyHandle GenerateHmacSha256(int slot) =>

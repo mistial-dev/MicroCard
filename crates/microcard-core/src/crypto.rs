@@ -165,14 +165,6 @@ pub trait CryptoProvider {
         ccm_decrypt_in_place(key, nonce, aad, ciphertext)
     }
 
-    fn ed25519_verify(&mut self, key: &[u8], signature: &[u8], message: &[u8]) -> Result<bool> {
-        Ok(ed25519_verify(key, signature, message))
-    }
-
-    fn ed25519_public_key_valid(&mut self, key: &[u8; 32]) -> Result<bool> {
-        Ok(ed25519_public_key_valid(key))
-    }
-
     fn p256_public_key_into(
         &mut self,
         private_key: &[u8; 32],
@@ -502,23 +494,72 @@ pub fn ccm_decrypt_in_place(
     Ok(length)
 }
 
-/// Strict Ed25519 verification shared by signed packages and managed services.
-/// Reject malformed lengths, weak points and noncanonical scalars.
-pub fn ed25519_verify(key: &[u8], signature: &[u8], message: &[u8]) -> bool {
-    use ed25519_dalek::{Signature, VerifyingKey};
-    let Ok(key): core::result::Result<&[u8; 32], _> = key.try_into() else {
-        return false;
-    };
-    VerifyingKey::from_bytes(key)
-        .ok()
-        .zip(Signature::from_slice(signature).ok())
-        .is_some_and(|(key, sig)| key.verify_strict(message, &sig).is_ok())
+/// Uncompressed SEC1 public key bytes, which is the only encoding a signed package carries.
+pub const P256_PUBLIC_KEY_BYTES: usize = 65;
+/// Fixed-width IEEE P1363 signature bytes.
+pub const P256_SIGNATURE_BYTES: usize = 64;
+
+/// Half the P-256 group order, as 32 big-endian bytes.
+///
+/// A signature with `s` above this is the malleable twin of one below it. Comparing bytes
+/// rather than parsing a scalar keeps this check identical on a card that has no software
+/// P-256 implementation linked at all.
+const P256_HALF_ORDER: [u8; 32] = [
+    0x7f, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xde, 0x73, 0x7d, 0x56, 0xd3, 0x8b, 0xcf, 0x42, 0x79, 0xdc, 0xe5, 0x61, 0x7e, 0x31, 0x92, 0xa8,
+];
+
+/// The identity a domain binds to, which is the digest of the signer's key.
+///
+/// A package carries the whole uncompressed key so verification needs no point
+/// decompression. What persists is this digest, which keeps every stored identity the width
+/// it has always been.
+pub fn signer_identity(public_key: &[u8; P256_PUBLIC_KEY_BYTES]) -> [u8; 32] {
+    sha256(public_key)
 }
 
-/// Validate an Ed25519 identity before persisting it as an authorization policy.
-pub fn ed25519_public_key_valid(key: &[u8; 32]) -> bool {
-    use ed25519_dalek::VerifyingKey;
-    VerifyingKey::from_bytes(key).is_ok_and(|key| !key.is_weak())
+/// The P-256 group order, as 32 big-endian bytes.
+const P256_ORDER: [u8; 32] = [
+    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63, 0x25, 0x51,
+];
+
+/// Sign for a package, choosing the low form of the two signatures that verify.
+///
+/// The signer does not pick a form on its own, and measurement puts roughly half of its
+/// output in the high one. A card that accepted both would let one signed package have two
+/// encodings with two digests, and a registry identity is derived from that digest, so the
+/// same package could be installed twice under different names. Every packager has to agree
+/// on this, in every language.
+pub fn p256_ecdsa_sign_package(private_key: &[u8; 32], message: &[u8]) -> Result<[u8; 64]> {
+    let mut signature = p256_ecdsa_sign(private_key, message)?;
+    if signature[32..] > P256_HALF_ORDER[..] {
+        let mut borrow = 0i16;
+        for index in (0..32).rev() {
+            let difference =
+                i16::from(P256_ORDER[index]) - i16::from(signature[32 + index]) - borrow;
+            signature[32 + index] = difference.rem_euclid(256) as u8;
+            borrow = i16::from(difference < 0);
+        }
+    }
+    Ok(signature)
+}
+
+/// Whether a key and signature are in the exact shape a signed package may carry.
+///
+/// Two things this pins that a plain verify would let through. The software verifier accepts
+/// compressed SEC1 and the CryptoCell one refuses it, so a compressed key would verify on the
+/// simulator and be rejected by the board. And ECDSA admits two signatures for every message,
+/// so an untouched package can be handed back with a different signature that still verifies.
+/// Its digest would differ, which is what dependency digest pinning and the rollback check
+/// compare. Requiring the low form removes that.
+pub fn p256_signature_acceptable(public_key: &[u8], signature: &[u8]) -> bool {
+    public_key.len() == P256_PUBLIC_KEY_BYTES
+        && public_key[0] == 0x04
+        && signature.len() == P256_SIGNATURE_BYTES
+        && signature[32..] <= P256_HALF_ORDER[..]
+        && signature[..32].iter().any(|byte| *byte != 0)
+        && signature[32..].iter().any(|byte| *byte != 0)
 }
 
 /// Validate a P-256 private scalar before dispatching to a hardware provider.
@@ -813,5 +854,76 @@ mod p256_tests {
         );
         assert_eq!(p256_ecdh(&private, &[0; 65]), Err(Error::Authentication));
         assert_eq!(p256_public_key(&[0; 32]), Err(Error::Storage));
+    }
+}
+
+#[cfg(test)]
+mod signature_shape_tests {
+    use super::*;
+
+    fn sign(seed: u8, message: &[u8]) -> ([u8; 65], [u8; 64]) {
+        let private = [seed; 32];
+        (
+            p256_public_key(&private).unwrap(),
+            p256_ecdsa_sign(&private, message).unwrap(),
+        )
+    }
+
+    #[test]
+    fn only_an_uncompressed_key_and_a_low_signature_are_accepted() {
+        let (key, signature) = sign(0x31, b"package");
+        assert!(p256_signature_acceptable(&key, &signature));
+        assert!(p256_ecdsa_verify(&key, b"package", &signature));
+
+        // A compressed SEC1 key. The software verifier accepts one and the card's hardware
+        // refuses it, so a package may only ever carry the uncompressed form.
+        let mut compressed = [0; 33];
+        compressed[0] = 0x02;
+        compressed[1..].copy_from_slice(&key[1..33]);
+        assert!(!p256_signature_acceptable(&compressed, &signature));
+
+        // The right length with the wrong leading byte.
+        let mut mislabelled = key;
+        mislabelled[0] = 0x03;
+        assert!(!p256_signature_acceptable(&mislabelled, &signature));
+
+        // Wrong widths on either half.
+        assert!(!p256_signature_acceptable(&key[..64], &signature));
+        assert!(!p256_signature_acceptable(&key, &signature[..63]));
+    }
+
+    #[test]
+    fn the_malleable_twin_of_a_signature_is_refused() {
+        let (key, signature) = sign(0x5a, b"package");
+        assert!(p256_signature_acceptable(&key, &signature));
+
+        // s' = n - s verifies just as well as s, so accepting both would let an untouched
+        // package come back with a different digest.
+        let order = [
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2,
+            0xfc, 0x63, 0x25, 0x51,
+        ];
+        let mut borrow = 0i16;
+        let mut high = signature;
+        for index in (0..32).rev() {
+            let difference = order[index] as i16 - signature[32 + index] as i16 - borrow;
+            high[32 + index] = difference.rem_euclid(256) as u8;
+            borrow = i16::from(difference < 0);
+        }
+        // The twin still verifies, which is exactly why the shape check has to reject it.
+        assert!(p256_ecdsa_verify(&key, b"package", &high));
+        assert!(!p256_signature_acceptable(&key, &high));
+    }
+
+    #[test]
+    fn a_zero_half_is_refused() {
+        let (key, signature) = sign(0x77, b"package");
+        let mut zero_r = signature;
+        zero_r[..32].fill(0);
+        assert!(!p256_signature_acceptable(&key, &zero_r));
+        let mut zero_s = signature;
+        zero_s[32..].fill(0);
+        assert!(!p256_signature_acceptable(&key, &zero_s));
     }
 }

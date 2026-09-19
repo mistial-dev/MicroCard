@@ -11,11 +11,11 @@ import subprocess
 import tempfile
 import time
 import sys
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from dk_smoke import SerialClient
 from domain_inventory import inventory
-from scp03_acceptance import BinaryClient, bootstrap_isd, domain_policy, ensure_assembly
+from scp03_acceptance import (BinaryClient, bootstrap_isd, domain_policy, ensure_assembly,
+                              new_seed, sign_package, signer_public_key)
 
 class StrictReplies:
     def command(self, ins, data=b"", status=0x9000):
@@ -33,7 +33,7 @@ class StrictSerial(StrictReplies, SerialClient):
 class StrictBinary(StrictReplies, BinaryClient):
     pass
 
-CONTEXT = b"MicroCard signed package v3\0"
+CONTEXT = b"MicroCard signed package v4\0"
 HEADER = 12 + len(CONTEXT)
 AID = "F04D43EE01"
 
@@ -57,12 +57,12 @@ def dependency(assembly):
 def encode(value):
     return json.dumps(value, separators=(",", ":")).encode()
 
-def package(meta, key, image=None, context=CONTEXT):
+def package(meta, seed, image=None, context=CONTEXT):
     if image is None: image = acceptance_image()
     meta = encode(meta) if isinstance(meta, dict) else meta
-    raw = b"MP03" + context + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + image
-    raw += key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    return raw + key.sign(raw)
+    raw = b"MP04" + context + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + image
+    raw += signer_public_key(seed)
+    return raw + sign_package(seed, raw)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -134,12 +134,12 @@ def main():
             if args.report:
                 args.report.parent.mkdir(parents=True, exist_ok=True)
                 args.report.write_text(json.dumps(dict(result="IN_PROGRESS", test_domain=domain, checks=results), indent=2)+"\n")
-            key = Ed25519PrivateKey.generate(); other = Ed25519PrivateKey.generate()
+            key = new_seed(); other = new_seed()
             meta = manifest(domain, inc); raw = package(meta, key)
             bad = bytearray(raw); bad[-1] ^= 1
             reject("invalid signature", bytes(bad))
             reject("unsigned", raw[:-64])
-            for name, offset in [("metadata tamper", HEADER + 8), ("image tamper", len(raw)-97), ("public-key substitution", len(raw)-96)]:
+            for name, offset in [("metadata tamper", HEADER + 8), ("image tamper", len(raw)-130), ("public-key substitution", len(raw)-129)]:
                 bad = bytearray(raw); bad[offset] ^= 1; reject(name, bytes(bad))
             reject("wrong context", package(meta, key, context=b"Other protocol"))
             for name, field, value in [("wrong SSD", "domain", "missing-"+domain),

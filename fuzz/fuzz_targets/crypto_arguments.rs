@@ -42,13 +42,14 @@ fuzz_target!(|data: &[u8]| {
         assert!(crypto::ccm_decrypt(&aes_key, &nonce, aad, &tampered).is_err());
     }
 
+    // Arbitrary bytes through the package shape check and the verifier behind it.
     let signature_len = data.len().min(64);
-    let key_len = data.len().saturating_sub(signature_len).min(32);
-    let _ = crypto::ed25519_verify(
-        &data[..key_len],
-        &data[data.len().saturating_sub(signature_len)..],
-        message,
-    );
+    let key_len = data.len().saturating_sub(signature_len).min(65);
+    let candidate_key = &data[..key_len];
+    let candidate_signature = &data[data.len().saturating_sub(signature_len)..];
+    if crypto::p256_signature_acceptable(candidate_key, candidate_signature) {
+        let _ = crypto::p256_ecdsa_verify(candidate_key, message, candidate_signature);
+    }
 
     let private_key = crypto::sha256(data);
     if let Ok(public_key) = crypto::p256_public_key(&private_key) {

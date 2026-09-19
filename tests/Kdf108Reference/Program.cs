@@ -49,7 +49,6 @@ sealed class ReferenceHost(byte[] key) : IHost
     public byte[] KeyOperation(int operation, byte[] token, byte[] data, int offset, int length) =>
         throw new NotSupportedException();
 
-    public bool Ed25519Verify(byte[] publicKey, byte[] data, byte[] signature) => false;
     public bool P256Verify(byte[] publicKey, byte[] data, byte[] signature) => false;
     public void CreateCredential(int slot, byte[] pin, int pinOffset, int pinLength, int pinRetries,
         byte[] puk, int pukOffset, int pukLength, int pukRetries) => throw new NotSupportedException();

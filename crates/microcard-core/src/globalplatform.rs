@@ -296,8 +296,8 @@ pub(crate) fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
 /// magic, and the two cannot collide.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Payload {
-    /// A signed MP03 package for the CIL engine.
-    Mp03,
+    /// A signed MP04 package for the CIL engine.
+    Mp04,
     /// A Java Card package, whose load file leads with the Header component.
     JavaCard,
 }
@@ -307,8 +307,8 @@ pub(crate) enum Payload {
 /// A Java Card load file begins with the Header component, JCVM §6.3, which is the tag
 /// `0x01`, a two byte size and then the magic `DECAFFED`.
 pub(crate) fn payload_kind(value: &[u8]) -> Result<Payload> {
-    if value.starts_with(b"MP03") {
-        return Ok(Payload::Mp03);
+    if value.starts_with(b"MP04") {
+        return Ok(Payload::Mp04);
     }
     if value.len() >= 7 && value[0] == 0x01 && value[3..7] == [0xde, 0xca, 0xff, 0xed] {
         return Ok(Payload::JavaCard);
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn a_load_file_says_which_engine_it_is_for() {
-        assert_eq!(payload_kind(b"MP03rest"), Ok(Payload::Mp03));
+        assert_eq!(payload_kind(b"MP04rest"), Ok(Payload::Mp04));
         // The first bytes of the committed OpenFIPS201 load file.
         let header = [0x01, 0x00, 0x13, 0xde, 0xca, 0xff, 0xed, 0x01, 0x02];
         assert_eq!(payload_kind(&header), Ok(Payload::JavaCard));
@@ -577,6 +577,8 @@ mod tests {
         // Too short to tell, so the card refuses rather than guessing.
         assert_eq!(payload_kind(&[0x01, 0x00, 0x13, 0xde]), Err(Error::Format));
         assert_eq!(payload_kind(b"MP0"), Err(Error::Format));
+        // The previous container format is no longer recognised as a payload at all.
+        assert_eq!(payload_kind(b"MP03rest"), Err(Error::Format));
         assert_eq!(payload_kind(&[]), Err(Error::Format));
     }
 }

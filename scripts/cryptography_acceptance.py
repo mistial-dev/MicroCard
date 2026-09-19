@@ -7,22 +7,19 @@ import pathlib
 import subprocess
 import tempfile
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from domain_inventory import inventory
-from scp03_acceptance import Client, bootstrap_isd, ensure_assembly
+from scp03_acceptance import sign_package, signer_public_key, Client, bootstrap_isd, ensure_assembly, signer_identity
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACK = ROOT / "managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll"
 ISD_SEED = bytes([0x11]) * 32
 SSD_SEED = bytes([0x45]) * 32
-ISD_PUBLIC = Ed25519PrivateKey.from_private_bytes(ISD_SEED).public_key().public_bytes(
-    Encoding.Raw, PublicFormat.Raw)
-SSD_PUBLIC = Ed25519PrivateKey.from_private_bytes(SSD_SEED).public_key().public_bytes(
-    Encoding.Raw, PublicFormat.Raw)
+ISD_PUBLIC = signer_identity(ISD_SEED)
+SSD_PUBLIC = signer_identity(SSD_SEED)
 
 
 def package(image, metadata, domain, incarnation, seed, output):
@@ -110,12 +107,13 @@ def main():
         different = bytearray(comparison)
         different[-1] ^= 1
         assert client.command(0x10, b"\x12" + comparison + different) == b"\x00"
-        signing_key = Ed25519PrivateKey.from_private_bytes(bytes([0x72]) * 32)
-        public_key = signing_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        signature = signing_key.sign(message)
+        signing_seed = bytes([0x72]) * 32
+        public_key = signer_public_key(signing_seed)
+        signature = sign_package(signing_seed, message)
         verify = b"\x01" + public_key + signature + message
         assert client.command(0x10, verify) == b"\x01"
         invalid = bytearray(verify)
+        # Inside the public key, so the point no longer matches the signature.
         invalid[40] ^= 1
         assert client.command(0x10, bytes(invalid)) == b"\x00"
         assert client.command(0x10, b"\x06") == b"\x00"

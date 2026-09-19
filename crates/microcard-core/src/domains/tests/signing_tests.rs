@@ -21,15 +21,15 @@ fn rejected(c: &mut Card<MemoryFlash, TestPlatform>, raw: &[u8], expected: Optio
 }
 
 fn signed(meta: &[u8], image: &[u8], seed: u8, context: &[u8]) -> Vec<u8> {
-    let key = SigningKey::from_bytes(&[seed; 32]);
-    let mut raw = b"MP03".to_vec();
+    let private = [seed; 32];
+    let mut raw = b"MP04".to_vec();
     raw.extend(context);
     raw.extend((meta.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(meta);
     raw.extend(image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(crate::crypto::p256_public_key(&private).unwrap());
+    let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     raw
 }
@@ -167,7 +167,7 @@ fn signed_dependency_predicates_and_export_policy_are_enforced() {
         requirement.package_version = 8;
     }
     fn wrong_signer(requirement: &mut Dependency) {
-        requirement.signer = Some(SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes());
+        requirement.signer = Some(crate::crypto::signer_identity(&crate::crypto::p256_public_key(&[8; 32]).unwrap()));
     }
     fn wrong_digest(requirement: &mut Dependency) {
         requirement.digest = Some([0x66; 32]);
@@ -201,7 +201,7 @@ fn signed_dependency_predicates_and_export_policy_are_enforced() {
                 max_inclusive: true,
             };
             requirement.package_version = 7;
-            requirement.signer = Some(parsed_provider.key);
+            requirement.signer = Some(parsed_provider.signer);
             requirement.digest = Some(parsed_provider.digest);
             manifest.dependencies = alloc::vec![requirement];
         },
@@ -255,7 +255,7 @@ fn ssd_dependency_resolves_pinned_isd_provider_with_distinct_signer() {
                     max_inclusive: true,
                 }],
                 package_version: 1,
-                signer: Some(parsed_provider.key),
+                signer: Some(parsed_provider.signer),
                 digest: Some(parsed_provider.digest),
                 scope: 1,
             }];
@@ -304,7 +304,7 @@ fn ssd_dependency_resolves_pinned_isd_provider_with_distinct_signer() {
 
     let wrong_pin = rewritten(&consumer, 7, |manifest| {
         manifest.version = 2;
-        manifest.dependencies[0].signer = Some(parsed_consumer.key);
+        manifest.dependencies[0].signer = Some(parsed_consumer.signer);
     });
     rejected(&mut c, &wrong_pin, Some(Error::Missing));
     c.manage(command(0xf0, br#"["consumer","KdfConsumer"]"#))
@@ -547,7 +547,7 @@ fn signed_invalid_content_never_activates_or_binds() {
         let mut substituted = package("a", inc, "candidate", 1, 7, &[0x2a]);
         let offset = substituted.len() - 96;
         substituted[offset..offset + 32]
-            .copy_from_slice(&SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes());
+            .copy_from_slice(&crate::crypto::signer_identity(&crate::crypto::p256_public_key(&[8; 32]).unwrap()));
         rejected(&mut c, &substituted, Some(Error::Signature));
         if bound {
             rejected(
@@ -708,7 +708,7 @@ fn inventory_is_bounded_authenticated_and_read_only() {
     assert_eq!(second[21], 1);
     assert_eq!(
         &second[22..54],
-        &SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes()
+        &crate::crypto::signer_identity(&crate::crypto::p256_public_key(&[7; 32]).unwrap())
     );
     assert_eq!(&second[54..], &[1, 0, 0, 0]);
     for data in [

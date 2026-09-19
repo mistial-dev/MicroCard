@@ -7,7 +7,7 @@ Persistent storage keys are declared at assembly scope:
 [assembly: PersistentBytes(2, 512)]
 ```
 
-The preprocessor emits declarations into the canonical package manifest in ascending key order. The Ed25519 package signature therefore covers each key, value kind and byte bound. The device accepts at most 64 declarations per assembly, requires non-negative keys, uses kind `1` for Int32 with a zero byte bound, and kind `2` for byte strings from 1 through 2,048 bytes.
+The preprocessor emits declarations into the canonical package manifest in ascending key order. The package signature therefore covers each key, value kind and byte bound. The device accepts at most 64 declarations per assembly, requires non-negative keys, uses kind `1` for Int32 with a zero byte bound, and kind `2` for byte strings from 1 through 2,048 bytes.
 
 The field is mandatory. Packages created before this schema are rejected, and there is no conversion or upgrade path.
 

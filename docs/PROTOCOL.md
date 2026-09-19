@@ -29,7 +29,7 @@ Use chunks of at most 200 bytes before the offset. SCP03 encryption/MAC overhead
 
 ### ISD ownership
 
-A factory-empty journal contains one unbound ISD with a random incarnation. Its first activated package must target `ISD`, name the assembly exactly `mscorlib`, and declare no lifecycle entry points or dependencies. Successful activation atomically records the assembly and permanently pins its Ed25519 signer as the ISD ownership identity. Every later ISD assembly must use that exact signer. SSD creation is refused before this commit. ISD deletion and `mscorlib` unload are always refused. This profile has no reset, unbind, conversion, or upgrade path.
+A factory-empty journal contains one unbound ISD with a random incarnation. Its first activated package must target `ISD`, name the assembly exactly `mscorlib`, and declare no lifecycle entry points or dependencies. Successful activation atomically records the assembly and permanently pins its signer identity as the ISD ownership identity. Every later ISD assembly must use that exact signer. SSD creation is refused before this commit. ISD deletion and `mscorlib` unload are always refused. This profile has no reset, unbind, conversion, or upgrade path.
 
 E2 returns one bounded public record: version, total record count (ISD plus at most eight SSDs), index, identifier, incarnation, binding flag, signing key or zeros, assembly count, installed-instance count, and application-record count. ISD is record zero.
 
@@ -39,9 +39,13 @@ E1 data is: version `01`, identifier length u8, UTF-8 identifier, capability bit
 
 Only an empty, unbound SSD accepts E1. A later E1 may replace its policy until first successful load. After signer binding it returns a state error. Activation rejects packages whose native capabilities or package storage exceed policy. Installation, recovery, Int32/byte storage, and framework-key creation enforce their corresponding limits. See [domain policy](DOMAIN_POLICY.md).
 
-## Signed package MP03
+## Signed package MP04
 
-Little-endian header: magic `MP03`, fixed ASCII context `MicroCard signed package v3` followed by a zero byte, manifest length u32, assembly length u32. Then canonical UTF-8 manifest JSON, complete embedded assembly, 32-byte Ed25519 public key, and 64-byte signature. The signed message is the single contiguous package slice from the magic through the public key. Keeping the context inside that slice provides protocol separation without constructing a second package-sized verification buffer. Earlier package magics and contexts are rejected. Here is no conversion or upgrade path.
+Little-endian header: magic `MP04`, fixed ASCII context `MicroCard signed package v4` followed by a zero byte, manifest length u32, assembly length u32. Then canonical UTF-8 manifest JSON, complete embedded assembly, 65-byte uncompressed SEC1 P-256 public key, and 64-byte P1363 ECDSA signature over SHA-256. The signed message is the single contiguous package slice from the magic through the public key. Keeping the context inside that slice provides protocol separation without constructing a second package-sized verification buffer. Earlier package magics and contexts are rejected. Here is no conversion or upgrade path.
+
+Two shapes are refused before the signature is checked at all, so that a software and a hardware provider answer identically. A compressed SEC1 key is refused, because the card's hardware path accepts only the uncompressed form. A signature whose `s` is above half the group order is refused, because ECDSA admits two signatures for every message and accepting both would give one signed package two encodings, two digests and therefore two registry identities. Every packager produces the low form.
+
+What a domain binds to is the SHA-256 digest of that 65-byte key rather than the key itself, which keeps every stored identity 32 bytes wide.
 
 Manifest field order is fixed: `domain`, `incarnation` (16 JSON byte numbers), `assembly`, `assembly_version` (four u16 values), `version`, `export`, `entry_points`, `dependencies`, `capabilities`, `limits`. Export field order is `access`, `key`. Access is private (0), any signer (1), same signer (2), or the exact 32-byte caller key (3). Entry-point field order is `aid`, `process`, `install`, `uninstall`, `select`, `deselect`. Missing optional hooks are null. Dependency field order is `assembly`, `ranges`, `package_version`, `signer`, `digest`, `scope`. Version ranges carry bounded four-part minimum/maximum tuples and inclusivity flags. Limits order is `arena`, `stack`, `frames`, `instructions`. No whitespace or unknown fields. Dependencies and capabilities are strictly increasing and unique. Device verification reserializes to enforce the canonical representation.
 

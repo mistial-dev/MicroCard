@@ -187,7 +187,7 @@ def main():
  encoding_consumer=json.loads((ROOT/'work/encoding-consumer.json').read_text())
  assert encoding_consumer['capabilities']==[2,11,12,13] and encoding_consumer['dependencies'][0]['assembly']=='MicroCard.Encoding'
  cryptography_manifest=json.loads((ROOT/'work/cryptography.json').read_text())
- assert cryptography_manifest['capabilities']==[20,21,22,23,24,25,26,27,28,29,30,35,36,37,38,39,49,50,51] and cryptography_manifest['entry_points']==[]
+ assert cryptography_manifest['capabilities']==[20,22,23,24,25,26,27,28,29,30,35,36,37,38,39,49,50,51] and cryptography_manifest['entry_points']==[]
  security_manifest=json.loads((ROOT/'work/security.json').read_text())
  assert security_manifest['capabilities']==[40,41,42,43,44,45] and security_manifest['entry_points']==[]
  security_consumer=json.loads((ROOT/'work/security-consumer.json').read_text())

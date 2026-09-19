@@ -58,16 +58,24 @@ final class WalletCard {
         }
     }
 
+    private void upload(String asset, String domain, byte[] incarnation, byte[] seed) throws Exception {
+        try {
+            Packages.upload(card, Packages.create(assets, asset, domain, incarnation, seed));
+        } catch (IOException failure) {
+            throw new IOException("Loading " + asset + " into " + domain + ": " + failure.getMessage(), failure);
+        }
+    }
+
     private void ensureIsd() throws Exception {
         Domain isd = inventory().getFirst();
         if (!isd.bound()) {
-            Packages.upload(card, Packages.create(assets, "mscorlib", "ISD", isd.incarnation(), ISD_SEED));
+            upload("mscorlib", "ISD", isd.incarnation(), ISD_SEED);
             isd = inventory().getFirst();
         }
-        requireSigner(isd, Packages.publicKey(ISD_SEED));
-        if (isd.assemblies() < 2) Packages.upload(card, Packages.create(assets, "cryptography", "ISD", isd.incarnation(), ISD_SEED));
+        requireSigner(isd, Packages.signerIdentity(ISD_SEED));
+        if (isd.assemblies() < 2) upload("cryptography", "ISD", isd.incarnation(), ISD_SEED);
         isd = inventory().getFirst();
-        if (isd.assemblies() < 3) Packages.upload(card, Packages.create(assets, "security", "ISD", isd.incarnation(), ISD_SEED));
+        if (isd.assemblies() < 3) upload("security", "ISD", isd.incarnation(), ISD_SEED);
         if (inventory().getFirst().assemblies() < 3) throw new IOException("ISD dependency setup incomplete");
     }
 
@@ -79,10 +87,10 @@ final class WalletCard {
             domain = find(identity.domain()).orElseThrow();
         }
         if (!domain.bound()) {
-            Packages.upload(card, Packages.create(assets, identity.asset(), identity.domain(), domain.incarnation(), identity.signerSeed()));
+            upload(identity.asset(), identity.domain(), domain.incarnation(), identity.signerSeed());
             domain = find(identity.domain()).orElseThrow();
         }
-        requireSigner(domain, Packages.publicKey(identity.signerSeed()));
+        requireSigner(domain, Packages.signerIdentity(identity.signerSeed()));
         if (domain.assemblies() != 1) throw new IOException(identity.label() + " has unexpected assembly state");
         if (domain.instances() == 0) {
             card.command(0xEC, Packages.JSON.toJson(List.of(identity.domain(), identity.aid())).getBytes(StandardCharsets.UTF_8));

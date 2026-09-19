@@ -1,10 +1,10 @@
 # On-device assembly verification
 
-MicroCard treats the preprocessor as untrusted input. A valid Ed25519 signature proves who signed an assembly. It does not prove that its bytecode is safe. The Rust runtime independently verifies the complete signed assembly before adding it to a domain.
+MicroCard treats the preprocessor as untrusted input. A valid P-256 ECDSA signature proves who signed an assembly. It does not prove that its bytecode is safe. The Rust runtime independently verifies the complete signed assembly before adding it to a domain.
 
 ## Verification boundary
 
-`PackageView::verify` performs Ed25519 verification, canonical manifest checks, manifest-to-Assembly identity comparison and MC04 static verification. MC04 validation covers metadata tables, coded indices, signatures, CIL operands and control flow, exact stack types, lifecycle MethodDefs and the fixed framework ABI. Activation resolves and persists exact external targets, builds the complete local and cross-assembly call graph, and rejects cycles or paths over 32 frames before changing durable state. `Card::open` repeats package, assembly, dependency, link and complete frame-depth verification for every persisted MC04 assembly. VM entry consumes borrowed verified assembly slices and only those persisted links.
+`PackageView::verify` performs P-256 ECDSA verification, canonical manifest checks, manifest-to-Assembly identity comparison and MC04 static verification. MC04 validation covers metadata tables, coded indices, signatures, CIL operands and control flow, exact stack types, lifecycle MethodDefs and the fixed framework ABI. Activation resolves and persists exact external targets, builds the complete local and cross-assembly call graph, and rejects cycles or paths over 32 frames before changing durable state. `Card::open` repeats package, assembly, dependency, link and complete frame-depth verification for every persisted MC04 assembly. VM entry consumes borrowed verified assembly slices and only those persisted links.
 
 The rules are based on ECMA-335, 6th edition, Partition I §8.7 (assignment compatibility) and Partition III §1.8 (correctness and verifiability), narrowed to MicroCard's instruction set. This document defines the MicroCard profile rather than claiming full CLI verification.
 

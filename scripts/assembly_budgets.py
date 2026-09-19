@@ -6,7 +6,8 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PACKAGE_FIXED_BYTES = 136
+# 40 byte header, a 65 byte uncompressed SEC1 signer key and a 64 byte signature.
+PACKAGE_FIXED_BYTES = 169
 sys.path.insert(0, str(ROOT / "scripts"))
 import mcinspect
 
@@ -17,7 +18,7 @@ CORPUS = [
     ("KeyOperations", "keys", "samples/KeyOperations/bin/Release/net10.0/KeyOperations.dll", 3072, 4096),
     ("Kdf108", "kdf108", "samples/Kdf108/bin/Release/net10.0/Kdf108.dll", 1024, 2048),
     ("Kdf108Consumer", "kdf108-consumer", "samples/Kdf108Consumer/bin/Release/net10.0/Kdf108Consumer.dll", 2048, 3072),
-    ("SigningAcceptance", "signing-acceptance", "samples/SigningAcceptance/bin/Release/net10.0/SigningAcceptance.dll", 512, 1024),
+    ("SigningAcceptance", "signing-acceptance", "samples/SigningAcceptance/bin/Release/net10.0/SigningAcceptance.dll", 512, 1280),
     ("MicroCard.Iso7816", "iso7816", "managed/MicroCard.Iso7816/bin/Release/net10.0/MicroCard.Iso7816.dll", 3072, 4096),
     ("Iso7816Consumer", "iso7816-consumer", "samples/Iso7816Consumer/bin/Release/net10.0/Iso7816Consumer.dll", 2048, 3072),
     ("MicroCard.Encoding", "encoding", "managed/MicroCard.Encoding/bin/Release/net10.0/MicroCard.Encoding.dll", 4096, 5120),

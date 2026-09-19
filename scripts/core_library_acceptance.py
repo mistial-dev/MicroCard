@@ -6,18 +6,16 @@ import pathlib
 import subprocess
 import tempfile
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from domain_inventory import inventory
-from scp03_acceptance import Client, bootstrap_isd, ensure_assembly
+from scp03_acceptance import Client, bootstrap_isd, ensure_assembly, signer_identity
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACK = ROOT / "managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll"
 ISD_SEED = bytes([0x11]) * 32
 SSD_SEED = bytes([0x44]) * 32
-ISD_PUBLIC = Ed25519PrivateKey.from_private_bytes(ISD_SEED).public_key().public_bytes(
-    Encoding.Raw, PublicFormat.Raw)
+ISD_PUBLIC = signer_identity(ISD_SEED)
 
 
 def package(image, metadata, domain, incarnation, seed, output):

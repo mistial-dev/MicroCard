@@ -1547,7 +1547,7 @@ impl PackageData for Package {
         self.digest
     }
     fn key(&self) -> [u8; 32] {
-        self.key
+        self.signer
     }
 }
 
@@ -1562,7 +1562,7 @@ impl PackageData for PackageView<'_> {
         self.digest
     }
     fn key(&self) -> [u8; 32] {
-        self.key
+        self.signer
     }
 }
 
@@ -1588,7 +1588,7 @@ fn resolve_dependency(
                     && provider
                         .manifest
                         .export
-                        .allows(provider.key, consumer.key())
+                        .allows(provider.signer, consumer.key())
             })
         {
             let candidate = ResolvedDependency {
@@ -1643,8 +1643,9 @@ impl DomainPolicy {
 
     fn standard() -> Result<Self> {
         let mut capabilities = Vec::new();
-        capabilities.try_reserve_exact(45).map_err(|_| Error::Quota)?;
-        capabilities.extend((2..=13).chain(20..=52));
+        capabilities.try_reserve_exact(44).map_err(|_| Error::Quota)?;
+        // 21 was the Ed25519 verification primitive, which the card no longer carries.
+        capabilities.extend((2..=13).chain(core::iter::once(20)).chain(22..=52));
         Ok(Self {
             capabilities,
             max_assemblies: MAX_ASSEMBLIES_PER_DOMAIN,
@@ -2521,11 +2522,6 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
             {
                 return Err(Error::Storage);
             }
-            if let Some(key) = d.key {
-                if !platform.ed25519_public_key_valid(&key)? {
-                    return Err(Error::Storage);
-                }
-            }
             d.keys.validate()?;
             d.credentials.validate(d.incarnation)?;
             let mut domain_package_bytes = 0usize;
@@ -2549,7 +2545,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                     || p.manifest.domain != id
                     || p.manifest.assembly.as_str() != name.as_ref()
                     || p.manifest.incarnation != d.incarnation
-                    || Some(p.key) != d.key
+                    || Some(p.signer) != d.key
                     || d.versions.get(name) != Some(&(p.manifest.version, p.digest))
                     || p.manifest.storage.iter().any(|declaration| {
                         d.storage_declaration(declaration.key) != Some(declaration)
@@ -3317,7 +3313,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 if d.incarnation != p.manifest.incarnation {
                     return Err(Error::Domain);
                 }
-                if d.key.is_some_and(|key| key != p.key) {
+                if d.key.is_some_and(|key| key != p.signer) {
                     return Err(Error::KeyMismatch);
                 }
                 d.merge_storage_schema(&p.manifest.storage)?;
@@ -3364,7 +3360,7 @@ impl<F: Flash, P: Platform, S: PackageStaging> Card<F, P, S> {
                 d.bindings.reserve_for(p.manifest.assembly.as_str())?;
                 d.imports.reserve_for(p.manifest.assembly.as_str())?;
                 d.assemblies.reserve_for(p.manifest.assembly.as_str())?;
-                let signing_key = p.key;
+                let signing_key = p.signer;
                 let version = p.manifest.version;
                 let digest = p.digest;
                 let activated_domain = fallible_string(&p.manifest.domain)?;
@@ -4771,10 +4767,6 @@ impl<P: Platform> Host<'_, P> {
                 )?;
                 Ok(BufferResult::Bytes(core::mem::take(&mut *output)))
             }
-            21 if args.len() == 3 => {
-                let valid = self.platform.ed25519_verify(args[0], args[2], args[1])?;
-                Ok(BufferResult::Scalar(valid as i32))
-            }
             37 if args.len() == 3 => {
                 let valid = self.platform.p256_ecdsa_verify(args[0], args[1], args[2])?;
                 Ok(BufferResult::Scalar(valid as i32))
@@ -5023,7 +5015,6 @@ mod tests {
             AssemblyEntry, CONTEXT, Dependency, DependencyExport, Limits, Manifest, VersionRange,
         },
     };
-    use ed25519_dalek::{Signer, SigningKey};
     const STORAGE_KEY: [u8; 16] = [0x5a; 16];
     struct TestPlatform(u8);
     impl crate::crypto::CryptoProvider for TestPlatform {}
@@ -5315,7 +5306,7 @@ mod tests {
     #[test]
     fn durable_domains_require_an_explicit_fallible_policy() {
         let policy = DomainPolicy::standard().unwrap();
-        assert_eq!(policy.capabilities.len(), 45);
+        assert_eq!(policy.capabilities.len(), 44);
         assert!(policy.valid());
 
         let mut value = serde_json::to_value(&card().state).unwrap();
@@ -5479,7 +5470,7 @@ mod tests {
             hash: Some([7; 32]),
             total: Some(1),
             next_block: 1,
-            payload: Some(crate::globalplatform::Payload::Mp03),
+            payload: Some(crate::globalplatform::Payload::Mp04),
         });
         reopened.staging.bytes.push(0xaa);
         let delete = Verified {
@@ -5937,15 +5928,15 @@ mod tests {
         };
         let meta = serde_json::to_vec(&m).unwrap();
         let image = test_assembly(name, code);
-        let key = SigningKey::from_bytes(&[seed; 32]);
-        let mut raw = Vec::from(b"MP03" as &[u8]);
+        let private = [seed; 32];
+        let mut raw = Vec::from(b"MP04" as &[u8]);
         raw.extend(CONTEXT);
         raw.extend((meta.len() as u32).to_le_bytes());
         raw.extend((image.len() as u32).to_le_bytes());
         raw.extend(meta);
         raw.extend(image);
-        raw.extend(key.verifying_key().to_bytes());
-        let signature = key.sign(&raw).to_bytes();
+        raw.extend(crate::crypto::p256_public_key(&private).unwrap());
+        let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
         raw.extend(signature);
         raw
     }
@@ -6200,15 +6191,15 @@ mod tests {
 
     fn signed_compiled_package(manifest: &Manifest, image: &[u8], seed: u8) -> Vec<u8> {
         let meta = serde_json::to_vec(manifest).unwrap();
-        let key = SigningKey::from_bytes(&[seed; 32]);
-        let mut raw = Vec::from(b"MP03" as &[u8]);
+        let private = [seed; 32];
+        let mut raw = Vec::from(b"MP04" as &[u8]);
         raw.extend(CONTEXT);
         raw.extend((meta.len() as u32).to_le_bytes());
         raw.extend((image.len() as u32).to_le_bytes());
         raw.extend(meta);
         raw.extend(image);
-        raw.extend(key.verifying_key().to_bytes());
-        let signature = key.sign(&raw).to_bytes();
+        raw.extend(crate::crypto::p256_public_key(&private).unwrap());
+        let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
         raw.extend(signature);
         raw
     }
@@ -6333,8 +6324,9 @@ mod tests {
             assert_eq!(positions.len(), 1);
             package[positions[0]] ^= 1;
             let signed_length = package.len() - 64;
-            let key = SigningKey::from_bytes(&[seed; 32]);
-            let signature = key.sign(&package[..signed_length]).to_bytes();
+            let signature =
+                crate::crypto::p256_ecdsa_sign_package(&[seed; 32], &package[..signed_length])
+                    .unwrap();
             package[signed_length..].copy_from_slice(&signature);
 
             assert_eq!(load(&mut card, &package), Err(Error::Unauthorized));
@@ -6440,7 +6432,7 @@ mod tests {
         assert!(c.state.is_owned());
         assert_eq!(
             c.state.isd.key,
-            Some(SigningKey::from_bytes(&[42; 32]).verifying_key().to_bytes())
+            Some(crate::crypto::signer_identity(&crate::crypto::p256_public_key(&[42; 32]).unwrap()))
         );
     }
 
@@ -7881,15 +7873,15 @@ mod tests {
         let mut p = Package::verify(&package("a", inc, "one", 1, 7, &[0x2b, 0xfe])).unwrap();
         p.manifest.entry_points[0].install = Some(0);
         let meta = serde_json::to_vec(&p.manifest).unwrap();
-        let mut raw = Vec::from(b"MP03" as &[u8]);
+        let mut raw = Vec::from(b"MP04" as &[u8]);
         raw.extend(CONTEXT);
         raw.extend((meta.len() as u32).to_le_bytes());
         raw.extend((p.image().len() as u32).to_le_bytes());
         raw.extend(meta);
         raw.extend(p.image());
-        let key = SigningKey::from_bytes(&[7; 32]);
-        raw.extend(key.verifying_key().to_bytes());
-        let signature = key.sign(&raw).to_bytes();
+        let private = [7; 32];
+        raw.extend(crate::crypto::p256_public_key(&private).unwrap());
+        let signature = crate::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
         raw.extend(signature);
         load(&mut c, &raw).unwrap();
         assert_eq!(
@@ -8544,7 +8536,7 @@ mod tests {
 
         struct TrackingPlatform {
             random: u8,
-            calls: Rc<Cell<[usize; 3]>>,
+            calls: Rc<Cell<[usize; 2]>>,
         }
         impl crate::crypto::CryptoProvider for TrackingPlatform {
             fn sha256(&mut self, data: &[u8]) -> Result<[u8; 32]> {
@@ -8554,23 +8546,16 @@ mod tests {
                 Ok(crate::crypto::sha256(data))
             }
 
-            fn ed25519_verify(
+            fn p256_ecdsa_verify(
                 &mut self,
-                key: &[u8],
-                signature: &[u8],
+                public_key: &[u8],
                 message: &[u8],
+                signature: &[u8],
             ) -> Result<bool> {
                 let mut calls = self.calls.get();
                 calls[1] += 1;
                 self.calls.set(calls);
-                Ok(crate::crypto::ed25519_verify(key, signature, message))
-            }
-
-            fn ed25519_public_key_valid(&mut self, key: &[u8; 32]) -> Result<bool> {
-                let mut calls = self.calls.get();
-                calls[2] += 1;
-                self.calls.set(calls);
-                Ok(crate::crypto::ed25519_public_key_valid(key))
+                Ok(crate::crypto::p256_ecdsa_verify(public_key, message, signature))
             }
         }
         impl crate::hal::Entropy for TrackingPlatform {
@@ -8586,7 +8571,7 @@ mod tests {
             }
         }
 
-        let calls = Rc::new(Cell::new([0; 3]));
+        let calls = Rc::new(Cell::new([0; 2]));
         let platform = TrackingPlatform {
             random: 0,
             calls: Rc::clone(&calls),
@@ -8594,7 +8579,7 @@ mod tests {
         let mut card = Card::open(MemoryFlash::new(16384), platform, STORAGE_KEY).unwrap();
         let package = library_package("ISD", card.state.isd.incarnation, "mscorlib", 1, 42);
         load(&mut card, &package).unwrap();
-        assert_eq!(calls.get(), [1, 1, 0]);
+        assert_eq!(calls.get(), [1, 1]);
 
         let flash = card.into_flash();
         let platform = TrackingPlatform {
@@ -8602,6 +8587,9 @@ mod tests {
             calls: Rc::clone(&calls),
         };
         Card::open(flash, platform, STORAGE_KEY).unwrap();
-        assert_eq!(calls.get(), [2, 2, 1]);
+        // Digest and signature again on reopening. A stored identity is the digest of a
+        // key rather than a key, so there is nothing left for recovery to revalidate as a
+        // curve point. A package whose key is wrong fails its signature instead.
+        assert_eq!(calls.get(), [2, 2]);
     }
 }

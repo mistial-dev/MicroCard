@@ -13,7 +13,7 @@ The nRF52840 contains Arm CryptoCell 310. Nordic's product specification lists h
 | AES-128 block and CBC | Portable Rust | Opt-in CC310 cipher support compiles and self-tests. MicroCard keeps ISO 7816 padding validation and failure mapping in Rust. |
 | AES-CCM | Portable Rust | Opt-in CC310 AEAD compiles for the fixed 13-byte nonce and 16-byte tag profile. It remains disabled pending physical rejection and reset tests. |
 | P-256 ECDSA and ECDH | Portable Rust | Opt-in CC310 P-256 compiles and self-tests. Rust prevalidates private scalars so both providers map invalid stored keys identically. |
-| Ed25519 verification | Portable Rust | CryptoCell advertises Ed25519, but no selected pinned entry point has passed the strict malformed and noncanonical vector suite, so no hardware override is implemented. |
+| Package signature verification | Portable Rust, with a CryptoCell override available | Package signatures are P-256 ECDSA over SHA-256, which the pinned `cc310-p256` path already implements and self-tests. Enabling it puts package verification on hardware. |
 | SCP03 KDF | Rust framing with the selected AES-CMAC provider | The framing stays portable. Opt-in CC310 CMAC accelerates its primitive only when that provider is selected by the board build. |
 
 Protocol formatting, ISO 7816 parsing, SCP03 chaining, KDF labels, padding policy, domain authorization and key-handle checks remain portable Rust responsibilities. The accelerator receives an operation only after those checks.
@@ -69,7 +69,7 @@ CryptoCell advertises an application derived-key model, but MicroCard does not y
 ## Required evidence
 
 - Run the same known-answer and negative vectors through Rust and CryptoCell providers for every enabled operation.
-- Run all 151 strict Ed25519 verification cases before enabling hardware Ed25519.
+- Run the committed Wycheproof P-256 ECDSA corpus through both providers before enabling the hardware override for package verification.
 - Verify caller ownership, algorithm/key mismatch, malformed lengths, provider-reported output bounds and plaintext clearing after authentication failure.
 - Measure flash, BSS, native stack, latency and energy, including enable/disable overhead and break-even message sizes.
 - Interrupt each operation through timeout, watchdog and reset scenarios. Verify no successful result or persistent mutation is exposed after failure.

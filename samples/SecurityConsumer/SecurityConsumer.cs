@@ -3,7 +3,7 @@ using MicroCard.Security;
 
 [assembly: Dependency("MicroCard.Security", "=0.1.0",
     Scope = DependencyScope.IssuerSecurityDomain,
-    SignerPublicKeyHex = "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737")]
+    SignerPublicKeyHex = "2bad0fd610d99eae443e932a26142bca1e5fa995b4518452827e78ef1f317ff0")]
 
 namespace MicroCard.Samples.SecurityConsumer;
 

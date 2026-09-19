@@ -6,7 +6,9 @@ import hashlib, json, os, pathlib, subprocess, tempfile
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 SIM=ROOT/'target/debug/microcard-sim'
@@ -117,6 +119,39 @@ def ensure_assembly(project, output):
  subprocess.run(['dotnet',tool,assembly,ROOT/'work'/output,framework,pin],cwd=ROOT,check=True)
  return image,metadata
 
+# MP04 packages are signed with P-256 ECDSA over SHA-256. The signer key travels as an
+# uncompressed SEC1 point and what a domain binds to is that point's digest.
+P256_ORDER=0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+PACKAGE_PREFIX=b'MP04MicroCard signed package v4\0'
+
+def signing_key(seed):
+ return ec.derive_private_key(int.from_bytes(seed,'big'),ec.SECP256R1())
+
+def signer_public_key(seed):
+ return signing_key(seed).public_key().public_bytes(Encoding.X962,PublicFormat.UncompressedPoint)
+
+def signer_identity(seed):
+ """The 32-byte identity a domain binds to."""
+ return hashlib.sha256(signer_public_key(seed)).digest()
+
+def sign_package(seed,message):
+ """Fixed-width r and s, in the low form the card requires."""
+ r,s=decode_dss_signature(signing_key(seed).sign(message,ec.ECDSA(hashes.SHA256())))
+ if s>P256_ORDER//2: s=P256_ORDER-s
+ return r.to_bytes(32,'big')+s.to_bytes(32,'big')
+
+def new_seed():
+ """A random 32-byte value that is a usable P-256 scalar."""
+ while True:
+  candidate=os.urandom(32)
+  if 0<int.from_bytes(candidate,'big')<P256_ORDER: return candidate
+
+def package_envelope(meta,image,seed):
+ raw=PACKAGE_PREFIX+len(meta).to_bytes(4,'little')+len(image).to_bytes(4,'little')+meta+image
+ raw+=signer_public_key(seed)
+ return raw+sign_package(seed,raw)
+
+
 def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
  record=c.command(0xe2,b'\x00');assert record[4:7]==b'ISD'
  incarnation=record[7:23]
@@ -126,9 +161,8 @@ def bootstrap_isd(c, signing_seed=bytes([0x42])*32):
  manifest=dict(domain='ISD',incarnation=list(incarnation),assembly=generated['assembly'],assembly_version=generated['assembly_version'],version=1,
                export=generated['export'],entry_points=generated['entry_points'],dependencies=generated['dependencies'],capabilities=generated['capabilities'],storage=generated['storage'],
                limits=dict(arena=16384,stack=256,frames=32,instructions=100000))
- meta=json.dumps(manifest,separators=(',',':')).encode();key=Ed25519PrivateKey.from_private_bytes(signing_seed)
- raw=b'MP03MicroCard signed package v3\0'+len(meta).to_bytes(4,'little')+len(image).to_bytes(4,'little')+meta+image
- raw+=key.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw);raw+=key.sign(raw)
+ meta=json.dumps(manifest,separators=(',',':')).encode()
+ raw=package_envelope(meta,image,signing_seed)
  c.command(0xe6)
  for offset in range(0,len(raw),200):c.command(0xe8,offset.to_bytes(4,'little')+raw[offset:offset+200])
  c.command(0xea)

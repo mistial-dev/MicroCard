@@ -15,7 +15,7 @@ repeated dependency-first entries:
   package version
   SHA-256(MC04 image)
   SHA-256(complete signed package)
-Ed25519 signature over every preceding byte
+P-256 ECDSA signature over every preceding byte
 ```
 
 `MicroCard.Bundle verify BUNDLE PACKAGE...` verifies the manifest signature and every package signature, reconstructs the canonical representation, and requires an exact match. The package digest is the same full-package SHA-256 identity used by runtime dependency bindings.

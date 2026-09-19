@@ -3,7 +3,7 @@ using MicroCard.Framework;
 
 [assembly: Dependency("MicroCard.Cryptography", "=0.1.0",
     Scope = DependencyScope.IssuerSecurityDomain,
-    SignerPublicKeyHex = "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737")]
+    SignerPublicKeyHex = "2bad0fd610d99eae443e932a26142bca1e5fa995b4518452827e78ef1f317ff0")]
 
 namespace MicroCard.Samples.CryptographyConsumer;
 
@@ -101,15 +101,15 @@ public static class CryptographyConsumer
         var data = Copy(command, 1, length - 1);
         if (operation == 1)
         {
-            if (data.Length < 96)
+            if (data.Length < 129)
             {
                 ResponseApdu.SetStatus(0x6700);
                 return;
             }
-            var publicKey = Copy(data, 0, 32);
-            var signature = Copy(data, 32, 64);
-            var message = Copy(data, 96, data.Length - 96);
-            byte[] result = [Ed25519.Verify(signature, message, publicKey) ? (byte)1 : (byte)0];
+            var publicKey = Copy(data, 0, 65);
+            var signature = Copy(data, 65, 64);
+            var message = Copy(data, 129, data.Length - 129);
+            byte[] result = [P256.VerifyData(signature, message, publicKey) ? (byte)1 : (byte)0];
             Write(result);
             return;
         }
@@ -141,7 +141,7 @@ public static class CryptographyConsumer
         }
         if (operation == 6)
         {
-            byte[] result = [Ed25519.Verify(new byte[63], new byte[0], new byte[31]) ?
+            byte[] result = [P256.VerifyData(new byte[63], new byte[0], new byte[64]) ?
                 (byte)1 : (byte)0];
             Write(result);
             return;

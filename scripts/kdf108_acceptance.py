@@ -1,33 +1,45 @@
 #!/usr/bin/env python3
 """Host acceptance for the signed Kdf108 ISD/SSD assembly pair."""
 import json, os, pathlib, subprocess, tempfile
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from domain_inventory import inventory
-from scp03_acceptance import Client, bootstrap_isd, ensure_assembly
+from scp03_acceptance import (Client, bootstrap_isd, ensure_assembly, sign_package,
+                              signer_identity, signer_public_key)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACK = ROOT / "managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll"
-KDF_PUBLIC = bytes.fromhex("d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737")
-SSD_PUBLIC = bytes.fromhex("a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0")
-CONTEXT = b"MicroCard signed package v3\0"
+# The identity a domain binds to, which is the digest of the signer's uncompressed key.
+KDF_PUBLIC = bytes.fromhex("2bad0fd610d99eae443e932a26142bca1e5fa995b4518452827e78ef1f317ff0")
+SSD_PUBLIC = bytes.fromhex("6fc66a90486171ca69b512be185d66a763a68ff2d34cda639e78cff9e98caeab")
+CONTEXT = b"MicroCard signed package v4\0"
 HEADER = 12 + len(CONTEXT)
 
-def verify_package(path, expected_key):
+def verify_package(path, expected_identity):
+    """Parse and verify a package independently of the tool that produced it."""
+    import hashlib
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    from cryptography.hazmat.primitives import hashes
     raw = path.read_bytes()
-    assert raw[:4] == b"MP03" and raw[4:4 + len(CONTEXT)] == CONTEXT
+    assert raw[:4] == b"MP04" and raw[4:4 + len(CONTEXT)] == CONTEXT
     manifest_length = int.from_bytes(raw[4 + len(CONTEXT):8 + len(CONTEXT)], "little")
     image_length = int.from_bytes(raw[8 + len(CONTEXT):HEADER], "little")
-    signed_end = HEADER + manifest_length + image_length + 32
+    signed_end = HEADER + manifest_length + image_length + 65
     assert signed_end + 64 == len(raw)
-    assert raw[signed_end - 32:signed_end] == expected_key
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    Ed25519PublicKey.from_public_bytes(expected_key).verify(raw[signed_end:], raw[:signed_end])
+    key = raw[signed_end - 65:signed_end]
+    assert key[0] == 0x04, "a package carries an uncompressed point"
+    assert hashlib.sha256(key).digest() == expected_identity
+    signature = raw[signed_end:]
+    r = int.from_bytes(signature[:32], "big")
+    s = int.from_bytes(signature[32:], "big")
+    order = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+    assert 0 < s <= order // 2, "a package carries the low signature"
+    ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), key).verify(
+        encode_dss_signature(r, s), raw[:signed_end], ec.ECDSA(hashes.SHA256()))
     manifest = json.loads(raw[HEADER:HEADER + manifest_length])
     image = raw[HEADER + manifest_length:HEADER + manifest_length + image_length]
     return raw, manifest, image
 
-def signed_type_confusion_package(incarnation, key):
+def signed_type_confusion_package(incarnation, seed):
     valid = (1 << 0) | (1 << 2) | (1 << 6) | (1 << 32)
     tables = bytearray([2, 0, 0, 0]) + valid.to_bytes(8, "little")
     tables += (1).to_bytes(2, "little") * 4
@@ -52,9 +64,9 @@ def signed_type_confusion_package(incarnation, key):
         entry_points=[], dependencies=[], capabilities=[],
         limits=dict(arena=16384, stack=256, frames=32, instructions=100000))
     meta = json.dumps(manifest, separators=(",", ":")).encode()
-    raw = b"MP03" + CONTEXT + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + image
-    raw += key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    return raw + key.sign(raw)
+    raw = b"MP04" + CONTEXT + len(meta).to_bytes(4, "little") + len(image).to_bytes(4, "little") + meta + image
+    raw += signer_public_key(seed)
+    return raw + sign_package(seed, raw)
 
 def main():
     subprocess.run(["dotnet", "build", str(ROOT / "tests/Kdf108Reference"), "-c", "Release",
@@ -77,8 +89,8 @@ def main():
         directory = pathlib.Path(directory)
         kdf_seed, ssd_seed = directory / "kdf.seed", directory / "ssd.seed"
         kdf_seed.write_bytes(bytes([0x11]) * 32); ssd_seed.write_bytes(bytes([0x22]) * 32)
-        assert Ed25519PrivateKey.from_private_bytes(kdf_seed.read_bytes()).public_key().public_bytes(Encoding.Raw, PublicFormat.Raw) == KDF_PUBLIC
-        assert Ed25519PrivateKey.from_private_bytes(ssd_seed.read_bytes()).public_key().public_bytes(Encoding.Raw, PublicFormat.Raw) == SSD_PUBLIC
+        assert signer_identity(kdf_seed.read_bytes()) == KDF_PUBLIC
+        assert signer_identity(ssd_seed.read_bytes()) == SSD_PUBLIC
         consumer_json = directory / "entry.json"; consumer_json.write_text(json.dumps(consumer_metadata, separators=(",", ":")))
         kdf_package, consumer_package = directory / "kdf.mcp", directory / "entry.mcp"
         incarnation = "00112233445566778899aabbccddeeff"
@@ -92,11 +104,13 @@ def main():
         assert kdf_manifest["domain"] == "ISD" and consumer_manifest["domain"] == "kdf-test"
         dependency = consumer_manifest["dependencies"][0]
         assert bytes(dependency["signer"]) == KDF_PUBLIC and dependency["scope"] == 1
-        assert KDF_PUBLIC != SSD_PUBLIC and consumer_raw[-96:-64] == SSD_PUBLIC
+        import hashlib as _hashlib
+        assert KDF_PUBLIC != SSD_PUBLIC
+        assert _hashlib.sha256(consumer_raw[-129:-64]).digest() == SSD_PUBLIC
         tampered = bytearray(consumer_raw); tampered[20] ^= 1
+        tampered_path = directory / "tampered.mcp"; tampered_path.write_bytes(bytes(tampered))
         try:
-            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-            Ed25519PublicKey.from_public_bytes(SSD_PUBLIC).verify(tampered[-64:], tampered[:-64])
+            verify_package(tampered_path, SSD_PUBLIC)
             raise AssertionError("tampered package signature accepted")
         except Exception as error:
             if isinstance(error, AssertionError): raise
@@ -218,7 +232,7 @@ def main():
                 "--explicit-sign"], check=True)
             upload(identity_package.read_bytes(), 0x6985)
         type_confusion = signed_type_confusion_package(
-            isd_incarnation, Ed25519PrivateKey.from_private_bytes(kdf_seed.read_bytes()))
+            isd_incarnation, kdf_seed.read_bytes())
         upload(type_confusion, 0x6985)
         wrong_signer = directory / "wrong-signer.mcp"
         subprocess.run(["dotnet", str(PACK), str(kdf_image), str(kdf_metadata_path),

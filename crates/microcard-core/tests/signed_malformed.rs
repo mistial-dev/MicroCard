@@ -1,4 +1,3 @@
-use ed25519_dalek::{Signer, SigningKey};
 use microcard_core::assembly::Assembly;
 use microcard_core::package::{
     AssemblyEntry, DependencyExport, Limits, Manifest, Package, StorageDeclaration, CONTEXT,
@@ -84,15 +83,16 @@ fn signed_with_storage(image: &[u8], storage: Vec<StorageDeclaration>) -> Vec<u8
 }
 
 fn signed_metadata(image: &[u8], metadata: &[u8]) -> Vec<u8> {
-    let key = SigningKey::from_bytes(&[0x5a; 32]);
-    let mut package = b"MP03".to_vec();
+    let private = [0x5a; 32];
+    let mut package = b"MP04".to_vec();
     package.extend(CONTEXT);
     package.extend((metadata.len() as u32).to_le_bytes());
     package.extend((image.len() as u32).to_le_bytes());
     package.extend_from_slice(metadata);
     package.extend(image);
-    package.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&package).to_bytes();
+    package.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &package).unwrap();
     package.extend(signature);
     package
 }

@@ -164,7 +164,7 @@ public final class Main {
         if (wallet.inventory().stream().noneMatch(item -> item.id().equals(rejectId))) card.command(0xE0, rejectId.getBytes(StandardCharsets.US_ASCII));
         WalletCard.Domain reject = wallet.inventory().stream().filter(item -> item.id().equals(rejectId)).findFirst().orElseThrow();
         JsonObject metadata = JsonParser.parseString(Files.readString(assets.resolve(WalletCard.PERSONAL.asset() + ".json"))).getAsJsonObject();
-        metadata.getAsJsonArray("dependencies").get(0).getAsJsonObject().add("signer", byteArray(Packages.publicKey(WalletCard.WORK.signerSeed())));
+        metadata.getAsJsonArray("dependencies").get(0).getAsJsonObject().add("signer", byteArray(Packages.signerIdentity(WalletCard.WORK.signerSeed())));
         byte[] badDependency = Packages.create(Files.readAllBytes(assets.resolve(WalletCard.PERSONAL.asset() + ".mca")), metadata,
             reject.id(), reject.incarnation(), WalletCard.PERSONAL.signerSeed());
         Packages.upload(card, badDependency, 0x6985);

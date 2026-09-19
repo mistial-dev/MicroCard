@@ -1,14 +1,16 @@
 # Cryptographic verification vectors
 
-## Ed25519
+## P-256 ECDSA
 
-Unmodified C2SP Wycheproof vectors at commit `3fa63dd0344abb611f1fb1d77e119938603ea230`.
+Unmodified C2SP Wycheproof vectors at commit `3fa63dd0344abb611f1fb1d77e119938603ea230`, the same commit the Ed25519 vectors came from before package signing moved to P-256.
 
-Source: https://github.com/C2SP/wycheproof/blob/3fa63dd0344abb611f1fb1d77e119938603ea230/testvectors_v1/ed25519_test.json
+Source: https://github.com/C2SP/wycheproof/blob/3fa63dd0344abb611f1fb1d77e119938603ea230/testvectors_v1/ecdsa_secp256r1_sha256_p1363_test.json
 
-Apache-2.0 license is preserved in WYCHEPROOF_LICENSE. These are public verification fixtures, not deployment credentials. Tests require all valid cases to pass and all invalid cases to fail through the same strict verification function used by packages and managed native calls.
+Apache-2.0 license is preserved in WYCHEPROOF_LICENSE. These are public verification fixtures rather than deployment credentials. All 262 cases across 112 groups are classified valid or invalid, and an unknown classification fails the test instead of silently passing.
 
-SHA-256 of `ed25519_test.json`: `752d2ea7d7c6cf4736381b6cbacb61f8182b126ab7cd9b058f00c50084975536`. All 151 cases are classified valid or invalid; unknown classifications fail the test instead of silently passing. Small-order key and malformed public-key length checks are additional original tests.
+SHA-256 of `ecdsa_secp256r1_sha256_p1363_test.json`: `c60de693930e386c3a5472d08081623ef8504decc54b38ac01ec6b2a2575c986`.
+
+The fixed-width P1363 form is the one a package carries. Wycheproof classifies the malleable twin of a signature as valid, because plain ECDSA admits both forms. A package accepts only the low one, so a second test finds every high signature the corpus marks valid and requires the package check to refuse it. That is a MicroCard policy on top of the algorithm rather than a property of ECDSA.
 
 ## SCP03 level 13
 

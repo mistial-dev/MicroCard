@@ -209,16 +209,6 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
         {
             Import::Native(51)
         }
-        ("Cryptography", "VerifyEd25519")
-            if exact(
-                &types,
-                false,
-                &[byte_array, byte_array, byte_array],
-                Some(int),
-            ) =>
-        {
-            Import::Native(21)
-        }
         ("DomainKeys", "Generate")
             if reference(
                 assembly,
@@ -475,7 +465,7 @@ mod tests {
         native.dedup();
         assert_eq!(
             native,
-            [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49, 50, 51]
+            [20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49, 50, 51]
         );
     }
 

@@ -1,6 +1,5 @@
 #![no_main]
 
-use ed25519_dalek::{Signer, SigningKey};
 use libfuzzer_sys::fuzz_target;
 use microcard_core::{
     apdu::Command,
@@ -106,15 +105,16 @@ fn package(incarnation: [u8; 16]) -> Vec<u8> {
     };
     let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/counter.mca");
-    let key = SigningKey::from_bytes(&[0x53; 32]); // public, test-only seed
-    let mut raw = b"MP03".to_vec();
+    let private = [0x53; 32]; // public, test-only seed
+    let mut raw = b"MP04".to_vec();
     raw.extend(CONTEXT);
     raw.extend((metadata.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(metadata);
     raw.extend(image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     raw
 }
@@ -143,15 +143,16 @@ fn core_package(incarnation: [u8; 16]) -> Vec<u8> {
     };
     let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/mscorlib.mca");
-    let key = SigningKey::from_bytes(&[0x11; 32]);
-    let mut raw = b"MP03".to_vec();
+    let private = [0x11; 32];
+    let mut raw = b"MP04".to_vec();
     raw.extend(CONTEXT);
     raw.extend((metadata.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(metadata);
     raw.extend(image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     raw
 }
@@ -236,15 +237,16 @@ fn key_operations_package(incarnation: [u8; 16]) -> Vec<u8> {
     };
     let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/key_operations.mca");
-    let key = SigningKey::from_bytes(&[0x53; 32]);
-    let mut raw = b"MP03".to_vec();
+    let private = [0x53; 32];
+    let mut raw = b"MP04".to_vec();
     raw.extend(CONTEXT);
     raw.extend((metadata.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(metadata);
     raw.extend(image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     raw
 }
@@ -273,23 +275,22 @@ fn provider_package(incarnation: [u8; 16], version: u32) -> Vec<u8> {
     };
     let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/kdf108.mca");
-    let key = SigningKey::from_bytes(&[0x11; 32]);
-    let mut raw = b"MP03".to_vec();
+    let private = [0x11; 32];
+    let mut raw = b"MP04".to_vec();
     raw.extend(CONTEXT);
     raw.extend((metadata.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(metadata);
     raw.extend(image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     raw
 }
 
 fn consumer_package(incarnation: [u8; 16]) -> Vec<u8> {
-    let provider_key = SigningKey::from_bytes(&[0x11; 32])
-        .verifying_key()
-        .to_bytes();
+    let provider_key = microcard_core::crypto::signer_identity(&microcard_core::crypto::p256_public_key(&[0x11; 32]).unwrap());
     let manifest = Manifest {
         domain: DOMAIN.into(),
         incarnation,
@@ -332,15 +333,16 @@ fn consumer_package(incarnation: [u8; 16]) -> Vec<u8> {
     };
     let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/kdf108_consumer.mca");
-    let key = SigningKey::from_bytes(&[0x53; 32]);
-    let mut raw = b"MP03".to_vec();
+    let private = [0x53; 32];
+    let mut raw = b"MP04".to_vec();
     raw.extend(CONTEXT);
     raw.extend((metadata.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(metadata);
     raw.extend(image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     raw
 }

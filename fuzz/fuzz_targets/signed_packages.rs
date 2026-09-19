@@ -1,5 +1,4 @@
 #![no_main]
-use ed25519_dalek::{Signer, SigningKey};
 use libfuzzer_sys::fuzz_target;
 use microcard_core::{
     assembly::Assembly,
@@ -27,15 +26,16 @@ fuzz_target!(|data: &[u8]| {
         _ => meta = data[1..].to_vec(),
     }
     // Public test-only key, used solely to reach validation behind the signature gate.
-    let key = SigningKey::from_bytes(&[0x42; 32]);
-    let mut raw = b"MP03".to_vec();
+    let private = [0x42; 32];
+    let mut raw = b"MP04".to_vec();
     raw.extend(CONTEXT);
     raw.extend((meta.len() as u32).to_le_bytes());
     raw.extend((image.len() as u32).to_le_bytes());
     raw.extend(&meta);
     raw.extend(&image);
-    raw.extend(key.verifying_key().to_bytes());
-    let signature = key.sign(&raw).to_bytes();
+    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
+    let signature =
+        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
     raw.extend(signature);
     if let Ok(package) = Package::verify(&raw) {
         let assembly = Assembly::parse(package.image()).expect("verified assembly must parse");

@@ -25,8 +25,8 @@
       "build_metadata_bytes": 152,
       "debug_map_bytes": 1521,
       "representative_manifest_bytes": 301,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2598,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2631,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -58,8 +58,8 @@
       "build_metadata_bytes": 538,
       "debug_map_bytes": 99,
       "representative_manifest_bytes": 687,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 1998,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2031,
       "ceilings": {
         "mc04_bytes": 2048,
         "package_bytes": 3072
@@ -92,8 +92,8 @@
       "build_metadata_bytes": 581,
       "debug_map_bytes": 1533,
       "representative_manifest_bytes": 730,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 3379,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 3412,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -125,8 +125,8 @@
       "build_metadata_bytes": 723,
       "debug_map_bytes": 296,
       "representative_manifest_bytes": 872,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 3175,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 3208,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -157,8 +157,8 @@
       "build_metadata_bytes": 152,
       "debug_map_bytes": 49,
       "representative_manifest_bytes": 301,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 1057,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 1090,
       "ceilings": {
         "mc04_bytes": 1024,
         "package_bytes": 2048
@@ -190,8 +190,8 @@
       "build_metadata_bytes": 541,
       "debug_map_bytes": 159,
       "representative_manifest_bytes": 690,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 1956,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 1989,
       "ceilings": {
         "mc04_bytes": 2048,
         "package_bytes": 3072
@@ -223,11 +223,11 @@
       "build_metadata_bytes": 255,
       "debug_map_bytes": 56,
       "representative_manifest_bytes": 404,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 969,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 1002,
       "ceilings": {
         "mc04_bytes": 512,
-        "package_bytes": 1024
+        "package_bytes": 1280
       }
     },
     {
@@ -254,8 +254,8 @@
       "build_metadata_bytes": 161,
       "debug_map_bytes": 604,
       "representative_manifest_bytes": 310,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2503,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2536,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -287,8 +287,8 @@
       "build_metadata_bytes": 550,
       "debug_map_bytes": 165,
       "representative_manifest_bytes": 699,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2040,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2073,
       "ceilings": {
         "mc04_bytes": 2048,
         "package_bytes": 3072
@@ -318,8 +318,8 @@
       "build_metadata_bytes": 162,
       "debug_map_bytes": 1557,
       "representative_manifest_bytes": 311,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 4052,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 4085,
       "ceilings": {
         "mc04_bytes": 4096,
         "package_bytes": 5120
@@ -351,8 +351,8 @@
       "build_metadata_bytes": 552,
       "debug_map_bytes": 538,
       "representative_manifest_bytes": 701,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2568,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2601,
       "ceilings": {
         "mc04_bytes": 2048,
         "package_bytes": 3072
@@ -383,8 +383,8 @@
       "build_metadata_bytes": 222,
       "debug_map_bytes": 1164,
       "representative_manifest_bytes": 371,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2534,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2567,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -416,8 +416,8 @@
       "build_metadata_bytes": 560,
       "debug_map_bytes": 288,
       "representative_manifest_bytes": 709,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 3144,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 3177,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -448,8 +448,8 @@
       "build_metadata_bytes": 179,
       "debug_map_bytes": 471,
       "representative_manifest_bytes": 328,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 1354,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 1387,
       "ceilings": {
         "mc04_bytes": 2048,
         "package_bytes": 3072
@@ -481,8 +481,8 @@
       "build_metadata_bytes": 555,
       "debug_map_bytes": 158,
       "representative_manifest_bytes": 704,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2224,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2257,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -514,8 +514,8 @@
       "build_metadata_bytes": 876,
       "debug_map_bytes": 238,
       "representative_manifest_bytes": 1025,
-      "package_fixed_bytes": 136,
-      "representative_package_bytes": 2688,
+      "package_fixed_bytes": 169,
+      "representative_package_bytes": 2721,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 5120
@@ -533,7 +533,7 @@
         "MicroCard.Security"
       ],
       "aggregate_mc04_bytes": 10740,
-      "aggregate_representative_package_bytes": 13041,
+      "aggregate_representative_package_bytes": 13206,
       "ceilings": {
         "aggregate_mc04_bytes": 12288,
         "aggregate_representative_package_bytes": 14336
@@ -548,7 +548,7 @@
         "Credential"
       ],
       "aggregate_mc04_bytes": 6605,
-      "aggregate_representative_package_bytes": 9174,
+      "aggregate_representative_package_bytes": 9306,
       "ceilings": {
         "aggregate_mc04_bytes": 7168,
         "aggregate_representative_package_bytes": 10240

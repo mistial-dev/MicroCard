@@ -8,10 +8,9 @@ import pathlib
 import subprocess
 import tempfile
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from scp03_acceptance import Client, ensure_assembly
+from scp03_acceptance import Client, ensure_assembly, package_envelope
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SIM = ROOT / "target/debug/microcard-sim"
@@ -54,16 +53,7 @@ def package_for(project, output, domain, incarnation, signing_seed):
         limits=dict(arena=16384, stack=256, frames=32, instructions=100000),
     )
     metadata = json.dumps(manifest, separators=(",", ":")).encode()
-    key = Ed25519PrivateKey.from_private_bytes(signing_seed)
-    package = (
-        b"MP03MicroCard signed package v3\0"
-        + len(metadata).to_bytes(4, "little")
-        + len(image).to_bytes(4, "little")
-        + metadata
-        + image
-        + key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    )
-    return package + key.sign(package)
+    return package_envelope(metadata, image, signing_seed)
 
 
 def c4(value):

@@ -123,7 +123,7 @@ RSA is the open risk. On a 64 MHz Cortex-M4 without a hardware accelerator, a 30
 
 ## Authorization
 
-A Java Card package carries no signature of its own, so on-card verification and the secure channel are the whole safety boundary. That is a weaker position than the MC04 path, where every package carries an Ed25519 signature that binds it to a domain. GlobalPlatform DAP blocks are the standards-native way to restore an offline code signer, and the tooling already supports them.
+A Java Card package carries no signature of its own, so on-card verification and the secure channel are the whole safety boundary. That is a weaker position than the MC04 path, where every package carries an P-256 ECDSA signature that binds it to a domain. GlobalPlatform DAP blocks are the standards-native way to restore an offline code signer, and the tooling already supports them.
 
 ## Sources
 

@@ -38,10 +38,11 @@ That replays twelve PIV commands through `microcard-sim serve-jcvm` and compares
 
 ## Security model
 
-- The first assembly assigned to the ISD takes permanent ownership of the card through its Ed25519 signer.
+- The first assembly assigned to the ISD takes permanent ownership of the card through its signer identity.
 - Each SSD binds permanently to the signer of its first valid assembly.
 - Dependencies must already exist. Both provider and consumer policies constrain versions, signers, digests, and scope.
-- Package signatures authorize .NET code. SCP03 authorizes management commands. Both checks are required.
+- Package signatures authorize .NET code, as P-256 ECDSA over SHA-256. SCP03 authorizes management commands. Both checks are required.
+- A package carries its signer as a 65-byte uncompressed key. What a domain binds to is that key's SHA-256 digest. A compressed key is refused, and so is the malleable twin of a signature, so one signed package has exactly one encoding.
 - A Java Card package carries no signature of its own, so on-card verification and the secure channel are the whole safety boundary for it. This is a deliberate difference from the .NET engine and [the Java Card profile](docs/JCVM_PROFILE.md) explains it.
 - Rust verifies the reduced CIL before activation and enforces domain identity, memory limits, call targets, transactions, key ownership, and native-call budgets.
 - Private keys are opaque native handles. Managed code receives only approved cryptographic operations.

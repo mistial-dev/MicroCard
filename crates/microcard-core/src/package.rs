@@ -1,8 +1,10 @@
 use crate::{Error, Result, crypto::CryptoProvider};
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
-pub const CONTEXT: &[u8] = b"MicroCard signed package v3\0";
+pub const CONTEXT: &[u8] = b"MicroCard signed package v4\0";
 pub const HEADER_BYTES: usize = 12 + CONTEXT.len();
+/// The uncompressed SEC1 signer key and the P1363 signature that follow the image.
+pub const SUFFIX_BYTES: usize = crate::crypto::P256_PUBLIC_KEY_BYTES + crate::crypto::P256_SIGNATURE_BYTES;
 pub const MAX_PACKAGE_BYTES: usize = 16 * 1024;
 pub const MAX_STORAGE_DECLARATIONS: usize = 64;
 pub const MAX_DECLARED_BLOB_BYTES: u16 = 2048;
@@ -68,12 +70,10 @@ impl DependencyExport {
             _ => false,
         }
     }
-    fn valid_with(&self, provider: &mut impl CryptoProvider) -> Result<bool> {
-        match (self.access, self.key) {
-            (0..=2, None) => Ok(true),
-            (3, Some(key)) => provider.ed25519_public_key_valid(&key),
-            _ => Ok(false),
-        }
+    // A pinned peer is named by the hash of its key rather than by the key, so there is no
+    // point to validate. A hash that names no real key simply never matches one.
+    fn valid(&self) -> bool {
+        matches!((self.access, self.key), (0..=2, None) | (3, Some(_)))
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,22 +124,22 @@ pub struct Dependency {
 }
 impl Dependency {
     pub fn matches(&self, provider: &Package) -> bool {
-        self.matches_parts(&provider.manifest, provider.key, provider.digest)
+        self.matches_parts(&provider.manifest, provider.signer, provider.digest)
     }
     pub fn matches_view(&self, provider: &PackageView<'_>) -> bool {
-        self.matches_parts(&provider.manifest, provider.key, provider.digest)
+        self.matches_parts(&provider.manifest, provider.signer, provider.digest)
     }
-    fn matches_parts(&self, manifest: &Manifest, key: [u8; 32], digest: [u8; 32]) -> bool {
+    fn matches_parts(&self, manifest: &Manifest, signer: [u8; 32], digest: [u8; 32]) -> bool {
         self.assembly == manifest.assembly
             && self
                 .ranges
                 .iter()
                 .any(|range| range.matches(manifest.assembly_version))
             && (self.package_version == 0 || self.package_version == manifest.version)
-            && self.signer.is_none_or(|signer| signer == key)
+            && self.signer.is_none_or(|expected| expected == signer)
             && self.digest.is_none_or(|expected| expected == digest)
     }
-    fn valid_with(&self, consumer: &str, provider: &mut impl CryptoProvider) -> Result<bool> {
+    fn valid(&self, consumer: &str) -> bool {
         let shape_valid = valid_identifier(&self.assembly)
             && self.assembly != consumer
             && self.scope <= 2
@@ -150,13 +150,7 @@ impl Dependency {
                 .ranges
                 .windows(2)
                 .all(|pair| pair[0].strictly_before(&pair[1]));
-        if !shape_valid {
-            return Ok(false);
-        }
-        match self.signer {
-            Some(key) => provider.ed25519_public_key_valid(&key),
-            None => Ok(true),
-        }
+        shape_valid
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -171,7 +165,9 @@ pub struct Limits {
 pub struct Package {
     pub manifest: Manifest,
     image: core::ops::Range<usize>,
-    pub key: [u8; 32],
+    pub key: [u8; crate::crypto::P256_PUBLIC_KEY_BYTES],
+    /// SHA-256 of the signer key, which is the identity a domain binds to.
+    pub signer: [u8; 32],
     pub digest: [u8; 32],
     pub raw: Vec<u8>,
 }
@@ -180,7 +176,9 @@ pub struct Package {
 pub struct PackageView<'a> {
     pub manifest: Manifest,
     pub image: &'a [u8],
-    pub key: [u8; 32],
+    pub key: [u8; crate::crypto::P256_PUBLIC_KEY_BYTES],
+    /// SHA-256 of the signer key, which is the identity a domain binds to.
+    pub signer: [u8; 32],
     pub digest: [u8; 32],
     pub raw: &'a [u8],
 }
@@ -206,9 +204,9 @@ impl<'a> PackageView<'a> {
         provider: &mut impl CryptoProvider,
         expected_digest: Option<&[u8; 32]>,
     ) -> Result<Self> {
-        if bytes.len() < HEADER_BYTES + 96
+        if bytes.len() < HEADER_BYTES + SUFFIX_BYTES
             || bytes.len() > MAX_PACKAGE_BYTES
-            || &bytes[..4] != b"MP03"
+            || &bytes[..4] != b"MP04"
             || &bytes[4..4 + CONTEXT.len()] != CONTEXT
         {
             return Err(Error::Format);
@@ -216,21 +214,31 @@ impl<'a> PackageView<'a> {
         let lengths = 4 + CONTEXT.len();
         let n = u32::from_le_bytes(bytes[lengths..lengths + 4].try_into().unwrap()) as usize;
         let k = u32::from_le_bytes(bytes[lengths + 4..HEADER_BYTES].try_into().unwrap()) as usize;
-        if n > 16384 || k > 65536 || HEADER_BYTES + n + k + 96 != bytes.len() {
+        if n > 16384 || k > 65536 || HEADER_BYTES + n + k + SUFFIX_BYTES != bytes.len() {
             return Err(Error::Format);
         }
         let end = HEADER_BYTES + n + k;
-        let key: [u8; 32] = bytes[end..end + 32].try_into().unwrap();
-        if !provider.ed25519_verify(&key, &bytes[end + 32..], &bytes[..end + 32])? {
+        let signed = end + crate::crypto::P256_PUBLIC_KEY_BYTES;
+        let key: [u8; crate::crypto::P256_PUBLIC_KEY_BYTES] =
+            bytes[end..signed].try_into().unwrap();
+        // Pin the encoding and reject the malleable signature before dispatching, so a
+        // software and a hardware provider answer this identically.
+        if !crate::crypto::p256_signature_acceptable(&key, &bytes[signed..]) {
             return Err(Error::Signature);
         }
+        // The argument order differs from the signature scheme this replaced.
+        if !provider.p256_ecdsa_verify(&key, &bytes[..signed], &bytes[signed..])? {
+            return Err(Error::Signature);
+        }
+        let mut signer = [0; 32];
+        provider.sha256_into(&key, &mut signer)?;
         let manifest: Manifest = serde_json::from_slice(&bytes[HEADER_BYTES..HEADER_BYTES + n])
             .map_err(|_| Error::Format)?;
         if !valid_identifier(&manifest.assembly)
             || !valid_identifier(&manifest.domain)
             || manifest.version == 0
             || manifest.assembly_version == [0; 4]
-            || !manifest.export.valid_with(provider)?
+            || !manifest.export.valid()
             || manifest.entry_points.len() > 4
             || manifest.dependencies.len() > 16
             || !manifest
@@ -252,7 +260,7 @@ impl<'a> PackageView<'a> {
             return Err(Error::Format);
         }
         for dependency in &manifest.dependencies {
-            if !dependency.valid_with(&manifest.assembly, provider)? {
+            if !dependency.valid(&manifest.assembly) {
                 return Err(Error::Format);
             }
         }
@@ -317,6 +325,7 @@ impl<'a> PackageView<'a> {
             manifest,
             image: image_bytes,
             key,
+            signer,
             digest,
             raw: bytes,
         })
@@ -341,6 +350,7 @@ impl Package {
             manifest: verified.manifest,
             image: image_start..image_end,
             key: verified.key,
+            signer: verified.signer,
             digest: verified.digest,
             raw,
         })
@@ -357,18 +367,51 @@ mod tests {
 
     struct SignatureProvider(Result<bool>);
     impl CryptoProvider for SignatureProvider {
-        fn ed25519_verify(&mut self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool> {
+        fn p256_ecdsa_verify(&mut self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool> {
             self.0.clone()
         }
     }
 
+    /// An envelope whose key and signature are the right shape, so verification reaches the
+    /// provider rather than stopping at the shape check before it.
     fn envelope() -> Vec<u8> {
-        let mut bytes = Vec::from(b"MP03" as &[u8]);
+        let mut bytes = Vec::from(b"MP04" as &[u8]);
         bytes.extend_from_slice(CONTEXT);
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.resize(HEADER_BYTES + 96, 0);
+        bytes.resize(HEADER_BYTES, 0);
+        let mut key = [0x11; crate::crypto::P256_PUBLIC_KEY_BYTES];
+        key[0] = 0x04;
+        bytes.extend_from_slice(&key);
+        bytes.extend_from_slice(&[0x11; crate::crypto::P256_SIGNATURE_BYTES]);
         bytes
+    }
+
+    #[test]
+    fn a_previous_format_container_is_refused_by_its_magic() {
+        let mut bytes = envelope();
+        bytes[..4].copy_from_slice(b"MP03");
+        assert!(matches!(
+            PackageView::verify_with(&bytes, &mut SignatureProvider(Ok(true))),
+            Err(Error::Format)
+        ));
+    }
+
+    #[test]
+    fn a_misshapen_key_or_signature_never_reaches_the_provider() {
+        // A provider that would answer yes. The shape check has to refuse first.
+        let mut compressed = envelope();
+        compressed[HEADER_BYTES] = 0x02;
+        assert!(matches!(
+            PackageView::verify_with(&compressed, &mut SignatureProvider(Ok(true))),
+            Err(Error::Signature)
+        ));
+        let mut high = envelope();
+        high[HEADER_BYTES + crate::crypto::P256_PUBLIC_KEY_BYTES + 32] = 0xff;
+        assert!(matches!(
+            PackageView::verify_with(&high, &mut SignatureProvider(Ok(true))),
+            Err(Error::Signature)
+        ));
     }
 
     #[test]

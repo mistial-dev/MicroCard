@@ -31,9 +31,8 @@ fn provider_package(
 }
 
 fn credential_package(incarnation: [u8; 16]) -> Vec<u8> {
-    let signer = SigningKey::from_bytes(&[42; 32])
-        .verifying_key()
-        .to_bytes();
+    let signer =
+        crate::crypto::signer_identity(&crate::crypto::p256_public_key(&[42; 32]).unwrap());
     let exact = |assembly: &str| Dependency {
         assembly: assembly.into(),
         ranges: alloc::vec![VersionRange {
@@ -90,9 +89,8 @@ fn credential_package(incarnation: [u8; 16]) -> Vec<u8> {
 }
 
 fn cryptography_consumer_package(incarnation: [u8; 16]) -> Vec<u8> {
-    let signer = SigningKey::from_bytes(&[42; 32])
-        .verifying_key()
-        .to_bytes();
+    let signer =
+        crate::crypto::signer_identity(&crate::crypto::p256_public_key(&[42; 32]).unwrap());
     let manifest = Manifest {
         domain: "crypto-offset".into(),
         incarnation,
@@ -151,7 +149,7 @@ fn sha256_offset_api_writes_a_caller_owned_destination() {
             "MicroCard.Cryptography",
             include_bytes!("../../../../../fuzz/fixtures/cryptography.mca"),
             alloc::vec![
-                20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49,
+                20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49,
                 50, 51,
             ],
         ),
@@ -209,7 +207,7 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
         "MicroCard.Cryptography",
         include_bytes!("../../../../../fuzz/fixtures/cryptography.mca"),
         alloc::vec![
-            20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49, 50, 51,
+            20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 35, 36, 37, 38, 39, 49, 50, 51,
         ],
     );
     let security = provider_package(
@@ -283,8 +281,8 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
     assert_eq!(
         (active_package_bytes, serialized_state_bytes, peak),
         (
-            7198,
-            14449,
+            7246,
+            14480,
             crate::mc04_vm::ExecutionMetrics {
                 instructions: 78,
                 peak_evaluation_slots: 19,

@@ -4,6 +4,7 @@ import os
 import pathlib
 import platform
 import subprocess
+import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -22,8 +23,13 @@ def environment() -> dict[str, str]:
 
 def run(arguments: list[object], *, env: dict[str, str], capture: bool = False,
         cwd: pathlib.Path = ROOT) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(value) for value in arguments], cwd=cwd, env=env, check=True,
-                          text=True, capture_output=capture)
+    result = subprocess.run([str(value) for value in arguments], cwd=cwd, env=env,
+                            text=True, capture_output=capture)
+    if capture and result.returncode:
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
+    result.check_returncode()
+    return result
 
 
 def main() -> None:

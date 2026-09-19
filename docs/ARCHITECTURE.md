@@ -24,7 +24,7 @@ flowchart TB
     CSharp[C# source in Rider] --> Compiler[Normal .NET compiler + Roslyn diagnostics]
     Compiler --> Reducer[Metadata-only preprocessor]
     Reducer --> Image[MC04 assembly + manifest]
-    Image --> Signer[Explicit Ed25519 packaging]
+    Image --> Signer[Explicit P-256 packaging]
     Signer --> Client[Java wallet / GlobalPlatformPro]
     Client -->|SCP03-protected APDUs| Management[Rust management and package verifier]
     Management --> Linker[Verified dependency linking]

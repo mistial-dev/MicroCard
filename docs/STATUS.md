@@ -6,10 +6,10 @@ MicroCard has a working simulator path from annotated C# source to verified exec
 
 - Compact MC04 assemblies retaining recognizable ECMA-335 metadata, signatures, tokens, and supported CIL.
 - Host Roslyn diagnostics, metadata-only preprocessing, deterministic packaging, and independent Rust verification.
-- Ed25519-signed MP03 packages with exact domain, incarnation, signer, dependency, version, capability, and resource binding.
+- P-256-signed MP04 packages with exact domain, incarnation, signer, dependency, version, capability, and resource binding.
 - Permanent ISD ownership and SSD signer binding, transactional activation, rollback protection, and dependency linking.
 - Bounded interpreter execution with typed verification, stack/frame/arena/fuel limits, native work budgets, and transaction safety.
-- Domain stores, opaque keys, PIN/PUK retry floors, SHA-256, HMAC, AES-CMAC/CBC/CCM, Ed25519 verification, and P-256 operations.
+- Domain stores, opaque keys, PIN/PUK retry floors, SHA-256, HMAC, AES-CMAC/CBC/CCM, P-256 ECDSA verification, and P-256 operations.
 - A Java Card virtual machine that installs and runs a real applet. OpenFIPS201 selects and answers PIV commands in the simulator, with its own PIN retry counter surviving from one command to the next.
 - A committed OpenFIPS201 load file and a corpus of PIV commands with their expected status words, replayed by the checkpoint gate and by CI, so that claim has an automated check behind it.
 - SCP03 in S16 mode with a derived card challenge, at security levels 01, 03, 11, 13 and 33, which is every combination carrying a command MAC. Management requires that MAC and accepts any of them. Optional capabilities are cargo features, and both the advertised implementation option and the accepted levels are derived from the enabled set, so the card cannot offer protection it does not apply. A level outside that set is refused at EXTERNAL AUTHENTICATE with 6982.
