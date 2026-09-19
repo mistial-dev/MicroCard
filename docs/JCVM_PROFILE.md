@@ -27,8 +27,8 @@ Two delivery paths are also absent. A GlobalPlatform LOAD does not reach the eng
 
 The shared C4 receiver now enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
-staging. MC04 uses this receiver today; JCVM still needs authenticated activation and
-the durable management adapter. RAM and flash staging accept compile-time limits,
+staging. MC04 uses this receiver today; JCVM still needs it connected to the shared
+authenticated transport and registry loader. RAM and flash staging accept compile-time limits,
 so the MC04 16 KiB bound does not constrain a future JCVM profile. The JCVM package
 verifier uses MP05 and its own [bounded signed manifest](DEVICE_CBOR.md#jcvm-manifest-version-1),
 with a 60 KiB package limit. Raw CAP input remains a simulator convenience, not a signed package.
@@ -49,8 +49,12 @@ AID, and frames instance AID, privileges, and C9 application data for the applet
 Explicit `Applet.register` calls must use the requested instance AID. Empty or short
 registration AIDs and repeated registration are rejected. The bounded registry journal
 now persists ownership, rollback history, image references, and installation identities.
-The management adapter still needs to coordinate those records with image and heap
-activation and dispatch selection by instance AID.
+The registry loader now authorizes signed packages before erasing, stages images in
+unreferenced slots, verifies readback, and commits activation metadata. It protects
+the old image through write failures and cancellation. Package reads verify both flash
+and the current registry binding. The management adapter still needs to coordinate
+heap activation and dispatch selection by instance AID, and boards need the storage
+partitions connected to these services.
 
 ## What holds this claim up
 

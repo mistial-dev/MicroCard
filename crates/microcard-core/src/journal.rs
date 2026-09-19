@@ -334,6 +334,7 @@ pub fn decode_monotonic_bits(bytes: &[u8]) -> Result<u64> {
 pub struct MemoryFlash {
     slots: Vec<Vec<u8>>,
     images: Vec<Vec<u8>>,
+    image_size: usize,
     monotonic: Vec<u8>,
     nonces: Vec<u8>,
     pub fail_after: Option<usize>,
@@ -342,10 +343,18 @@ impl MemoryFlash {
     pub fn new(size: usize) -> Self {
         Self::with_slots(size, 2)
     }
+    pub fn with_images(size: usize, image_count: usize, image_size: usize) -> Result<Self> {
+        if !(2..=64).contains(&image_count) || image_size == 0 { return Err(Error::Storage); }
+        let mut flash = Self::new(size);
+        flash.images.truncate(image_count);
+        flash.image_size = image_size;
+        Ok(flash)
+    }
     fn with_slots(size: usize, slot_count: usize) -> Self {
         Self {
             slots: (0..slot_count).map(|_| vec![255; size]).collect(),
             images: (0..64).map(|_| Vec::new()).collect(),
+            image_size: crate::staging::MAX_PACKAGE_BYTES,
             monotonic: vec![255; size],
             nonces: vec![255; size],
             fail_after: None,
@@ -382,7 +391,7 @@ impl MemoryFlash {
 }
 impl crate::image_store::ImageFlash for MemoryFlash {
     fn slot_count(&self) -> usize { self.images.len() }
-    fn slot_size(&self) -> usize { crate::staging::MAX_PACKAGE_BYTES }
+    fn slot_size(&self) -> usize { self.image_size }
     fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
         let image = self.images.get(index).ok_or(Error::Bounds)?;
         if image.is_empty() { return Err(Error::Storage); }
@@ -391,8 +400,8 @@ impl crate::image_store::ImageFlash for MemoryFlash {
     fn erase(&mut self, index: usize) -> Result<()> {
         let image = self.images.get_mut(index).ok_or(Error::Bounds)?;
         if image.is_empty() {
-            image.try_reserve_exact(crate::staging::MAX_PACKAGE_BYTES).map_err(|_| Error::Quota)?;
-            image.resize(crate::staging::MAX_PACKAGE_BYTES, 255);
+            image.try_reserve_exact(self.image_size).map_err(|_| Error::Quota)?;
+            image.resize(self.image_size, 255);
         }
         for offset in 0..image.len() {
             self.tick()?;

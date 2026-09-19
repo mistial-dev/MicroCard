@@ -204,6 +204,16 @@ impl<F: ImageFlash> Images<F> {
         provider: &mut impl CryptoProvider,
         read: impl FnOnce(&[u8]) -> Result<T>,
     ) -> Result<T> {
+        self.with_verified_image(descriptor, provider, |bytes, _| read(bytes))
+    }
+
+    /// Keep provider access inside the verified borrow for signature/engine checks.
+    pub fn with_verified_image<P: CryptoProvider, T>(
+        &self,
+        descriptor: &Descriptor,
+        provider: &mut P,
+        read: impl FnOnce(&[u8], &mut P) -> Result<T>,
+    ) -> Result<T> {
         self.validate(descriptor)?;
         self.flash.with_slot(usize::from(descriptor.slot), |slot| {
             let bytes = slot
@@ -212,7 +222,7 @@ impl<F: ImageFlash> Images<F> {
             if provider.sha256(bytes)? != descriptor.digest {
                 return Err(Error::Authentication);
             }
-            read(bytes)
+            read(bytes, provider)
         })
     }
 
@@ -244,6 +254,20 @@ impl<F: ImageFlash> Images<F> {
         protected: &[Descriptor],
         provider: &mut impl CryptoProvider,
     ) -> Result<Descriptor> {
+        self.stage_with_cancel(image, protected, provider, &mut || false)
+    }
+
+    /// Cancellation can abandon an unreferenced candidate, never a protected image.
+    pub fn stage_with_cancel(
+        &mut self,
+        image: &[u8],
+        protected: &[Descriptor],
+        provider: &mut impl CryptoProvider,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Descriptor> {
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
         let length = u32::try_from(image.len()).map_err(|_| Error::Quota)?;
         if image.is_empty() {
             return Err(Error::Format);
@@ -260,6 +284,9 @@ impl<F: ImageFlash> Images<F> {
                 if self.with_image(descriptor, provider, |bytes| Ok(bytes != image))? {
                     return Err(Error::Authentication);
                 }
+                if cancel() {
+                    return Err(Error::Cancelled);
+                }
                 return Ok(*descriptor);
             }
         }
@@ -271,8 +298,14 @@ impl<F: ImageFlash> Images<F> {
             }
         }
         let slot = candidate.ok_or(Error::Quota)?;
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
         self.flash.erase(slot)?;
         for (chunk, bytes) in image.chunks(256).enumerate() {
+            if cancel() {
+                return Err(Error::Cancelled);
+            }
             self.flash.program(slot, chunk * 256, bytes)?;
         }
         let descriptor = Descriptor {
@@ -281,6 +314,9 @@ impl<F: ImageFlash> Images<F> {
             digest,
         };
         self.with_image(&descriptor, provider, |_| Ok(()))?;
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
         Ok(descriptor)
     }
 

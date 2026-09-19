@@ -138,9 +138,7 @@ impl Registry {
         Ok(start..=end)
     }
 
-    /// Call only with a verified package and a verified, staged image descriptor.
-    /// Persist the resulting metadata before reclaiming any formerly protected slot.
-    pub fn activate(&mut self, package: &Package<'_>, image: Descriptor) -> Result<()> {
+    fn activation_slots(&self, package: &Package<'_>) -> Result<(usize, usize)> {
         let domain = Aid::new(package.manifest.domain)?;
         let aid = Aid::new(package.manifest.package)?;
         let domain_slot = self
@@ -158,15 +156,6 @@ impl Registry {
         {
             return Err(Error::KeyMismatch);
         }
-        let length = crate::envelope::OVERHEAD_BYTES
-            + package.envelope.manifest.len()
-            + package.envelope.image.len();
-        if image.digest != package.envelope.package_digest
-            || image.length as usize != length
-            || image.slot >= 64
-        {
-            return Err(Error::Authentication);
-        }
         let existing = self
             .loads
             .iter()
@@ -180,8 +169,11 @@ impl Registry {
                 return Err(Error::Rollback);
             }
             if package.manifest.version == previous.version {
-                return if previous.image == Some(image) {
-                    Ok(())
+                return if previous
+                    .image
+                    .is_some_and(|image| image.digest == package.envelope.package_digest)
+                {
+                    Ok((domain_slot, index))
                 } else {
                     Err(Error::Rollback)
                 };
@@ -192,15 +184,33 @@ impl Registry {
         } else if self.in_use(aid) {
             return Err(Error::Busy);
         }
+        let index = existing
+            .or_else(|| self.loads.iter().position(Option::is_none))
+            .ok_or(Error::Quota)?;
+        Ok((domain_slot, index))
+    }
+
+    /// Call only with a verified package and a verified, staged image descriptor.
+    /// Persist the resulting metadata before reclaiming any formerly protected slot.
+    pub fn activate(&mut self, package: &Package<'_>, image: Descriptor) -> Result<()> {
+        let (domain_slot, index) = self.activation_slots(package)?;
+        let domain = Aid::new(package.manifest.domain)?;
+        let aid = Aid::new(package.manifest.package)?;
+        let length = crate::envelope::OVERHEAD_BYTES
+            + package.envelope.manifest.len()
+            + package.envelope.image.len();
+        if image.digest != package.envelope.package_digest
+            || image.length as usize != length
+            || image.slot >= 64
+        {
+            return Err(Error::Authentication);
+        }
         if self
             .loads()
             .any(|p| p.aid != aid && p.image.is_some_and(|old| old.slot == image.slot))
         {
             return Err(Error::Busy);
         }
-        let index = existing
-            .or_else(|| self.loads.iter().position(Option::is_none))
-            .ok_or(Error::Quota)?;
         self.loads[index] = Some(Load {
             domain,
             aid,
@@ -524,12 +534,74 @@ impl<F: crate::journal::Flash> Store<F> {
         Ok(&self.state)
     }
 
+    /// Authenticate and authorize before erasing, then activate only verified writes.
+    /// On error, query recovered state before reusing any image slot.
+    pub fn load<I: crate::image_store::ImageFlash>(
+        &mut self,
+        images: &mut crate::image_store::Images<I>,
+        raw: &[u8],
+        scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Descriptor> {
+        self.state()?;
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        let package = Package::verify(raw, provider, scratch)?;
+        self.state.activation_slots(&package)?;
+        let mut protected = [Descriptor {
+            slot: 0,
+            length: 0,
+            digest: [0; 32],
+        }; MAX_PACKAGES];
+        let mut count = 0;
+        for image in self.state.protected_images() {
+            protected[count] = image;
+            count += 1;
+        }
+        let image = images.stage_with_cancel(raw, &protected[..count], provider, cancel)?;
+        let mut next = self.state;
+        next.activate(&package, image)?;
+        if cancel() {
+            return Err(Error::Cancelled);
+        }
+        if next != self.state {
+            self.commit(next, provider)?;
+        }
+        Ok(image)
+    }
+
     pub fn recover(&mut self, provider: &mut impl crate::crypto::CryptoProvider) -> Result<()> {
         self.recovery_required = true;
         let snapshot = self.journal.recover_with(provider)?.ok_or(Error::Storage)?;
         self.state = Registry::decode(&snapshot)?;
         self.recovery_required = false;
         Ok(())
+    }
+
+    /// Verify the persisted image and its current registry binding before using it.
+    pub fn with_package<I: crate::image_store::ImageFlash, P: crate::crypto::CryptoProvider, T>(
+        &self,
+        aid: Aid,
+        images: &crate::image_store::Images<I>,
+        scratch: &mut [u8],
+        provider: &mut P,
+        read: impl FnOnce(&Package<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let state = self.state()?;
+        let load = state.loads().find(|p| p.aid == aid).ok_or(Error::Missing)?;
+        let image = load.image.ok_or(Error::Missing)?;
+        images.with_verified_image(&image, provider, |raw, provider| {
+            let package = Package::verify(raw, provider, scratch)?;
+            if package.manifest.package != aid.as_slice()
+                || package.manifest.version != load.version
+            {
+                return Err(Error::Authentication);
+            }
+            state.activation_slots(&package)?;
+            read(&package)
+        })
     }
 
     pub fn commit(
@@ -557,215 +629,4 @@ impl<F: crate::journal::Flash> Store<F> {
 }
 
 #[cfg(all(test, feature = "software-crypto"))]
-mod tests {
-    use super::*;
-    use crate::{
-        crypto::{self, SoftwareCrypto},
-        envelope, jcvm_package,
-        journal::MemoryFlash,
-    };
-    use microcard_engine_jcvm::{applet::Sizes, cap::LoadFile};
-
-    fn signed(version: u32, incarnation: u8, private: u8) -> Vec<u8> {
-        let image = include_bytes!(
-            "../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
-        );
-        let header = LoadFile::parse(image).unwrap().header().unwrap();
-        let manifest = jcvm_package::Manifest {
-            domain: &crate::globalplatform::ISD_AID,
-            incarnation: [incarnation; 16],
-            package: header.package_aid,
-            package_version: [header.package_major, header.package_minor],
-            version,
-            sizes: Sizes {
-                heap_bytes: 65536,
-                frame_words: 8192,
-                ..Sizes::default()
-            },
-        }
-        .encode()
-        .unwrap();
-        let key = crypto::p256_public_key(&[private; 32]).unwrap();
-        let mut raw = envelope::signing_prefix_bounded(
-            &manifest,
-            image.len(),
-            &crypto::sha256(image),
-            &key,
-            jcvm_package::MAX_PACKAGE_BYTES,
-        )
-        .unwrap();
-        raw.extend(crypto::p256_ecdsa_sign_package(&[private; 32], &raw).unwrap());
-        raw.extend(image);
-        raw
-    }
-
-    #[test]
-    fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
-        let initial = Registry::new([1; 16], None);
-        let vector: serde_json::Value =
-            serde_json::from_str(include_str!("../../../format/jcvm-registry-cbor-v1.json"))
-                .unwrap();
-        let hex = vector["hex"].as_str().unwrap();
-        let expected: Vec<_> = (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-            .collect();
-        assert_eq!(initial.encode().unwrap(), expected);
-        assert_eq!(Registry::decode(&expected).unwrap(), initial);
-        assert!(core::mem::size_of::<Registry>() <= MAX_SNAPSHOT_BYTES);
-        let mut counters = initial;
-        assert_eq!(counters.reserve_sequences(2).unwrap(), 1..=2);
-        assert_eq!(
-            Registry::decode(&counters.encode().unwrap())
-                .unwrap()
-                .reserve_sequences(1)
-                .unwrap(),
-            3..=3
-        );
-        assert_eq!(counters.reserve_sequences(0), Err(Error::Quota));
-        assert_eq!(counters.reserve_sequences(0xffffff), Err(Error::Quota));
-        let mut store = Store::open(
-            MemoryFlash::new(4096),
-            [3; 16],
-            initial,
-            &mut SoftwareCrypto,
-        )
-        .unwrap();
-        let raw = signed(7, 1, 7);
-        let mut scratch = alloc::vec![0; 16384];
-        let package = Package::verify(&raw, &mut SoftwareCrypto, &mut scratch).unwrap();
-        let image = Descriptor {
-            slot: 0,
-            length: raw.len() as u32,
-            digest: package.envelope.package_digest,
-        };
-        let mut next = *store.state().unwrap();
-        next.activate(&package, image).unwrap();
-        store.commit(next, &mut SoftwareCrypto).unwrap();
-        assert_eq!(
-            store.state().unwrap().domains[0].unwrap().owner,
-            Some(package.envelope.signer)
-        );
-        for (version, incarnation, private, error) in [
-            (6, 1, 7, Error::Rollback),
-            (8, 2, 7, Error::Domain),
-            (8, 1, 8, Error::KeyMismatch),
-        ] {
-            let raw = signed(version, incarnation, private);
-            let package = Package::verify(&raw, &mut SoftwareCrypto, &mut scratch).unwrap();
-            let mut candidate = next;
-            assert_eq!(
-                candidate.activate(
-                    &package,
-                    Descriptor {
-                        slot: 1,
-                        length: raw.len() as u32,
-                        digest: package.envelope.package_digest
-                    }
-                ),
-                Err(error)
-            );
-            assert_eq!(candidate, next);
-        }
-
-        let raw = signed(8, 1, 7);
-        let package = Package::verify(&raw, &mut SoftwareCrypto, &mut scratch).unwrap();
-        let mut newer = next;
-        newer
-            .activate(
-                &package,
-                Descriptor {
-                    slot: 1,
-                    length: raw.len() as u32,
-                    digest: package.envelope.package_digest,
-                },
-            )
-            .unwrap();
-        store.journal.flash_mut().fail_after = Some(0);
-        assert_eq!(
-            store.commit(newer, &mut SoftwareCrypto),
-            Err(Error::Storage)
-        );
-        assert_eq!(store.state().unwrap(), &next);
-        // Burn nonce, mark reclaim, erase, write authenticated record and markers;
-        // fail the anchor update after the new image has become authoritative.
-        store.journal.flash_mut().fail_after =
-            Some(4 + 1 + 4096 + 24 + newer.encode().unwrap().len() + 16 + 1 + 1);
-        assert_eq!(
-            store.commit(newer, &mut SoftwareCrypto),
-            Err(Error::Storage)
-        );
-        assert_eq!(store.state(), Err(Error::Storage));
-        store.journal.flash_mut().fail_after = None;
-        store.recover(&mut SoftwareCrypto).unwrap();
-        assert_eq!(store.state().unwrap(), &newer);
-        assert_eq!(
-            store
-                .state()
-                .unwrap()
-                .protected_images()
-                .next()
-                .unwrap()
-                .slot,
-            1
-        );
-
-        let aid = Aid::new(&[0xf0, 1, 2, 3, 4]).unwrap();
-        let file = LoadFile::parse(package.envelope.image).unwrap();
-        let module = Aid::new(file.applets().unwrap().iter().next().unwrap().aid).unwrap();
-        newer.register(&package, module, aid, [4; 16], 0).unwrap();
-        store.commit(newer, &mut SoftwareCrypto).unwrap();
-        store.recover(&mut SoftwareCrypto).unwrap();
-        assert_eq!(store.state().unwrap().instances().next().unwrap().aid, aid);
-        let load = Aid::new(package.manifest.package).unwrap();
-        assert_eq!(newer.remove_load(load), Err(Error::Busy));
-        newer.remove_instance(aid).unwrap();
-        newer.remove_load(load).unwrap();
-        store.commit(newer, &mut SoftwareCrypto).unwrap();
-        let mut reopened =
-            Store::open(store.into_flash(), [3; 16], initial, &mut SoftwareCrypto).unwrap();
-        let mut tombstone = *reopened.state().unwrap();
-        assert_eq!(
-            tombstone.activate(
-                &package,
-                Descriptor {
-                    slot: 1,
-                    length: raw.len() as u32,
-                    digest: package.envelope.package_digest
-                }
-            ),
-            Err(Error::Rollback)
-        );
-        assert_eq!(tombstone.loads().next().unwrap().version, 8);
-        assert_eq!(tombstone.protected_images().count(), 0);
-        reopened.recover(&mut SoftwareCrypto).unwrap();
-
-        let mut duplicate = initial;
-        duplicate.domains[1] = duplicate.domains[0];
-        assert_eq!(duplicate.encode(), Err(Error::Format));
-        let child = Aid::new(&[0xf0, 5, 6, 7, 8]).unwrap();
-        assert_eq!(
-            {
-                let mut unclaimed = initial;
-                unclaimed.add_domain(child, [2; 16])
-            },
-            Err(Error::Unauthorized)
-        );
-        tombstone.add_domain(child, [2; 16]).unwrap();
-        assert_eq!(
-            tombstone.domains().find(|d| d.aid == child).unwrap().owner,
-            tombstone.domains[0].unwrap().owner
-        );
-        assert_eq!(
-            tombstone.remove_domain(Aid::isd()),
-            Err(Error::Unauthorized)
-        );
-        tombstone.remove_domain(child).unwrap();
-        let mut old = expected.clone();
-        old[2] = 0;
-        assert_eq!(Registry::decode(&old), Err(Error::IncompatibleState));
-        let mut trailing = expected;
-        trailing.push(0);
-        assert_eq!(Registry::decode(&trailing), Err(Error::Format));
-    }
-}
+mod tests;
