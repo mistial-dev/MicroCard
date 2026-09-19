@@ -1173,9 +1173,17 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         self.ensure_cc310()?;
         let mut hash = [0; 32];
         self.sha256_into(message, &mut hash)?;
-        let success = cc310::p256_sign_hash(private_key, &hash, output);
+        let result = self.p256_sign_hash_into(private_key, &hash, output);
         hash.fill(0);
-        let result = if success { Ok(()) } else { Err(Error::Native) };
+        result
+    }
+
+    #[cfg(feature = "cc310-p256")]
+    fn p256_sign_hash_into(&mut self, private_key: &[u8; 32], hash: &[u8; 32], output: &mut [u8; 64]) -> Result<()> {
+        output.fill(0);
+        if !microcard_core::crypto::p256_private_key_valid(private_key) { return Err(Error::Storage); }
+        self.ensure_cc310()?;
+        let result = if cc310::p256_sign_hash(private_key, hash, output) { Ok(()) } else { Err(Error::Native) };
         microcard_core::crypto::clear_output_on_error(output, result)
     }
 
@@ -1190,9 +1198,15 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         self.ensure_cc310()?;
         let mut hash = [0; 32];
         self.sha256_into(message, &mut hash)?;
-        let status = cc310::p256_verify_hash(public_key, &hash, signature);
+        let result = self.p256_verify_hash(public_key, &hash, signature);
         hash.fill(0);
-        match status {
+        result
+    }
+
+    #[cfg(feature = "cc310-p256")]
+    fn p256_verify_hash(&mut self, public_key: &[u8], hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
+        self.ensure_cc310()?;
+        match cc310::p256_verify_hash(public_key, hash, signature) {
             0 => Ok(true),
             1 => Ok(false),
             _ => Err(Error::Native),

@@ -45,6 +45,11 @@ SCP03 storage-key derivation, session KDF, command and response MACs, command IV
 
 AES-CMAC accepts a bounded list of borrowed input slices. SCP03 passes its chaining value, fixed header, command data and status bytes as separate slices, so storage-key derivation, session derivation, command MAC and response MAC do not allocate concatenation buffers. The software provider streams the slices through one CMAC state. Hardware providers must produce the same result for every segmentation of identical bytes.
 
+Prehashed P-256 operations accept exactly one 32-byte SHA-256 digest and never hash it
+again. They share the hardware signing/verification path with message operations, allowing
+streaming clients to retain a hash context instead of complete messages. The software
+reference uses the prehash API; both paths must match the existing RFC 6979 vector.
+
 The allocation-free `hal::conformance::run_crypto` runner applies the same standard known answers to any provider. It covers SHA-256, HMAC-SHA-256, one-piece and segmented AES-CMAC, AES-128 block encryption/decryption, padded CBC round trip, CCM encryption/decryption, P-256 ECDSA verification and changed-message rejection, plus P-256 public-key derivation, deterministic ECDSA sign/verify and ECDH. Negative cases require short CBC/CCM output, malformed CBC ciphertext, CBC padding failure and CCM tag rejection to clear the complete caller buffer. They also reject malformed P-256 inputs, map invalid P-256 private scalars consistently, reject invalid ECDH peers and expose no failed fixed output. The deterministic simulator passes this runner. Each board provider must pass it before physical failure-injection and timing acceptance.
 
 SCP03 command verification consumes the parsed command. MAC validation borrows its payload, then removes the received MAC by truncating the existing vector. Unencrypted commands keep that allocation through trusted dispatch. Encrypted commands allocate only the separate plaintext buffer required by Rust's nonaliasing input and output contract.

@@ -266,6 +266,28 @@ pub trait CryptoProvider {
         }
     );
 
+    software_method!(
+        "software-p256",
+        fn p256_sign_hash_into(&mut self, private_key: &[u8; 32], hash: &[u8; 32], output: &mut [u8; 64]) -> Result<()> {
+            use p256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey};
+            output.fill(0);
+            let key = SigningKey::from_slice(private_key).map_err(|_| Error::Storage)?;
+            let signature: Signature = key.sign_prehash(hash).map_err(|_| Error::Native)?;
+            output.copy_from_slice(&signature.to_bytes());
+            Ok(())
+        }
+    );
+
+    software_method!(
+        "software-p256",
+        fn p256_verify_hash(&mut self, public_key: &[u8], hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
+            use p256::ecdsa::{signature::hazmat::PrehashVerifier, Signature, VerifyingKey};
+            Ok(VerifyingKey::from_sec1_bytes(public_key).ok()
+                .zip(Signature::from_slice(signature).ok())
+                .is_some_and(|(key, signature)| key.verify_prehash(hash, &signature).is_ok()))
+        }
+    );
+
     fn p256_ecdsa_sign(&mut self, private_key: &[u8; 32], message: &[u8]) -> Result<[u8; 64]> {
         let mut output = [0; 64];
         self.p256_ecdsa_sign_into(private_key, message, &mut output)?;
@@ -947,6 +969,16 @@ mod p256_tests {
         assert_eq!(signature, expected.as_slice());
         let public = p256_public_key(&private).unwrap();
         assert!(p256_ecdsa_verify(&public, b"sample", &signature));
+        struct Reference;
+        impl CryptoProvider for Reference {}
+        let mut hashed_signature = [0; 64];
+        Reference.p256_sign_hash_into(&private, &sha256(b"sample"), &mut hashed_signature).unwrap();
+        assert_eq!(hashed_signature, signature);
+        assert_eq!(Reference.p256_verify_hash(&public, &sha256(b"sample"), &signature), Ok(true));
+        assert_eq!(Reference.p256_verify_hash(&public, &sha256(b"changed"), &signature), Ok(false));
+        assert!(Reference.p256_sign_hash_into(&[0; 32], &[0; 32], &mut hashed_signature).is_err());
+        assert_eq!(hashed_signature, [0; 64]);
+
         assert!(!p256_ecdsa_verify(&public, b"changed", &signature));
         assert!(!p256_ecdsa_verify(&[0; 65], b"sample", &signature));
 

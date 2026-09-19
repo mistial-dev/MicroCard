@@ -398,6 +398,14 @@ pub mod conformance {
         let mut p256_signature = [0; 64];
         provider.p256_ecdsa_sign_into(&private_key, b"sample", &mut p256_signature)?;
         require(p256_signature == expected_signature)?;
+        let mut sample_hash = [0; 32];
+        provider.sha256_into(b"sample", &mut sample_hash)?;
+        provider.p256_sign_hash_into(&private_key, &sample_hash, &mut p256_signature)?;
+        require(p256_signature == expected_signature)?;
+        require(provider.p256_verify_hash(&derived_public_key, &sample_hash, &p256_signature)?)?;
+        sample_hash[0] ^= 1;
+        require(!provider.p256_verify_hash(&derived_public_key, &sample_hash, &p256_signature)?)?;
+
         require(provider.p256_ecdsa_verify(
             &derived_public_key,
             b"sample",
