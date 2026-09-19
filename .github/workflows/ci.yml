@@ -44,9 +44,9 @@ jobs:
           python scripts/jcvm_transport_acceptance.py
       - name: Rust lint
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: nRF52840 release link
-        run: cargo build --release --locked
-        working-directory: board/nrf52840
-      - name: nRF52840 USB CCID link
-        run: cargo build --release --locked --features usb-ccid
-        working-directory: board/nrf52840
+      - name: ARM link inspection tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi
+      - name: Separate firmware links and budgets
+        if: runner.os == 'Linux'
+        run: python scripts/board_budgets.py --check

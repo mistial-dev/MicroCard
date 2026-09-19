@@ -1,12 +1,12 @@
 # Release readiness
 
-MicroCard is a development system. The current cleanup has not produced the separate .NET and JCVM firmware release candidates yet. Hardware testing of this cleanup is deferred.
+MicroCard is a development system. Separate .NET and JCVM firmware now cross-link, but release-candidate acceptance is incomplete. Hardware testing of this cleanup is deferred.
 
 ## Current implementation
 
 The .NET path compiles, verifies, signs, installs, and runs MC04 applications in the simulator and links for nRF52840. Package signing uses P-256 with uncompressed SEC1 keys and low-S signatures. Domain identities are SHA-256 key hashes. MP05 packages and MDB2 bundles reject their earlier formats. Native capability 21 remains reserved.
 
-JCVM runs the supported applet corpus in the simulator. It still needs the board loading, persistence, and shared security-service integration described in [JCVM profile](JCVM_PROFILE.md). Neither a linked image nor host acceptance establishes hardware behavior.
+JCVM runs the supported applet corpus in the simulator. Its board adapter uses the shared authenticated loading and persistent storage path described in [JCVM profile](JCVM_PROFILE.md); runtime memory and remaining applet services still need work. Neither a linked image nor host acceptance establishes hardware behavior.
 
 The shared APDU endpoint is generic over `CardEngine`. It owns SCP03 authentication,
 session reset, cancellation, and response protection; engine adapters receive verified
@@ -17,7 +17,8 @@ engine. JCVM now implements this boundary with authenticated loading, installati
 status records, selection, invocation, and deletion. A real SCP03/PIV lifecycle test
 checks recovery across reboot. The file-backed simulator now has independent Python
 SCP03 acceptance for load, install, process restart, heap reclaim, and damaged-state
-rejection. Board storage and the separate firmware artifact remain unfinished.
+rejection. Separate board builds now use this same adapter and inspect link maps and
+symbols to prove that the other interpreter is absent.
 
 The independent `jcvm` core feature exposes SHA-256 and entropy through the shared
 provider adapter, now used by the simulator. Unsupported JCVM crypto factories raise
@@ -30,7 +31,7 @@ MC04 stores immutable packages in separate image slots and commits only descript
 in its version-2 metadata snapshot. Recovery verifies image hashes and package
 signatures. Interrupted activation protects both committed and uncertain candidate
 images. Both board layouts reserve eight 16 KiB image slots; the simulator uses files.
-Runtime package views still occupy RAM. JCVM heap partitioning remains unfinished;
+Runtime package views still occupy RAM. Both JCVM board layouts now reserve separate heap banks;
 its core management adapter commits heaps before publishing instance metadata.
 
 MJ03 reserves a durable nonce before each encryption attempt, separately from the
@@ -40,8 +41,8 @@ MJ01/MJ02 and simulator state without a nonce counter are rejected without migra
 
 ## Required implementation work
 
-- Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
-- MP05 manifests, lifecycle management names, and journal snapshots now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Allocate the separate JCVM heap journal in both board layouts.
+- Validate JCVM peak RAM and finish applet services in the separately linked firmware.
+- MP05 manifests, lifecycle management names, and journal snapshots now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Both board layouts now allocate separate JCVM heap journals.
 - Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
 - Replace whole-state transaction copies and compact MC04 object storage while preserving rollback, quotas, and object lifetime checks.
 - Share native byte-copy and encoding services, compact runtime tables, and finish the documentation consolidation.
@@ -50,9 +51,9 @@ CBOR removes device JSON parsing and canonical re-encoding. The snapshot migrati
 
 ## Crypto replacement measurements
 
-`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 186,356 text bytes, SHA-256 replacement 189,080, SHA-256 plus P-256 203,172, and all hardware providers 212,320. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
+`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 187,188 text bytes, SHA-256 replacement 189,876, SHA-256 plus P-256 203,904, and all hardware providers 213,124. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
 
-For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
+For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features engine-mc04,cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
 
 ## Validation gates
 
@@ -60,7 +61,7 @@ For a hardware-only cross-link, run `cargo build --release --locked --no-default
 
 Acceptance requires host and wallet tests, exhaustive recovery, workspace Clippy, affected fuzz-target builds, and both engines' board links and size checks. Timing reports under `work/` describe the executed commands and failures. They are local evidence, not a release certification or a sustained fuzz campaign.
 
-Before hardware loading, run `python3 scripts/prepare_first_flash.py` from the committed worktree. Verify that the generated manifest names HEAD, reports a clean worktree, includes matching artifact hashes, and records `hardware_flashed` as false. This command prepares artifacts without operating a probe.
+Before hardware loading, run `python3 scripts/prepare_first_flash.py --engine mc04` from the committed worktree. Verify that the generated manifest names HEAD, reports a clean worktree, includes matching artifact hashes, and records `hardware_flashed` as false. This command prepares artifacts without operating a probe.
 
 ## Remaining hardware and production evidence
 

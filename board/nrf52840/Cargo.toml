@@ -5,6 +5,8 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 [features]
 default = ["development-debug", "software-crypto"]
+engine-mc04 = ["microcard-core/mc04"]
+engine-jcvm = ["microcard-core/jcvm"]
 development-debug = []
 cc310 = ["cc310-sha256", "cc310-entropy", "cc310-cmac", "cc310-hmac", "cc310-aes", "cc310-cbc", "cc310-ccm", "cc310-p256"]
 software-crypto = ["microcard-core/software-crypto"]
@@ -33,7 +35,7 @@ cc310-ccm = ["cc310-aes"]
 cc310-p256 = ["cc310-entropy"]
 
 [dependencies]
-microcard-core = { path = "../../crates/microcard-core", default-features = false, features = ["mc04", "scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"] }
+microcard-core = { path = "../../crates/microcard-core", default-features = false, features = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"] }
 cortex-m = {version="0.7", features=["critical-section-single-core"]}
 cortex-m-rt = "0.7"
 embedded-alloc = "0.6"

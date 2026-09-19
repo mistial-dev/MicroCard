@@ -7,10 +7,10 @@ Read [the security note](#what-you-are-agreeing-to) before using one for anythin
 ## Build the image
 
 ```sh
-python3 scripts/prepare_first_flash.py --features dongle
+python3 scripts/prepare_first_flash.py --engine mc04 --features dongle
 ```
 
-That runs the checkpoint gate first, so expect it to take a while. It writes `artifacts/first-flash/microcard.uf2` along with the ELF, the hex and a manifest recording the revision, the flash window and a digest of every artifact. It never touches a device.
+That runs the checkpoint gate first, so expect it to take a while. It writes `artifacts/first-flash/mc04/dongle/microcard.uf2` along with the ELF, the hex and a manifest recording the revision, the flash window and a digest of every artifact. It never touches a device.
 
 ## Put the dongle in bootloader mode
 
@@ -19,7 +19,7 @@ Hold the button while inserting the dongle, or press reset twice quickly if it i
 ## Copy the image
 
 ```sh
-cp artifacts/first-flash/microcard.uf2 /Volumes/UF2BOOT/
+cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
 ```
 
 The dongle reboots itself when the copy finishes. The volume disappears and a smart card reader called `MicroCard MicroCard virtual smart card` takes its place.

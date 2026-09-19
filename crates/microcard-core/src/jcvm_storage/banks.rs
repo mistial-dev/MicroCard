@@ -6,6 +6,19 @@ use crate::{
 };
 use zeroize::Zeroizing;
 
+/// Derive the engine's heap root from its registry key, identically on every backend.
+pub fn heap_root(provider: &mut impl CryptoProvider, registry: &JournalKey) -> Result<JournalKey> {
+    let mut output = Zeroizing::new([0; 32]);
+    provider.hmac_sha256_into(
+        registry.as_ref(),
+        b"MicroCard JCVM heap root v1\0",
+        &mut output,
+    )?;
+    Ok(JournalKey::from(
+        <[u8; 16]>::try_from(&output[..16]).unwrap(),
+    ))
+}
+
 pub trait HeapBanks {
     type Bank: Flash;
 

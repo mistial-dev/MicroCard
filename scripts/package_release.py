@@ -97,15 +97,17 @@ exec "$ROOT/runtime/bin/java" -cp "$ROOT/wallet/microcard-wallet.jar:$ROOT/walle
     run(["dotnet", "pack", "managed/MicroCard.Analyzers", "-c", "Release", "-o", analyzer_output,
          "--nologo"], env=env)
 
-    board_output = stage / "nrf52840-development"
-    board_output.mkdir()
-    run(["cargo", "build", "--release", "--locked"], env=env, cwd=ROOT / "board/nrf52840")
-    board_elf = ROOT / "board/nrf52840/target/thumbv7em-none-eabihf/release/microcard-nrf52840"
-    shutil.copy2(board_elf, board_output / "microcard-nrf52840.elf")
     objcopy = shutil.which("arm-none-eabi-objcopy") or shutil.which("rust-objcopy")
     if objcopy is None:
         raise RuntimeError("arm-none-eabi-objcopy or rust-objcopy is required")
-    run([objcopy, "-O", "ihex", board_elf, board_output / "microcard-nrf52840.hex"], env=env)
+    for engine in ("mc04", "jcvm"):
+        board_output = stage / f"nrf52840-{engine}-development"
+        board_output.mkdir()
+        run(["cargo", "build", "--release", "--locked", "--features", f"engine-{engine}"],
+            env=env, cwd=ROOT / "board/nrf52840")
+        board_elf = ROOT / "board/nrf52840/target/thumbv7em-none-eabihf/release/microcard-nrf52840"
+        shutil.copy2(board_elf, board_output / f"microcard-{engine}.elf")
+        run([objcopy, "-O", "ihex", board_elf, board_output / f"microcard-{engine}.hex"], env=env)
 
     metadata = {
         "version": VERSION,

@@ -5,10 +5,10 @@ The requested stopping point is **before flashing**. No command in `prepare_firs
 ## Prepare and verify
 
 ```sh
-python3 scripts/prepare_first_flash.py
+python3 scripts/prepare_first_flash.py --engine mc04
 ```
 
-Outputs under ignored `artifacts/first-flash/`: ELF, Intel HEX, binary, both sample micro images/metadata/maps, and a SHA-256 manifest. The script runs host acceptance, Clippy, the release cross-build, flash-load-range checks, initial stack/reset-vector checks and a minimum static stack-margin check.
+Outputs under ignored `artifacts/first-flash/mc04/dk/`: ELF, Intel HEX, binary, both sample micro images/metadata/maps, and a SHA-256 manifest. The script runs host acceptance, Clippy, the release cross-build, flash-load-range checks, initial stack/reset-vector checks and a minimum static stack-margin check.
 
 The host gate includes .NET differential execution, deterministic preprocessing/signing, incremental MSBuild/pin checks, first-load failure injection, independent SCP03, persistent key operations, binary UART framing, and the real serial adapter through a fragmented pseudo-terminal. See `scripts/check.py --checkpoint` and the keystore documentation for the scenarios.
 
@@ -30,7 +30,7 @@ The keygen command refuses to overwrite existing files. Use development credenti
 These commands are documented, **not executed**. First confirm a dedicated nRF52840 DK and preserve any firmware/data you need. Identify the intended probe with `probe-rs list`. Add `--probe` if more than one is connected. Do not use erase-all/recovery or chip-erase as an automatic fallback.
 
 ```sh
-probe-rs download --chip nRF52840_xxAA --connect-under-reset --verify artifacts/first-flash/microcard.elf
+probe-rs download --chip nRF52840_xxAA --connect-under-reset --verify artifacts/first-flash/mc04/dk/microcard.elf
 probe-rs download --chip nRF52840_xxAA --connect-under-reset --verify --binary-format bin --base-address 0xE0000 .keys/first-test-management.key
 ```
 

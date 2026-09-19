@@ -1,10 +1,12 @@
 {
   "format": 1,
+  "engine": "mc04",
+  "layout": "dk",
   "target": "thumbv7em-none-eabihf",
   "device_latency_measured": false,
   "stages": {
     "software": {
-      "text_bytes": 186356,
+      "text_bytes": 187188,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "software_dependencies": [
@@ -18,12 +20,13 @@
         "sha2"
       ],
       "features": [
+        "engine-mc04",
         "development-debug",
         "software-crypto"
       ]
     },
     "sha256": {
-      "text_bytes": 189080,
+      "text_bytes": 189876,
       "data_bytes": 128,
       "bss_bytes": 196668,
       "software_dependencies": [
@@ -37,6 +40,7 @@
         "sha2"
       ],
       "features": [
+        "engine-mc04",
         "development-debug",
         "cc310-sha256",
         "software-hmac",
@@ -45,7 +49,7 @@
       ]
     },
     "p256": {
-      "text_bytes": 203172,
+      "text_bytes": 203904,
       "data_bytes": 144,
       "bss_bytes": 197692,
       "software_dependencies": [
@@ -56,6 +60,7 @@
         "sha2"
       ],
       "features": [
+        "engine-mc04",
         "development-debug",
         "cc310-sha256",
         "cc310-p256",
@@ -64,11 +69,12 @@
       ]
     },
     "hardware": {
-      "text_bytes": 212320,
+      "text_bytes": 213124,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "software_dependencies": [],
       "features": [
+        "engine-mc04",
         "development-debug",
         "cc310"
       ]

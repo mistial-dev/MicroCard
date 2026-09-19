@@ -587,10 +587,18 @@ dependencies = [
  "ccm",
  "cmac",
  "hmac",
+ "microcard-engine-jcvm",
  "p256",
  "serde",
  "sha2",
  "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "microcard-engine-jcvm"
+version = "0.1.0-wip"
+dependencies = [
  "zeroize",
 ]
 

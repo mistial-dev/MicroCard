@@ -15,8 +15,8 @@ use zeroize::Zeroizing;
 mod session;
 pub use session::Session;
 mod banks;
-pub use banks::HeapBanks;
 pub(crate) use banks::heap_key;
+pub use banks::{heap_root, HeapBanks};
 
 pub struct Store<F: Flash> {
     journal: Journal<F>,

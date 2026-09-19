@@ -64,12 +64,18 @@ python3 scripts/check.py --checkpoint
 
 The quick gate builds Rust and managed code and runs structural checks. The checkpoint gate performs the security and interoperability suite and takes a long time. Sustained fuzzing is reserved for release checkpoints. Read [CONTRIBUTING.md](CONTRIBUTING.md) before a first change, because the gate enforces a documentation style rule that has surprised people. Rider consumes the standard Roslyn analyzer package. See [Rider authoring](docs/RIDER.md).
 
-Build the nRF52840 image:
+Build one nRF52840 engine:
 
 ```sh
 cd board/nrf52840
-cargo build --release --locked
+cargo build --release --locked --features engine-mc04
+# Or build the Java Card engine:
+cargo build --release --locked --features engine-jcvm
 ```
+
+Selecting neither engine or both is an error. The board budget gate saves separate
+ELF and link-map artifacts under `artifacts/firmware/`. These are development builds;
+[readiness](docs/READINESS.md) lists the remaining release blockers.
 
 The quickest hardware to talk to is a USB dongle, which needs no debug probe. See [the dongle guide](docs/DONGLE.md). For the nRF52840 DK, read the [board guide](docs/BOARD.md) and [first flash](docs/FIRST_FLASH.md) before provisioning or flashing.
 

@@ -24,4 +24,4 @@ Transport, identity and erased-slot inspection allocate no heap memory. Oversize
 
 ## Current verification
 
-`cargo check --release --locked` cross-compiles the board with the HAL path. Host HAL tests enforce transport and protected-key output bounds. Physical deadline, watchdog-reset and UART reconnect acceptance remains in the DK work list.
+`cargo check --release --locked --features engine-mc04` cross-compiles the board with the HAL path. Host HAL tests enforce transport and protected-key output bounds. Physical deadline, watchdog-reset and UART reconnect acceptance remains in the DK work list.

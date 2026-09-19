@@ -1,11 +1,12 @@
 #![no_std]
 #![no_main]
 extern crate alloc;
+#[cfg(feature = "engine-jcvm")]
+mod jcvm;
 #[cfg(feature = "usb-ccid")]
 mod usb_ccid;
 use cortex_m_rt::entry;
 use microcard_core::{
-    domains::Card,
     hal::{
         receive_command, send_response, ApduTransport, DeviceIdentity, Entropy, LogicalGpio,
         MonotonicClock, ResetReason, ResetReport, StagingFlash, TickExtender, Watchdog,
@@ -14,7 +15,6 @@ use microcard_core::{
     journal::{decode_monotonic_bits, Flash},
     provisioning::{ownership_marker_action, OwnershipMarkerAction, PROGRAMMED_OWNERSHIP_MARKER},
     scp03::Keys,
-    staging::FlashStaging,
     transport::Endpoint,
     Error, Result,
 };
@@ -1257,33 +1257,75 @@ impl LogicalGpio for Hardware {
         Ok(())
     }
 }
-struct Nvm;
+struct Nvm {
+    slots: [usize; 3],
+    count: usize,
+    size: usize,
+    monotonic: usize,
+    nonces: usize,
+}
 impl Nvm {
-    const MONOTONIC_BASE: usize = crate::layout::MONOTONIC_BASE;
-    const MONOTONIC_BYTES: usize = crate::layout::MONOTONIC_BYTES;
-
-    fn base(slot: usize) -> Result<usize> {
-        match slot {
-            0 => Ok(crate::layout::JOURNAL0_BASE),
-            1 => Ok(crate::layout::JOURNAL1_BASE),
-            2 => Ok(crate::layout::JOURNAL2_BASE),
-            _ => Err(Error::Bounds),
+    const COUNTER_BYTES: usize = 4096;
+    fn new() -> Self {
+        Self {
+            slots: [layout::JOURNAL0_BASE, layout::JOURNAL1_BASE, {
+                #[cfg(feature = "engine-mc04")]
+                {
+                    layout::JOURNAL2_BASE
+                }
+                #[cfg(not(feature = "engine-mc04"))]
+                {
+                    0
+                }
+            }],
+            count: if cfg!(feature = "engine-mc04") { 3 } else { 2 },
+            size: layout::JOURNAL0_BYTES,
+            monotonic: layout::MONOTONIC_BASE,
+            nonces: layout::NONCES_BASE,
         }
     }
 
+    fn base(&self, slot: usize) -> Result<usize> {
+        if slot >= self.count {
+            return Err(Error::Bounds);
+        }
+        Ok(self.slots[slot])
+    }
+
     fn persistent_storage_erased() -> Result<bool> {
-        let flash = Self;
+        let flash = Self::new();
         for slot in 0..flash.slot_count() {
             if !flash.is_erased(slot)? {
                 return Ok(false);
             }
         }
-        if unsafe { core::slice::from_raw_parts(crate::layout::IMAGES_BASE as *const u8, crate::layout::IMAGES_BYTES) }
-            .iter().any(|byte| *byte != 0xff) {
+        if unsafe {
+            core::slice::from_raw_parts(
+                crate::layout::IMAGES_BASE as *const u8,
+                crate::layout::IMAGES_BYTES,
+            )
+        }
+        .iter()
+        .any(|byte| *byte != 0xff)
+        {
             return Ok(false);
         }
-        Ok(Self::bit_counter(Self::MONOTONIC_BASE, Self::MONOTONIC_BYTES)? == 0
-            && Self::bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES)? == 0)
+        #[cfg(feature = "engine-jcvm")]
+        for bank in 0..2 {
+            let heap = jcvm::Heaps::region(bank)?;
+            for slot in 0..heap.slot_count() {
+                if !heap.is_erased(slot)? {
+                    return Ok(false);
+                }
+            }
+            if heap.monotonic_generation()? != 0 || heap.nonce_generation()? != 0 {
+                return Ok(false);
+            }
+        }
+        Ok(
+            Self::bit_counter(layout::MONOTONIC_BASE, layout::MONOTONIC_BYTES)? == 0
+                && Self::bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES)? == 0,
+        )
     }
 
     fn ownership_marker() -> u32 {
@@ -1366,8 +1408,12 @@ struct StagingNvm {
 }
 impl StagingNvm {
     const BASE: usize = crate::layout::STAGING_BASE;
-    const BANK_BYTES: usize = 16 * 1024;
-    const BANKS: usize = 4;
+    const BANK_BYTES: usize = if cfg!(feature = "engine-jcvm") {
+        64 * 1024
+    } else {
+        16 * 1024
+    };
+    const BANKS: usize = layout::STAGING_BYTES / Self::BANK_BYTES;
 
     const fn new() -> Self {
         Self {
@@ -1400,7 +1446,14 @@ impl StagingFlash for StagingNvm {
     }
     fn erase(&mut self) -> Result<()> {
         let selected = (0..Self::BANKS)
-            .map(|offset| (self.next_bank + offset) % Self::BANKS)
+            .map(|offset| {
+                let bank = self.next_bank + offset;
+                if bank < Self::BANKS {
+                    bank
+                } else {
+                    bank - Self::BANKS
+                }
+            })
             .find(|bank| Self::bank_is_erased(*bank))
             .unwrap_or(self.next_bank);
         let base = Self::BASE + selected * Self::BANK_BYTES;
@@ -1408,7 +1461,11 @@ impl StagingFlash for StagingNvm {
             Nvm::erase_region(base, Self::BANK_BYTES)?;
         }
         self.bank = Some(selected);
-        self.next_bank = (selected + 1) % Self::BANKS;
+        self.next_bank = if selected + 1 == Self::BANKS {
+            0
+        } else {
+            selected + 1
+        };
         Ok(())
     }
     fn program(&mut self, offset: usize, bytes: &[u8]) -> Result<()> {
@@ -1416,17 +1473,27 @@ impl StagingFlash for StagingNvm {
     }
 }
 impl Nvm {
-    const IMAGE_SLOT_BYTES: usize = microcard_core::staging::MAX_PACKAGE_BYTES;
+    const IMAGE_SLOT_BYTES: usize = if cfg!(feature = "engine-jcvm") {
+        64 * 1024
+    } else {
+        16 * 1024
+    };
     const IMAGE_SLOTS: usize = crate::layout::IMAGES_BYTES / Self::IMAGE_SLOT_BYTES;
 
     fn image_base(index: usize) -> Result<usize> {
-        if index >= Self::IMAGE_SLOTS { return Err(Error::Bounds); }
+        if index >= Self::IMAGE_SLOTS {
+            return Err(Error::Bounds);
+        }
         Ok(crate::layout::IMAGES_BASE + index * Self::IMAGE_SLOT_BYTES)
     }
 }
 impl microcard_core::image_store::ImageFlash for Nvm {
-    fn slot_count(&self) -> usize { Self::IMAGE_SLOTS }
-    fn slot_size(&self) -> usize { Self::IMAGE_SLOT_BYTES }
+    fn slot_count(&self) -> usize {
+        Self::IMAGE_SLOTS
+    }
+    fn slot_size(&self) -> usize {
+        Self::IMAGE_SLOT_BYTES
+    }
     fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
         let base = Self::image_base(index)?;
         read(unsafe { core::slice::from_raw_parts(base as *const u8, Self::IMAGE_SLOT_BYTES) })
@@ -1435,7 +1502,12 @@ impl microcard_core::image_store::ImageFlash for Nvm {
         Nvm::erase_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES)
     }
     fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
-        Nvm::program_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES, offset, bytes)
+        Nvm::program_region(
+            Self::image_base(index)?,
+            Self::IMAGE_SLOT_BYTES,
+            offset,
+            bytes,
+        )
     }
 }
 impl Nvm {
@@ -1474,45 +1546,49 @@ impl Nvm {
 }
 impl Flash for Nvm {
     fn slot_count(&self) -> usize {
-        3
+        self.count
     }
     fn slot_size(&self) -> usize {
-        65536
+        self.size
     }
     fn monotonic_capacity(&self) -> u64 {
-        (Self::MONOTONIC_BYTES * 8) as u64
+        (Self::COUNTER_BYTES * 8) as u64
     }
     fn monotonic_generation(&self) -> Result<u64> {
-        decode_monotonic_bits(unsafe {
-            core::slice::from_raw_parts(Self::MONOTONIC_BASE as *const u8, Self::MONOTONIC_BYTES)
-        })
+        Self::bit_counter(self.monotonic, Self::COUNTER_BYTES)
     }
     fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
-        Self::advance_bit_counter(Self::MONOTONIC_BASE, Self::MONOTONIC_BYTES, generation)
+        Self::advance_bit_counter(self.monotonic, Self::COUNTER_BYTES, generation)
     }
-    fn nonce_capacity(&self) -> u64 { (crate::layout::NONCES_BYTES * 8) as u64 }
-    fn nonce_generation(&self) -> Result<u64> { Self::bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES) }
+    fn nonce_capacity(&self) -> u64 {
+        (Self::COUNTER_BYTES * 8) as u64
+    }
+    fn nonce_generation(&self) -> Result<u64> {
+        Self::bit_counter(self.nonces, Self::COUNTER_BYTES)
+    }
     fn reserve_nonce(&mut self) -> Result<u64> {
-        let next = self.nonce_generation()?.checked_add(1).ok_or(Error::Quota)?;
-        Self::advance_bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES, next)?;
+        let next = self
+            .nonce_generation()?
+            .checked_add(1)
+            .ok_or(Error::Quota)?;
+        Self::advance_bit_counter(self.nonces, Self::COUNTER_BYTES, next)?;
         Ok(next)
     }
     fn is_erased(&self, slot: usize) -> Result<bool> {
-        let base = Self::base(slot)?;
         Ok(
-            unsafe { core::slice::from_raw_parts(base as *const u8, 65536) }
+            unsafe { core::slice::from_raw_parts(self.base(slot)? as *const u8, self.size) }
                 .iter()
                 .all(|byte| *byte == 0xff),
         )
     }
     fn read(&self, slot: usize, offset: usize, output: &mut [u8]) -> Result<()> {
-        Self::read_region(Self::base(slot)?, 65536, offset, output)
+        Self::read_region(self.base(slot)?, self.size, offset, output)
     }
     fn erase(&mut self, slot: usize) -> Result<()> {
-        Self::erase_region(Self::base(slot)?, 65536)
+        Self::erase_region(self.base(slot)?, self.size)
     }
     fn program(&mut self, slot: usize, offset: usize, bytes: &[u8]) -> Result<()> {
-        Self::program_region(Self::base(slot)?, 65536, offset, bytes)
+        Self::program_region(self.base(slot)?, self.size, offset, bytes)
     }
 }
 #[derive(Default)]
@@ -1789,14 +1865,25 @@ fn main() -> ! {
             let _ = transport.watchdog.feed();
         }
     }
-    let card = match Card::open_with_staging(
-        Nvm,
+    #[cfg(feature = "engine-mc04")]
+    let opened = microcard_core::domains::Card::open_with_staging(
+        Nvm::new(),
         hardware,
         storage_key,
-        FlashStaging::new(StagingNvm::new()),
-    ) {
+        microcard_core::staging::FlashStaging::new(StagingNvm::new()),
+    );
+    #[cfg(feature = "engine-jcvm")]
+    let opened = jcvm::open(hardware, storage_key);
+    let card = match opened {
         Ok(c) => c,
-        Err(_) => {
+        Err(error) => {
+            let message: &[u8] = if error == Error::IncompatibleState {
+                b"MicroCard: incompatible persistent state; explicit provisioning required\r\n"
+            } else {
+                b"MicroCard: persistent state open failed\r\n"
+            };
+            let deadline = transport.deadline_after(1_000_000);
+            let _ = transport.write_raw(message, deadline);
             drop(keys);
             loop {
                 let _ = transport.watchdog.feed();

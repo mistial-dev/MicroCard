@@ -1,13 +1,11 @@
 //! Persistent host regions for the authenticated JCVM transport.
 use crate::{file_flash::Region, private_open_options, sim_hal::Hardware};
 use microcard_core::{
-    crypto::CryptoProvider,
     hal::Entropy,
     image_store::Images,
     jcvm_card::{Card, Storage},
     jcvm_registry::{Registry, Store},
-    jcvm_storage::HeapBanks,
-    journal::JournalKey,
+    jcvm_storage::{heap_root, HeapBanks},
     scp03::Keys,
     staging::BoundedRamStaging,
     transport::Endpoint,
@@ -106,13 +104,7 @@ pub(crate) fn open(keys: Keys, root: &Path) -> Result<Endpoint<ManagedCard>> {
     }
     let mut provider = Hardware;
     let key = keys.storage_key_with(&mut provider)?;
-    let mut heap_root = zeroize::Zeroizing::new([0; 32]);
-    provider.hmac_sha256_into(
-        key.as_ref(),
-        b"MicroCard JCVM heap root v1\0",
-        &mut heap_root,
-    )?;
-    let heap_key = JournalKey::from(<[u8; 16]>::try_from(&heap_root[..16]).unwrap());
+    let heap_key = heap_root(&mut provider, &key)?;
     let mut incarnation = [0; 16];
     provider.fill_entropy(&mut incarnation)?;
     let storage = Storage {

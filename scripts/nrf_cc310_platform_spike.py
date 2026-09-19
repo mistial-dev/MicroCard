@@ -97,7 +97,7 @@ def tool(name):
 
 def measure(extra_arguments):
     subprocess.run(
-        ["cargo", "build", "--release", "--locked", *extra_arguments],
+        ["cargo", "build", "--release", "--locked", "--features", "engine-mc04", *extra_arguments],
         cwd=BOARD,
         check=True,
     )

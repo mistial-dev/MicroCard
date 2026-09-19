@@ -28,7 +28,8 @@ JCVM through `jcvm_card::Card` and `transport::Endpoint`. The host lifecycle tes
 real SCP03 messages, installs the committed PIV applet, selects it, checks PIN retries
 across reboot, and deletes it. `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` uses this
 path with persistent files; `serve-jcvm-managed-binary` uses the shared framed transport.
-The separate board image remains a delivery gap.
+The separate `engine-jcvm` board build now uses the same adapter with NVMC storage.
+Both DK and dongle layouts cross-link; physical execution remains unverified.
 
 The shared C4 receiver now enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
@@ -148,8 +149,8 @@ One detail that only real packages show. The Directory records a size for the De
 ## Memory placement
 
 MC04 now journals image descriptors and stores code in dedicated flash slots. JCVM
-has an authenticated applet-state journal bound to its image and installation, but
-its image and heap regions still need board allocation.
+has an authenticated applet-state journal bound to its image and installation.
+Its image and heap regions are allocated separately in both board layouts.
 
 The managed simulator uses two 8 KiB registry journal slots, two 64 KiB image slots,
 and two independent heap banks with two 64 KiB journal slots each. Every journal has
@@ -205,7 +206,7 @@ undo still need integration before board delivery.
 
 The generated bindings describe Java Card API names; they do not establish algorithm support.
 The simulator's default JCVM host now uses the shared platform provider for SHA-256
-and entropy. The same adapter builds without MC04 or software crypto for future board
+and entropy. The same adapter builds without MC04 or software crypto for the separate board
 integration. Provider failures clear output and return an error without a software retry.
 SHA-384 remains only in the engine's explicit test-reference host.
 
