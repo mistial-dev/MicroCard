@@ -63,3 +63,8 @@ include allocator metadata or stack use. Host file reads and pointer sizes diffe
 the board, so these figures are optimization evidence, not a safe device heap bound.
 The ordinary simulator and firmware builds omit the counters. No new applet behavior
 suite is needed for profiling; the existing workload must still pass.
+
+Board size checks use persistent per-profile target directories under
+`board/nrf52840/target/profiles/`. Separate gate invocations cannot substitute another
+profile's ELF or link map between the build and inspection. The first run fills each
+profile's cache; later runs reuse it.

@@ -9,20 +9,21 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BOARD = ROOT / "board" / "nrf52840"
-BINARY = BOARD / "target" / "thumbv7em-none-eabihf" / "release" / "microcard-nrf52840"
 DESTINATION = ROOT / "docs" / "BOARD_BUDGETS.json"
 CEILINGS = {"text_bytes": 350_000, "data_bytes": 0, "bss_bytes": 200_000}
 
 
-def measure(extra_arguments, engine="mc04"):
+def measure(extra_arguments, engine, target):
     arguments = ["--features", f"engine-{engine}", *extra_arguments]
-    link_map = BOARD / "target" / f"microcard-{engine}.map"
+    target.mkdir(parents=True, exist_ok=True)
+    binary = target / "thumbv7em-none-eabihf" / "release" / "microcard-nrf52840"
+    link_map = target / f"microcard-{engine}.map"
     subprocess.run(
-        ["cargo", "rustc", "--release", "--locked", *arguments, "--", "-C", f"link-arg=-Map={link_map}"],
+        ["cargo", "rustc", "--release", "--locked", "--target-dir", str(target), *arguments, "--", "-C", f"link-arg=-Map={link_map}"],
         cwd=BOARD,
         check=True,
     )
-    symbols = subprocess.run(["arm-none-eabi-nm", "-C", str(BINARY)],
+    symbols = subprocess.run(["arm-none-eabi-nm", "-C", str(binary)],
         check=True, capture_output=True, text=True).stdout
     required = "microcard_core::mc04_vm::" if engine == "mc04" else "microcard_engine_jcvm::"
     forbidden = ["microcard_engine_jcvm", "microcard_core::jcvm_"] if engine == "mc04" else ["microcard_core::mc04_vm::", "microcard_core::domains::"]
@@ -35,7 +36,7 @@ def measure(extra_arguments, engine="mc04"):
         # Inspect loadable bytes, not ELF debug strings or symbol names.
         with tempfile.TemporaryDirectory(prefix="microcard-api-names-") as temporary:
             image = pathlib.Path(temporary) / "firmware.bin"
-            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(BINARY), str(image)], check=True)
+            subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", str(binary), str(image)], check=True)
             flashed = image.read_bytes()
         api = json.loads((ROOT / "format/jcvm-api.json").read_text())
         names = [klass["name"] for package in api["packages"] for klass in package["classes"]]
@@ -44,9 +45,9 @@ def measure(extra_arguments, engine="mc04"):
     size = shutil.which("arm-none-eabi-size")
     if size is None:
         raise SystemExit("arm-none-eabi-size is required for the board budget gate")
-    output = subprocess.run([size, str(BINARY)], check=True, capture_output=True, text=True).stdout
+    output = subprocess.run([size, str(binary)], check=True, capture_output=True, text=True).stdout
     values = output.strip().splitlines()[-1].split()
-    return {
+    return binary, link_map, {
         "text_bytes": int(values[0]),
         "data_bytes": int(values[1]),
         "bss_bytes": int(values[2]),
@@ -55,11 +56,12 @@ def measure(extra_arguments, engine="mc04"):
 
 
 def artifact(name, arguments, engine="mc04"):
-    result = measure(arguments, engine)
+    # Different profiles must never overwrite the ELF between linking and inspection.
+    binary, link_map, result = measure(arguments, engine, BOARD / "target" / "profiles" / name)
     destination = ROOT / "artifacts" / "firmware" / name
     destination.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(BINARY, destination / f"microcard-{engine}.elf")
-    shutil.copy2(BOARD / "target" / f"microcard-{engine}.map", destination / f"microcard-{engine}.map")
+    shutil.copy2(binary, destination / f"microcard-{engine}.elf")
+    shutil.copy2(link_map, destination / f"microcard-{engine}.map")
     return result
 
 
