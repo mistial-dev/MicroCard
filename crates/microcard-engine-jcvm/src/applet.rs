@@ -135,6 +135,19 @@ impl Card {
         module_aid: &[u8],
         parameters: &[u8],
     ) -> Result<()> {
+        self.install_module_with_cancel(file, host, module_aid, parameters, &mut || false)
+    }
+
+    /// A cancelled or failed installation must be discarded by the caller.
+    pub fn install_module_with_cancel(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        module_aid: &[u8],
+        parameters: &[u8],
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        if cancel() { return Err(Error::Cancelled); }
         if self.installed() { return Err(Error::Inconsistent); }
         if parameters.len() > u8::MAX as usize { return Err(Error::Bounds); }
         let applets = file.applets()?;
@@ -160,7 +173,7 @@ impl Card {
                     ..Limits::IMPLEMENTED
                 },
                 Jcre::new(self.apdu, self.buffer),
-            );
+            ).with_cancel(cancel);
             let mut budget = self.sizes.budget;
             let mut arena = Arena {
                 words: &mut self.words,
@@ -207,6 +220,20 @@ impl Card {
         command: &[u8],
         selecting: bool,
     ) -> Result<Response> {
+        self.process_with_cancel(file, host, command, selecting, &mut || false)
+    }
+
+    /// Cancellation is polled before execution and at each instruction boundary.
+    /// On an engine error, restore committed state before using this card again.
+    pub fn process_with_cancel(
+        &mut self,
+        file: &LoadFile,
+        host: &mut dyn Host,
+        command: &[u8],
+        selecting: bool,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Response> {
+        if cancel() { return Err(Error::Cancelled); }
         let instance = self.instance.ok_or(Error::Missing)?;
         let linked = Linked::new(file)?;
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
@@ -242,7 +269,7 @@ impl Card {
                     ..Limits::IMPLEMENTED
                 },
                 jcre,
-            );
+            ).with_cancel(cancel);
             let mut arena = Arena {
                 words: &mut self.words,
                 tags: &mut self.tags,
@@ -486,13 +513,24 @@ mod tests {
         let mut card = Card::new(&file, Sizes::default()).unwrap();
         let initial_heap = card.heap_used;
         let module = file.applets().unwrap().iter().next().unwrap().aid;
+        assert_eq!(card.install_module_with_cancel(&file, &mut crate::host::NoHost, module, &[], &mut || true), Err(Error::Cancelled));
         assert_eq!(card.install_module(&file, &mut crate::host::NoHost, &[0; 5], &[]), Err(Error::Missing));
         assert_eq!(card.install_module(&file, &mut crate::host::NoHost, module, &[0; 256]), Err(Error::Bounds));
         assert_eq!(card.heap_used, initial_heap);
         assert!(!card.installed());
+        {
+            let mut interrupted = Card::new(&file, Sizes::default()).unwrap();
+            let mut polls = 0;
+            assert_eq!(interrupted.install_module_with_cancel(&file, &mut crate::host::NoHost, module, &[], &mut || {
+                polls += 1;
+                polls == 3
+            }), Err(Error::Cancelled));
+            assert_eq!(polls, 3);
+        }
         card.install_module(&file, &mut crate::host::NoHost, module, &[]).unwrap();
         assert!(card.installed());
         assert_eq!(card.install(&file, &mut crate::host::NoHost, &[]), Err(Error::Inconsistent));
+        assert_eq!(card.process_with_cancel(&file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true, &mut || true), Err(Error::Cancelled));
 
         // SELECT, which the applet accepts.
         let response = card
@@ -574,6 +612,12 @@ mod tests {
         // The word the applet chose, not a generic failure.
         assert_eq!(response.sw, 0x6a82);
         assert!(response.data.is_empty());
+        let mut polls = 0;
+        assert_eq!(card.process_with_cancel(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false, &mut || {
+            polls += 1;
+            polls == 3
+        }), Err(Error::Cancelled));
+        assert_eq!(polls, 3);
     }
 
     #[test]

@@ -52,6 +52,7 @@ pub struct Machine<'a, 'h, 'p> {
     /// What the runtime environment knows while this command runs.
     pub jcre: Jcre,
     depth: u8,
+    cancel: Option<&'a mut dyn FnMut() -> bool>,
 }
 
 impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
@@ -78,7 +79,13 @@ impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
             limits,
             jcre,
             depth: 0,
+            cancel: None,
         }
+    }
+
+    pub fn with_cancel(mut self, cancel: &'a mut dyn FnMut() -> bool) -> Self {
+        self.cancel = Some(cancel);
+        self
     }
 }
 
@@ -468,6 +475,9 @@ pub fn run_body(
 ) -> Result<Outcome> {
     let mut pc = 0usize;
     loop {
+        if machine.cancel.as_mut().is_some_and(|cancel| cancel()) {
+            return Err(Error::Cancelled);
+        }
         *budget = budget.checked_sub(1).ok_or(Error::Quota)?;
         let opcode = byte(code, pc)?;
         machine.limits.allows(opcode)?;
@@ -1317,6 +1327,10 @@ mod tests {
 
     /// Run one package's first method, which is what the applet entry point is.
     fn execute_package(package: &Package) -> Result<Outcome> {
+        execute_package_with_cancel(package, &mut || false)
+    }
+
+    fn execute_package_with_cancel(package: &Package, cancel: &mut dyn FnMut() -> bool) -> Result<Outcome> {
         let bytes = package.build();
         let file = LoadFile::parse(&bytes)?;
         let linked = Linked::new(&file)?;
@@ -1334,7 +1348,7 @@ mod tests {
             1,
             Limits::IMPLEMENTED,
             Jcre::new(0, 0),
-        );
+        ).with_cancel(cancel);
         let mut words = vec![0u16; 256];
         let mut tags = vec![0u8; 32];
         let mut arena = Arena {
@@ -2039,5 +2053,12 @@ mod tests {
         // goto to itself, which without a budget would never return.
         let code = [op::GOTO, 0, op::RETURN];
         assert_eq!(execute(&code, 0), Err(Error::Quota));
+        let package = Package { code: code.to_vec(), nargs: 0, ..Package::default() };
+        let mut polls = 0;
+        assert_eq!(execute_package_with_cancel(&package, &mut || {
+            polls += 1;
+            polls == 3
+        }), Err(Error::Cancelled));
+        assert_eq!(polls, 3);
     }
 }

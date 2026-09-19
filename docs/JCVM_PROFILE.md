@@ -31,6 +31,13 @@ staging. MC04 uses this receiver today; JCVM still needs authenticated activatio
 the durable management adapter. RAM and flash staging accept compile-time limits,
 so the MC04 16 KiB bound does not constrain a future JCVM profile.
 
+Installation, selection, and processing expose cancellation callbacks, checked before
+execution and at each instruction boundary. Cancellation escapes as an engine error;
+an applet cannot catch it or turn it into a successful response. Native calls finish
+before the next poll. The durable adapter must restore committed state after an engine
+error and check cancellation again before committing. Cancellation itself does not
+roll back mutations.
+
 ## What holds this claim up
 
 One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, with its MIT notice, the applet revision it was built from and the digests of both the CAP and the block. Twelve PIV commands and their expected status words are committed beside it. `scripts/piv_vector_acceptance.py` replays them with no argument, and the checkpoint gate and CI both run it.

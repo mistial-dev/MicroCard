@@ -35,6 +35,8 @@ pub enum Error {
     Unsupported,
     /// Verifying or running it needs more memory than the card offered.
     Quota,
+    /// Transport cancellation, outside the applet's exception mechanism.
+    Cancelled,
     /// A word was used as the wrong kind of value, such as a number as a reference.
     Type,
     /// An arithmetic operation the language defines as a thrown exception, such as a
