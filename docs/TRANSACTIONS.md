@@ -4,8 +4,11 @@
 
 The Rust command dispatcher executes assembly processing against staged records, keys,
 and credentials for its owning domain. It borrows immutable package metadata and leaves
-other domains untouched. Lifecycle hooks and management still copy the complete state;
-removing those copies remains release work. Successful execution journals the candidate
+other domains untouched. Selection stages at most the old and new domains, reusing
+one stage when both callbacks share a domain. Both callbacks commit together;
+failure preserves the previous selection and live fields. Other management lifecycle
+hooks still copy the complete state; removing those copies remains release work.
+Successful execution journals the candidate
 before publishing it. A journal error restores live mutable fields; after an uncertain
 write, reboot recovery may select either complete committed generation, never a partial
 mixture. Credential retry floors are the deliberate exception to application rollback.

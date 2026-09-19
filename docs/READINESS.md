@@ -68,11 +68,16 @@ CBOR removes device JSON parsing and canonical re-encoding. The snapshot migrati
 
 MC04 invocation and pending transactions now stage only the owning domain's mutable
 records, keys, and credentials. Retry-floor commits stage only credentials. Selection
-and management still need conversion. Against `cadef33`, the same 21-invocation
+now stages at most two affected domains; management still needs conversion. Against `cadef33`, the same 21-invocation
 credential acceptance workload reduces invocation peak host allocation from 41,310 to
 39,473 bytes and allocation traffic by 44,681 bytes, with unchanged live bytes.
 Overall workload peak falls from 41,310 to 40,496 bytes. Development firmware text
 increases by 1,236 bytes. These measurements do not establish a smaller device heap.
+The subsequent selection conversion reduces allocation traffic by 5,857 bytes over
+the same workload's three selections against `a4e70aa`, with unchanged peak/live
+heap and 668 additional development text bytes. Callback ordering, cancellation,
+cross-domain rollback, failed persistence, and reboot are covered in one lifecycle
+test. Host timing samples do not establish a latency improvement.
 
 ## Crypto replacement measurements
 

@@ -1726,6 +1726,55 @@ fn selected_identity_buffers_are_reused_across_processing() {
 }
 
 #[test]
+fn selection_callbacks_share_staging_and_roll_back_both_domains() {
+    let mut card = card();
+    for (name, aid) in [("first", "F04D431001"), ("second", "F04D431002")] {
+        let incarnation = create(&mut card, name);
+        let raw = counter_package(name, incarnation, 1, 7);
+        let view = PackageView::verify(&raw).unwrap();
+        let mut manifest = view.manifest.clone();
+        manifest.entry_points[0].aid = aid.into();
+        manifest.entry_points[0].select = Some(1);
+        manifest.entry_points[0].deselect = Some(1);
+        load(&mut card, &signed_compiled_package(&manifest, view.image, 7)).unwrap();
+        card.manage(command(0xec, &management_names_wire(name, aid).unwrap())).unwrap();
+    }
+    card.select("F04D431001").unwrap();
+    card.select("F04D431001").unwrap();
+    assert_eq!(card.state.domains["first"].store.get(&1), Some(&3));
+
+    // The old callback succeeds before the target overflows. Neither write publishes.
+    let mut next = card.state.try_clone().unwrap();
+    next.domains.get_mut("second").unwrap().store.insert(1, i32::MAX).unwrap();
+    card.commit(next).unwrap();
+    let before = card.state.encode_snapshot().unwrap().to_vec();
+    assert!(card.select("F04D431002").is_err());
+    assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
+    assert_eq!(card.selected.as_ref().unwrap().2, "F04D431001");
+
+    let mut next = card.state.try_clone().unwrap();
+    next.domains.get_mut("second").unwrap().store.insert(1, 0).unwrap();
+    card.commit(next).unwrap();
+    let before = card.state.encode_snapshot().unwrap().to_vec();
+    card.journal.flash_mut().fail_after = Some(0);
+    assert_eq!(card.select("F04D431002"), Err(Error::Storage));
+    card.journal.flash_mut().fail_after = None;
+    assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
+    assert_eq!(card.selected.as_ref().unwrap().2, "F04D431001");
+    assert_eq!(card.select_with_cancel("F04D431002", &mut || true), Err(Error::Cancelled));
+    assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
+
+    card.select("F04D431002").unwrap();
+    assert_eq!(card.state.domains["first"].store.get(&1), Some(&4));
+    assert_eq!(card.state.domains["second"].store.get(&1), Some(&1));
+    card.select_isd_with_cancel(&mut || false).unwrap();
+    assert!(card.selected.is_none());
+    let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    assert_eq!(reopened.state.domains["first"].store.get(&1), Some(&4));
+    assert_eq!(reopened.state.domains["second"].store.get(&1), Some(&2));
+}
+
+#[test]
 fn signed_multi_command_transactions_commit_abort_and_expire() {
     let mut card = card();
     let incarnation = create(&mut card, "transaction");

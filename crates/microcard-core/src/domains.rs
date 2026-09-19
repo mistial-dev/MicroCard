@@ -17,7 +17,7 @@ pub use crate::hal::RuntimePlatform as Platform;
 mod snapshot;
 mod engine;
 mod application;
-use application::{ApplicationView, StagedApplication};
+use application::{ApplicationChanges, ApplicationView, StagedApplication};
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
 const MAX_SSDS: usize = 8;
@@ -2132,10 +2132,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 .ok_or(Error::Missing)?
                 .deselect;
             if let Some(entry) = deselect {
-                let mut next = self.state.try_clone()?;
-                let next_domain = next.domains.get_mut(id).ok_or(Error::Domain)?;
-                run_context_with_cancel(
-                    next_domain,
+                let mut next = ApplicationChanges::new();
+                run_application_with_metrics_and_cancel(
+                    next.view(domain)?,
                     &units[0].package,
                     Some(&units),
                     entry,
@@ -2146,7 +2145,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     &mut self.platform,
                     should_cancel,
                 )?;
-                self.commit(next)?;
+                self.commit_application_changes(next)?;
             }
             Ok(())
         })();
@@ -2967,7 +2966,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     .find(|entry| entry.aid == *old_aid)
                     .ok_or(Error::Missing)?
                     .deselect;
-                Ok(Some((fallible_string(id)?, units, entry)))
+                Ok(Some((domain, units, entry)))
             })
             .transpose()?
             .flatten();
@@ -2992,11 +2991,10 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             domain.incarnation,
             fallible_string(aid)?,
         );
-        let mut next = self.state.try_clone()?;
-        if let Some((old_id, old_units, Some(old_entry))) = old {
-            let old_domain = next.domains.get_mut(&old_id).ok_or(Error::Domain)?;
-            run_context_with_cancel(
-                old_domain,
+        let mut next = ApplicationChanges::new();
+        if let Some((old_domain, old_units, Some(old_entry))) = old {
+            run_application_with_metrics_and_cancel(
+                next.view(old_domain)?,
                 &old_units[0].package,
                 Some(&old_units),
                 old_entry,
@@ -3009,9 +3007,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             )?;
         }
         if let Some(entry) = entry {
-            let domain = next.domains.get_mut(id).ok_or(Error::Domain)?;
-            run_context_with_cancel(
-                domain,
+            run_application_with_metrics_and_cancel(
+                next.view(domain)?,
                 &units[0].package,
                 Some(&units),
                 entry,
@@ -3023,7 +3020,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 should_cancel,
             )?;
         }
-        self.commit(next)?;
+        self.commit_application_changes(next)?;
         self.selected = Some(selected);
         Ok(())
     }
@@ -3273,6 +3270,20 @@ fn run_context_with_metrics_and_cancel(
     platform: &mut impl Platform,
     should_cancel: &mut dyn FnMut() -> bool,
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
+    run_application_with_metrics_and_cancel(
+        d.application_view(), p, units, entry, input, platform, should_cancel,
+    )
+}
+
+fn run_application_with_metrics_and_cancel(
+    d: ApplicationView<'_>,
+    p: &impl PackageData,
+    units: Option<&[ExecutionUnit]>,
+    entry: u16,
+    input: InvocationInput<'_>,
+    platform: &mut impl Platform,
+    should_cancel: &mut dyn FnMut() -> bool,
+) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut retry_floor = CredentialRetryFloors::default();
     let mut transaction = TransactionDisposition::Inactive;
     let mut control = InvocationControl {
@@ -3281,7 +3292,7 @@ fn run_context_with_metrics_and_cancel(
         transaction: &mut transaction,
     };
     let result =
-        run_context_with_metrics_and_retry_floor(d, p, units, entry, input, platform, &mut control);
+        run_application_with_metrics_and_retry_floor(d, p, units, entry, input, platform, &mut control);
     if transaction != TransactionDisposition::Inactive {
         return Err(Error::Unauthorized);
     }
@@ -3304,20 +3315,6 @@ fn managed_response_buffer() -> Result<Vec<u8>> {
         .try_reserve_exact(MAX_MANAGED_RESPONSE_WITH_STATUS)
         .map_err(|_| Error::Quota)?;
     Ok(response)
-}
-
-fn run_context_with_metrics_and_retry_floor(
-    d: &mut Domain,
-    p: &impl PackageData,
-    units: Option<&[ExecutionUnit]>,
-    entry: u16,
-    input: InvocationInput<'_>,
-    platform: &mut impl Platform,
-    control: &mut InvocationControl<'_>,
-) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
-    run_application_with_metrics_and_retry_floor(
-        d.application_view(), p, units, entry, input, platform, control,
-    )
 }
 
 fn run_application_with_metrics_and_retry_floor(

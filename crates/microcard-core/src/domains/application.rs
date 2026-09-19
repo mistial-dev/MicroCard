@@ -32,6 +32,32 @@ pub(super) struct StagedApplication {
     credentials: crate::credential_store::CredentialStore,
 }
 
+/// A selection can run callbacks in at most the old and new domains.
+pub(super) struct ApplicationChanges([Option<(RegistryAid, StagedApplication)>; 2]);
+
+impl ApplicationChanges {
+    pub(super) fn new() -> Self {
+        Self([None, None])
+    }
+
+    pub(super) fn view<'a>(&'a mut self, domain: &'a Domain) -> Result<ApplicationView<'a>> {
+        let index = self
+            .0
+            .iter()
+            .position(|entry| {
+                entry
+                    .as_ref()
+                    .is_some_and(|(aid, _)| *aid == domain.registry_aid)
+            })
+            .or_else(|| self.0.iter().position(Option::is_none))
+            .ok_or(Error::Quota)?;
+        if self.0[index].is_none() {
+            self.0[index] = Some((domain.registry_aid, StagedApplication::new(domain)?));
+        }
+        Ok(self.0[index].as_mut().ok_or(Error::Storage)?.1.view(domain))
+    }
+}
+
 impl StagedApplication {
     pub(super) fn new(domain: &Domain) -> Result<Self> {
         let context = &mut crate::fallible_clone::CloneContext::new();
@@ -95,18 +121,34 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
     pub(super) fn commit_application(
         &mut self,
         aid: RegistryAid,
-        mut next: StagedApplication,
+        next: StagedApplication,
     ) -> Result<()> {
-        let index = self.application_domain_index(aid)?;
-        let domain = &mut self.state.domains.0[index].1;
-        if next.unchanged(domain) {
+        self.commit_application_changes(ApplicationChanges([Some((aid, next)), None]))
+    }
+
+    pub(super) fn commit_application_changes(
+        &mut self,
+        mut changes: ApplicationChanges,
+    ) -> Result<()> {
+        let mut indexes = [0; 2];
+        let mut changed = false;
+        // Resolve every owner before swapping anything, so validation cannot interrupt undo.
+        for (index, (aid, next)) in indexes.iter_mut().zip(changes.0.iter().flatten()) {
+            *index = self.application_domain_index(*aid)?;
+            changed |= !next.unchanged(&self.state.domains.0[*index].1);
+        }
+        if !changed {
             return Ok(());
         }
         // Keep the previous mutable fields as undo data until the journal succeeds.
-        next.swap(domain);
+        for (index, (_, next)) in indexes.iter().zip(changes.0.iter_mut().flatten()) {
+            next.swap(&mut self.state.domains.0[*index].1);
+        }
         let result = self.commit_application_snapshot();
         if result.is_err() {
-            next.swap(&mut self.state.domains.0[index].1);
+            for (index, (_, next)) in indexes.iter().zip(changes.0.iter_mut().flatten()) {
+                next.swap(&mut self.state.domains.0[*index].1);
+            }
         }
         result
     }
