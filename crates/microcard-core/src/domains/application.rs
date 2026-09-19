@@ -153,8 +153,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         aid: RegistryAid,
         retry_floor: &CredentialRetryFloors,
     ) -> Result<()> {
-        let index = self.application_domain_index(aid)?;
-        let domain = &mut self.state.domains.0[index].1;
+        let owner = lifecycle::Owner::resolve(&self.state, aid)?;
+        let domain = owner.domain(&mut self.state);
         let mut next = domain
             .credentials
             .try_clone_with(&mut crate::fallible_clone::CloneContext::new())?;
@@ -164,7 +164,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         core::mem::swap(&mut domain.credentials, &mut next);
         let result = self.commit_metadata_snapshot();
         if result.is_err() {
-            core::mem::swap(&mut self.state.domains.0[index].1.credentials, &mut next);
+            core::mem::swap(&mut owner.domain(&mut self.state).credentials, &mut next);
         }
         result
     }

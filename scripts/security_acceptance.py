@@ -48,7 +48,7 @@ def main():
     dependency = consumer["dependencies"][0]
     assert dependency["assembly"] == "MicroCard.Security"
     assert dependency["scope"] == 1 and bytes(dependency["signer"]) == ISD_PUBLIC
-    assert consumer["capabilities"] == [2, 11, 12, 13, 23]
+    assert consumer["capabilities"] == [2, 7, 8, 11, 12, 13, 23]
     assert ISD_PUBLIC != SSD_PUBLIC
 
     with tempfile.TemporaryDirectory() as directory_name:
@@ -142,11 +142,38 @@ def main():
         client.command(0xA4, AID)
         assert client.command(0x10, b"\x07") == b"\x00"
         assert client.command(0x10, b"\x01" + b"2468") == b"\x01"
+        # All lifecycle routes share the same retry handling. Ordinary writes roll back.
+        for phase in (1, 2, 4):
+            client.command(0x10, bytes([9, phase]))
+            if phase == 4:
+                client.command(0xEE, management_names("security-test", "F04D4307C0"), status=0x6985)
+            else:
+                client.command(0xA4, AID, status=0x6985)
+            assert client.command(0x10, b"\x0a") == bytes([phase])
+            assert client.command(0x10, b"\x02") == b"\x02"
+            client.command(0x10, b"\x09\x00")
+            client.close()
+            client = Client(management, state)
+            client.connect()
+            client.command(0xA4, AID)
+            assert client.command(0x10, b"\x02") == b"\x02"
+            assert client.command(0x10, b"\x01" + b"2468") == b"\x01"
+
+        client.command(0x10, b"\x09\x03")
+        client.command(0xEE, management_names("security-test", "F04D4307C0"))
+        for _ in range(3):
+            client.command(0xEC, management_names("security-test", "F04D4307C0"), status=0x6985)
+        # Once blocked, this fixture's callback returns without another comparison.
+        client.command(0xEC, management_names("security-test", "F04D4307C0"))
+        client.command(0xA4, AID)
+        assert client.command(0x10, b"\x02") == b"\x00"
+        assert client.command(0x10, b"\x0a") == b"\x03"
+        client.command(0x10, b"\x09\x00")
         domains = {item["identifier"]: item for item in inventory(client)}
         assert domains["security-test"]["assemblies"] == 1
         assert bytes.fromhex(domains["security-test"]["signing_public_key"]) == SSD_PUBLIC
         client.close()
-    print("PASS: signed MicroCard.Security facade, durable retries and reboot")
+    print("PASS: signed MicroCard.Security facade, durable invocation/lifecycle retries and reboot")
 
 
 if __name__ == "__main__":

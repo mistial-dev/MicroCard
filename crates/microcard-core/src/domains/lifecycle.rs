@@ -1,6 +1,35 @@
 //! Package and instance mutations with bounded rollback before metadata commits.
 use super::*;
 
+#[derive(Default)]
+pub(super) struct LifecycleRetries([Option<(RegistryAid, CredentialRetryFloors)>; 2]);
+
+pub(super) struct LifecycleControl<'a> {
+    pub retry_floor: &'a mut CredentialRetryFloors,
+    pub should_cancel: &'a mut dyn FnMut() -> bool,
+}
+
+impl LifecycleRetries {
+    pub(super) fn control<'a>(
+        &'a mut self,
+        aid: RegistryAid,
+        should_cancel: &'a mut dyn FnMut() -> bool,
+    ) -> Result<LifecycleControl<'a>> {
+        let index = self
+            .0
+            .iter()
+            .position(|entry| entry.as_ref().is_some_and(|(owner, _)| *owner == aid))
+            .or_else(|| self.0.iter().position(Option::is_none))
+            .ok_or(Error::Quota)?;
+        let (_, retry_floor) =
+            self.0[index].get_or_insert_with(|| (aid, CredentialRetryFloors::default()));
+        Ok(LifecycleControl {
+            retry_floor,
+            should_cancel,
+        })
+    }
+}
+
 pub(super) struct PackageActivation {
     pub name: Rc<str>,
     pub metadata: Rc<StoredPackage>,
@@ -43,12 +72,12 @@ impl<V> MapUndo<V> {
 }
 
 #[derive(Clone, Copy)]
-enum Owner {
+pub(super) enum Owner {
     Isd,
     Ssd(usize),
 }
 impl Owner {
-    fn resolve(state: &State, aid: RegistryAid) -> Result<Self> {
+    pub(super) fn resolve(state: &State, aid: RegistryAid) -> Result<Self> {
         if state.isd.registry_aid == aid {
             return Ok(Self::Isd);
         }
@@ -59,7 +88,7 @@ impl Owner {
             .map(Self::Ssd)
             .ok_or(Error::Domain)
     }
-    fn domain(self, state: &mut State) -> &mut Domain {
+    pub(super) fn domain(self, state: &mut State) -> &mut Domain {
         match self {
             Self::Isd => &mut state.isd,
             Self::Ssd(index) => &mut state.domains.0[index].1,
@@ -68,6 +97,22 @@ impl Owner {
 }
 
 impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+    pub(super) fn with_lifecycle_retry_floors<T>(
+        &mut self,
+        callback: impl FnOnce(&mut Self, &mut LifecycleRetries) -> Result<T>,
+    ) -> Result<T> {
+        let mut retries = LifecycleRetries::default();
+        let result = callback(self, &mut retries);
+        if result.is_err() {
+            for (owner, floor) in retries.0.iter().flatten() {
+                if !floor.is_empty() {
+                    self.commit_credential_retry_floor(*owner, floor)?;
+                }
+            }
+        }
+        result
+    }
+
     pub(super) fn activate_package(
         &mut self,
         candidate: PackageActivation,
@@ -243,6 +288,18 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         aid: &str,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.with_lifecycle_retry_floors(|card, retries| {
+            card.uninstall_instance_with_retries(id, aid, cancel, retries)
+        })
+    }
+
+    fn uninstall_instance_with_retries(
+        &mut self,
+        id: &str,
+        aid: &str,
+        cancel: &mut dyn FnMut() -> bool,
+        retries: &mut LifecycleRetries,
+    ) -> Result<()> {
         if cancel() {
             return Err(Error::Cancelled);
         }
@@ -264,7 +321,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let mut application = None;
         if let Some(method) = entry.uninstall {
             let mut staged = StagedApplication::new(source)?;
-            run_application_with_metrics_and_cancel(
+            run_lifecycle(
                 staged.view(source),
                 package,
                 Some(&units),
@@ -274,7 +331,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     level: 0,
                 },
                 &mut self.platform,
-                cancel,
+                &mut retries.control(owner, cancel)?,
             )?;
             application = Some(staged);
         }

@@ -2004,6 +2004,16 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         &mut self,
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.with_lifecycle_retry_floors(|card, retries| {
+            card.select_isd_with_retries(should_cancel, retries)
+        })
+    }
+
+    fn select_isd_with_retries(
+        &mut self,
+        should_cancel: &mut dyn FnMut() -> bool,
+        retries: &mut lifecycle::LifecycleRetries,
+    ) -> Result<()> {
         self.abort_transaction();
         let Some(selected) = self.selected.take() else {
             return Ok(());
@@ -2028,7 +2038,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 .deselect;
             if let Some(entry) = deselect {
                 let mut next = ApplicationChanges::new();
-                run_application_with_metrics_and_cancel(
+                run_lifecycle(
                     next.view(domain)?,
                     &units[0].package,
                     Some(&units),
@@ -2038,7 +2048,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                         level: 0,
                     },
                     &mut self.platform,
-                    should_cancel,
+                    &mut retries.control(domain.registry_aid, should_cancel)?,
                 )?;
                 self.commit_application_changes(next)?;
             }
@@ -2232,6 +2242,18 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         aid: &str,
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.with_lifecycle_retry_floors(|card, retries| {
+            card.install_instance_with_retries(load_aid, aid, should_cancel, retries)
+        })
+    }
+
+    fn install_instance_with_retries(
+        &mut self,
+        load_aid: RegistryAid,
+        aid: &str,
+        should_cancel: &mut dyn FnMut() -> bool,
+        retries: &mut lifecycle::LifecycleRetries,
+    ) -> Result<()> {
         if should_cancel() { return Err(Error::Cancelled); }
         let (aid_bytes, aid_len) = decode_aid(aid)?;
         if self
@@ -2285,9 +2307,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let mut application = None;
         if let Some(method) = entry.install {
             let mut staged = StagedApplication::new(source)?;
-            run_application_with_metrics_and_cancel(
+            run_lifecycle(
                 staged.view(source), package, Some(&units), method,
-                InvocationInput { data: &[], level: 0 }, &mut self.platform, should_cancel,
+                InvocationInput { data: &[], level: 0 }, &mut self.platform, &mut retries.control(source.registry_aid, should_cancel)?,
             )?;
             application = Some(staged);
         }
@@ -2632,6 +2654,17 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         aid: &str,
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        self.with_lifecycle_retry_floors(|card, retries| {
+            card.select_with_retries(aid, should_cancel, retries)
+        })
+    }
+
+    fn select_with_retries(
+        &mut self,
+        aid: &str,
+        should_cancel: &mut dyn FnMut() -> bool,
+        retries: &mut lifecycle::LifecycleRetries,
+    ) -> Result<()> {
         self.abort_transaction();
         let old = self
             .selected
@@ -2678,7 +2711,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         );
         let mut next = ApplicationChanges::new();
         if let Some((old_domain, old_units, Some(old_entry))) = old {
-            run_application_with_metrics_and_cancel(
+            run_lifecycle(
                 next.view(old_domain)?,
                 &old_units[0].package,
                 Some(&old_units),
@@ -2688,11 +2721,11 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     level: 0,
                 },
                 &mut self.platform,
-                should_cancel,
+                &mut retries.control(old_domain.registry_aid, should_cancel)?,
             )?;
         }
         if let Some(entry) = entry {
-            run_application_with_metrics_and_cancel(
+            run_lifecycle(
                 next.view(domain)?,
                 &units[0].package,
                 Some(&units),
@@ -2702,7 +2735,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     level: 0,
                 },
                 &mut self.platform,
-                should_cancel,
+                &mut retries.control(domain.registry_aid, should_cancel)?,
             )?;
         }
         self.commit_application_changes(next)?;
@@ -2924,34 +2957,38 @@ fn run_context(
     platform: &mut impl Platform,
     level: u8,
 ) -> Result<Vec<u8>> {
-    run_application_with_metrics_and_cancel(
+    let mut retry_floor = CredentialRetryFloors::default();
+    run_lifecycle(
         d.application_view(),
         p,
         units,
         entry,
         InvocationInput { data, level },
         platform,
-        &mut || false,
+        &mut lifecycle::LifecycleControl { retry_floor: &mut retry_floor, should_cancel: &mut || false },
     ).map(|(output, _)| output)
 }
-fn run_application_with_metrics_and_cancel(
+fn run_lifecycle(
     d: ApplicationView<'_>,
     p: &impl PackageData,
     units: Option<&[ExecutionUnit]>,
     entry: u16,
     input: InvocationInput<'_>,
     platform: &mut impl Platform,
-    should_cancel: &mut dyn FnMut() -> bool,
+    lifecycle: &mut lifecycle::LifecycleControl<'_>,
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut retry_floor = CredentialRetryFloors::default();
     let mut transaction = TransactionDisposition::Inactive;
     let mut control = InvocationControl {
         retry_floor: &mut retry_floor,
-        should_cancel,
+        should_cancel: lifecycle.should_cancel,
         transaction: &mut transaction,
     };
     let result =
         run_application_with_metrics_and_retry_floor(d, p, units, entry, input, platform, &mut control);
+    for (slot, remaining) in retry_floor.iter() {
+        lifecycle.retry_floor.record(slot, remaining)?;
+    }
     if transaction != TransactionDisposition::Inactive {
         return Err(Error::Unauthorized);
     }

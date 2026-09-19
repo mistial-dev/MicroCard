@@ -106,6 +106,12 @@ both first activation and replacement, live rollback, retryable upload bytes, an
 reboot recovery. Allocation-failure coverage targets the remaining application staging
 instead of the removed state-clone implementation. Host timings do not show a latency
 improvement, and these results do not establish a smaller board heap.
+Lifecycle retry handling now shares the invocation rule for consumed credential
+attempts. Previously, failed lifecycle callbacks discarded that information. The
+existing security acceptance flow covers failed install, uninstall, select, and
+deselect callbacks, ordinary-write rollback, and retry counts across reboot. The fix
+adds 984 development text bytes against `9ee4205`; it is a correctness change, not a
+size optimization.
 
 ## Crypto replacement measurements
 

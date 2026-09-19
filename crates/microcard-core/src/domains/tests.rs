@@ -3007,7 +3007,7 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
 }
 
 #[test]
-fn credential_retry_floor_is_committed_and_recovers_after_invocation_failure() {
+fn lifecycle_retry_floors_accumulate_without_restoring_consumed_attempts() {
     let mut card = card();
     let incarnation = create(&mut card, "credential-floor");
     load(
@@ -3029,13 +3029,19 @@ fn credential_retry_floor_is_committed_and_recovers_after_invocation_failure() {
             &mut TestPlatform(0x59),
         )
         .unwrap();
+    let isd_incarnation = next.isd.incarnation;
+    next.isd.credentials.create(isd_incarnation, 4, b"1234", b"12345678", (3, 2), &mut TestPlatform(0x61)).unwrap();
+    let isd_aid = next.isd.registry_aid;
     card.commit(next).unwrap();
 
-    let mut floor = CredentialRetryFloors::default();
-    floor.record(4, (2, 1)).unwrap();
     let domain_registry_aid = card.state.domains["credential-floor"].registry_aid;
-    card.commit_credential_retry_floor(domain_registry_aid, &floor)
-        .unwrap();
+    let result: Result<()> = card.with_lifecycle_retry_floors(|_, retries| {
+        retries.control(domain_registry_aid, &mut || false)?.retry_floor.record(4, (2, 2))?;
+        retries.control(domain_registry_aid, &mut || false)?.retry_floor.record(4, (3, 1))?;
+        retries.control(isd_aid, &mut || false)?.retry_floor.record(4, (1, 2))?;
+        Err(Error::Cancelled)
+    });
+    assert_eq!(result, Err(Error::Cancelled));
     assert_eq!(
         card.state.domains["credential-floor"]
             .credentials
@@ -3044,6 +3050,7 @@ fn credential_retry_floor_is_committed_and_recovers_after_invocation_failure() {
         (2, 1)
     );
     let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    assert_eq!(reopened.state.isd.credentials.retries(isd_incarnation, 4).unwrap(), (1, 2));
     assert_eq!(
         reopened.state.domains["credential-floor"]
             .credentials

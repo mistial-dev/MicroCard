@@ -19,6 +19,10 @@ Successful execution journals the candidate
 before publishing it. A journal error restores live mutable fields; after an uncertain
 write, reboot recovery may select either complete committed generation, never a partial
 mixture. Credential retry floors are the deliberate exception to application rollback.
+Install, uninstall, select, and deselect share this rule: callback failure or cancellation
+preserves consumed retries after undoing ordinary changes. Selection accumulates retry
+floors for at most two domains, taking the minimum remaining count across callbacks.
+Failure to persist those counts returns an error rather than a successful response.
 
 APDU response construction is buffered until execution returns and may occur in a transaction. Irreversible hardware output cannot be rolled back. The analyzer walks local calls and constructors and reports `MCA0008` when an annotated method or a method reaching explicit transaction controls can also reach `Hardware.Write`. The preprocessor independently recomputes both effects from compiled method bodies. MC04 signs the annotation effect in each method body header, and the Rust verifier propagates irreversible-output effects over the complete verified local and cross-assembly call graph before activation, recovery or execution. Runtime sequencing checks remain authoritative for a validly signed image that bypassed both host checks.
 

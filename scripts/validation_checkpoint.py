@@ -149,7 +149,7 @@ def run_checkpoint():
  security_manifest=json.loads((ROOT/'work/security.json').read_text())
  assert security_manifest['capabilities']==[40,41,42,43,44,45] and security_manifest['entry_points']==[]
  security_consumer=json.loads((ROOT/'work/security-consumer.json').read_text())
- assert security_consumer['capabilities']==[2,11,12,13,23] and security_consumer['dependencies'][0]['assembly']=='MicroCard.Security'
+ assert security_consumer['capabilities']==[2,7,8,11,12,13,23] and security_consumer['dependencies'][0]['assembly']=='MicroCard.Security'
  cryptography_consumer=json.loads((ROOT/'work/cryptography-consumer.json').read_text())
  assert cryptography_consumer['capabilities']==[2,11,12,13,20,50] and cryptography_consumer['dependencies'][0]['assembly']=='MicroCard.Cryptography'
  iso_consumer=json.loads((ROOT/'work/iso7816-consumer.json').read_text())
