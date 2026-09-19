@@ -13,8 +13,8 @@ This page is the authoritative list of supported behavior and release blockers.
   package rejection, and persistence. See [the execution profile](PROFILE.md).
 - **JCVM:** the supported CAP corpus installs and processes APDUs in the simulator.
   The shared SCP03 path supports authenticated loading, installation, selection,
-  deletion, and recovery through dedicated image and heap storage. SHA-256 and
-  entropy use shared providers; unsupported crypto factories throw Java Card errors.
+  deletion, and recovery through dedicated image and heap storage. SHA-256, entropy, and AES-128 ECB
+  use shared providers; unsupported crypto factories throw Java Card errors.
   See [the applet profile and its limits](JCVM_PROFILE.md).
 - **Shared platform:** APDU transport, SCP03, cancellation, quotas, authenticated
   persistence, image activation, and hardware-provider contracts. Board gates reject

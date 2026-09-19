@@ -185,6 +185,29 @@ impl Card {
                             |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);
                         let material = word(2);
                         valid_reference(material)?;
+                        if class.id == ClassId::Cipher {
+                            let pending = word(5);
+                            valid_reference(pending)?;
+                            if word(0) != 14 || pending == 0 || word(3) > 1
+                                || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2))) {
+                                return Err(Error::Format);
+                            }
+                            let header = &saved.heap[pending as usize..pending as usize + heap::HEADER];
+                            if u16::from_be_bytes([header[2], header[3]]) != 16
+                                || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4) {
+                                return Err(Error::Format);
+                            }
+                            if material != 0 {
+                                let start = material as usize;
+                                let key_class = u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
+                                if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::AESKey)
+                                    || saved.heap[start + 4] != heap::KIND_OBJECT
+                                    || u16::from_be_bytes([saved.heap[start + 2], saved.heap[start + 3]]) != 6
+                                    || saved.heap.get(start + heap::HEADER + 2..start + heap::HEADER + 4) != Some(&[0, 128]) {
+                                    return Err(Error::Type);
+                                }
+                            }
+                        }
                         let pin = class.id == ClassId::OwnerPIN;
                         if material != 0 && (pin || class.id.is_key()) {
                             let header =

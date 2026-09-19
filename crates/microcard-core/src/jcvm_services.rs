@@ -12,6 +12,23 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         matches!(algorithm, 1 | 2)
     }
 
+    fn supports_cipher(&self, algorithm: u8) -> bool {
+        algorithm == 14 // ALG_AES_BLOCK_128_ECB_NOPAD
+    }
+
+    fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
+        let result = if encrypt {
+            self.0.aes128_encrypt_block_in_place(key, block)
+        } else {
+            self.0.aes128_decrypt_block_in_place(key, block)
+        };
+        if result.is_err() {
+            block.fill(0);
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
     fn random(&mut self, output: &mut [u8]) -> Result<()> {
         output.fill(0);
         if self.0.fill_entropy(output).is_err() {
@@ -49,6 +66,16 @@ mod tests {
         fail: bool,
     }
     impl CryptoProvider for Provider {
+        fn aes128_encrypt_block_in_place(&mut self, key: &[u8; 16], block: &mut [u8; 16]) -> crate::Result<()> {
+            self.calls += 1;
+            if self.fail { block.fill(0x42); return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.aes128_encrypt_block_in_place(key, block)
+        }
+        fn aes128_decrypt_block_in_place(&mut self, key: &[u8; 16], block: &mut [u8; 16]) -> crate::Result<()> {
+            self.calls += 1;
+            if self.fail { block.fill(0x42); return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.aes128_decrypt_block_in_place(key, block)
+        }
         fn sha256_into(&mut self, _: &[u8], output: &mut [u8; 32]) -> crate::Result<()> {
             self.calls += 1;
             output.fill(0x42);
@@ -100,5 +127,18 @@ mod tests {
         assert_eq!(host.random(&mut output), Err(Error::Unauthorized));
         assert_eq!(output, [0; 64]);
         assert_eq!(host.0.calls, 4);
+        host.0.fail = false;
+        let mut block = [0; 16];
+        host.aes128_block(&[0; 16], &mut block, true).unwrap();
+        assert_eq!(block, [0x66, 0xe9, 0x4b, 0xd4, 0xef, 0x8a, 0x2c, 0x3b,
+            0x88, 0x4c, 0xfa, 0x59, 0xca, 0x34, 0x2b, 0x2e]);
+        host.aes128_block(&[0; 16], &mut block, false).unwrap();
+        assert_eq!(block, [0; 16]);
+        host.0.fail = true;
+        for encrypt in [true, false] {
+            assert_eq!(host.aes128_block(&[0; 16], &mut block, encrypt), Err(Error::Unauthorized));
+            assert_eq!(block, [0; 16]);
+        }
+        assert_eq!(host.0.calls, 8);
     }
 }

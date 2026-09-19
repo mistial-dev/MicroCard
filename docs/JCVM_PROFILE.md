@@ -251,8 +251,14 @@ SHA-384 remains only in the engine's explicit test-reference host.
 
 Algorithm factories consult host capabilities. Unsupported algorithms and shared-access
 requests raise [CryptoException.NO_SUCH_ALGORITHM](https://docs.oracle.com/en/java/javacard/3.2/jcapi/api_classic/javacard/security/CryptoException.html).
-Cipher, Signature, and KeyAgreement operations are not wired up, so their factories
-reject requests rather than creating unusable objects. The committed PIV acceptance
+[AES-128 ECB without padding](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacardx/crypto/Cipher.html) (algorithm 14) supports encryption, decryption, split
+`update`/`doFinal` input, and overlapping arrays through the shared provider. It accepts
+128-bit AES keys and modes 1/2; other key sizes, algorithms and IV initialization are
+rejected. Reset clears pending bytes, while the key binding and direction persist.
+Transient-key clearing prevents further operations until the key is initialized again.
+Cipher input consumes one work unit per byte including pending bytes; output uses one
+bounded staging buffer so provider failure cannot publish partial output.
+Signature and KeyAgreement factories still reject requests. The committed PIV acceptance
 still installs, selects, and exercises PIN retry behavior with this restriction.
 
 Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`

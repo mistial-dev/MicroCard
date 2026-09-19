@@ -26,6 +26,8 @@ const MATERIAL: usize = 2;
 const READY: usize = 3;
 /// Field four, tries left on a PIN, or the padding mode of a cipher.
 const COUNTER: usize = 4;
+/// Reset-scoped cipher pending bytes: count followed by at most fifteen bytes.
+const PENDING: usize = 5;
 
 pub(super) fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
     heap.visit_objects(|_, info, payload| {
@@ -90,6 +92,12 @@ pub fn digest_length(algorithm: u8) -> Result<usize> {
     })
 }
 
+fn crypto_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Result<Native> {
+    let exception = super::new_exception(heap, ClassId::CryptoException, context)?;
+    heap.put_word(exception, super::REASON_FIELD, reason)?;
+    Ok(Native::Threw(exception))
+}
+
 /// The pieces are unrelated to each other, which is why they arrive separately rather
 /// than as a struct that would exist only to be passed here.
 #[allow(clippy::too_many_arguments)]
@@ -102,6 +110,7 @@ pub fn call(
     frame: &mut Frame,
     context: heap::Context,
     jcre: &mut Jcre,
+    budget: &mut u32,
 ) -> Result<Native> {
     match (class, method) {
         (ClassId::KeyBuilder, MethodId::buildKey) => {
@@ -322,6 +331,7 @@ pub fn call(
                 Ok(id) if !external => match class {
                     ClassId::MessageDigest => host.supports_digest(id),
                     ClassId::RandomData => host.supports_random(id),
+                    ClassId::Cipher => id == 14 && host.supports_cipher(id),
                     _ => false,
                 },
                 _ => false,
@@ -333,6 +343,10 @@ pub fn call(
             }
             let instance = new_native(heap, class, STATE_WORDS, context)?;
             heap.put_word(instance, KIND, algorithm as u16)?;
+            if class == ClassId::Cipher {
+                let pending = heap.new_transient_array(heap::KIND_BYTE, 16, context, heap::CLEAR_ON_RESET)?;
+                heap.put_word(instance, PENDING, pending)?;
+            }
             frame.push_reference(instance)?;
         }
         (ClassId::KeyPair, MethodId::Constructor) => {
@@ -404,10 +418,85 @@ pub fn call(
             let algorithm = word_field(heap, this, KIND)? as u8;
             frame.push_short(digest_length(algorithm)? as i16)?;
         }
+        (ClassId::Cipher, MethodId::init) => {
+            if signature.init_vector() {
+                let _length = frame.pop_short()?;
+                let _offset = frame.pop_short()?;
+                let _vector = frame.pop_reference()?;
+                frame.pop_short()?;
+                frame.pop_reference()?;
+                frame.pop_reference()?;
+                return crypto_exception(heap, context, 1); // ECB has no IV.
+            }
+            let mode = frame.pop_short()?;
+            let key = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            heap.check_access(key, context)?;
+            if !matches!(mode, 1 | 2)
+                || super::api_class(heap.info(key)?.class).map(|entry| entry.id) != Some(ClassId::AESKey)
+                || word_field(heap, key, SIZE)? != 128 {
+                return crypto_exception(heap, context, 1);
+            }
+            if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2); }
+            let pending = heap.get_word(this, PENDING)?;
+            heap.byte_slice_mut(pending, 0, 16)?.fill(0);
+            heap.put_word(this, MATERIAL, key)?;
+            heap.put_word(this, COUNTER, mode as u16)?;
+            heap.put_word(this, READY, 1)?;
+        }
+        (ClassId::Cipher, MethodId::update | MethodId::doFinal) => {
+            let out_offset = frame.pop_short()?;
+            let output = frame.pop_reference()?;
+            let length = frame.pop_short()?;
+            let offset = frame.pop_short()?;
+            let input = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            if word_field(heap, this, READY)? == 0 { return crypto_exception(heap, context, 4); }
+            let key = heap.get_word(this, MATERIAL)?;
+            heap.check_access(key, context)?;
+            if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2); }
+            heap.check_access(input, context)?;
+            heap.check_access(output, context)?;
+            if length < 0 || offset < 0 || out_offset < 0 { return Err(Error::Bounds); }
+            let pending = heap.get_word(this, PENDING)?;
+            let mut prior = Zeroizing::new([0u8; 16]);
+            prior.copy_from_slice(heap.byte_slice(pending, 0, 16)?);
+            let count = prior[0] as usize;
+            if count > 15 { return Err(Error::Format); }
+            let total = count + length as usize;
+            if method == MethodId::doFinal && !total.is_multiple_of(16) {
+                return crypto_exception(heap, context, 5);
+            }
+            let written = total / 16 * 16;
+            if written > i16::MAX as usize { return Err(Error::Bounds); }
+            heap.byte_slice(output, out_offset as usize, written)?;
+            let message = heap.byte_slice(input, offset as usize, length as usize)?;
+            let material = heap.get_word(key, MATERIAL)?;
+            let prefix = usize::from(symmetric_key_clear_event(word_field(heap, key, KIND)?) != 0);
+            let mut key_bytes = Zeroizing::new([0u8; 16]);
+            key_bytes.copy_from_slice(heap.byte_slice(material, prefix, 16)?);
+            // Stage output only: input may overlap it at any offset. A provider failure
+            // must publish neither partial ciphertext nor updated streaming state.
+            *budget = budget.checked_sub(total as u32).ok_or(Error::Quota)?;
+            let mut result = Zeroizing::new(alloc::vec::Vec::new());
+            result.try_reserve_exact(written).map_err(|_| Error::Quota)?;
+            let byte = |at: usize| if at < count { prior[1 + at] } else { message[at - count] };
+            for start in (0..written).step_by(16) {
+                let mut block = Zeroizing::new([0u8; 16]);
+                for (at, value) in block.iter_mut().enumerate() { *value = byte(start + at); }
+                host.aes128_block(&key_bytes, &mut block, word_field(heap, this, COUNTER)? == 2)?;
+                result.extend_from_slice(&block[..]);
+            }
+            let mut tail = Zeroizing::new([0u8; 16]);
+            tail[0] = (total - written) as u8;
+            for at in written..total { tail[1 + at - written] = byte(at); }
+            heap.byte_slice_mut(output, out_offset as usize, written)?.copy_from_slice(&result);
+            heap.byte_slice_mut(pending, 0, 16)?.copy_from_slice(&tail[..]);
+            frame.push_short(written as i16)?;
+        }
         // An algorithm holder remembers the key and the direction it was given, and the
         // operation itself is the host's to answer.
-        (ClassId::Cipher, MethodId::init)
-        | (ClassId::Signature, MethodId::init)
+        (ClassId::Signature, MethodId::init)
         | (ClassId::KeyAgreement, MethodId::init) => {
             // Both forms end with the mode or the key. The longer one also carries an
             // initialisation vector, which is taken and held with the key.

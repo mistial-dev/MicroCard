@@ -99,8 +99,8 @@ def main():
     text_limits = {
         "software_reference": 186_000, "hardware_release": 212_000,
         "development_debug": 212_000, "usb_ccid": 224_000,
-        "dongle": 224_000, "jcvm_development_debug": 165_000,
-        "jcvm_dongle": 175_000,
+        "dongle": 224_000, "jcvm_development_debug": 167_500,
+        "jcvm_dongle": 177_500,
     }
     for name, result in variants.items():
         result["ceilings"] = {"text_bytes": text_limits[name],

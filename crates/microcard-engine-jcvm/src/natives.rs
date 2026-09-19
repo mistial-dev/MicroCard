@@ -242,6 +242,7 @@ pub fn call_with_budget(
                 frame,
                 context,
                 jcre,
+                budget,
             )?;
             if let Native::Unimplemented = handled {
                 #[cfg(feature = "diagnostics")]
@@ -633,7 +634,7 @@ mod tests {
     fn symmetric_keys_clear_material_and_initialization_with_their_lifetime() {
         let signature = framework(ClassId::KeyBuilder, MethodId::buildKey, true).method.signature;
         let invoke = |class, method, heap: &mut Heap, frame: &mut Frame| {
-            security::call(class, method, signature, heap, &mut crate::host::NoHost, frame, 1, &mut idle()).unwrap()
+            security::call(class, method, signature, heap, &mut crate::host::NoHost, frame, 1, &mut idle(), &mut { u32::MAX }).unwrap()
         };
         for (class, first) in [(ClassId::DESKey, 1), (ClassId::AESKey, 13), (ClassId::HMACKey, 19)] {
             for lifetime in 0..3 {
@@ -692,6 +693,68 @@ mod tests {
     }
 
     #[test]
+    fn aes_cipher_streams_overlapping_buffers_and_preserves_output_on_failure() {
+        struct CipherHost { calls: usize, fail_at: usize }
+        impl crate::host::Host for CipherHost {
+            fn supports_cipher(&self, algorithm: u8) -> bool { algorithm == 14 }
+            fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
+                assert_eq!(key, &[0x11; 16]);
+                assert!(encrypt);
+                self.calls += 1;
+                for byte in block.iter_mut() { *byte ^= 0xaa; }
+                if self.calls == self.fail_at { return Err(Error::Unauthorized); }
+                Ok(())
+            }
+        }
+        fn invoke(class: ClassId, method: MethodId, args: &[(bool, u16)], heap: &mut Heap,
+            frame: &mut Frame, host: &mut CipherHost) -> Result<Native> {
+            for &(reference, value) in args {
+                if reference { frame.push_reference(value)?; } else { frame.push_short(value as i16)?; }
+            }
+            security::call(class, method, framework(class, method, method == MethodId::getInstance).method.signature,
+                heap, host, frame, 1, &mut idle(), &mut { u32::MAX })
+        }
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = CipherHost { calls: 0, fail_at: usize::MAX };
+        let key = new_native(&mut heap, ClassId::AESKey, security::STATE_WORDS, 1).unwrap();
+        heap.put_word(key, 0, 13).unwrap(); // transient reset key
+        heap.put_word(key, 1, 128).unwrap();
+        let data = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
+        heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x11);
+        invoke(ClassId::AESKey, MethodId::setKey, &[(true,key),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke(ClassId::Cipher, MethodId::getInstance, &[(false,14),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        let cipher = frame.pop_reference().unwrap();
+        invoke(ClassId::Cipher, MethodId::init, &[(true,cipher),(true,key),(false,2)], &mut heap, &mut frame, &mut host).unwrap();
+        for (at, byte) in heap.byte_slice_mut(data, 0, 64).unwrap().iter_mut().enumerate() { *byte = at as u8; }
+        invoke(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,0),(false,5),(true,data),(false,8)], &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 0);
+        invoke(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,5),(false,27),(true,data),(false,8)], &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 32);
+        for (at, byte) in heap.byte_slice(data, 8, 32).unwrap().iter().enumerate() { assert_eq!(*byte, at as u8 ^ 0xaa); }
+        assert_eq!(host.calls, 2);
+        let before = heap.byte_slice(data, 0, 64).unwrap().to_vec();
+        for (reference, value) in [(true,cipher),(true,data),(false,0),(false,32),(true,data),(false,0)] {
+            if reference { frame.push_reference(value).unwrap(); } else { frame.push_short(value as i16).unwrap(); }
+        }
+        let mut budget = 31;
+        assert!(matches!(call_with_budget(framework(ClassId::Cipher, MethodId::doFinal, false),
+            &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget), Err(Error::Quota)));
+        assert_eq!(host.calls, 2);
+        assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
+        host.fail_at = 4;
+        assert!(invoke(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,32),(true,data),(false,0)], &mut heap, &mut frame, &mut host).is_err());
+        assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
+        assert_eq!(heap.byte_slice(heap.get_word(cipher, 5).unwrap(), 0, 16).unwrap(), &[0; 16]);
+        heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
+        let result = invoke(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        let Native::Threw(exception) = result else { panic!("cleared key accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 2);
+        assert_eq!(host.calls, 4);
+    }
+
+    #[test]
     fn digest_borrows_overlapping_input_and_publishes_only_complete_results() {
         struct DigestHost { input: usize, calls: usize, result: Result<usize> }
         impl crate::host::Host for DigestHost {
@@ -728,7 +791,7 @@ mod tests {
             frame.push_short(offset).unwrap();
             let actual = security::call(ClassId::MessageDigest, MethodId::doFinal,
                 framework(ClassId::MessageDigest, MethodId::doFinal, false).method.signature,
-                &mut heap, &mut host, &mut frame, 1, &mut idle());
+                &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut { u32::MAX });
             assert_eq!(actual.is_ok(), succeeds);
             assert_eq!(host.calls, calls);
             assert_eq!(heap.byte_slice(array, 0, 32).unwrap(), &[if succeeds { 0x99 } else { 0x42 }; 32]);
@@ -758,7 +821,7 @@ mod tests {
             let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
             frame.push_short(algorithm).unwrap();
             if class != ClassId::RandomData { frame.push_short(i16::from(external)).unwrap(); }
-            let result = security::call(class, MethodId::getInstance, framework(class, MethodId::getInstance, true).method.signature, &mut heap, &mut Capabilities, &mut frame, 1, &mut idle()).unwrap();
+            let result = security::call(class, MethodId::getInstance, framework(class, MethodId::getInstance, true).method.signature, &mut heap, &mut Capabilities, &mut frame, 1, &mut idle(), &mut { u32::MAX }).unwrap();
             if supported {
                 assert!(matches!(result, Native::Returned));
                 let instance = frame.pop_reference().unwrap();
