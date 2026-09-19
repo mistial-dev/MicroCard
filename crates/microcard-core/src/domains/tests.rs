@@ -122,44 +122,6 @@ fn card() -> Card<MemoryFlash, TestPlatform> {
     card
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct PackageMapFixture {
-    #[serde(with = "package_map")]
-    packages: NameMap<Rc<Vec<u8>>>,
-}
-
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct DigestFixture {
-    #[serde(with = "digest_bytes")]
-    digest: [u8; 32],
-}
-
-#[test]
-fn durable_binary_serializers_round_trip_canonically_at_bounds() {
-    for length in [0, 1, 2, 3, 47, 48, 49, MAX_PACKAGE_BYTES] {
-        let raw: Vec<u8> = (0..length).map(|index| index as u8).collect();
-        let mut packages = NameMap::new();
-        packages
-            .insert("assembly".into(), Rc::new(raw.clone()))
-            .unwrap();
-        let fixture = PackageMapFixture { packages };
-        let encoded = serde_json::to_string(&fixture).unwrap();
-        assert!(encoded.contains(&Base64::encode_string(&raw)));
-        assert_eq!(
-            serde_json::from_str::<PackageMapFixture>(&encoded).unwrap(),
-            fixture
-        );
-    }
-
-    let digest = DigestFixture { digest: [0xa5; 32] };
-    let encoded = serde_json::to_string(&digest).unwrap();
-    assert!(encoded.contains(&Base64::encode_string(&digest.digest)));
-    assert_eq!(
-        serde_json::from_str::<DigestFixture>(&encoded).unwrap(),
-        digest
-    );
-}
-
 #[test]
 fn assembly_name_maps_are_compact_sorted_bounded_and_unique() {
     let mut values = NameMap::new();
@@ -177,45 +139,7 @@ fn assembly_name_maps_are_compact_sorted_bounded_and_unique() {
     assert_eq!(values.0.as_ptr(), pointer);
     assert_eq!(values.get("a0"), Some(&99));
 
-    let encoded = serde_json::to_string(&values).unwrap();
-    assert!(encoded.find("\"a0\"").unwrap() < encoded.find("\"a7\"").unwrap());
-    assert!(serde_json::from_str::<NameMap<i32>>(&encoded).unwrap() == values);
-    assert!(serde_json::from_str::<NameMap<i32>>(r#"{"a":1,"a":2}"#).is_err());
-
-    let mut oversized = String::from("{\"packages\":{");
-    for index in 0..=MAX_ASSEMBLIES_PER_DOMAIN {
-        if index != 0 {
-            oversized.push(',');
-        }
-        let value = if index == MAX_ASSEMBLIES_PER_DOMAIN {
-            "!"
-        } else {
-            "AQ=="
-        };
-        oversized.push_str(&alloc::format!("\"a{index}\":\"{value}\""));
-    }
-    oversized.push_str("}}");
-    let error = alloc::format!(
-        "{}",
-        serde_json::from_str::<PackageMapFixture>(&oversized).unwrap_err()
-    );
-    assert!(error.contains("quota"), "{error}");
-}
-
-#[test]
-fn lifecycle_management_names_borrow_the_command_buffer() {
-    let encoded = &management_names_wire("payments", "F04D430001").unwrap();
-    let (domain, instance) = management_names(encoded).unwrap();
-    let start = encoded.as_ptr() as usize;
-    let end = start + encoded.len();
-    for value in [domain, instance] {
-        let pointer = value.as_ptr() as usize;
-        assert!(pointer >= start && pointer + value.len() <= end);
-    }
-    assert_eq!(
-        management_names(br#"["pay\u006dents","F04D430001"]"#),
-        Err(Error::Format)
-    );
+    assert!(values.0.windows(2).all(|pair| pair[0].0 < pair[1].0));
 }
 
 #[test]
@@ -258,56 +182,6 @@ fn credential_invocation_state_uses_fixed_capacity() {
     floors.record(0, (2, 1)).unwrap();
     assert_eq!(floors.record(99, (1, 1)), Err(Error::Quota));
     assert!(floors.iter().any(|entry| entry == (0, (2, 1))));
-}
-
-#[test]
-fn managed_response_reserves_its_complete_bound() {
-    let response = managed_response_buffer().unwrap();
-    assert!(response.is_empty());
-    assert!(response.capacity() >= MAX_MANAGED_RESPONSE_WITH_STATUS);
-}
-
-#[test]
-fn management_name_encoding_is_bounded_and_canonical() {
-    let encoded = management_names_wire("payments", "Wallet").unwrap();
-    assert_eq!(encoded, b"\x83\x01\x68payments\x66Wallet");
-    assert_eq!(management_names(&encoded), Ok(("payments", "Wallet")));
-    assert!(encoded.capacity() >= encoded.len());
-    assert_eq!(management_names_wire("bad/name", "Wallet"), Err(Error::Format));
-}
-
-#[test]
-fn durable_binary_serializers_reject_noncanonical_and_oversized_input() {
-    assert!(
-        serde_json::from_str::<PackageMapFixture>(r#"{"packages":{"assembly":"AR=="}}"#)
-            .is_err()
-    );
-    assert!(
-        serde_json::from_str::<PackageMapFixture>(
-            r#"{"packages":{"assembly":"AA==","assembly":"AA=="}}"#
-        )
-        .is_err()
-    );
-
-    let oversized = "A".repeat(MAX_PACKAGE_BYTES.div_ceil(3) * 4 + 4);
-    let document = alloc::format!(r#"{{"packages":{{"assembly":"{oversized}"}}}}"#);
-    assert!(serde_json::from_str::<PackageMapFixture>(&document).is_err());
-
-    let mut noncanonical_digest = Base64::encode_string(&[0_u8; 32]);
-    noncanonical_digest.replace_range(42..43, "B");
-    let document = alloc::format!(r#"{{"digest":"{noncanonical_digest}"}}"#);
-    assert!(serde_json::from_str::<DigestFixture>(&document).is_err());
-}
-
-#[test]
-fn durable_domains_require_an_explicit_fallible_policy() {
-    let policy = DomainPolicy::standard().unwrap();
-    assert_eq!(policy.capabilities.len(), 44);
-    assert!(policy.valid());
-
-    let mut value = serde_json::to_value(&card().state).unwrap();
-    value["isd"].as_object_mut().unwrap().remove("policy");
-    assert!(serde_json::from_value::<State>(value).is_err());
 }
 
 fn command(ins: u8, data: &[u8]) -> Verified<'_> {
@@ -1452,29 +1326,8 @@ fn domain_capacity_is_bounded_and_survives_reboot() {
 }
 
 #[test]
-fn domain_registry_serialization_is_sorted_bounded_and_unique() {
+fn domain_registry_orders_insertions() {
     let policy = DomainPolicy::standard().unwrap();
-    let domain = Domain::new(
-        [1; 16],
-        RegistryAid::synthetic(0x53, &[1; 16]),
-        policy.clone(),
-    );
-    let encoded_domain = serde_json::to_string(&domain).unwrap();
-    let duplicate = alloc::format!(
-        "{{\"same\":{encoded_domain},\"same\":{encoded_domain}}}"
-    );
-    assert!(serde_json::from_str::<Domains>(&duplicate).is_err());
-
-    let mut oversized = String::from("{");
-    for index in 0..=MAX_SSDS {
-        if index != 0 {
-            oversized.push(',');
-        }
-        oversized.push_str(&alloc::format!("\"d{index}\":{encoded_domain}"));
-    }
-    oversized.push('}');
-    assert!(serde_json::from_str::<Domains>(&oversized).is_err());
-
     let mut domains = Domains::new();
     for id in ["z", "a", "m"] {
         let stable = [id.as_bytes()[0]; 16];
@@ -1489,10 +1342,7 @@ fn domain_registry_serialization_is_sorted_bounded_and_unique() {
             )
             .unwrap();
     }
-    let encoded = serde_json::to_string(&domains).unwrap();
-    assert!(encoded.find("\"a\"").unwrap() < encoded.find("\"m\"").unwrap());
-    assert!(encoded.find("\"m\"").unwrap() < encoded.find("\"z\"").unwrap());
-    assert!(serde_json::from_str::<Domains>(&encoded).unwrap() == domains);
+    assert_eq!(domains.0.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["a", "m", "z"]);
 }
 
 #[test]
@@ -1512,20 +1362,7 @@ fn integer_store_is_compact_sorted_bounded_and_unique() {
     small.insert(2, 20).unwrap();
     small.insert(-1, -10).unwrap();
     small.insert(1, 10).unwrap();
-    let encoded = serde_json::to_string(&small).unwrap();
-    assert_eq!(encoded, r#"{"-1":-10,"1":10,"2":20}"#);
-    assert!(serde_json::from_str::<IntStore>(&encoded).unwrap() == small);
-    assert!(serde_json::from_str::<IntStore>(r#"{"1":1,"1":2}"#).is_err());
-
-    let mut oversized = String::from("{");
-    for key in 0..=MAX_INT_RECORDS {
-        if key != 0 {
-            oversized.push(',');
-        }
-        oversized.push_str(&alloc::format!("\"{key}\":{key}"));
-    }
-    oversized.push('}');
-    assert!(serde_json::from_str::<IntStore>(&oversized).is_err());
+    assert_eq!(small.0, [(-1, -10), (1, 10), (2, 20)]);
 }
 
 #[test]
@@ -1552,20 +1389,7 @@ fn byte_store_is_compact_sorted_bounded_and_unique() {
     let mut small = BlobStore::new();
     small.insert(2, alloc::vec![2]).unwrap();
     small.insert(-1, alloc::vec![1]).unwrap();
-    let encoded = serde_json::to_string(&small).unwrap();
-    assert_eq!(encoded, r#"{"-1":[1],"2":[2]}"#);
-    assert!(serde_json::from_str::<BlobStore>(&encoded).unwrap() == small);
-    assert!(serde_json::from_str::<BlobStore>(r#"{"1":[1],"1":[2]}"#).is_err());
-
-    let mut oversized = String::from("{");
-    for key in 0..=MAX_BLOB_RECORDS {
-        if key != 0 {
-            oversized.push(',');
-        }
-        oversized.push_str(&alloc::format!("\"{key}\":[{key}]"));
-    }
-    oversized.push('}');
-    assert!(serde_json::from_str::<BlobStore>(&oversized).is_err());
+    assert_eq!(small.0, [(-1, alloc::vec![1]), (2, alloc::vec![2])]);
 }
 
 #[test]
@@ -1591,30 +1415,7 @@ fn installed_instances_are_compact_sorted_bounded_and_unique() {
     assert_eq!(instances.0.as_ptr(), pointer);
     assert_eq!(instances.get("F04D430100").unwrap().as_ref(), "Counter");
 
-    let encoded = serde_json::to_string(&instances).unwrap();
-    assert!(
-        encoded.find("\"F04D430100\"").unwrap()
-            < encoded.find("\"F04D430107\"").unwrap()
-    );
-    assert!(serde_json::from_str::<Instances>(&encoded).unwrap() == instances);
-    assert!(
-        serde_json::from_str::<Instances>(
-            r#"{"F04D430100":"Counter","F04D430100":"Other"}"#
-        )
-        .is_err()
-    );
-
-    let mut oversized = String::from("{");
-    for index in 0..=MAX_INSTANCES_PER_DOMAIN {
-        if index != 0 {
-            oversized.push(',');
-        }
-        oversized.push_str(&alloc::format!(
-            "\"F04D4301{index:02}\":\"Counter\""
-        ));
-    }
-    oversized.push('}');
-    assert!(serde_json::from_str::<Instances>(&oversized).is_err());
+    assert!(instances.0.windows(2).all(|pair| pair[0].0 < pair[1].0));
 }
 
 #[test]
@@ -2279,38 +2080,6 @@ fn recovery_rejects_missing_or_retyped_persistent_schema() {
     )
     .unwrap();
     run_loaded(&mut card, "schema-recovery", "Counter", 1, &[]).unwrap();
-    let canonical = serde_json::to_value(&card.state).unwrap();
-    assert_eq!(
-        canonical["domains"]["schema-recovery"]["storage_schema"],
-        serde_json::json!([[1, 1, 0]])
-    );
-    let mut legacy = canonical.clone();
-    legacy["domains"]["schema-recovery"]["storage_schema"] =
-        serde_json::json!([{"key": 1, "kind": 1, "max_bytes": 0}]);
-    assert!(serde_json::from_value::<State>(legacy).is_err());
-    let schema = |count: i32| {
-        serde_json::Value::Array(
-            (0..count)
-                .map(|key| serde_json::json!([key, 1, 0]))
-                .collect(),
-        )
-    };
-    let mut maximum = canonical.clone();
-    maximum["domains"]["schema-recovery"]["storage_schema"] =
-        schema(MAX_DOMAIN_STORAGE_DECLARATIONS as i32);
-    let maximum = serde_json::from_value::<State>(maximum).unwrap();
-    assert_eq!(
-        maximum.domains["schema-recovery"].storage_schema.len(),
-        MAX_DOMAIN_STORAGE_DECLARATIONS
-    );
-    let mut oversized = canonical.clone();
-    oversized["domains"]["schema-recovery"]["storage_schema"] =
-        schema(MAX_DOMAIN_STORAGE_DECLARATIONS as i32 + 1);
-    assert!(serde_json::from_value::<State>(oversized).is_err());
-    let mut duplicate = canonical;
-    duplicate["domains"]["schema-recovery"]["storage_schema"] =
-        serde_json::json!([[1, 1, 0], [1, 1, 0]]);
-    assert!(serde_json::from_value::<State>(duplicate).is_err());
     let mut corrupted = card.state.try_clone().unwrap();
     let domain = corrupted.domains.get_mut("schema-recovery").unwrap();
     let mut schema = domain.storage_schema.as_ref().clone();
@@ -2561,17 +2330,6 @@ fn state_snapshots_share_signed_packages_and_preserve_wire_state() {
         card.state.encode_snapshot().unwrap().to_vec(),
         snapshot.encode_snapshot().unwrap().to_vec()
     );
-    let mut noncanonical = serde_json::to_value(&card.state).unwrap();
-    let mut encoded = String::from(
-        noncanonical["domains"]["shared"]["assemblies"]["Counter"]
-            .as_str()
-            .unwrap(),
-    );
-    encoded.push('=');
-    noncanonical["domains"]["shared"]["assemblies"]["Counter"] =
-        serde_json::Value::String(encoded);
-    assert!(serde_json::from_value::<State>(noncanonical).is_err());
-
     let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_shared_names(&reopened.state.isd, "mscorlib");
     assert_shared_names(&reopened.state.domains["shared"], "Counter");
@@ -3565,6 +3323,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
 
 #[test]
 fn management_cbor_matches_shared_vectors_and_rejects_other_encodings() {
+    assert_eq!(management_names_wire("bad/name", "Wallet"), Err(Error::Format));
     let vectors: serde_json::Value = serde_json::from_str(include_str!("../../../../format/management-names-v1.json")).unwrap();
     for vector in vectors.as_array().unwrap() {
         let first = vector["first"].as_str().unwrap();
@@ -3573,6 +3332,11 @@ fn management_cbor_matches_shared_vectors_and_rejects_other_encodings() {
         let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i+2], 16).unwrap()).collect();
         assert_eq!(management_names_wire(first, second).unwrap(), bytes);
         assert_eq!(management_names(&bytes), Ok((first, second)));
+        let (domain, target) = management_names(&bytes).unwrap();
+        for name in [domain, target] {
+            let offset = name.as_ptr() as usize - bytes.as_ptr() as usize;
+            assert!(offset + name.len() <= bytes.len(), "name was copied out of the command buffer");
+        }
         for end in 0..bytes.len() { assert_eq!(management_names(&bytes[..end]), Err(Error::Format)); }
         let mut trailing = bytes.clone(); trailing.push(0);
         assert_eq!(management_names(&trailing), Err(Error::Format));

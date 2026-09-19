@@ -1,17 +1,16 @@
 //! Persistent framework keys, separate from application values. Handles bind to an incarnation.
 use crate::{crypto::{zeroizing_buffer, CryptoProvider}, Error, Result};
 use alloc::vec::Vec;
-use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
     HmacSha256,
     Aes128,
     P256,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 struct Entry {
     algorithm: Algorithm,
     nonce: [u8; 16],
@@ -122,66 +121,7 @@ impl Entries {
     }
 }
 
-impl Serialize for Entries {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (slot, entry) in &self.0 {
-            map.serialize_entry(slot, entry)?;
-        }
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Entries {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::fmt;
-        use serde::de::{MapAccess, Visitor};
-
-        struct EntriesVisitor;
-
-        impl<'de> Visitor<'de> for EntriesVisitor {
-            type Value = Entries;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of up to eight protected keys")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut entries = Entries::default();
-                while let Some(slot) = map.next_key::<i32>()? {
-                    if !(0..MAX_ENTRIES as i32).contains(&slot) {
-                        return Err(serde::de::Error::custom("protected key slot"));
-                    }
-                    if entries.contains_key(&slot) {
-                        return Err(serde::de::Error::custom("duplicate protected key slot"));
-                    }
-                    entries
-                        .reserve_entry()
-                        .map_err(|_| serde::de::Error::custom("protected key allocation"))?;
-                    let entry = map.next_value::<Entry>()?;
-                    entries
-                        .insert(slot, entry)
-                        .map_err(|_| serde::de::Error::custom("protected key quota"))?;
-                }
-                Ok(entries)
-            }
-        }
-
-        deserializer.deserialize_map(EntriesVisitor)
-    }
-}
-
-#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct KeyStore {
     entries: Entries,
 }
@@ -567,15 +507,17 @@ mod tests {
         assert_eq!(entries.insert(MAX_ENTRIES as i32, entry(8)), Err(Error::Bounds));
         assert_eq!(entries.0.as_ptr(), pointer);
 
-        let encoded = serde_json::to_string(&entries).unwrap();
-        assert!(encoded.find("\"0\"").unwrap() < encoded.find("\"7\"").unwrap());
-        assert!(serde_json::from_str::<Entries>(&encoded).unwrap() == entries);
-
-        let encoded_entry = serde_json::to_string(&entry(0)).unwrap();
-        let duplicate = alloc::format!("{{\"0\":{encoded_entry},\"0\":{encoded_entry}}}");
-        assert!(serde_json::from_str::<Entries>(&duplicate).is_err());
-        let out_of_range = alloc::format!("{{\"8\":{encoded_entry}}}");
-        assert!(serde_json::from_str::<Entries>(&out_of_range).is_err());
+        assert!(entries.0.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        for invalid in [
+            alloc::vec![(0, entry(0)), (0, entry(1))],
+            alloc::vec![(8, entry(0))],
+            (0..=MAX_ENTRIES as i32).map(|slot| (slot, entry(slot))).collect(),
+        ] {
+            let mut encoder = crate::cbor::Encoder::new(2048);
+            KeyStore { entries: Entries(invalid) }.encode_state(&mut encoder).unwrap();
+            let raw = zeroize::Zeroizing::new(encoder.finish());
+            assert!(KeyStore::decode_state(&mut crate::cbor::Decoder::new(&raw)).is_err());
+        }
     }
 
     #[test]
@@ -627,8 +569,10 @@ mod tests {
             Err(Error::Unauthorized)
         );
 
-        let encoded = serde_json::to_vec(&store).unwrap();
-        let reopened: KeyStore = serde_json::from_slice(&encoded).unwrap();
+        let mut encoder = crate::cbor::Encoder::new(1024);
+        store.encode_state(&mut encoder).unwrap();
+        let encoded = zeroize::Zeroizing::new(encoder.finish());
+        let reopened = KeyStore::decode_state(&mut crate::cbor::Decoder::new(&encoded)).unwrap();
         assert!(reopened.validate().is_ok());
         assert_eq!(
             reopened

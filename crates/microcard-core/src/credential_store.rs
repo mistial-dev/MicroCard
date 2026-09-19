@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use serde::{Deserialize, Serialize};
 use crate::{crypto::CryptoProvider, hal::Entropy};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
@@ -13,8 +12,8 @@ const MAX_RETRIES: u8 = 15;
 pub(crate) const MAX_SLOTS: usize = 8;
 const DIGEST_CONTEXT: &[u8] = b"MicroCard credential v1";
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, PartialEq, Eq)]
+
 struct Entry {
     slot: i32,
     owner: [u8; 16],
@@ -115,70 +114,8 @@ impl Entries {
     }
 }
 
-impl Serialize for Entries {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (slot, entry) in self.iter() {
-            map.serialize_entry(slot, entry)?;
-        }
-        map.end()
-    }
-}
+#[derive(Clone, Default, PartialEq, Eq)]
 
-impl<'de> Deserialize<'de> for Entries {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::fmt;
-        use serde::de::{MapAccess, Visitor};
-
-        struct EntriesVisitor;
-
-        impl<'de> Visitor<'de> for EntriesVisitor {
-            type Value = Entries;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of up to eight credential verifiers")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut entries = Entries::default();
-                while let Some(slot) = map.next_key::<i32>()? {
-                    if entries.len() >= MAX_SLOTS {
-                        return Err(serde::de::Error::custom("credential quota"));
-                    }
-                    if slot < 0 {
-                        return Err(serde::de::Error::custom("credential slot"));
-                    }
-                    if entries.contains_key(&slot) {
-                        return Err(serde::de::Error::custom("duplicate credential slot"));
-                    }
-                    entries
-                        .reserve_entry()
-                        .map_err(|_| serde::de::Error::custom("credential allocation"))?;
-                    let entry = map.next_value::<Entry>()?;
-                    entries
-                        .insert(slot, entry)
-                        .map_err(|_| serde::de::Error::custom("credential quota"))?;
-                }
-                Ok(entries)
-            }
-        }
-
-        deserializer.deserialize_map(EntriesVisitor)
-    }
-}
-
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
 pub(crate) struct CredentialStore(Entries);
 
 impl CredentialStore {
@@ -485,6 +422,8 @@ mod tests {
         let mut encoder = crate::cbor::Encoder::new(2048);
         store.encode_state(&mut encoder).unwrap();
         let raw = zeroize::Zeroizing::new(encoder.finish());
+        assert!(!raw.windows(4).any(|window| window == b"1234"));
+        assert!(!raw.windows(8).any(|window| window == b"12345678"));
         for end in 0..raw.len() {
             assert!(CredentialStore::decode_state(&mut crate::cbor::Decoder::new(&raw[..end]), OWNER).is_err());
         }
@@ -515,29 +454,19 @@ mod tests {
         );
         assert_eq!(store.0.0.as_ptr(), pointer);
 
-        let encoded = serde_json::to_string(&store).unwrap();
-        assert!(encoded.find("\"0\"").unwrap() < encoded.find("\"7\"").unwrap());
-        let decoded = serde_json::from_str::<CredentialStore>(&encoded).unwrap();
-        assert!(decoded == store);
-        assert!(decoded.validate(OWNER).is_ok());
-
-        let encoded_entry = serde_json::to_string(store.0.get(&0).unwrap()).unwrap();
-        let duplicate = alloc::format!("{{\"0\":{encoded_entry},\"0\":{encoded_entry}}}");
-        assert!(serde_json::from_str::<CredentialStore>(&duplicate).is_err());
-        let negative = alloc::format!("{{\"-1\":{encoded_entry}}}");
-        assert!(serde_json::from_str::<CredentialStore>(&negative).is_err());
-
-        let mut oversized = alloc::string::String::from("{");
-        for slot in 0..=MAX_SLOTS {
-            if slot != 0 {
-                oversized.push(',');
+        assert!(store.0.0.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        for case in 0..3 {
+            let mut invalid = store.clone();
+            match case {
+                0 => invalid.0.0.insert(0, invalid.0.0[0].clone()),
+                1 => { invalid.0.0.truncate(1); invalid.0.0[0].0 = -1; invalid.0.0[0].1.slot = -1; }
+                _ => { invalid.0.0.truncate(2); invalid.0.0[1] = invalid.0.0[0].clone(); }
             }
-            let value = serde_json::to_string(store.0.get(&(slot.min(7) as i32)).unwrap())
-                .unwrap();
-            oversized.push_str(&alloc::format!("\"{slot}\":{value}"));
+            let mut encoder = crate::cbor::Encoder::new(2048);
+            invalid.encode_state(&mut encoder).unwrap();
+            let raw = zeroize::Zeroizing::new(encoder.finish());
+            assert!(CredentialStore::decode_state(&mut crate::cbor::Decoder::new(&raw), OWNER).is_err());
         }
-        oversized.push('}');
-        assert!(serde_json::from_str::<CredentialStore>(&oversized).is_err());
     }
 
     #[test]
@@ -635,17 +564,6 @@ mod tests {
         reference.update(secret);
         let expected: [u8; 32] = reference.finalize().into();
         assert_eq!(credential_digest(OWNER, 3, 2, &salt, &secret, &mut crate::crypto::SoftwareCrypto).unwrap(), expected);
-    }
-
-    #[test]
-    fn serialized_store_contains_digests_instead_of_secrets() {
-        let mut store = CredentialStore::default();
-        create(&mut store);
-        let encoded = serde_json::to_vec(&store).unwrap();
-        assert!(!encoded.windows(4).any(|window| window == b"1234"));
-        assert!(!encoded.windows(8).any(|window| window == b"12345678"));
-        let decoded: CredentialStore = serde_json::from_slice(&encoded).unwrap();
-        assert!(decoded.validate(OWNER).is_ok());
     }
 
     #[test]

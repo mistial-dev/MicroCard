@@ -1,4 +1,4 @@
-//! MicroCard domain profile, not a GlobalPlatform card implementation.
+//! Persistent MC04 domain management and application lifecycle.
 use crate::{
     Error, Result,
     journal::{Flash, Journal, JournalKey},
@@ -10,8 +10,6 @@ use crate::{
     staging::{PackageStaging, RamStaging},
 };
 use alloc::{rc::Rc, string::String, vec::Vec};
-use base64ct::{Base64, Encoding};
-use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -30,7 +28,6 @@ const MAX_BLOB_RECORDS: usize = 64;
 const BLOB_STORE_GROWTH: usize = 8;
 const MAX_DOMAIN_STORAGE_DECLARATIONS: usize =
     MAX_ASSEMBLIES_PER_DOMAIN as usize * MAX_STORAGE_DECLARATIONS;
-const STORAGE_SCHEMA_GROWTH: usize = 16;
 const MAX_EXECUTION_UNITS: usize = 17;
 const MAX_TOTAL_ASSEMBLIES: usize = (MAX_SSDS + 1) * MAX_ASSEMBLIES_PER_DOMAIN as usize;
 const MAX_REGISTRY_AIDS: usize = 1 + MAX_SSDS + MAX_TOTAL_ASSEMBLIES + MAX_TOTAL_INSTANCES;
@@ -174,373 +171,6 @@ impl<V> core::ops::Index<&str> for NameMap<V> {
     }
 }
 
-impl<V: Serialize> Serialize for NameMap<V> {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (name, value) in self.iter() {
-            map.serialize_entry(name, value)?;
-        }
-        map.end()
-    }
-}
-
-impl<'de, V: Deserialize<'de>> Deserialize<'de> for NameMap<V> {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::{fmt, marker::PhantomData};
-        use serde::de::{MapAccess, Visitor};
-
-        struct NameMapVisitor<V>(PhantomData<V>);
-
-        impl<'de, V: Deserialize<'de>> Visitor<'de> for NameMapVisitor<V> {
-            type Value = NameMap<V>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of up to eight assembly identities")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut values = NameMap::new();
-                while let Some(name) = map.next_key::<String>()? {
-                    if values.len() >= MAX_ASSEMBLIES_PER_DOMAIN as usize {
-                        return Err(serde::de::Error::custom("assembly map quota"));
-                    }
-                    if values.contains_key(&name) {
-                        return Err(serde::de::Error::custom("duplicate assembly identity"));
-                    }
-                    values
-                        .reserve_entry()
-                        .map_err(|_| serde::de::Error::custom("assembly map allocation"))?;
-                    let value = map.next_value::<V>()?;
-                    values
-                        .insert(Rc::from(name), value)
-                        .map_err(|_| serde::de::Error::custom("assembly map quota"))?;
-                }
-                Ok(values)
-            }
-        }
-
-        deserializer.deserialize_map(NameMapVisitor(PhantomData))
-    }
-}
-
-mod package_map {
-    use super::*;
-    use core::fmt;
-    use serde::de::{MapAccess, Visitor};
-    use serde::ser::SerializeMap;
-
-    type Packages = NameMap<Rc<Vec<u8>>>;
-
-    const ENCODE_CHUNK_BYTES: usize = 48;
-    const ENCODE_CHUNK_CHARS: usize = 64;
-
-    struct Base64Display<'a>(&'a [u8]);
-
-    impl fmt::Display for Base64Display<'_> {
-        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let mut encoded = [0; ENCODE_CHUNK_CHARS];
-            for chunk in self.0.chunks(ENCODE_CHUNK_BYTES) {
-                let value = Base64::encode(chunk, &mut encoded).map_err(|_| fmt::Error)?;
-                formatter.write_str(value)?;
-            }
-            Ok(())
-        }
-    }
-
-    impl Serialize for Base64Display<'_> {
-        fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            serializer.collect_str(self)
-        }
-    }
-
-    fn canonical(raw: &[u8], encoded: &str) -> bool {
-        if encoded.len() != raw.len().div_ceil(3) * 4 {
-            return false;
-        }
-        let mut position = 0;
-        let mut output = [0; ENCODE_CHUNK_CHARS];
-        for chunk in raw.chunks(ENCODE_CHUNK_BYTES) {
-            let Ok(value) = Base64::encode(chunk, &mut output) else {
-                return false;
-            };
-            let end = position + value.len();
-            if encoded.as_bytes().get(position..end) != Some(value.as_bytes()) {
-                return false;
-            }
-            position = end;
-        }
-        position == encoded.len()
-    }
-
-    fn decode<E: serde::de::Error>(encoded: &str) -> core::result::Result<Vec<u8>, E> {
-        const MAX_ENCODED_PACKAGE_BYTES: usize = MAX_PACKAGE_BYTES.div_ceil(3) * 4;
-        if encoded.len() > MAX_ENCODED_PACKAGE_BYTES || !encoded.len().is_multiple_of(4) {
-            return Err(E::custom("invalid package encoding length"));
-        }
-        let padding = encoded
-            .as_bytes()
-            .iter()
-            .rev()
-            .take_while(|byte| **byte == b'=')
-            .count();
-        if padding > 2 {
-            return Err(E::custom("invalid package encoding padding"));
-        }
-        let decoded_len = encoded.len() / 4 * 3 - padding;
-        let mut raw = Vec::new();
-        raw.try_reserve_exact(decoded_len)
-            .map_err(|_| E::custom("package allocation failed"))?;
-        raw.resize(decoded_len, 0);
-        let length = Base64::decode(encoded, &mut raw).map_err(E::custom)?.len();
-        if length != raw.len() {
-            return Err(E::custom("invalid package encoding length"));
-        }
-        if !canonical(&raw, encoded) {
-            return Err(E::custom("noncanonical package encoding"));
-        }
-        Ok(raw)
-    }
-
-    struct PackageBytes(Vec<u8>);
-
-    impl<'de> Deserialize<'de> for PackageBytes {
-        fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            struct PackageVisitor;
-
-            impl Visitor<'_> for PackageVisitor {
-                type Value = PackageBytes;
-
-                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    formatter.write_str("canonical Base64 package bytes")
-                }
-
-                fn visit_str<E>(self, value: &str) -> core::result::Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    decode(value).map(PackageBytes)
-                }
-
-                fn visit_borrowed_str<E>(self, value: &str) -> core::result::Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    self.visit_str(value)
-                }
-            }
-
-            deserializer.deserialize_str(PackageVisitor)
-        }
-    }
-
-    pub(super) fn serialize<S>(
-        packages: &Packages,
-        serializer: S,
-    ) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(packages.len()))?;
-        for (name, raw) in packages.iter() {
-            map.serialize_entry(name.as_ref(), &Base64Display(raw))?;
-        }
-        map.end()
-    }
-
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> core::result::Result<Packages, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct PackagesVisitor;
-
-        impl<'de> Visitor<'de> for PackagesVisitor {
-            type Value = Packages;
-
-            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                formatter.write_str("a package map")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut packages = NameMap::new();
-                while let Some(name) = map.next_key::<String>()? {
-                    if packages.len() >= MAX_ASSEMBLIES_PER_DOMAIN as usize {
-                        return Err(serde::de::Error::custom("package map quota"));
-                    }
-                    if packages.contains_key(&name) {
-                        return Err(serde::de::Error::custom("duplicate package name"));
-                    }
-                    packages
-                        .reserve_entry()
-                        .map_err(|_| serde::de::Error::custom("package map allocation"))?;
-                    let PackageBytes(raw) = map.next_value::<PackageBytes>()?;
-                    packages
-                        .insert(Rc::from(name), Rc::new(raw))
-                        .map_err(|_| serde::de::Error::custom("package map quota"))?;
-                }
-                Ok(packages)
-            }
-        }
-
-        deserializer.deserialize_map(PackagesVisitor)
-    }
-}
-
-mod storage_schema {
-    use super::*;
-    use core::fmt;
-    use serde::de::{SeqAccess, Visitor};
-    use serde::ser::SerializeSeq;
-
-    type Schema = Rc<Vec<StorageDeclaration>>;
-
-    pub fn serialize<S>(schema: &Schema, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut sequence = serializer.serialize_seq(Some(schema.len()))?;
-        for declaration in schema.iter() {
-            sequence.serialize_element(&(
-                declaration.key,
-                declaration.kind,
-                declaration.max_bytes,
-            ))?;
-        }
-        sequence.end()
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> core::result::Result<Schema, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct SchemaVisitor;
-
-        impl<'de> Visitor<'de> for SchemaVisitor {
-            type Value = Schema;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a sorted sequence of persistent storage declarations")
-            }
-
-            fn visit_seq<A>(self, mut sequence: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let capacity = sequence
-                    .size_hint()
-                    .unwrap_or(0)
-                    .min(MAX_DOMAIN_STORAGE_DECLARATIONS);
-                let mut declarations = Vec::new();
-                declarations
-                    .try_reserve_exact(capacity)
-                    .map_err(|_| serde::de::Error::custom("storage schema allocation"))?;
-                while let Some((key, kind, max_bytes)) =
-                    sequence.next_element::<(i32, u8, u16)>()?
-                {
-                    if declarations.len() >= MAX_DOMAIN_STORAGE_DECLARATIONS {
-                        return Err(serde::de::Error::custom("storage schema quota"));
-                    }
-                    let declaration = StorageDeclaration { key, kind, max_bytes };
-                    if !declaration.valid()
-                        || declarations
-                            .last()
-                            .is_some_and(|previous: &StorageDeclaration| previous.key >= key)
-                    {
-                        return Err(serde::de::Error::custom("invalid storage schema"));
-                    }
-                    if declarations.len() == declarations.capacity() {
-                        let target = (declarations.len() + STORAGE_SCHEMA_GROWTH)
-                            .min(MAX_DOMAIN_STORAGE_DECLARATIONS);
-                        declarations
-                            .try_reserve_exact(target - declarations.len())
-                            .map_err(|_| serde::de::Error::custom("storage schema allocation"))?;
-                    }
-                    declarations.push(declaration);
-                }
-                Ok(Rc::new(declarations))
-            }
-        }
-
-        deserializer.deserialize_seq(SchemaVisitor)
-    }
-}
-
-mod digest_bytes {
-    use super::*;
-    use core::fmt;
-    use serde::de::Visitor;
-
-    pub(super) fn serialize<S>(
-        digest: &[u8; 32],
-        serializer: S,
-    ) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut encoded = [0; 44];
-        let value = Base64::encode(digest, &mut encoded).map_err(serde::ser::Error::custom)?;
-        serializer.serialize_str(value)
-    }
-
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> core::result::Result<[u8; 32], D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct DigestVisitor;
-
-        impl Visitor<'_> for DigestVisitor {
-            type Value = [u8; 32];
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a canonical Base64-encoded 32-byte digest")
-            }
-
-            fn visit_str<E>(self, value: &str) -> core::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                let mut digest = [0; 32];
-                let decoded = Base64::decode(value, &mut digest).map_err(E::custom)?;
-                if decoded.len() != digest.len() {
-                    return Err(E::custom("digest must be 32 bytes"));
-                }
-                let mut encoded = [0; 44];
-                if Base64::encode(&digest, &mut encoded).map_err(E::custom)? != value {
-                    return Err(E::custom("noncanonical digest encoding"));
-                }
-                Ok(digest)
-            }
-
-            fn visit_borrowed_str<E>(self, value: &str) -> core::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_str(value)
-            }
-        }
-
-        deserializer.deserialize_str(DigestVisitor)
-    }
-}
-
 #[derive(Clone, PartialEq, Eq)]
 struct Domains(Vec<(String, Domain)>);
 
@@ -640,66 +270,6 @@ impl core::ops::Index<&str> for Domains {
     }
 }
 
-impl Serialize for Domains {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (id, domain) in self.iter() {
-            map.serialize_entry(id, domain)?;
-        }
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Domains {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::fmt;
-        use serde::de::{MapAccess, Visitor};
-
-        struct DomainsVisitor;
-
-        impl<'de> Visitor<'de> for DomainsVisitor {
-            type Value = Domains;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of at most eight security domains")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut domains = Domains::new();
-                domains
-                    .0
-                    .try_reserve_exact(MAX_SSDS)
-                    .map_err(|_| serde::de::Error::custom("domain allocation"))?;
-                while let Some(id) = map.next_key::<String>()? {
-                    if domains.len() >= MAX_SSDS {
-                        return Err(serde::de::Error::custom("domain quota"));
-                    }
-                    if domains.contains_key(&id) {
-                        return Err(serde::de::Error::custom("duplicate domain"));
-                    }
-                    let domain = map.next_value::<Domain>()?;
-                    domains
-                        .insert(id, domain)
-                        .map_err(|_| serde::de::Error::custom("domain quota"))?;
-                }
-                Ok(domains)
-            }
-        }
-
-        deserializer.deserialize_map(DomainsVisitor)
-    }
-}
-
 #[derive(Clone, PartialEq, Eq)]
 struct IntStore(Vec<(i32, i32)>);
 
@@ -781,62 +351,6 @@ impl core::ops::Index<&i32> for IntStore {
 
     fn index(&self, key: &i32) -> &Self::Output {
         self.get(key).expect("missing integer record")
-    }
-}
-
-impl Serialize for IntStore {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (key, value) in &self.0 {
-            map.serialize_entry(key, value)?;
-        }
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for IntStore {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::fmt;
-        use serde::de::{MapAccess, Visitor};
-
-        struct IntStoreVisitor;
-
-        impl<'de> Visitor<'de> for IntStoreVisitor {
-            type Value = IntStore;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of at most 512 integer records")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut store = IntStore::new();
-                while let Some(key) = map.next_key::<i32>()? {
-                    if store.len() >= MAX_INT_RECORDS {
-                        return Err(serde::de::Error::custom("integer record quota"));
-                    }
-                    if store.contains_key(&key) {
-                        return Err(serde::de::Error::custom("duplicate integer record"));
-                    }
-                    let value = map.next_value::<i32>()?;
-                    store
-                        .insert(key, value)
-                        .map_err(|_| serde::de::Error::custom("integer record allocation"))?;
-                }
-                Ok(store)
-            }
-        }
-
-        deserializer.deserialize_map(IntStoreVisitor)
     }
 }
 
@@ -941,76 +455,16 @@ impl core::ops::Index<&i32> for BlobStore {
     }
 }
 
-impl Serialize for BlobStore {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (key, value) in &self.0 {
-            map.serialize_entry(key, value)?;
-        }
-        map.end()
-    }
-}
+#[derive(PartialEq, Eq)]
 
-impl<'de> Deserialize<'de> for BlobStore {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::fmt;
-        use serde::de::{MapAccess, Visitor};
-
-        struct BlobStoreVisitor;
-
-        impl<'de> Visitor<'de> for BlobStoreVisitor {
-            type Value = BlobStore;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of at most 64 byte records")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut store = BlobStore::new();
-                while let Some(key) = map.next_key::<i32>()? {
-                    if store.len() >= MAX_BLOB_RECORDS {
-                        return Err(serde::de::Error::custom("byte record quota"));
-                    }
-                    if store.contains_key(&key) {
-                        return Err(serde::de::Error::custom("duplicate byte record"));
-                    }
-                    let value = map.next_value::<Vec<u8>>()?;
-                    store
-                        .insert(key, value)
-                        .map_err(|_| serde::de::Error::custom("byte record allocation"))?;
-                }
-                Ok(store)
-            }
-        }
-
-        deserializer.deserialize_map(BlobStoreVisitor)
-    }
-}
-
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct State {
     isd: Domain,
     domains: Domains,
     /// First SCP03 sequence counter value never yet handed out, SCP03 1.1.2.6 §6.2.2.1.
     ///
     /// Reserved ahead of use so a power cut can only skip values, never repeat one.
-    #[serde(default, skip_serializing_if = "sequence_unused")]
-    scp03_sequence: u32,
-}
 
-fn sequence_unused(reserved: &u32) -> bool {
-    *reserved == 0
+    scp03_sequence: u32,
 }
 
 /// Values reserved by one durable write, so a secure channel does not cost a flash write.
@@ -1136,22 +590,22 @@ impl State {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+
 struct ResolvedDependency {
-    #[serde(with = "digest_bytes")]
+
     digest: [u8; 32],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+
 struct ResolvedCall {
     member: u16,
     target: CallTarget,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+
 enum CallTarget {
     ObjectConstructor,
     CurrentDomain,
@@ -1614,8 +1068,8 @@ fn resolve_dependency(
     }
     if ambiguous { None } else { resolved }
 }
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, PartialEq, Eq)]
+
 struct DomainPolicy {
     capabilities: Vec<u8>,
     max_assemblies: u8,
@@ -1731,8 +1185,8 @@ impl DomainPolicy {
         Ok((identifier, policy))
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+
 struct RegistryAid {
     bytes: [u8; 16],
     len: u8,
@@ -1880,65 +1334,6 @@ impl core::ops::Index<&str> for Instances {
     }
 }
 
-impl Serialize for Instances {
-    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (aid, assembly) in self.iter() {
-            map.serialize_entry(aid, assembly)?;
-        }
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Instances {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::fmt;
-        use serde::de::{MapAccess, Visitor};
-
-        struct InstancesVisitor;
-
-        impl<'de> Visitor<'de> for InstancesVisitor {
-            type Value = Instances;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of up to eight installed instances")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> core::result::Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut instances = Instances::new();
-                while let Some(aid) = map.next_key::<String>()? {
-                    if instances.len() >= MAX_INSTANCES_PER_DOMAIN as usize {
-                        return Err(serde::de::Error::custom("instance quota"));
-                    }
-                    if instances.contains_key(&aid) {
-                        return Err(serde::de::Error::custom("duplicate instance"));
-                    }
-                    instances
-                        .reserve_entry()
-                        .map_err(|_| serde::de::Error::custom("instance allocation"))?;
-                    let assembly = map.next_value::<Rc<str>>()?;
-                    instances
-                        .insert(aid, assembly)
-                        .map_err(|_| serde::de::Error::custom("instance quota"))?;
-                }
-                Ok(instances)
-            }
-        }
-
-        deserializer.deserialize_map(InstancesVisitor)
-    }
-}
-
 #[derive(Clone, PartialEq, Eq)]
 struct StoredPackage {
     manifest: Manifest,
@@ -1983,28 +1378,28 @@ impl PackageData for StoredPackageView<'_> {
     fn key(&self) -> [u8; 32] { self.signer }
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, PartialEq, Eq)]
+
 struct Domain {
     incarnation: [u8; 16],
     registry_aid: RegistryAid,
     key: Option<[u8; 32]>,
-    #[serde(with = "package_map")]
+
     assemblies: NameMap<Rc<Vec<u8>>>,
-    #[serde(skip)]
+
     packages: NameMap<Rc<StoredPackage>>,
     bindings: NameMap<Vec<ResolvedDependency>>,
     imports: NameMap<Vec<ResolvedCall>>,
     versions: NameMap<(u32, [u8; 32])>,
-    #[serde(with = "storage_schema")]
+
     storage_schema: Rc<Vec<StorageDeclaration>>,
     instances: Instances,
     store: IntStore,
-    #[serde(default, skip_serializing_if = "BlobStore::is_empty")]
+
     blobs: BlobStore,
-    #[serde(default)]
+
     keys: crate::key_store::KeyStore,
-    #[serde(default)]
+
     credentials: crate::credential_store::CredentialStore,
     policy: DomainPolicy,
 }

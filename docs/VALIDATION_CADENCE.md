@@ -12,6 +12,13 @@ Run the smallest gate that proves the current change, and retain the broader gat
 
 These checks should complete quickly. Record their exact scope. They do not imply that exhaustive recovery or fuzzing passed.
 
+Each test should catch a distinct regression or cover a distinct integration boundary.
+Use table-driven cases for related inputs instead of separate tests with repeated setup.
+When replacing a format or implementation, remove tests and helpers that only exercise
+the retired path. Preserve its relevant failure cases in the current contract tests;
+do not retain obsolete decoders just to keep their tests running. Test counts are not
+a quality target, and a commit alone is not a reason to add tests.
+
 ## Security checkpoint
 
 Run `scripts/check.py --checkpoint`, complete workspace Clippy, both nRF52840 release variants and the relevant exhaustive power-loss suite after a consolidated security batch, before device loading, or before release acceptance. Do not repeat it for each individual change to package verification, linking, transactions, journals, domain management, secure messaging or native security services. The ordinary `scripts/check.py` command intentionally omits exhaustive recovery tests.

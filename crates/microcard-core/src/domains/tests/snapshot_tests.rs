@@ -55,7 +55,7 @@ fn snapshot_rejects_every_truncation_and_noncanonical_header() {
 
 #[test]
 fn old_snapshot_fails_explicitly_without_mutating_flash() {
-    let old = serde_json::to_vec(&fresh_card().state).unwrap();
+    let old = br#"{"isd":{},"domains":{}}"#.to_vec();
     let shared = SharedJournalFlash(Rc::new(RefCell::new(MemoryFlash::new(16384))));
     let (mut journal, _) = Journal::open(shared.clone(), STORAGE_KEY).unwrap();
     journal.commit(&old).unwrap();
@@ -83,4 +83,79 @@ fn snapshot_rejects_duplicate_and_unsorted_records() {
     card.state.isd.store.0.clear();
     card.state.isd.blobs.0 = alloc::vec![(1, alloc::vec![1]), (1, alloc::vec![2])];
     assert!(State::decode_snapshot(&card.state.encode_snapshot().unwrap()).is_err());
+
+    // Each collection has its own decoder bound. Test the current binary path once.
+    for collection in [
+        "domains",
+        "assemblies",
+        "instances",
+        "integers",
+        "blobs",
+        "schema",
+        "duplicate names",
+        "duplicate instances",
+        "duplicate schema",
+    ] {
+        let mut state = fresh_card().state.try_clone().unwrap();
+        let domain = &mut state.isd;
+        match collection {
+            "duplicate names" => {
+                domain.assemblies.0 = alloc::vec![(Rc::from("a"), Rc::new(Vec::new())); 2]
+            }
+            "duplicate instances" => {
+                domain.instances.0 =
+                    alloc::vec![(String::from("F04D430100"), Rc::from("Counter")); 2]
+            }
+            "duplicate schema" => {
+                domain.storage_schema =
+                    Rc::new(alloc::vec![StorageDeclaration { key: 1, kind: 1, max_bytes: 0 }; 2])
+            }
+            "domains" => {
+                state.domains.0 = (0..=MAX_SSDS)
+                    .map(|i| {
+                        (
+                            alloc::format!("d{i:02}"),
+                            Domain::new(
+                                [i as u8; 16],
+                                RegistryAid::isd(),
+                                DomainPolicy::standard().unwrap(),
+                            ),
+                        )
+                    })
+                    .collect()
+            }
+            "assemblies" => {
+                domain.assemblies.0 = (0..=MAX_ASSEMBLIES_PER_DOMAIN)
+                    .map(|i| (Rc::from(alloc::format!("a{i:02}")), Rc::new(Vec::new())))
+                    .collect()
+            }
+            "instances" => {
+                domain.instances.0 = (0..=MAX_INSTANCES_PER_DOMAIN)
+                    .map(|i| (alloc::format!("F04D4301{i:02}"), Rc::from("Counter")))
+                    .collect()
+            }
+            "integers" => domain.store.0 = (0..=MAX_INT_RECORDS as i32).map(|i| (i, i)).collect(),
+            "blobs" => {
+                domain.blobs.0 = (0..=MAX_BLOB_RECORDS as i32)
+                    .map(|i| (i, Vec::new()))
+                    .collect()
+            }
+            "schema" => {
+                domain.storage_schema = Rc::new(
+                    (0..=MAX_DOMAIN_STORAGE_DECLARATIONS)
+                        .map(|i| StorageDeclaration {
+                            key: i as i32,
+                            kind: 1,
+                            max_bytes: 0,
+                        })
+                        .collect(),
+                )
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(State::decode_snapshot(&state.encode_snapshot().unwrap()), Err(Error::Format)),
+            "accepted invalid {collection}"
+        );
+    }
 }

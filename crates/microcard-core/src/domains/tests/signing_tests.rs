@@ -271,31 +271,6 @@ fn ssd_dependency_resolves_pinned_isd_provider_with_distinct_signer() {
         }]
     );
     assert_eq!(
-        serde_json::to_vec(&c.state.domains["consumer"].bindings["KdfConsumer"])
-            .unwrap()
-            .len(),
-        59
-    );
-    let mut noncanonical =
-        serde_json::to_value(&c.state.domains["consumer"].bindings["KdfConsumer"][0]).unwrap();
-    noncanonical["digest"] = alloc::format!("{}=", noncanonical["digest"].as_str().unwrap()).into();
-    assert!(serde_json::from_value::<ResolvedDependency>(noncanonical).is_err());
-    let mut obsolete_binding =
-        serde_json::to_value(&c.state.domains["consumer"].bindings["KdfConsumer"][0]).unwrap();
-    obsolete_binding["domain"] = "ISD".into();
-    assert!(serde_json::from_value::<ResolvedDependency>(obsolete_binding).is_err());
-    let managed_call = ResolvedCall {
-        member: 1,
-        target: CallTarget::Managed {
-            dependency: 0,
-            method: 0,
-        },
-    };
-    assert_eq!(serde_json::to_vec(&managed_call).unwrap().len(), 61);
-    let mut obsolete_call = serde_json::to_value(&managed_call).unwrap();
-    obsolete_call["target"]["Managed"]["assembly"] = "Kdf108".into();
-    assert!(serde_json::from_value::<ResolvedCall>(obsolete_call).is_err());
-    assert_eq!(
         c.manage(command(0xf0, &management_names_wire("ISD", "Kdf108").unwrap())),
         Err(Error::Busy)
     );
