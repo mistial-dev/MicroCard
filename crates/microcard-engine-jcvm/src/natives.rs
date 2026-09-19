@@ -692,6 +692,18 @@ mod tests {
         }
     }
 
+    fn invoke_security(class: ClassId, method: MethodId, args: &[(bool, u16)], heap: &mut Heap,
+            frame: &mut Frame, host: &mut dyn crate::host::Host) -> Result<Native> {
+            for &(reference, value) in args {
+                if reference { frame.push_reference(value)?; } else { frame.push_short(value as i16)?; }
+            }
+            let target = framework(class, method, method == MethodId::getInstance);
+            let signature = if method == MethodId::init {
+                target.class.methods.iter().find(|entry| entry.id == method && entry.signature.init_vector() == (args.len() == 6)).unwrap().signature
+            } else { target.method.signature };
+            security::call(class, method, signature,
+                heap, host, frame, 1, &mut idle(), &mut { u32::MAX })
+        }
     #[test]
     fn aes_cipher_streams_overlapping_buffers_and_preserves_output_on_failure() {
         struct CipherHost { calls: usize, fail_at: usize }
@@ -706,14 +718,6 @@ mod tests {
                 Ok(())
             }
         }
-        fn invoke(class: ClassId, method: MethodId, args: &[(bool, u16)], heap: &mut Heap,
-            frame: &mut Frame, host: &mut CipherHost) -> Result<Native> {
-            for &(reference, value) in args {
-                if reference { frame.push_reference(value)?; } else { frame.push_short(value as i16)?; }
-            }
-            security::call(class, method, framework(class, method, method == MethodId::getInstance).method.signature,
-                heap, host, frame, 1, &mut idle(), &mut { u32::MAX })
-        }
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
@@ -723,14 +727,14 @@ mod tests {
         heap.put_word(key, 1, 128).unwrap();
         let data = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
         heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x11);
-        invoke(ClassId::AESKey, MethodId::setKey, &[(true,key),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
-        invoke(ClassId::Cipher, MethodId::getInstance, &[(false,14),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::AESKey, MethodId::setKey, &[(true,key),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::Cipher, MethodId::getInstance, &[(false,14),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
         let cipher = frame.pop_reference().unwrap();
-        invoke(ClassId::Cipher, MethodId::init, &[(true,cipher),(true,key),(false,2)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::Cipher, MethodId::init, &[(true,cipher),(true,key),(false,2)], &mut heap, &mut frame, &mut host).unwrap();
         for (at, byte) in heap.byte_slice_mut(data, 0, 64).unwrap().iter_mut().enumerate() { *byte = at as u8; }
-        invoke(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,0),(false,5),(true,data),(false,8)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,0),(false,5),(true,data),(false,8)], &mut heap, &mut frame, &mut host).unwrap();
         assert_eq!(frame.pop_short().unwrap(), 0);
-        invoke(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,5),(false,27),(true,data),(false,8)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,5),(false,27),(true,data),(false,8)], &mut heap, &mut frame, &mut host).unwrap();
         assert_eq!(frame.pop_short().unwrap(), 32);
         for (at, byte) in heap.byte_slice(data, 8, 32).unwrap().iter().enumerate() { assert_eq!(*byte, at as u8 ^ 0xaa); }
         assert_eq!(host.calls, 2);
@@ -744,14 +748,75 @@ mod tests {
         assert_eq!(host.calls, 2);
         assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
         host.fail_at = 4;
-        assert!(invoke(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,32),(true,data),(false,0)], &mut heap, &mut frame, &mut host).is_err());
+        assert!(invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,32),(true,data),(false,0)], &mut heap, &mut frame, &mut host).is_err());
         assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
         assert_eq!(heap.byte_slice(heap.get_word(cipher, 5).unwrap(), 0, 16).unwrap(), &[0; 16]);
         heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
-        let result = invoke(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        let result = invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
         let Native::Threw(exception) = result else { panic!("cleared key accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 2);
         assert_eq!(host.calls, 4);
+    }
+
+    #[test]
+    fn cbc_tracks_ciphertext_iv_and_resets_after_final_or_reset() {
+        struct CbcHost { calls: alloc::vec::Vec<([u8; 16], usize, bool)>, fail: bool }
+        impl crate::host::Host for CbcHost {
+            fn supports_cipher(&self, algorithm: u8) -> bool { algorithm == 13 }
+            fn aes128_cbc(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> Result<()> {
+                assert_eq!(key, &[0x11; 16]);
+                self.calls.push((*iv, buffer.len(), encrypt));
+                buffer.fill(0x30 + self.calls.len() as u8);
+                if self.fail { return Err(Error::Unauthorized); }
+                Ok(())
+            }
+        }
+        for mode in [1, 2] {
+            let (mut slab, mut words, mut tags) = setup(0);
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+            let mut host = CbcHost { calls: vec![], fail: false };
+            let key = new_native(&mut heap, ClassId::AESKey, security::STATE_WORDS, 1).unwrap();
+            heap.put_word(key, 0, 15).unwrap();
+            heap.put_word(key, 1, 128).unwrap();
+            let data = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
+            heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x11);
+            invoke_security(ClassId::AESKey, MethodId::setKey, &[(true,key),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x19);
+            invoke_security(ClassId::Cipher, MethodId::getInstance, &[(false,13),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            let cipher = frame.pop_reference().unwrap();
+            invoke_security(ClassId::Cipher, MethodId::init, &[(true,cipher),(true,key),(false,mode),(true,data),(false,0),(false,16)], &mut heap, &mut frame, &mut host).unwrap();
+            heap.byte_slice_mut(data, 0, 64).unwrap().fill(7);
+            for (offset, length, written) in [(0,5,0),(5,27,32)] {
+                invoke_security(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,offset),(false,length),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+                assert_eq!(frame.pop_short().unwrap(), written);
+            }
+            assert_eq!(host.calls, [([0x19;16],32,mode == 2)]);
+            invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,32),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), 16);
+            assert_eq!(host.calls[1], ([if mode == 2 { 0x31 } else { 7 };16],16,mode == 2));
+            let pending = heap.get_word(cipher, 5).unwrap();
+            assert_eq!(heap.byte_slice(pending, 0, 32).unwrap(), &[0;32]);
+            let result = invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,0),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            let Native::Threw(exception) = result else { panic!("empty operation accepted"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 5);
+            invoke_security(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,0),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), 16);
+            assert_eq!(host.calls[2].0, [0;16]);
+            invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,0),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), 0);
+            assert_eq!(host.calls.len(), 3);
+            invoke_security(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,0),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), 16);
+            let state = heap.byte_slice(pending, 0, 32).unwrap().to_vec();
+            let output = heap.byte_slice(data, 0, 64).unwrap().to_vec();
+            host.fail = true;
+            assert!(invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,0),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).is_err());
+            assert_eq!(heap.byte_slice(pending, 0, 32).unwrap(), state);
+            assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), output);
+            heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
+            assert_eq!(heap.byte_slice(pending, 0, 32).unwrap(), &[0;32]);
+        }
     }
 
     #[test]

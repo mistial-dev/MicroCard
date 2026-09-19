@@ -188,12 +188,12 @@ impl Card {
                         if class.id == ClassId::Cipher {
                             let pending = word(5);
                             valid_reference(pending)?;
-                            if word(0) != 14 || pending == 0 || word(3) > 1
+                            if !matches!(word(0), 13 | 14) || pending == 0 || word(3) > 1
                                 || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2))) {
                                 return Err(Error::Format);
                             }
                             let header = &saved.heap[pending as usize..pending as usize + heap::HEADER];
-                            if u16::from_be_bytes([header[2], header[3]]) != 16
+                            if u16::from_be_bytes([header[2], header[3]]) != if word(0) == 13 { 32 } else { 16 }
                                 || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4) {
                                 return Err(Error::Format);
                             }

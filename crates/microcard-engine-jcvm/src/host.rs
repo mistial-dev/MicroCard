@@ -18,6 +18,12 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// Transform nonempty, complete AES-128 CBC blocks without padding.
+    fn aes128_cbc(&mut self, _key: &[u8; 16], _iv: &[u8; 16], buffer: &mut [u8], _encrypt: bool) -> Result<()> {
+        buffer.fill(0);
+        Err(Error::Unsupported)
+    }
+
     /// Fill a buffer with random bytes.
     fn random(&mut self, output: &mut [u8]) -> Result<()> {
         let _ = output;

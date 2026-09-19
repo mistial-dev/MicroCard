@@ -53,21 +53,21 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 166972,
+      "text_bytes": 167816,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
-        "text_bytes": 167500,
+        "text_bytes": 168000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 176824,
+      "text_bytes": 177668,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 177500,
+        "text_bytes": 178000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }

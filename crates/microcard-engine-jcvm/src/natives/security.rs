@@ -26,7 +26,7 @@ const MATERIAL: usize = 2;
 const READY: usize = 3;
 /// Field four, tries left on a PIN, or the padding mode of a cipher.
 const COUNTER: usize = 4;
-/// Reset-scoped cipher pending bytes: count followed by at most fifteen bytes.
+/// Reset-scoped cipher state: count/seen-input flag, fifteen pending bytes, then CBC IV.
 const PENDING: usize = 5;
 
 pub(super) fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
@@ -331,7 +331,7 @@ pub fn call(
                 Ok(id) if !external => match class {
                     ClassId::MessageDigest => host.supports_digest(id),
                     ClassId::RandomData => host.supports_random(id),
-                    ClassId::Cipher => id == 14 && host.supports_cipher(id),
+                    ClassId::Cipher => matches!(id, 13 | 14) && host.supports_cipher(id),
                     _ => false,
                 },
                 _ => false,
@@ -344,7 +344,8 @@ pub fn call(
             let instance = new_native(heap, class, STATE_WORDS, context)?;
             heap.put_word(instance, KIND, algorithm as u16)?;
             if class == ClassId::Cipher {
-                let pending = heap.new_transient_array(heap::KIND_BYTE, 16, context, heap::CLEAR_ON_RESET)?;
+                let bytes = if algorithm == 13 { 32 } else { 16 };
+                let pending = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
                 heap.put_word(instance, PENDING, pending)?;
             }
             frame.push_reference(instance)?;
@@ -419,18 +420,23 @@ pub fn call(
             frame.push_short(digest_length(algorithm)? as i16)?;
         }
         (ClassId::Cipher, MethodId::init) => {
-            if signature.init_vector() {
-                let _length = frame.pop_short()?;
-                let _offset = frame.pop_short()?;
-                let _vector = frame.pop_reference()?;
-                frame.pop_short()?;
-                frame.pop_reference()?;
-                frame.pop_reference()?;
-                return crypto_exception(heap, context, 1); // ECB has no IV.
-            }
+            let vector = if signature.init_vector() {
+                let length = frame.pop_short()?;
+                let offset = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                Some((array, offset, length))
+            } else { None };
             let mode = frame.pop_short()?;
             let key = frame.pop_reference()?;
             let this = frame.pop_reference()?;
+            let cbc = word_field(heap, this, KIND)? == 13;
+            let mut iv = Zeroizing::new([0u8; 16]);
+            if let Some((array, offset, length)) = vector {
+                if !cbc || length != 16 { return crypto_exception(heap, context, 1); }
+                if offset < 0 { return Err(Error::Bounds); }
+                heap.check_access(array, context)?;
+                iv.copy_from_slice(heap.byte_slice(array, offset as usize, 16)?);
+            }
             heap.check_access(key, context)?;
             if !matches!(mode, 1 | 2)
                 || super::api_class(heap.info(key)?.class).map(|entry| entry.id) != Some(ClassId::AESKey)
@@ -440,6 +446,7 @@ pub fn call(
             if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2); }
             let pending = heap.get_word(this, PENDING)?;
             heap.byte_slice_mut(pending, 0, 16)?.fill(0);
+            if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&iv[..]); }
             heap.put_word(this, MATERIAL, key)?;
             heap.put_word(this, COUNTER, mode as u16)?;
             heap.put_word(this, READY, 1)?;
@@ -461,10 +468,10 @@ pub fn call(
             let pending = heap.get_word(this, PENDING)?;
             let mut prior = Zeroizing::new([0u8; 16]);
             prior.copy_from_slice(heap.byte_slice(pending, 0, 16)?);
-            let count = prior[0] as usize;
-            if count > 15 { return Err(Error::Format); }
+            let count = (prior[0] & 0x0f) as usize;
+            if prior[0] & 0x70 != 0 { return Err(Error::Format); }
             let total = count + length as usize;
-            if method == MethodId::doFinal && !total.is_multiple_of(16) {
+            if method == MethodId::doFinal && (!total.is_multiple_of(16) || (total == 0 && prior[0] & 0x80 == 0)) {
                 return crypto_exception(heap, context, 5);
             }
             let written = total / 16 * 16;
@@ -481,17 +488,32 @@ pub fn call(
             let mut result = Zeroizing::new(alloc::vec::Vec::new());
             result.try_reserve_exact(written).map_err(|_| Error::Quota)?;
             let byte = |at: usize| if at < count { prior[1 + at] } else { message[at - count] };
-            for start in (0..written).step_by(16) {
-                let mut block = Zeroizing::new([0u8; 16]);
-                for (at, value) in block.iter_mut().enumerate() { *value = byte(start + at); }
-                host.aes128_block(&key_bytes, &mut block, word_field(heap, this, COUNTER)? == 2)?;
-                result.extend_from_slice(&block[..]);
+            for at in 0..written { result.push(byte(at)); }
+            let cbc = word_field(heap, this, KIND)? == 13;
+            let encrypt = word_field(heap, this, COUNTER)? == 2;
+            let mut next_iv = Zeroizing::new([0u8; 16]);
+            if cbc {
+                let mut iv = Zeroizing::new([0u8; 16]);
+                iv.copy_from_slice(heap.byte_slice(pending, 16, 16)?);
+                *next_iv = *iv;
+                if written != 0 {
+                    if !encrypt { next_iv.copy_from_slice(&result[written - 16..]); }
+                    host.aes128_cbc(&key_bytes, &iv, &mut result, encrypt)?;
+                    if encrypt { next_iv.copy_from_slice(&result[written - 16..]); }
+                }
+                if method == MethodId::doFinal { next_iv.fill(0); }
+            } else {
+                for block in result.chunks_exact_mut(16) {
+                    host.aes128_block(&key_bytes, block.try_into().map_err(|_| Error::Bounds)?, encrypt)?;
+                }
             }
             let mut tail = Zeroizing::new([0u8; 16]);
             tail[0] = (total - written) as u8;
+            if method == MethodId::update && (total != 0 || prior[0] & 0x80 != 0) { tail[0] |= 0x80; }
             for at in written..total { tail[1 + at - written] = byte(at); }
             heap.byte_slice_mut(output, out_offset as usize, written)?.copy_from_slice(&result);
             heap.byte_slice_mut(pending, 0, 16)?.copy_from_slice(&tail[..]);
+            if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&next_iv[..]); }
             frame.push_short(written as i16)?;
         }
         // An algorithm holder remembers the key and the direction it was given, and the

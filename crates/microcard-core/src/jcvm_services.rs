@@ -13,7 +13,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_cipher(&self, algorithm: u8) -> bool {
-        algorithm == 14 // ALG_AES_BLOCK_128_ECB_NOPAD
+        matches!(algorithm, 13 | 14) // AES-128 CBC/ECB, no padding
     }
 
     fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
@@ -24,6 +24,14 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         };
         if result.is_err() {
             block.fill(0);
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
+    fn aes128_cbc(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> Result<()> {
+        if self.0.aes_cbc_in_place(key, iv, buffer, encrypt).is_err() {
+            buffer.fill(0);
             return Err(Error::Unauthorized);
         }
         Ok(())
@@ -66,6 +74,11 @@ mod tests {
         fail: bool,
     }
     impl CryptoProvider for Provider {
+        fn aes_cbc_in_place(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> crate::Result<()> {
+            self.calls += 1;
+            if self.fail { buffer.fill(0x42); return Err(crate::Error::Native); }
+            crate::crypto::SoftwareCrypto.aes_cbc_in_place(key, iv, buffer, encrypt)
+        }
         fn aes128_encrypt_block_in_place(&mut self, key: &[u8; 16], block: &mut [u8; 16]) -> crate::Result<()> {
             self.calls += 1;
             if self.fail { block.fill(0x42); return Err(crate::Error::Native); }
@@ -140,5 +153,17 @@ mod tests {
             assert_eq!(block, [0; 16]);
         }
         assert_eq!(host.0.calls, 8);
+        host.0.fail = false;
+        host.aes128_cbc(&[0;16], &[0;16], &mut block, true).unwrap();
+        assert_eq!(block, [0x66, 0xe9, 0x4b, 0xd4, 0xef, 0x8a, 0x2c, 0x3b,
+            0x88, 0x4c, 0xfa, 0x59, 0xca, 0x34, 0x2b, 0x2e]);
+        host.aes128_cbc(&[0;16], &[0;16], &mut block, false).unwrap();
+        assert_eq!(block, [0;16]);
+        host.0.fail = true;
+        for encrypt in [true, false] {
+            assert_eq!(host.aes128_cbc(&[0;16], &[0;16], &mut block, encrypt), Err(Error::Unauthorized));
+            assert_eq!(block, [0;16]);
+        }
+        assert_eq!(host.0.calls, 12);
     }
 }
