@@ -1806,12 +1806,18 @@ fn main() -> ! {
     let mut endpoint = Endpoint::new(card, keys);
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     // ACL entries are reset-scoped. Keep debug recovery enabled; protect firmware writes.
+    // Each entry covers at most half of flash. Stop at the linked firmware boundary:
+    // images and upload staging must remain writable even when the layout changes.
     unsafe {
+        let firmware_end = layout::FLASH_BASE + layout::FLASH_BYTES;
         for (slot, start, size, perm) in [
-            (0, 0, 0x80000, 2),
-            (1, 0x80000, 0x30000, 2),
+            (0, 0, firmware_end.min(0x80000) as u32, 2),
+            (1, 0x80000, firmware_end.saturating_sub(0x80000) as u32, 2),
             (2, KEYS_BASE as u32, KEYS_BYTES as u32, 6),
         ] {
+            if size == 0 {
+                continue;
+            }
             let base = NVMC + 0x800 + slot * 16;
             write(base, start);
             write(base + 4, size);
