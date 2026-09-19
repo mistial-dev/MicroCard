@@ -21,7 +21,7 @@ def require(relative: str, needles: tuple[str, ...]) -> None:
 
 def main() -> None:
     analyzer = identifiers("managed/MicroCard.Analyzers/MicroCardProfileAnalyzer.cs")
-    acceptance = identifiers("scripts/validation_checkpoint.py")
+    acceptance = identifiers("scripts/analyzer_cases.py")
     matrix = identifiers("docs/PROFILE_ENFORCEMENT.md")
     for name, actual in (("analyzer", analyzer), ("acceptance", acceptance), ("matrix", matrix)):
         if actual != EXPECTED:

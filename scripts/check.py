@@ -9,7 +9,7 @@ from validation_quick import managed, rust, schemas
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", action="store_true", help="run full host and recovery acceptance")
-    parser.add_argument("--suite", choices=("all", "rust", "managed", "schemas", "wallet", "board"), default="all")
+    parser.add_argument("--suite", choices=("all", "rust", "managed", "schemas", "analyzer", "wallet", "board"), default="all")
     parser.add_argument("--jobs", type=int, default=1, help="managed build workers (default: 1)")
     parser.add_argument("--timings", type=pathlib.Path, default=ROOT / "work/validation-timings.json")
     args = parser.parse_args()
@@ -29,6 +29,9 @@ def main():
                 rust()
             if args.suite in ("all", "managed"):
                 managed(args.jobs)
+            if args.suite == "analyzer":
+                from analyzer_cases import run_analyzer_cases
+                run_analyzer_cases()
             if args.suite == "wallet":
                 run("python3", "scripts/wallet_acceptance.py")
             if args.suite == "board":

@@ -24,7 +24,7 @@ The complete validation toolchain uses the following. The versions are pinned be
 
 The **quick gate** is the development loop. It runs the generators in check mode, the structural audits, `cargo check` across the workspace, and the managed builds and unit tests.
 
-The **checkpoint gate** adds `cargo test --release`, the analyzer negative cases, the preprocessor bypass cases, the determinism and fixture assertions, and the acceptance suites, wallet demonstration, and board budgets. Failures must be resolved before accepting the batch.
+The **checkpoint gate** adds `cargo test --release`, the in-process analyzer cases and real MSBuild package-consumer checks, the preprocessor bypass cases, the determinism and fixture assertions, and the acceptance suites, wallet demonstration, and board budgets. Failures must be resolved before accepting the batch.
 
 CI runs the quick gate, the wallet acceptance run, `cargo clippy` with warnings denied, and both board link steps. The checkpoint gate is absent from CI entirely. Running it locally is therefore a real contribution. [The validation cadence](docs/VALIDATION_CADENCE.md) defines focused checks and checkpoint coverage.
 

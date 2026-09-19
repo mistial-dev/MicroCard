@@ -22,9 +22,9 @@ This checkpoint does not run a sustained fuzz campaign.
 
 ## Focused suites and timings
 
-Use `python3 scripts/check.py --suite rust`, `--suite managed`, or `--suite schemas` for a focused loop. `--suite wallet` runs the Java demonstration and `--suite board` links and checks the board variants. With no selection, the quick gate runs schemas, Rust checks, and managed reference tests.
+Use `python3 scripts/check.py --suite rust`, `--suite managed`, or `--suite schemas` for a focused loop. `--suite analyzer` runs the analyzer case corpus in one compiler process. `--suite wallet` runs the Java demonstration and `--suite board` links and checks the board variants. With no selection, the quick gate runs schemas, Rust checks, and managed reference tests.
 
-Managed projects build through one generated solution graph, so common dependencies share one build. `--jobs N` controls MSBuild workers, with one worker as the portable default. Independent invocations must use separate worktrees because managed output directories are shared.
+The quick gate builds managed projects through one generated solution graph, so common dependencies share one build. `--jobs N` controls MSBuild workers, with one worker as the portable default. Independent invocations must use separate worktrees because managed output directories are shared.
 
 Every command reports elapsed time. `work/validation-timings.json` records commands, durations, and exit codes, including the failing stage. Use `--timings PATH` to preserve a comparison run. These timings reflect existing caches unless a separate clean build directory is used.
 
