@@ -106,18 +106,6 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .ok_or(Error::Domain)
     }
 
-    /// Only mutable application fields changed; image descriptors remain valid.
-    fn commit_application_snapshot(&mut self) -> Result<()> {
-        let data = self.state.encode_snapshot()?;
-        if data.len() > 49152 {
-            return Err(Error::Quota);
-        }
-        self.journal
-            .commit_with(data.as_slice(), &mut self.platform)?;
-        self.uncommitted_images.clear();
-        Ok(())
-    }
-
     pub(super) fn commit_application(
         &mut self,
         aid: RegistryAid,
@@ -144,7 +132,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         for (index, (_, next)) in indexes.iter().zip(changes.0.iter_mut().flatten()) {
             next.swap(&mut self.state.domains.0[*index].1);
         }
-        let result = self.commit_application_snapshot();
+        let result = self.commit_metadata_snapshot();
         if result.is_err() {
             for (index, (_, next)) in indexes.iter().zip(changes.0.iter_mut().flatten()) {
                 next.swap(&mut self.state.domains.0[*index].1);
@@ -167,7 +155,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             return Ok(());
         }
         core::mem::swap(&mut domain.credentials, &mut next);
-        let result = self.commit_application_snapshot();
+        let result = self.commit_metadata_snapshot();
         if result.is_err() {
             core::mem::swap(&mut self.state.domains.0[index].1.credentials, &mut next);
         }

@@ -1341,6 +1341,36 @@ fn domain_capacity_is_bounded_and_survives_reboot() {
 }
 
 #[test]
+fn metadata_commit_failures_restore_live_state_without_reboot() {
+    fn rejected(card: &mut Card<MemoryFlash, TestPlatform>, change: impl FnOnce(&mut Card<MemoryFlash, TestPlatform>) -> Result<()>) {
+        let before = card.state.encode_snapshot().unwrap().to_vec();
+        card.journal.flash_mut().fail_after = Some(0);
+        assert_eq!(change(card), Err(Error::Storage));
+        card.journal.flash_mut().fail_after = None;
+        assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
+    }
+    let mut card = card();
+    rejected(&mut card, |card| card.manage(command(0xe0, b"new")).map(|_| ()));
+    create(&mut card, "new");
+    rejected(&mut card, |card| card.manage(command(0xe4, b"new")).map(|_| ()));
+    let policy = DomainPolicy { max_int_records: 1, ..DomainPolicy::standard().unwrap() };
+    let mut request = alloc::vec![1, 3, b'n', b'e', b'w'];
+    request.extend_from_slice(&policy.wire().unwrap()[1..]);
+    rejected(&mut card, |card| card.manage(command(0xe1, &request)).map(|_| ()));
+    card.manage(command(0xe1, &request)).unwrap();
+    assert_eq!(card.state.domains["new"].policy.max_int_records, 1);
+    #[cfg(feature = "scp03-pseudo-random")]
+    {
+        let next = card.state.scp03_sequence;
+        rejected(&mut card, |card| card.next_secure_channel_sequence().map(|_| ()));
+        assert_eq!(card.next_secure_channel_sequence().unwrap(), next);
+    }
+    card.manage(command(0xe4, b"new")).unwrap();
+    let recovered = Card::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
+    assert!(!recovered.state.domains.contains_key("new"));
+}
+
+#[test]
 fn domain_registry_orders_insertions() {
     let policy = DomainPolicy::standard().unwrap();
     let mut domains = Domains::new();

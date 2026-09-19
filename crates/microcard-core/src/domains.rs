@@ -17,6 +17,7 @@ pub use crate::hal::RuntimePlatform as Platform;
 mod snapshot;
 mod engine;
 mod application;
+mod metadata;
 use application::{ApplicationChanges, ApplicationView, StagedApplication};
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
@@ -233,12 +234,6 @@ impl Domains {
                 Ok(None)
             }
         }
-    }
-
-    fn remove(&mut self, id: &str) -> Option<Domain> {
-        self.position(id)
-            .ok()
-            .map(|index| self.0.remove(index).1)
     }
 
     fn len(&self) -> usize {
@@ -2052,9 +2047,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 .scp03_sequence
                 .saturating_add(SEQUENCE_WINDOW)
                 .min(SEQUENCE_CEILING + 1);
-            let mut next = self.state.try_clone()?;
-            next.scp03_sequence = reserved;
-            self.commit(next)?;
+            self.reserve_sequence_window(reserved)?;
             self.sequence.1 = reserved;
         }
         let issued = self.sequence.0;
@@ -2212,12 +2205,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 let identifier = encode_aid(requested.as_slice())?;
                 let mut incarnation = [0; 16];
                 self.platform.random(&mut incarnation)?;
-                let mut next = self.state.try_clone()?;
-                next.domains.insert(
-                    identifier,
-                    Domain::new(incarnation, requested, DomainPolicy::standard()?),
+                self.insert_domain(
+                    identifier, Domain::new(incarnation, requested, DomainPolicy::standard()?),
                 )?;
-                self.commit(next)?;
                 return Ok(Vec::new());
             }
             let install = crate::globalplatform::application_install(&command)?;
@@ -2233,16 +2223,10 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if target == RegistryAid::isd() {
             return Err(Error::Unauthorized);
         }
-        if let Some(identifier) = self
-            .state
-            .domains
-            .iter()
-            .find(|(_, domain)| domain.registry_aid == target)
-            .map(|(identifier, _)| identifier.as_str())
+        if let Some(index) = self.state.domains.iter()
+            .position(|(_, domain)| domain.registry_aid == target)
         {
-            let mut next = self.state.try_clone()?;
-            next.domains.remove(identifier).ok_or(Error::Missing)?;
-            self.commit(next)?;
+            self.remove_domain(index)?;
             self.abort_staging();
             return Ok(Vec::new());
         }
@@ -2514,29 +2498,16 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 if self.state.registry_aid_in_use(registry_aid) {
                     return Err(Error::Busy);
                 }
-                let mut next = self.state.try_clone()?;
-                next.domains.insert(
+                let response = fallible_copy(&incarnation)?;
+                self.insert_domain(
                     fallible_string(id)?,
                     Domain::new(incarnation, registry_aid, DomainPolicy::standard()?),
                 )?;
-                self.commit(next)?;
-                fallible_copy(&incarnation)
+                Ok(response)
             }
             0xe1 => {
                 let (identifier, policy) = DomainPolicy::request(&c.data)?;
-                let mut next = self.state.try_clone()?;
-                let domain = next.domains.get_mut(&identifier).ok_or(Error::Domain)?;
-                if domain.key.is_some()
-                    || !domain.assemblies.is_empty()
-                    || !domain.instances.is_empty()
-                    || !domain.store.is_empty()
-                    || !domain.blobs.is_empty()
-                    || !domain.keys.is_empty()
-                {
-                    return Err(Error::Busy);
-                }
-                domain.policy = policy;
-                self.commit(next)?;
+                self.update_domain_policy(&identifier, policy)?;
                 Ok(Vec::new())
             }
             0xe2 => {
@@ -2577,9 +2548,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 if id == "ISD" {
                     return Err(Error::Unauthorized);
                 }
-                let mut next = self.state.try_clone()?;
-                next.domains.remove(id).ok_or(Error::Missing)?;
-                self.commit(next)?;
+                let index = self.state.domains.position(id).map_err(|_| Error::Missing)?;
+                self.remove_domain(index)?;
                 self.staging.reset();
                 Ok(Vec::new())
             }
