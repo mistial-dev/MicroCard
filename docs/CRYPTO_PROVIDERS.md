@@ -50,14 +50,22 @@ Long-running validation follows the repository cadence: focused provider tests d
 
 ## Reproducible build inputs
 
-Install `arm-none-eabi-gcc` and GNU ARM binutils, then run:
+Install the pinned Arm GNU 13.3.Rel1 compiler and binutils, then fetch vendor sources:
 
 ```sh
+python3 scripts/fetch_arm_toolchain.py
+# Add the printed bin directory to PATH.
 python3 scripts/fetch_nrf_crypto_sources.py
 python3 scripts/verify_nrf_crypto_sources.py
 ```
 
-The fetch command uses the repository's lock files, performs shallow sparse checkouts
+The compiler installer checks the official archive SHA-256 before extracting into
+ignored `work/toolchains/`, checks compiler version 13.3.1, and leaves system tools
+untouched. It supports Linux x86-64, macOS ARM64/x86-64, and Windows x64. CI and
+release jobs add its bin directory to subsequent steps automatically. Existing
+installations are version-checked; remove a suspect installation to fetch it again.
+
+The vendor fetch command uses the repository's lock files, performs shallow sparse checkouts
 under ignored `work/`, and verifies the annotated tag, commit, tree, licenses, and
 pinned file hashes before publishing each directory. Existing checkouts are verified
 without reset, cleanup, or replacement. Cargo's build script separately validates every

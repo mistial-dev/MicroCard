@@ -44,15 +44,15 @@ jobs:
           python scripts/jcvm_transport_acceptance.py
       - name: Rust lint
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: ARM link inspection tools
+      - name: Pinned ARM compiler and link inspection tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
-      - name: Separate firmware links and budgets
-        if: runner.os == 'Linux'
-        run: python scripts/board_budgets.py --check
+        run: python scripts/fetch_arm_toolchain.py
       - name: Pinned hardware crypto inputs
         if: runner.os == 'Linux'
         run: python scripts/fetch_nrf_crypto_sources.py
+      - name: Separate firmware links and budgets
+        if: runner.os == 'Linux'
+        run: python scripts/board_budgets.py --check
       - name: Hardware crypto replacement links
         if: runner.os == 'Linux'
         run: |

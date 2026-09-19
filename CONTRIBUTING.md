@@ -17,8 +17,8 @@ The complete validation toolchain uses the following. The versions are pinned be
 - Rust 1.94.1, with the `thumbv7em-none-eabihf` target for board builds.
 - .NET SDK 10.0.302.
 - Java 21, with the committed Maven wrapper for the wallet.
-- Python 3, then `pip install -r scripts/requirements.txt`.
-- `arm-none-eabi-objcopy`, `arm-none-eabi-objdump` and `arm-none-eabi-size` for the board size gates.
+- Python 3.12 or newer, then `pip install -r scripts/requirements.txt`.
+- Arm GNU 13.3.Rel1 for firmware compilation and size gates. Run `python3 scripts/fetch_arm_toolchain.py` and add its printed bin directory to `PATH`; [crypto build setup](docs/CRYPTO_PROVIDERS.md#reproducible-build-inputs) also fetches the pinned vendor sources.
 
 ## Which gate does what
 
