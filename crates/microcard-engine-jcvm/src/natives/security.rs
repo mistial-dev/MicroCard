@@ -382,15 +382,19 @@ pub fn call(
             if length < 0 || offset < 0 || out_offset < 0 {
                 return Err(Error::Bounds);
             }
-            // The message is copied out because the input and the output may be the same
-            // array, and a digest written into what it is still reading would hash itself.
-            let mut message = alloc::vec::Vec::new();
-            message
-                .try_reserve_exact(length as usize)
-                .map_err(|_| Error::Quota)?;
-            message.extend_from_slice(heap.byte_slice(input, offset as usize, length as usize)?);
-            let mut digest = [0u8; 64];
-            let written = host.digest(algorithm, &message, &mut digest)?;
+            let expected = digest_length(algorithm)?;
+            // Validate before invoking the provider. Fixed scratch allows overlapping
+            // input/output without copying the message or publishing partial results.
+            heap.byte_slice(output, out_offset as usize, expected)?;
+            let mut digest = Zeroizing::new([0u8; 64]);
+            let written = host.digest(
+                algorithm,
+                heap.byte_slice(input, offset as usize, length as usize)?,
+                &mut digest[..expected],
+            )?;
+            if written != expected {
+                return Err(Error::Format);
+            }
             heap.byte_slice_mut(output, out_offset as usize, written)?
                 .copy_from_slice(&digest[..written]);
             frame.push_short(written as i16)?;

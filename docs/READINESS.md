@@ -44,7 +44,8 @@ Inactive JCVM instances retain reset-scoped transient arrays in a zeroizing RAM 
 with a 64 KiB logical limit. Records are bound to installation identity; reset and
 deletion clear them. Admission failure is explicit, without eviction. Transient key
 bytes and initialization flags clear together. Durable snapshots exclude transient
-values and PIN validation. These bounds do not prove that peak workloads fit the
+values and PIN validation. JCVM digest calls borrow input directly and stage only
+the fixed digest, validating output bounds and provider lengths before publication. These bounds do not prove that peak workloads fit the
 board's reserved heap.
 
 ## Required before the pre-hardware release candidate

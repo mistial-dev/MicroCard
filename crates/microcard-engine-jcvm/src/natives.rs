@@ -692,6 +692,51 @@ mod tests {
     }
 
     #[test]
+    fn digest_borrows_overlapping_input_and_publishes_only_complete_results() {
+        struct DigestHost { input: usize, calls: usize, result: Result<usize> }
+        impl crate::host::Host for DigestHost {
+            fn digest(&mut self, algorithm: u8, message: &[u8], output: &mut [u8]) -> Result<usize> {
+                self.calls += 1;
+                assert_eq!(algorithm, 4);
+                assert_eq!(message.as_ptr() as usize, self.input);
+                assert_eq!(message, &[0x42; 32]);
+                assert_eq!(output.len(), 32);
+                output.fill(0x99);
+                self.result
+            }
+        }
+        for (offset, result, succeeds, calls) in [
+            (0, Ok(32), true, 1),
+            (1, Ok(32), false, 0),
+            (0, Ok(65), false, 1),
+            (0, Ok(0), false, 1),
+            (0, Err(Error::Unsupported), false, 1),
+        ] {
+            let (mut slab, mut words, mut tags) = setup(0);
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+            let digest = new_native(&mut heap, ClassId::MessageDigest, security::STATE_WORDS, 1).unwrap();
+            heap.put_word(digest, 0, 4).unwrap();
+            let array = heap.new_array(heap::KIND_BYTE, 32, 1).unwrap();
+            heap.byte_slice_mut(array, 0, 32).unwrap().fill(0x42);
+            let mut host = DigestHost { input: heap.byte_slice(array, 0, 32).unwrap().as_ptr() as usize, calls: 0, result };
+            frame.push_reference(digest).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(0).unwrap();
+            frame.push_short(32).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(offset).unwrap();
+            let actual = security::call(ClassId::MessageDigest, MethodId::doFinal,
+                framework(ClassId::MessageDigest, MethodId::doFinal, false).method.signature,
+                &mut heap, &mut host, &mut frame, 1, &mut idle());
+            assert_eq!(actual.is_ok(), succeeds);
+            assert_eq!(host.calls, calls);
+            assert_eq!(heap.byte_slice(array, 0, 32).unwrap(), &[if succeeds { 0x99 } else { 0x42 }; 32]);
+            if succeeds { assert_eq!(frame.pop_short().unwrap(), 32); }
+        }
+    }
+
+    #[test]
     fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         struct Capabilities;
         impl crate::host::Host for Capabilities {
