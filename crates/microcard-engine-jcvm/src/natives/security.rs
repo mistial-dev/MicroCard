@@ -12,6 +12,7 @@ use crate::{Error, Result};
 extern crate alloc;
 use zeroize::Zeroizing;
 mod ec;
+mod agreement;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
@@ -118,6 +119,9 @@ pub fn call(
     budget: &mut u32,
 ) -> Result<Native> {
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
+    if class == ClassId::KeyAgreement {
+        if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? { return Ok(result); }
+    }
     match (class, method) {
         (ClassId::KeyBuilder, MethodId::buildKey) => {
             let _encryption = frame.pop_short()?;
@@ -343,6 +347,7 @@ pub fn call(
                     ClassId::MessageDigest => host.supports_digest(id),
                     ClassId::RandomData => host.supports_random(id),
                     ClassId::Cipher => matches!(id, 13 | 14) && host.supports_cipher(id),
+                    ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
                     _ => false,
                 },
                 _ => false,
@@ -529,8 +534,7 @@ pub fn call(
         }
         // An algorithm holder remembers the key and the direction it was given, and the
         // operation itself is the host's to answer.
-        (ClassId::Signature, MethodId::init)
-        | (ClassId::KeyAgreement, MethodId::init) => {
+        (ClassId::Signature, MethodId::init) => {
             // Both forms end with the mode or the key. The longer one also carries an
             // initialisation vector, which is taken and held with the key.
             if signature.init_vector() {

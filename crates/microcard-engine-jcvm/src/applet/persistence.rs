@@ -185,6 +185,20 @@ impl Card {
                             |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);
                         let material = word(2);
                         valid_reference(material)?;
+                        if class.id == ClassId::KeyAgreement {
+                            if word(0) != 3 || word(3) > 1 || (word(3) == 1 && material == 0) {
+                                return Err(Error::Format);
+                            }
+                            if material != 0 {
+                                let start = material as usize;
+                                let key_class = u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
+                                if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::ECPrivateKey)
+                                    || saved.heap[start + 4] != heap::KIND_OBJECT
+                                    || u16::from_be_bytes([saved.heap[start + 2], saved.heap[start + 3]]) != 6 {
+                                    return Err(Error::Type);
+                                }
+                            }
+                        }
                         if class.id == ClassId::Cipher {
                             let pending = word(5);
                             valid_reference(pending)?;

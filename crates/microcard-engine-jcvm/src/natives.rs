@@ -870,6 +870,7 @@ mod tests {
         impl crate::host::Host for Capabilities {
             fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
             fn supports_random(&self, algorithm: u8) -> bool { algorithm == 2 }
+            fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
         }
         for (class, algorithm, external, supported) in [
             (ClassId::MessageDigest, 4, false, true),
@@ -879,6 +880,9 @@ mod tests {
             (ClassId::RandomData, 99, false, false),
             (ClassId::Signature, 1, false, false),
             (ClassId::KeyAgreement, 1, false, false),
+            (ClassId::KeyAgreement, 3, false, true),
+            (ClassId::KeyAgreement, 3, true, false),
+            (ClassId::KeyAgreement, 4, false, false),
             (ClassId::Cipher, 1, false, false),
         ] {
             let (mut slab, mut words, mut tags) = setup(0);

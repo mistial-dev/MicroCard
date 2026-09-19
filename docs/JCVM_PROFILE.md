@@ -265,13 +265,18 @@ P-256 key objects accept the fixed SEC 2 curve parameters and validated private 
 or 65-byte uncompressed public points. Parameter flags share the key material's lifetime;
 reset/deselection clears transient parameters and values together. The cofactor is optional
 for initialization. Other curves, key sizes, and encrypted-key interfaces are rejected.
-Signature and KeyAgreement factories still reject requests. The committed PIV acceptance
+Raw P-256 ECDH (KeyAgreement algorithm 3) accepts an initialized private key and a
+65-byte uncompressed peer point, returning the 32-byte shared x-coordinate through
+the provider. Output is staged until success, including overlapping buffers; each call
+charges 65 work units and rechecks key initialization. Reset preserves the binding but
+clears transient private keys. Other agreement algorithms and external access are rejected.
+Signature factories still reject requests. The committed PIV acceptance
 still installs, selects, and exercises PIN retry behavior with this restriction.
 
 Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`
 throws `SystemException.NO_RESOURCE`; it never exposes the transport's management channel.
 
-JCVM P-256 key generation, signature, and agreement bindings remain required. Additional software
+JCVM P-256 key generation and signature bindings remain required. Additional software
 implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
 ## Authorization

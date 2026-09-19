@@ -11,6 +11,7 @@ pub trait Host {
     fn supports_digest(&self, _algorithm: u8) -> bool { false }
     fn supports_random(&self, _algorithm: u8) -> bool { false }
     fn supports_cipher(&self, _algorithm: u8) -> bool { false }
+    fn supports_agreement(&self, _algorithm: u8) -> bool { false }
 
     /// Transform one AES-128 block; failed operations clear the entire block.
     fn aes128_block(&mut self, _key: &[u8; 16], block: &mut [u8; 16], _encrypt: bool) -> Result<()> {
@@ -28,6 +29,12 @@ pub trait Host {
     fn p256_parameter(&self, _id: u8) -> Option<&'static [u8]> { None }
 
     fn p256_key_valid(&mut self, _private: bool, _key: &[u8]) -> Result<bool> {
+        Err(Error::Unsupported)
+    }
+
+    /// Raw P-256 ECDH x-coordinate; failure clears all output.
+    fn p256_agree(&mut self, _key: &[u8; 32], _peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
+        output.fill(0);
         Err(Error::Unsupported)
     }
 

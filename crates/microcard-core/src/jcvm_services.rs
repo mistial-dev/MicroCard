@@ -87,6 +87,11 @@ impl<P: CryptoProvider> Services<'_, P> {
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
+    fn p256_agree(&mut self, key: &[u8; 32], peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
+        Services::p256_agree(self, key, peer, output)
+    }
+
     fn p256_parameter(&self, id: u8) -> Option<&'static [u8]> { ec_parameters::parameter(id) }
 
     fn p256_key_valid(&mut self, private: bool, key: &[u8]) -> Result<bool> {
@@ -247,16 +252,16 @@ mod tests {
         let peer_private = [1;32];
         let peer = crate::crypto::p256_public_key(&peer_private).unwrap();
         let mut shared = [0xaa;32];
-        host.p256_agree(&private, &peer, &mut shared).unwrap();
+        Host::p256_agree(&mut host, &private, &peer, &mut shared).unwrap();
         assert_eq!(shared, crate::crypto::p256_ecdh(&peer_private, &public).unwrap());
         let mut off_curve = [0;65];
         off_curve[0] = 4;
         assert_eq!(host.p256_public_valid(&off_curve), Ok(false));
-        assert_eq!(host.p256_agree(&private, &off_curve, &mut shared), Err(Error::Bounds));
+        assert_eq!(Host::p256_agree(&mut host, &private, &off_curve, &mut shared), Err(Error::Bounds));
         assert_eq!(shared, [0;32]);
         host.0.fail = true;
         assert_eq!(host.p256_public_valid(&public), Err(Error::Unauthorized));
-        assert_eq!(host.p256_agree(&private, &peer, &mut shared), Err(Error::Unauthorized));
+        assert_eq!(Host::p256_agree(&mut host, &private, &peer, &mut shared), Err(Error::Unauthorized));
         assert_eq!(shared, [0;32]);
         for (fail, fail_public, bad_entropy, expected_calls) in [(true,false,false,1), (false,true,false,2), (false,false,true,8)] {
             host.0.fail = fail;

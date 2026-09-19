@@ -726,6 +726,10 @@ mod tests {
         heap.put_word(ec_private, 0, 30).unwrap();
         heap.put_word(ec_private, 1, 256).unwrap();
         heap.put_word(ec_private, 2, ec_private_bytes).unwrap();
+        let agreement = heap.new_object(native_class_of(ClassId::KeyAgreement).unwrap(), 6, 1).unwrap();
+        heap.put_word(agreement, 0, 3).unwrap();
+        heap.put_word(agreement, 2, ec_private).unwrap();
+        heap.put_word(agreement, 3, 1).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -741,6 +745,8 @@ mod tests {
         assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
         assert_eq!(recovered.byte_slice(pending, 0, 32).unwrap(), &[0; 32]);
         assert_eq!(recovered.get_word(cipher, 2), Ok(key));
+        assert_eq!(recovered.get_word(agreement, 2), Ok(ec_private));
+        assert_eq!(recovered.get_word(agreement, 3), Ok(1));
         assert_eq!(recovered.array_get(ec_public_bytes, 0), Ok(0x5f));
         assert_eq!(recovered.byte_slice(ec_private_bytes, 0, 33).unwrap(), &[0; 33]);
         assert_eq!(restored.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false).unwrap().data, [0x12, 0x34]);
@@ -748,7 +754,7 @@ mod tests {
         let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(live.array_get(transient, 0), Ok(7));
         assert_eq!(live.get_word(pin, 3), Ok(1));
-        for case in 0..13 {
+        for case in 0..15 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -763,6 +769,8 @@ mod tests {
                 9 => { invalid[ec_private_bytes as usize + 4] &= 0x0f; instance }
                 10 => { invalid[ec_public as usize + heap::HEADER + 1] = 12; instance }
                 11 => { invalid[ec_public as usize + heap::HEADER + 7] = 1; instance }
+                12 => { invalid[agreement as usize + heap::HEADER + 1] = 1; instance }
+                13 => { invalid[agreement as usize + heap::HEADER + 4..agreement as usize + heap::HEADER + 6].copy_from_slice(&ec_public.to_be_bytes()); instance }
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
