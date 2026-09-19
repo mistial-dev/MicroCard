@@ -1201,11 +1201,6 @@ fn instruction_end(code: &[u8], start: usize, rows: &[u16; 64]) -> Result<usize>
     let opcode = opcodes::lookup(value).ok_or(Error::Unsupported)?;
     use opcodes::Operand;
     match opcode.operand {
-        Operand::None => {}
-        Operand::I8 | Operand::VarU8 | Operand::BranchI8 => {
-            cursor = cursor.checked_add(1).ok_or(Error::Quota)?
-        }
-        Operand::I32 | Operand::BranchI32 => cursor = cursor.checked_add(4).ok_or(Error::Quota)?,
         Operand::SwitchI32 => {
             let count = u32_at(code, cursor)? as usize;
             if count > 256 {
@@ -1219,14 +1214,19 @@ fn instruction_end(code: &[u8], start: usize, rows: &[u16; 64]) -> Result<usize>
         Operand::MethodToken | Operand::FieldToken | Operand::TypeToken => {
             let table = *code.get(cursor).ok_or(Error::Bounds)?;
             let row = u16_at(code, cursor + 1)?;
-            if table >= 64
-                || opcode.token_tables & (1u64 << table) == 0
+            if table >= 16
+                || opcode.token_tables & (1u16 << table) == 0
                 || row == 0
                 || row > rows[table as usize]
             {
                 return Err(Error::Bounds);
             }
             cursor = cursor.checked_add(3).ok_or(Error::Quota)?;
+        }
+        _ => {
+            cursor = start
+                .checked_add(usize::from(opcode.fixed_length))
+                .ok_or(Error::Quota)?
         }
     }
     if cursor > code.len() {
@@ -2578,6 +2578,11 @@ mod tests {
         assert_eq!(validate_cil(&oversized_switch, &rows), Err(Error::Quota));
         assert_eq!(validate_cil(&[0x01], &rows), Err(Error::Unsupported));
         assert_eq!(validate_cil(&[0xe0], &rows), Err(Error::Unsupported));
+        assert_eq!(validate_cil(&[0xfe, 1], &rows), Ok(()));
+        assert_eq!(validate_cil(&[0xfe], &rows), Err(Error::Bounds));
+        for suffix in [0, 6, 255] {
+            assert_eq!(validate_cil(&[0xfe, suffix], &rows), Err(Error::Unsupported));
+        }
     }
 
     #[test]

@@ -11,6 +11,9 @@ RUST_OPERANDS = {
     "method_token": "MethodToken", "field_token": "FieldToken", "type_token": "TypeToken",
 }
 TABLES = {"TypeRef": 1, "TypeDef": 2, "Field": 4, "MethodDef": 6, "MemberRef": 10}
+OPERAND_BYTES = {"none": 0, "i8": 1, "var_u8": 1, "i32": 4,
+                 "branch_i8": 1, "branch_i32": 4, "method_token": 3,
+                 "field_token": 3, "type_token": 3}
 
 def rust(schema):
     pops = sorted({opcode["pop"] for opcode in schema["opcodes"]})
@@ -24,14 +27,37 @@ def rust(schema):
         "#[allow(non_camel_case_types, clippy::enum_variant_names)]", "#[derive(Clone, Copy, Debug, PartialEq, Eq)]", "pub enum Push {", *[f"    {value}," for value in pushes], "}",
         "#[allow(non_camel_case_types)]", "#[derive(Clone, Copy, Debug, PartialEq, Eq)]", "pub enum Flow {", *[f"    {value}," for value in flows], "}",
         "#[derive(Clone, Copy)]",
-        "pub struct Opcode {", "    pub operand: Operand,", "    pub token_tables: u64,", "    pub pop: Pop,", "    pub push: Push,", "    pub flow: Flow,", "}",
-        "pub fn lookup(value: u16) -> Option<Opcode> {",
-        "    Some(match value {",
+        "pub struct Opcode {", "    pub operand: Operand,", "    pub token_tables: u16,", "    pub pop: Pop,", "    pub push: Push,", "    pub flow: Flow,",
+        "    /// Includes the opcode prefix; zero denotes the variable-length switch.",
+        "    pub fixed_length: u8,", "}",
     ]
+    profiles = []
+    primary = [0] * 256
+    extended = [0] * (1 + max((o["value"] & 255 for o in schema["opcodes"] if o["value"] > 255), default=0))
     for opcode in schema["opcodes"]:
         mask = sum(1 << TABLES[name] for name in opcode["token_tables"])
-        lines += [f"        0x{opcode['value']:04x} => Opcode {{", f"            operand: Operand::{RUST_OPERANDS[opcode['operand']]},", f"            token_tables: 0x{mask:016x},", f"            pop: Pop::{opcode['pop']},", f"            push: Push::{opcode['push']},", f"            flow: Flow::{opcode['flow']},", "        },"]
-    lines += ["        _ => return None,", "    })", "}", ""]
+        value = opcode["value"]
+        if not (0 <= value < 0xfe or 0xfe00 <= value <= 0xfeff):
+            raise ValueError(f"invalid opcode encoding: {value:#x}")
+        length = 0 if opcode["operand"] == "switch_i32" else (2 if value > 255 else 1) + OPERAND_BYTES[opcode["operand"]]
+        profile = (RUST_OPERANDS[opcode["operand"]], mask, opcode["pop"], opcode["push"], opcode["flow"], length)
+        if profile not in profiles:
+            profiles.append(profile)
+        (extended if value > 255 else primary)[value & 255] = profiles.index(profile) + 1
+    if len(profiles) > 255 or max(p[1] for p in profiles) > 65535:
+        raise ValueError("opcode metadata exceeds compact table bounds")
+    lines += ["// Index zero rejects unsupported instructions, including unused FE prefixes."]
+    for name, indexes in (("PRIMARY", primary), ("EXTENDED", extended)):
+        lines += [f"const {name}: [u8; {len(indexes)}] = ["]
+        lines += ["    " + ", ".join(str(n) for n in indexes[i:i+16]) + "," for i in range(0, len(indexes), 16)]
+        lines += ["];", ""]
+    lines += [f"const PROFILES: [Opcode; {len(profiles)}] = ["]
+    for operand, mask, pop, push, flow, length in profiles:
+        lines += ["    Opcode {", f"        operand: Operand::{operand},", f"        token_tables: 0x{mask:04x},", f"        pop: Pop::{pop},", f"        push: Push::{push},", f"        flow: Flow::{flow},", f"        fixed_length: {length},", "    },"]
+    lines += ["];", "", "pub fn lookup(value: u16) -> Option<&'static Opcode> {",
+              "    let index = if value <= 0xff {", "        PRIMARY[usize::from(value)]",
+              "    } else {", "        *EXTENDED.get(usize::from(value.checked_sub(0xfe00)?))?", "    };",
+              "    PROFILES.get(usize::from(index.checked_sub(1)?))", "}", ""]
     return "\n".join(lines)
 
 def csharp(schema):

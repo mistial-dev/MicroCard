@@ -374,22 +374,17 @@ fn branch(next: usize, delta: i32) -> Result<usize> {
 }
 
 fn instruction_width(code: &[u8], pc: usize, value: u16) -> Result<usize> {
-    use mc04_opcodes::Operand;
-    let prefix = if value > 0xff { 2 } else { 1 };
-    let operand = mc04_opcodes::lookup(value)
-        .ok_or(Error::Unsupported)?
-        .operand;
-    let width = match operand {
-        Operand::None => prefix,
-        Operand::I8 | Operand::VarU8 | Operand::BranchI8 => prefix + 1,
-        Operand::I32 | Operand::BranchI32 => prefix + 4,
-        Operand::MethodToken | Operand::FieldToken | Operand::TypeToken => prefix + 3,
-        Operand::SwitchI32 => {
-            let count = usize::try_from(i32_at(code, pc + prefix)?).map_err(|_| Error::Bounds)?;
-            prefix + 4 + count.checked_mul(4).ok_or(Error::Bounds)?
-        }
+    let opcode = mc04_opcodes::lookup(value).ok_or(Error::Unsupported)?;
+    let width = if opcode.fixed_length != 0 {
+        usize::from(opcode.fixed_length)
+    } else {
+        let count = usize::try_from(i32_at(code, pc + 1)?).map_err(|_| Error::Bounds)?;
+        5usize
+            .checked_add(count.checked_mul(4).ok_or(Error::Bounds)?)
+            .ok_or(Error::Bounds)?
     };
-    code.get(pc..pc + width).ok_or(Error::Bounds)?;
+    code.get(pc..pc.checked_add(width).ok_or(Error::Bounds)?)
+        .ok_or(Error::Bounds)?;
     Ok(width)
 }
 
