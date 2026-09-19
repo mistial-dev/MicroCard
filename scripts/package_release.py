@@ -24,6 +24,13 @@ def copy_tree(source: pathlib.Path, destination: pathlib.Path) -> None:
     shutil.copytree(source, destination)
 
 
+def copy_documentation(stage: pathlib.Path) -> None:
+    for name in ("README.md", "CONTRIBUTING.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md"):
+        shutil.copy2(ROOT / name, stage / name)
+    # Preserve relative links from the root README and between contract documents.
+    copy_tree(ROOT / "docs", stage / "docs")
+
+
 def main() -> None:
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -87,10 +94,7 @@ exec "$ROOT/runtime/bin/java" -cp "$ROOT/wallet/microcard-wallet.jar:$ROOT/walle
 """, encoding="utf-8")
         launcher.chmod(0o755)
 
-    for name in ("README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md"):
-        shutil.copy2(ROOT / name, stage / name)
-    for name in ("ARCHITECTURE.md", "WALLET.md", "STATUS.md", "ROADMAP.md"):
-        shutil.copy2(ROOT / "docs" / name, stage / name)
+    copy_documentation(stage)
 
     analyzer_output = stage / "sdk"
     analyzer_output.mkdir()

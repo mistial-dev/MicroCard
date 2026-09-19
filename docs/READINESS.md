@@ -1,192 +1,126 @@
 # Release readiness
 
-MicroCard is a development system. Separate .NET and JCVM firmware now cross-link, but release-candidate acceptance is incomplete. Hardware testing of this cleanup is deferred.
+MicroCard is a development system, not yet a pre-hardware release candidate.
+MC04 (.NET) and JCVM firmware are separate builds. Both cross-link for nRF52840;
+current hardware execution and production certification remain unverified.
+This page is the authoritative list of supported behavior and release blockers.
 
-## Current implementation
+## Supported behavior
 
-The .NET path compiles, verifies, signs, installs, and runs MC04 applications in the simulator and links for nRF52840. Package signing uses P-256 with uncompressed SEC1 keys and low-S signatures. Domain identities are SHA-256 key hashes. MP05 packages and MDB2 bundles reject their earlier formats. Native capability 21 remains reserved.
+- **MC04:** annotated C# compilation, analysis, independent device verification,
+  signed loading, installation, selection, execution, and reboot recovery. The Java
+  wallet acceptance covers isolated credentials, P-256 signing, PIN recovery,
+  package rejection, and persistence. See [the execution profile](PROFILE.md).
+- **JCVM:** the supported CAP corpus installs and processes APDUs in the simulator.
+  The shared SCP03 path supports authenticated loading, installation, selection,
+  deletion, and recovery through dedicated image and heap storage. SHA-256 and
+  entropy use shared providers; unsupported crypto factories throw Java Card errors.
+  See [the applet profile and its limits](JCVM_PROFILE.md).
+- **Shared platform:** APDU transport, SCP03, cancellation, quotas, authenticated
+  persistence, image activation, and hardware-provider contracts. Board gates reject
+  configurations with both or neither engine and check that the unselected interpreter
+  and diagnostic name tables are absent.
+- **Device formats:** bounded deterministic CBOR, MP05 packages, MDB2 bundles, and
+  MJ03 journals. Old formats are rejected without automatic erasure. Packages use
+  P-256, 65-byte uncompressed SEC1 keys, low-S signatures, and 32-byte dependency
+  key hashes. Capability 21 remains reserved. [Device contracts](DEVICE_CBOR.md)
+  define the bytes and bounds; [protocol](PROTOCOL.md) defines the transport.
 
-JCVM runs the supported applet corpus in the simulator. Its board adapter uses the shared authenticated loading and persistent storage path described in [JCVM profile](JCVM_PROFILE.md); runtime memory and remaining applet services still need work. Neither a linked image nor host acceptance establishes hardware behavior.
+## Memory and atomicity
 
-The shared APDU endpoint is generic over `CardEngine`. It owns SCP03 authentication,
-session reset, cancellation, and response protection; engine adapters receive verified
-commands and raw AIDs. The core's `mc04` feature includes its loader and interpreter.
-Disabling it leaves transport, journal, crypto, and hardware contracts available without
-compiling MC04. Quick validation exercises that configuration with an independent test
-engine. JCVM now implements this boundary with authenticated loading, installation,
-status records, selection, invocation, and deletion. A real SCP03/PIV lifecycle test
-checks recovery across reboot. The file-backed simulator now has independent Python
-SCP03 acceptance for load, install, process restart, heap reclaim, and damaged-state
-rejection. Separate board builds now use this same adapter and inspect link maps and
-symbols to prove that the other interpreter is absent.
+Immutable images occupy dedicated flash slots. Journal activation protects the prior
+committed generation and uncertain candidates. JCVM holds authenticated image handles;
+MC04 still owns runtime package buffers in RAM. Both board layouts reserve separate
+JCVM heap banks. MJ03 reserves a durable nonce before every encryption attempt,
+independently of the committed generation, including failed attempts.
 
-The independent `jcvm` core feature exposes SHA-256 and entropy through the shared
-provider adapter, now used by the simulator. Unsupported JCVM crypto factories raise
-explicit Java Card exceptions. Its durable registry and dedicated applet journals
-are integrated in core. Full SELECT responses and durable deselection callbacks now
-run through the adapter. Authenticated applet APDUs preserve their original command
-fields without a nested tunnel. P-256/AES applet bindings still need integration.
-Inactive instances retain only CLEAR_ON_RESET array payloads in an opaque, zeroizing
-RAM cache, bounded to 64 KiB across cached instances. Installation captures constructor
-values before publication; selection binds restoration to the installation identity and
-validates the complete heap layout. Reset clears the cache and deletion removes the
-corresponding entries. Insufficient cache capacity fails explicitly without eviction.
-Engine lifecycle tests cover retained values, stale layouts, and exclusion of
-deselection-scoped data and PIN validation. Existing core tests cover installation
-quota rejection and switching between two independently persisted applets.
-This is a logical cache bound, not evidence that worst-case workloads fit the board heap.
-The snapshot and cache integration raises JCVM text from 129,572 to 132,236 bytes
-(serial) and 139,332 to 142,104 bytes (USB), with unchanged static RAM.
+MC04 no longer copies the whole runtime state for transactions. It stages affected
+application records, keys, and credentials, and uses small undo records for metadata.
+Credential retry floors survive failed lifecycle callbacks. The compact MC04 slab
+and JCVM heap share checked allocation sizing; native copies and bounded BER/DER
+reading replace interpreted utility loops while preserving engine-specific checks.
 
-MC04 stores immutable packages in separate image slots and commits only descriptors
-in its version-2 metadata snapshot. Recovery verifies image hashes and package
-signatures. Interrupted activation protects both committed and uncertain candidate
-images. Both board layouts reserve eight 16 KiB image slots; the simulator uses files.
-Runtime package views still occupy RAM. Both JCVM board layouts now reserve separate heap banks;
-its core management adapter commits heaps before publishing instance metadata. JCVM
-sessions retain image handles that prevent slot reclamation and authenticate each
-borrow, rather than keeping a second code image in RAM.
+Inactive JCVM instances retain reset-scoped transient arrays in a zeroizing RAM cache
+with a 64 KiB logical limit. Records are bound to installation identity; reset and
+deletion clear them. Admission failure is explicit, without eviction. Transient key
+bytes and initialization flags clear together. Durable snapshots exclude transient
+values and PIN validation. These bounds do not prove that peak workloads fit the
+board's reserved heap.
 
-MJ03 reserves a durable nonce before each encryption attempt, separately from the
-committed generation. Recovery tests track nonce uniqueness across interrupted writes,
-reboot, and provider failures. Both board layouts dedicate a 4 KiB nonce-counter region;
-MJ01/MJ02 and simulator state without a nonce counter are rejected without migration.
+## Required before the pre-hardware release candidate
 
-## Required implementation work
+- Complete JCVM P-256/AES applet bindings through shared providers, with explicit
+  errors for unsupported algorithms and no software fallback.
+- Resolve CC310's size regression and select hardware-only firmware defaults. The
+  explicit hardware profile excludes RustCrypto, but the current default remains
+  the software reference. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
+  record the earlier comparison: 187,188 software text bytes versus 213,124 with all
+  hardware providers. Remeasure the final tree; this is not an achieved optimization.
+- Remove remaining MC04 runtime image ownership, finish domain modularization, and
+  reduce affected-application staging where bounded undo improves measured cost
+  while preserving rollback, cancellation, quota, and persistence invariants.
+- Finish native utility integration and the dead-code/dependency review. Preserve
+  useful generated references and provenance; avoid a maintenance fork solely to
+  unify dependency version numbers.
+- Record reproducible cold/warm validation, representative load/invoke work, flash,
+  static RAM, and host heap peaks for the final tree. Establish final budgets from
+  achieved measurements. Do not lower the device heap without supporting evidence.
+- Complete the final host/wallet/recovery checkpoint, workspace Clippy, generated
+  artifact and contract checks, affected fuzz-target builds, and all required board
+  profile links and dependency/symbol inspections. Produce two firmware artifacts
+  from a clean committed tree, with revision and artifact hashes recorded.
 
-- Validate JCVM peak RAM and finish applet services in the separately linked firmware.
-- Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
-- Replace remaining affected-application staging copies only where bounded undo reduces measured cost without weakening rollback. Runtime whole-state copies have been removed.
-- Finish domain modularization, acceptance build reuse, documentation consolidation, and final budget enforcement.
+The cleanup intentionally breaks old packages and state. Rebuild clients and packages;
+there is no legacy decoder or automatic migration. Physical execution is a later gate,
+not a prerequisite for finishing these implementation tasks.
 
-MC04 opcode decoding now uses generated byte indexes into 30 shared operand/stack
-profiles, including fixed instruction lengths. Against `af83266`, development
-firmware text decreases from 187,272 to 186,820 bytes with unchanged static RAM.
-The 216-case execution differential corpus and existing malformed-CIL gate cover
-the decoder change; device timing remains unmeasured.
+## Measurements and validation
 
-JCVM native dispatch and class-hierarchy checks now use generated numeric identities.
-Method signature flags replace runtime descriptor-string checks. Diagnostic names
-remain available in host builds and the generated API reference, and the board gate
-rejects their presence in loadable firmware bytes. Against `5932528`, JCVM text
-decreases from 149,456 to 129,328 bytes on the DK and from 159,216 to 139,088 on the
-dongle. Static RAM is unchanged. These internal identities do not change CAP tokens
-or the package/token class words stored in applet heaps.
+[Board budgets](BOARD_BUDGETS.json) record current software-reference links: MC04
+185,704 text bytes on the development DK and 197,348 on the dongle; JCVM 132,912 and
+142,780 respectively. Static RAM includes the reserved heap. The existing ceilings
+are provisional and still need tightening. [Assembly budgets](ASSEMBLY_BUDGETS.json)
+record managed image sizes; [runtime budgets](RUNTIME_BUDGETS.md) record logical work.
 
-CBOR removes device JSON parsing and canonical re-encoding. The snapshot migration reduces development text from 250,836 to 182,516 bytes. The credential-profile test records 5,792 bytes of separate active packages and a 1,408-byte metadata snapshot, down from 7,052 bytes with inline packages (12,549 before CBOR). Its interpreted execution metrics are unchanged. Image storage adds about 3 KiB of firmware text; it reduces journal payload and copying, not interpreter code. The JCVM lifecycle now has host allocation measurements in [its profile](JCVM_PROFILE.md#memory-placement). Device heap high-water and latency remain unmeasured.
+CBOR and image separation reduced the credential metadata snapshot to 1,408 bytes,
+with 5,792 bytes of separately stored packages. The measured credential workload's
+host allocation peak reached 39,313 requested bytes after transaction and slab changes.
+Native copy and TLV services reduce interpreted code but add firmware text; no device
+latency improvement or smaller safe heap has been established. Historical per-change
+comparisons remain in Git history; reproduce current results before using them as budgets.
 
-MC04 invocation and pending transactions now stage only the owning domain's mutable
-records, keys, and credentials. Retry-floor commits stage only credentials. Selection
-now stages at most two affected domains. Domain creation/deletion, policy changes,
-and SCP03 counter reservation use small undo records. Instance installation/removal
-stages the bounded registry and callback data together. Package removal retains only
-the removed metadata entries for undo. Activation retains only the replaced entries,
-signer pin, and schema until commit, with both image generations protected on failure.
-Against `cadef33`, the same 21-invocation
-credential acceptance workload reduces invocation peak host allocation from 41,310 to
-39,473 bytes and allocation traffic by 44,681 bytes, with unchanged live bytes.
-Overall workload peak falls from 41,310 to 40,496 bytes. Development firmware text
-increases by 1,236 bytes. These measurements do not establish a smaller device heap.
-The subsequent selection conversion reduces allocation traffic by 5,857 bytes over
-the same workload's three selections against `a4e70aa`, with unchanged peak/live
-heap and 668 additional development text bytes. Callback ordering, cancellation,
-cross-domain rollback, failed persistence, and reboot are covered in one lifecycle
-test. Host timing samples do not establish a latency improvement.
-Against `375656e`, the metadata conversion saves 740 development text bytes. In the
-same workload, peak requested bytes fall from 28,167 to 25,616 for secure-channel
-setup, 23,248 to 21,711 for domain creation, and 25,903 to 24,271 for deletion.
-Overall workload peak remains 40,496 bytes. One failure-injection test covers live
-undo and subsequent retry for all four converted metadata mutations.
-Against `dcaf0ce`, instance lifecycle staging reduces the same workload's overall
-peak from 40,496 to 39,578 requested bytes. Its two installations allocate 5,318
-fewer bytes in total, with installation peak falling from 40,496 to 38,709 bytes.
-Development text increases by 708 bytes. The existing lifecycle test also covers
-failed installation/removal commits restoring both the registry and callback data;
-no additional test fixture or suite is needed.
-Package removal then saves 160 development text bytes against `473d9a3`. The shared
-commit-boundary test covers invocation and package removal, including live rollback
-and recovery of either complete generation. Removal keeps signing-key pins, version
-history, and storage declarations, and never erases the referenced code during commit.
-Against `58e3e79`, activation removes the final runtime whole-state copy and reduces
-development text from 188,532 to 183,380 bytes. The same seven-activation workload
-allocates 7,815 fewer bytes; activation peak falls from 39,578 to 38,321 requested
-bytes and overall peak from 39,578 to 39,313. Existing recovery coverage now checks
-both first activation and replacement, live rollback, retryable upload bytes, and
-reboot recovery. Allocation-failure coverage targets the remaining application staging
-instead of the removed state-clone implementation. Host timings do not show a latency
-improvement, and these results do not establish a smaller board heap.
-Lifecycle retry handling now shares the invocation rule for consumed credential
-attempts. Previously, failed lifecycle callbacks discarded that information. The
-existing security acceptance flow covers failed install, uninstall, select, and
-deselect callbacks, ordinary-write rollback, and retry counts across reboot. The fix
-adds 984 development text bytes against `9ee4205`; it is a correctness change, not a
-size optimization.
+[Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
+coverage. Managed builds share a graph, compiler cases run in process, and acceptance
+reuses outputs with bounded workers and isolated logs/state. A warm host sample measured
+43.312 seconds with one worker and 33.489 with two for the full checkpoint, with the
+same 17 acceptance invocations. Cold-build measurements remain outstanding.
 
-Both heaps now share checked allocation sizing through `microcard-memory`, with no
-dependency on either interpreter. MC04 checks byte and object quotas before requesting
-backing memory and publishes accounting only after allocation succeeds. Existing quota
-tests cover overflow rejection, unchanged accounting, and JCVM alignment. Against
-`62d0a5f`, development text falls by 36 bytes for MC04 and rises by 24 for JCVM; static
-RAM is unchanged.
+Run `python3 scripts/check.py --checkpoint --jobs 2` and
+`cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.
+Checkpoint builds fuzz targets but does not run sustained campaigns. Before hardware
+loading, use [first-flash preparation](FIRST_FLASH.md) from a clean committed tree;
+verify the engine, revision, artifact hashes, and `hardware_flashed: false` in its manifest.
 
-MC04 now stores command-local objects in one growable byte slab with six-byte headers
-and two-byte handles. Int32 fields occupy four bytes, and analyzer charges match the
-runtime, including alignment. Slab growth wipes the released allocation; clearing the
-heap invalidates retired handles. Existing tests cover these boundaries without adding
-a new suite. Against `048e3f8`, representative logical transient peaks fall from 177 to
-126 bytes and from 176 to 152 for credentials. Development text falls from 184,328 to
-183,920 bytes, with unchanged static RAM. The same credential acceptance workload
-allocates 909 fewer bytes over 21 invocations and 188 fewer over two installations;
-its overall host peak remains 39,313 bytes. No device heap reduction or latency
-improvement is established. Native results now require a bounded copy into the slab;
-slab capacity growth and temporary provider buffers remain included in host profiling.
+## Hardware and production blockers
 
-JCVM byte-array copies now validate both full ranges before modifying memory and use
-an overlap-safe CPU copy. The former 256-byte staging loop corrupted forward overlap
-across chunk boundaries and could partially modify an invalid destination. The existing
-copy test now covers both overlap directions beyond that boundary, empty end ranges,
-and unchanged data on rejected ranges. Against `08cff1e`, the fix adds 36 JCVM text
-bytes on each board layout, removes the explicit 256-byte stack buffer, and leaves
-static RAM unchanged. Physical stack and latency benefits remain unmeasured.
+[Hardware smoke](HARDWARE_SMOKE.md) records earlier revision-specific DK observations;
+they do not validate this cleanup. The [dongle guide](DONGLE.md) records its unresolved
+boot evidence. Neither cross-linking nor host tests prove physical behavior.
 
-The subsequent shared service now serves both engines. MC04 capability 53 replaces
-byte loops in the core-library and DER wrappers, charging one native work unit per call
-plus one per copied byte before writing. JCVM charges copied bytes against its existing
-execution budget, in addition to the call instruction. Both engines retain their own
-handle, access, and error checks. Existing copy tests cover budget exhaustion without
-buffer mutation. The two managed code sections each shrink by 82 bytes, but import
-metadata increases the complete default bundle by 62 bytes. Against `b9b90fd`,
-development firmware text grows by 608 bytes for MC04 and 180 bytes for JCVM,
-with unchanged static RAM. The default policy adds capability 53, increasing the
-two-domain credential snapshot by two bytes.
+Physical acceptance must cover both engine builds, CC310 independent vectors and
+forced failures, buffer aliasing, stack/heap peaks, latency and sustained throughput,
+USB abort/disconnect/suspend, and power interruption during ownership, activation,
+commit, credential retries, sequence reservation, and deletion. Complete a bounded
+release fuzz campaign and archive revision-bound results. Verify Linux and Windows
+release bundles in CI before claiming those distributions are supported.
 
-Native capability 54 subsequently moves bounded BER-TLV/DER reading into a shared
-Rust parser. GlobalPlatform loading in both engines reuses its definite-length decoder.
-The managed validators retain recursive constructed checks and SET ordering. Against
-`ac1337d`, ISO 7816 and Encoding images shrink by 203 and 280 bytes respectively;
-the default bundle loses 483 bytes. The native parser publishes no result on malformed
-input, invalid result bounds, or budget exhaustion. The desktop reference and native
-implementation retain separate boundary checks. Development firmware text grows by
-1,176 bytes for MC04 and four for JCVM, with unchanged static RAM. This moves work
-out of the interpreter; it does not reduce total firmware flash. Device latency remains
-unmeasured.
+Production additionally requires provisioning and sealed root keys, debug lockout,
+verified boot/update policy, MPU and rollback policy, secure recovery/disposal,
+flash endurance, side-channel assessment, and independent crypto review.
 
-## Crypto replacement measurements
+## Outside this cleanup
 
-`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 187,188 text bytes, SHA-256 replacement 189,876, SHA-256 plus P-256 203,904, and all hardware providers 213,124. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
-
-For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features engine-mc04,cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
-
-## Validation gates
-
-[Validation cadence](VALIDATION_CADENCE.md) defines the focused, quick, and checkpoint commands. Both gates use one managed build graph. The compiler suite runs 63 analyzer cases and emits 37 assemblies in one compiler process for 38 independent preprocessor checks. Checkpoint retains real MSBuild package-consumer and incremental integration tests. Against `acc6e84`, the warm compiler-case block falls from 27.615 to 3.862 seconds with one worker; the latter also includes analyzer diagnostics. This is a host timing sample, not a cold-build or full-checkpoint measurement. Acceptance now reuses checkpoint artifacts and runs with bounded workers and separate state/log directories. A subsequent warm full checkpoint measured 43.312 seconds with one worker and 33.489 seconds with two; the same 17 acceptance invocations passed in both runs. Cold-build timings remain outstanding.
-
-Acceptance requires host and wallet tests, exhaustive recovery, workspace Clippy, affected fuzz-target builds, and both engines' board links and size checks. Timing reports under `work/` describe the executed commands and failures. They are local evidence, not a release certification or a sustained fuzz campaign.
-
-Before hardware loading, run `python3 scripts/prepare_first_flash.py --engine mc04` from the committed worktree. Verify that the generated manifest names HEAD, reports a clean worktree, includes matching artifact hashes, and records `hardware_flashed` as false. This command prepares artifacts without operating a probe.
-
-## Remaining hardware and production evidence
-
-[Hardware smoke](HARDWARE_SMOKE.md) records earlier revision-specific device observations. Those results do not validate the current signing migration or future CC310 and JCVM changes. The dongle remains subject to the limits in [its guide](DONGLE.md).
-
-Production acceptance still requires provisioning and sealed root-key storage, debug lockout, verified firmware updates, physical rollback policy, flash endurance, side-channel assessment, transport fault testing, and independent hardware-crypto validation. Full CLI/BCL and Java Card API coverage are not claimed.
+Full CLI/BCL and Java Card coverage, every OpenFIPS201 variant, and software replacements
+for unsupported hardware algorithms are not promised. Additional default APIs, samples,
+extended APDUs, compatible schema migration, and retirement of proprietary loading are
+future work. Engine choice remains explicit at build time.

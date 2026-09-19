@@ -22,13 +22,17 @@ Original MicroCard implementation and corpus. HIVE/.NET Card decompiled code, ve
 - ITU-T X.690 (02/2021) | ISO/IEC 8825-1:2021: §§8.1.2-8.1.3, 8.3, 8.6 and 11 define the identifier, definite-length, INTEGER, OBJECT IDENTIFIER and DER canonical rules used by `MicroCard.Encoding`. The unchanged official ITU PDF is stored in the Reference Library. Only its path, hash and clause map are committed.
 - USB-IF CCID revision 1.1, April 22, 2005: §§3.1.3, 3.2.2, 5.1, 6.1.1-6.1.4, 6.1.13, 6.2.1-6.2.2 and 6.3.1 define the one-slot short-APDU transport framing in `ccid.rs` and [CCID_PROFILE.md](CCID_PROFILE.md). The unchanged official PDF is stored under ignored downloads with its copyright notice retained. Only its local path, hash, edition and clause map are committed.
 
-## Java Card VM source material (planned engine, no code yet)
+## Java Card VM source material
 
-The [roadmap](ROADMAP.md) reserves a second Rust execution engine for Java Card. No MicroCard code implements or consumes these documents yet, so nothing below is a normative reference map entry and no Java Card compliance is claimed. The list records what was collected, its edition and where it lives. [JCVM_PROFILE.md](JCVM_PROFILE.md) records the decision that came out of it, which is Java Card Classic 3.0.5 with compact CAP 2.1. The 3.0.5 editions themselves are not pinned here, so every clause the engine relies on is read in an edition later than the one it targets until they are.
+The implemented engine targets Java Card Classic 3.0.5 with compact CAP 2.1;
+[JCVM_PROFILE.md](JCVM_PROFILE.md) defines the supported subset. The collected later
+editions provide comparison material, not a claim of full conformance. Original 3.0.5
+specification locations and hashes are recorded below. Release limitations are tracked
+in [readiness](READINESS.md).
 
 Oracle publishes these specifications under the Oracle Technology Network Developer License. Unchanged copies are stored under ignored `references/downloads/javacard/` with their license annexes and copyright notices retained, and are pinned by URL and hash in `references/downloads.json`. Only paths, hashes, editions and URLs are committed.
 
-- **Java Card Platform Virtual Machine Specification, Classic Edition 3.2**, January 2023 (`JCVM_Classic_3.2_F74158_05.pdf`). The primary target document: chapter 2 language and VM subsets, chapter 3 VM structure, chapter 4 file formats and AID-based naming, chapter 5 the export file format, chapter 6 the CAP file format, chapter 7 the instruction set. This is the candidate edition for the loader, verifier and interpreter work.
+- **Java Card Platform Virtual Machine Specification, Classic Edition 3.2**, January 2023 (`JCVM_Classic_3.2_F74158_05.pdf`). The primary target document: chapter 2 language and VM subsets, chapter 3 VM structure, chapter 4 file formats and AID-based naming, chapter 5 the export file format, chapter 6 the CAP file format, chapter 7 the instruction set. Use this later edition to compare loader, verifier, and interpreter requirements against the 3.0.5 target.
 - **Java Card Platform Runtime Environment Specification, Classic Edition 3.2**, January 2023 (`JCRE_Classic_3.2_F74157_03.pdf`). Applet lifetime, logical channels and selection, the transient/temporary memory model, the applet firewall and shareable-interface sharing, and transaction atomicity. These are the semantics the architecture note says cannot be met by renaming the .NET APIs.
 - **Java Card Platform Options List 3.2**, January 2023 (`JC_Options_List_3.2_F80990_02.pdf`). The specification's own optional-feature inventory. It is the natural starting point for MicroCard's API profile decision.
 - **Java Card Specification Release Notes 3.2**, May 2026 revision (`JC_Spec_Release_Notes_3.2.pdf`). Covers version 3.2 with preview features.

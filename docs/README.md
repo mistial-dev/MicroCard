@@ -1,14 +1,14 @@
 # Documentation index
 
-Start with [release readiness](READINESS.md) for current limits and remaining release work. The [status record](STATUS.md) summarizes supported behavior, and the [roadmap](ROADMAP.md) tracks longer-term features.
+Use the [root README](../README.md) to run a simulator demonstration. [Release readiness](READINESS.md)
+is the authoritative list of supported behavior, unfinished implementation, and hardware blockers.
 
-## Start here
+## Build, change, and validate
 
-- [Status](STATUS.md) — what version 0.1-wip implements, and the limits of each claim.
-- [Roadmap](ROADMAP.md) — the authoritative public work list.
-- [Architecture](ARCHITECTURE.md) — responsibilities and trust boundaries across Rust, .NET, Java and Java Card.
-- [Contributing](../CONTRIBUTING.md) — the validation gates and the documentation style rule they enforce.
-- [Validation cadence](VALIDATION_CADENCE.md) — which gate to run when, and what CI adds.
+- [Contributing](../CONTRIBUTING.md): install the pinned toolchain and make a focused change.
+- [Validation cadence](VALIDATION_CADENCE.md): select a focused suite, checkpoint, or measurement run.
+- [Architecture](ARCHITECTURE.md): locate shared services and engine-specific security boundaries.
+- [Device contracts](DEVICE_CBOR.md): implement package, management, and persistence formats.
 
 ## Using the card
 

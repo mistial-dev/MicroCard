@@ -86,7 +86,7 @@ Complete every applicable item for a production board. Record commands, tool ver
 - [ ] Verify GlobalPlatform-profile discovery and management through GlobalPlatformPro after USB CCID is implemented.
 - [ ] Capture deterministic transport-independent SCP03 regression vectors using test-only keys.
 - [ ] Publish command latency, energy, flash wear, peak RAM/stack and binary-size results with thresholds.
-- [ ] Record every known limitation and incomplete production control in `ROADMAP.md`.
+- [ ] Record every known limitation and incomplete production control in [release readiness](READINESS.md).
 
 ## Port completion gate
 

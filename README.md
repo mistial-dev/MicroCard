@@ -1,17 +1,19 @@
 # MicroCard
 
-MicroCard is a programmable smart-card runtime written in Rust. Version **0.1-wip** runs two execution engines on one card. A reduced .NET/CIL engine builds annotated C# class libraries into compact signed assemblies and executes them in isolated security domains. A Java Card virtual machine loads a standard CAP file and runs it. A desktop simulator and a bare-metal nRF52840 image use the same runtime.
+MicroCard is a programmable smart-card runtime written in Rust. Version **0.1-wip** provides separate .NET and Java Card firmware builds. A reduced .NET/CIL engine builds annotated C# class libraries into compact signed assemblies and executes them in isolated security domains. A Java Card virtual machine loads a standard CAP file and runs it. A desktop simulator and a bare-metal nRF52840 image use the same runtime.
 
-This is a development release. It carries a complete simulator demonstration and hardware evidence from an nRF52840 DK. Production hardening remains in the [roadmap](docs/ROADMAP.md). Start with the [documentation index](docs/README.md) to find anything below in more detail.
+This is a development release. It carries a complete simulator demonstration and hardware evidence from an nRF52840 DK. Current capabilities and release blockers are tracked in [release readiness](docs/READINESS.md). Start with the [documentation index](docs/README.md) to find anything below in more detail.
 
 ## What works today
 
 - **The .NET engine** runs the credential wallet demonstration end to end, covering domain isolation, P-256 signing, PIN recovery, package rejection and persistence across a restart.
 - **The Java Card engine** installs OpenFIPS201, registers it, accepts a SELECT and answers PIV commands with the applet's own status words. Four of the eight OpenFIPS201 release variants reach that point. See [the Java Card profile](docs/JCVM_PROFILE.md) for what each part of the engine does and what is still missing.
 - **The secure channel** is SCP03 with implementation option `0x71`, meaning S16 mode, a derived card challenge, R-MAC and R-ENCRYPTION. It serves security levels 01, 03, 11, 13 and 33, which is every combination carrying a command MAC.
-- **The board** enumerates as a USB CCID reader and has carried SCP03 at every one of those levels through GlobalPlatformPro and the Java wallet.
+- **Earlier DK firmware** enumerated as a USB CCID reader and carried SCP03 through GlobalPlatformPro and the Java wallet. Current firmware still requires physical acceptance.
 
-The [status record](docs/STATUS.md) states the limits of each claim, and the honest summary of the Java Card engine is that a card loaded this way answers from an empty card. Cipher, signature and key agreement operations are unimplemented.
+JCVM cipher, signature, and key-agreement operations remain unimplemented. Both engine
+builds cross-link; [earlier DK observations](docs/HARDWARE_SMOKE.md) do not establish
+hardware acceptance of the current tree.
 
 ## Try the credential wallet
 
@@ -77,7 +79,7 @@ Selecting neither engine or both is an error. The board budget gate saves separa
 ELF and link-map artifacts under `artifacts/firmware/`. These are development builds;
 [readiness](docs/READINESS.md) lists the remaining release blockers.
 
-The quickest hardware to talk to is a USB dongle, which needs no debug probe. See [the dongle guide](docs/DONGLE.md). For the nRF52840 DK, read the [board guide](docs/BOARD.md) and [first flash](docs/FIRST_FLASH.md) before provisioning or flashing.
+The USB dongle requires no debug probe, but its boot acceptance remains unresolved. See [the dongle guide](docs/DONGLE.md). For the nRF52840 DK, read the [board guide](docs/BOARD.md) and [first flash](docs/FIRST_FLASH.md) before provisioning or flashing.
 
 ## Repository map
 
