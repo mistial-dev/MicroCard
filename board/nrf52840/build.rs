@@ -73,7 +73,7 @@ fn flash_layout(path: &str) -> String {
         let name = name.trim();
         if !matches!(
             name,
-            "FLASH" | "IMAGES" | "STAGING" | "JOURNAL0" | "JOURNAL1" | "JOURNAL2" | "KEYS" | "MONOTONIC"
+            "FLASH" | "IMAGES" | "STAGING" | "JOURNAL0" | "JOURNAL1" | "JOURNAL2" | "KEYS" | "MONOTONIC" | "NONCES"
         ) {
             continue;
         }
@@ -89,7 +89,7 @@ fn flash_layout(path: &str) -> String {
         ));
         found += 1;
     }
-    assert_eq!(found, 8, "{path} must define all eight flash regions");
+    assert_eq!(found, 9, "{path} must define all nine flash regions");
     let (first, last) = if path == "memory-dongle.x" { (0x27000, 0xea000) } else { (0, 0x100000) };
     assert_eq!(regions["FLASH"].0, first, "{path}: wrong vector-table origin");
     let mut ordered: Vec<_> = regions.iter().collect();

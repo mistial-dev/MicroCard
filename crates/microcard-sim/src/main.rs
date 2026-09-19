@@ -86,7 +86,8 @@ impl FileFlash {
         let slot0 = self.path(0).exists();
         let slot1 = self.path(1).exists();
         let monotonic = self.monotonic_path().exists();
-        if !slot0 && !slot1 && !monotonic {
+        let nonces = self.dir.join("nonces.bin").exists();
+        if !slot0 && !slot1 && !monotonic && !nonces {
             if (0..64).any(|index| self.dir.join(format!("image{index}.bin")).exists()) {
                 return Err(Error::IncompatibleState);
             }
@@ -98,9 +99,11 @@ impl FileFlash {
                 .map_err(|_| Error::Storage)?;
             Self::write_erased(&mut file, Self::MONOTONIC_BYTES)?;
             file.sync_all().map_err(|_| Error::Storage)?;
+            Self::erase_file(&self.dir.join("nonces.bin"), Self::MONOTONIC_BYTES)?;
             return Ok(());
         }
-        if slot0 && slot1 && monotonic {
+        if slot0 && slot1 && monotonic && !nonces { return Err(Error::IncompatibleState); }
+        if slot0 && slot1 && monotonic && nonces {
             return Ok(());
         }
         Err(Error::Storage)
@@ -172,15 +175,9 @@ impl microcard_core::image_store::ImageFlash for FileFlash {
         Self::program_file(&self.image_path(index)?, microcard_core::staging::MAX_PACKAGE_BYTES, offset, bytes)
     }
 }
-impl Flash for FileFlash {
-    fn slot_size(&self) -> usize {
-        65536
-    }
-    fn monotonic_capacity(&self) -> u64 {
-        (Self::MONOTONIC_BYTES / 4) as u64
-    }
-    fn monotonic_generation(&self) -> Result<u64> {
-        let mut file = fs::File::open(self.monotonic_path()).map_err(|_| Error::Storage)?;
+impl FileFlash {
+    fn read_counter_file(path: &Path) -> Result<u64> {
+        let mut file = fs::File::open(path).map_err(|_| Error::Storage)?;
         if file.metadata().map_err(|_| Error::Storage)?.len() != Self::MONOTONIC_BYTES as u64 {
             return Err(Error::Storage);
         }
@@ -203,7 +200,7 @@ impl Flash for FileFlash {
         }
         Ok(generation)
     }
-    fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
+    fn advance_counter_file(path: &Path, generation: u64) -> Result<()> {
         let index = generation.checked_sub(1).ok_or(Error::Storage)?;
         let offset = usize::try_from(index)
             .map_err(|_| Error::Storage)?
@@ -215,7 +212,7 @@ impl Flash for FileFlash {
         let mut file = fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .open(self.monotonic_path())
+            .open(path)
             .map_err(|_| Error::Storage)?;
         file.seek(SeekFrom::Start(offset as u64))
             .map_err(|_| Error::Storage)?;
@@ -228,6 +225,22 @@ impl Flash for FileFlash {
             .map_err(|_| Error::Storage)?;
         file.write_all(&[0; 4]).map_err(|_| Error::Storage)?;
         file.sync_all().map_err(|_| Error::Storage)
+    }
+}
+impl Flash for FileFlash {
+    fn slot_size(&self) -> usize {
+        65536
+    }
+    fn monotonic_capacity(&self) -> u64 {
+        (Self::MONOTONIC_BYTES / 4) as u64
+    }
+    fn monotonic_generation(&self) -> Result<u64> { Self::read_counter_file(&self.monotonic_path()) }
+    fn advance_monotonic(&mut self, generation: u64) -> Result<()> { Self::advance_counter_file(&self.monotonic_path(), generation) }
+    fn nonce_generation(&self) -> Result<u64> { Self::read_counter_file(&self.dir.join("nonces.bin")) }
+    fn reserve_nonce(&mut self) -> Result<u64> {
+        let next = self.nonce_generation()?.checked_add(1).ok_or(Error::Quota)?;
+        Self::advance_counter_file(&self.dir.join("nonces.bin"), next)?;
+        Ok(next)
     }
     fn is_erased(&self, s: usize) -> Result<bool> {
         let mut file = fs::File::open(self.path(s)).map_err(|_| Error::Storage)?;
@@ -352,6 +365,15 @@ mod tests {
         flash.advance_monotonic(1).unwrap();
         assert_eq!(flash.monotonic_generation().unwrap(), 1);
         flash.initialize().unwrap();
+        assert_eq!(flash.reserve_nonce().unwrap(), 1);
+        assert_eq!(flash.reserve_nonce().unwrap(), 2);
+        assert_eq!(flash.monotonic_generation().unwrap(), 1);
+        let nonces = flash.dir.join("nonces.bin");
+        let saved_nonces = fs::read(&nonces).unwrap();
+        fs::remove_file(&nonces).unwrap();
+        assert_eq!(flash.initialize(), Err(Error::IncompatibleState));
+        assert!(!nonces.exists());
+        fs::write(&nonces, saved_nonces).unwrap();
 
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -366,6 +388,7 @@ mod tests {
         assert_eq!(flash.initialize(), Err(Error::Storage));
         fs::remove_file(flash.path(0)).unwrap();
         fs::remove_file(flash.path(1)).unwrap();
+        fs::remove_file(nonces).unwrap();
         let image = flash.image_path(0).unwrap();
         fs::write(&image, b"orphaned image").unwrap();
         assert_eq!(flash.initialize(), Err(Error::IncompatibleState));

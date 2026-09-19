@@ -151,7 +151,7 @@ impl<F: Flash> Store<F> {
         sizes: Sizes,
         provider: &mut impl CryptoProvider,
     ) -> Result<(Self, Option<Card>)> {
-        let maximum = flash.slot_size().checked_sub(35).ok_or(Error::Storage)?;
+        let maximum = flash.slot_size().checked_sub(crate::journal::OVERHEAD).ok_or(Error::Storage)?;
         let mut image = [0; 32];
         provider.sha256_into(verified_image, &mut image)?;
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;

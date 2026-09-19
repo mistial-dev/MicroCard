@@ -34,6 +34,9 @@ impl AsMut<[u8; 16]> for JournalKey {
         &mut self.0
     }
 }
+pub const OVERHEAD: usize = 43;
+const HEADER_BYTES: usize = 24;
+
 pub trait Flash {
     /// Stable number of independently erasable snapshot slots.
     fn slot_count(&self) -> usize {
@@ -43,6 +46,12 @@ pub trait Flash {
     fn monotonic_capacity(&self) -> u64;
     fn monotonic_generation(&self) -> Result<u64>;
     fn advance_monotonic(&mut self, generation: u64) -> Result<()>;
+    /// Separate, non-erasable-in-service counter for encryption attempts.
+    fn nonce_capacity(&self) -> u64 { self.monotonic_capacity() }
+    fn nonce_generation(&self) -> Result<u64>;
+    /// Durably consume the next value before returning it. A partial reservation
+    /// is consumed on recovery; failures must never return a usable nonce.
+    fn reserve_nonce(&mut self) -> Result<u64>;
     fn is_erased(&self, slot: usize) -> Result<bool>;
     fn read(&self, slot: usize, offset: usize, output: &mut [u8]) -> Result<()>;
     fn erase(&mut self, slot: usize) -> Result<()>;
@@ -76,9 +85,11 @@ impl<F: Flash> Journal<F> {
             return Err(Error::Storage);
         }
         let size = flash.slot_size();
-        if size < 35 {
+        if size < OVERHEAD {
             return Err(Error::Storage);
         }
+        let reserved_nonce = flash.nonce_generation()?;
+        if reserved_nonce > flash.nonce_capacity() { return Err(Error::Storage); }
         let mut selected = None;
         let mut saw_non_erased = false;
         let mut saw_corrupt_committed = false;
@@ -91,21 +102,23 @@ impl<F: Flash> Journal<F> {
             if tail[2] != 0 {
                 continue;
             }
-            let mut header = [0; 16];
+            let mut header = [0; HEADER_BYTES];
             flash.read(slot, 0, &mut header)?;
-            if &header[..4] != b"MJ02" {
+            if matches!(&header[..4], b"MJ01" | b"MJ02") { return Err(Error::IncompatibleState); }
+            if &header[..4] != b"MJ03" {
                 saw_corrupt_committed = true;
                 continue;
             }
             let generation = u64::from_le_bytes(header[4..12].try_into().unwrap());
-            let n = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
-            if n < 16 || n > size - 19 {
+            let attempt = u64::from_le_bytes(header[12..20].try_into().unwrap());
+            let n = u32::from_le_bytes(header[20..24].try_into().unwrap()) as usize;
+            if attempt == 0 || attempt > reserved_nonce || n < 16 || n > size - HEADER_BYTES - 3 {
                 saw_corrupt_committed = true;
                 continue;
             }
             let mut plaintext = crate::crypto::zeroizing_buffer(n)?;
             flash.read(slot, header.len(), &mut plaintext)?;
-            let nonce = nonce(generation);
+            let nonce = nonce(attempt);
             match provider.aes_ccm_decrypt_in_place(key.as_ref(), &nonce, &header, &mut plaintext) {
                 Ok(written) if written == n - 16 => plaintext.truncate(written),
                 Ok(_) => {
@@ -187,7 +200,7 @@ impl<F: Flash> Journal<F> {
             return Err(Error::Storage);
         }
         let size = self.flash.slot_size();
-        if size < 35 || data.len() > size - 35 {
+        if size < OVERHEAD || data.len() > size - OVERHEAD {
             return Err(Error::Quota);
         }
         let generation = self.generation.checked_add(1).ok_or(Error::Storage)?;
@@ -199,15 +212,18 @@ impl<F: Flash> Journal<F> {
             .map_or(0, |active| (active + 1) % self.slot_count);
         let payload_length = data.len().checked_add(16).ok_or(Error::Quota)?;
         let encoded_payload_length = u32::try_from(payload_length).map_err(|_| Error::Quota)?;
-        let record_length = 16usize
+        let record_length = HEADER_BYTES
             .checked_add(payload_length)
             .ok_or(Error::Quota)?;
         let mut record = Vec::new();
         record
             .try_reserve_exact(record_length)
             .map_err(|_| Error::Quota)?;
-        record.extend_from_slice(b"MJ02");
+        // Burn a distinct attempt number before any encryption, even if later I/O fails.
+        let attempt = self.flash.reserve_nonce()?;
+        record.extend_from_slice(b"MJ03");
         record.extend_from_slice(&generation.to_le_bytes());
+        record.extend_from_slice(&attempt.to_le_bytes());
         record.extend_from_slice(&encoded_payload_length.to_le_bytes());
         let header = record.len();
         record.resize(record_length, 0);
@@ -215,7 +231,7 @@ impl<F: Flash> Journal<F> {
         let written =
             match provider.aes_ccm_encrypt(
                 self.key.as_ref(),
-                &nonce(generation),
+                &nonce(attempt),
                 aad,
                 data,
                 ciphertext,
@@ -259,9 +275,9 @@ impl<F: Flash> Journal<F> {
     pub(crate) fn flash_for_test(&self) -> &F { &self.flash }
 }
 
-fn nonce(generation: u64) -> [u8; 13] {
-    let mut nonce = *b"MCJNL\0\0\0\0\0\0\0\0";
-    nonce[5..].copy_from_slice(&generation.to_le_bytes());
+fn nonce(attempt: u64) -> [u8; 13] {
+    let mut nonce = *b"MCJN3\0\0\0\0\0\0\0\0";
+    nonce[5..].copy_from_slice(&attempt.to_le_bytes());
     nonce
 }
 
@@ -313,6 +329,7 @@ pub struct MemoryFlash {
     slots: Vec<Vec<u8>>,
     images: Vec<Vec<u8>>,
     monotonic: Vec<u8>,
+    nonces: Vec<u8>,
     pub fail_after: Option<usize>,
 }
 impl MemoryFlash {
@@ -324,6 +341,7 @@ impl MemoryFlash {
             slots: (0..slot_count).map(|_| vec![255; size]).collect(),
             images: (0..64).map(|_| Vec::new()).collect(),
             monotonic: vec![255; size],
+            nonces: vec![255; size],
             fail_after: None,
         }
     }
@@ -333,6 +351,25 @@ impl MemoryFlash {
                 return Err(Error::Storage);
             }
             *n -= 1;
+        }
+        Ok(())
+    }
+}
+impl MemoryFlash {
+    fn advance_word_counter(&mut self, generation: u64, nonce: bool) -> Result<()> {
+        let index = usize::try_from(generation.checked_sub(1).ok_or(Error::Storage)?)
+            .map_err(|_| Error::Storage)?;
+        let offset = index.checked_mul(4).ok_or(Error::Storage)?;
+        let counter = if nonce { &self.nonces } else { &self.monotonic };
+        let word = counter
+            .get(offset..offset + 4)
+            .ok_or(Error::Quota)?;
+        if word.iter().any(|byte| *byte != 0xff) {
+            return Err(Error::Storage);
+        }
+        for byte in offset..offset + 4 {
+            self.tick()?;
+            if nonce { self.nonces[byte] = 0; } else { self.monotonic[byte] = 0; }
         }
         Ok(())
     }
@@ -382,21 +419,13 @@ impl Flash for MemoryFlash {
         decode_monotonic_words(&self.monotonic)
     }
     fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
-        let index = usize::try_from(generation.checked_sub(1).ok_or(Error::Storage)?)
-            .map_err(|_| Error::Storage)?;
-        let offset = index.checked_mul(4).ok_or(Error::Storage)?;
-        let word = self
-            .monotonic
-            .get(offset..offset + 4)
-            .ok_or(Error::Quota)?;
-        if word.iter().any(|byte| *byte != 0xff) {
-            return Err(Error::Storage);
-        }
-        for byte in offset..offset + 4 {
-            self.tick()?;
-            self.monotonic[byte] = 0;
-        }
-        Ok(())
+        self.advance_word_counter(generation, false)
+    }
+    fn nonce_generation(&self) -> Result<u64> { decode_monotonic_words(&self.nonces) }
+    fn reserve_nonce(&mut self) -> Result<u64> {
+        let next = self.nonce_generation()?.checked_add(1).ok_or(Error::Quota)?;
+        self.advance_word_counter(next, true)?;
+        Ok(next)
     }
     fn is_erased(&self, s: usize) -> Result<bool> {
         Ok(self
@@ -462,6 +491,9 @@ mod tests {
             self.inner.advance_monotonic(generation)
         }
 
+        fn nonce_generation(&self) -> Result<u64> { self.inner.nonce_generation() }
+        fn reserve_nonce(&mut self) -> Result<u64> { self.inner.reserve_nonce() }
+
         fn is_erased(&self, slot: usize) -> Result<bool> {
             self.inner.is_erased(slot)
         }
@@ -505,11 +537,13 @@ mod tests {
     }
 
     #[test]
-    fn committed_mj01_state_has_no_upgrade_route() {
-        let mut old = MemoryFlash::new(128);
-        old.program(0, 0, b"MJ01").unwrap();
-        old.program(0, 127, &[0]).unwrap();
-        assert!(matches!(Journal::open(old, KEY), Err(Error::Storage)));
+    fn committed_old_formats_have_no_upgrade_route() {
+        for magic in [b"MJ01", b"MJ02"] {
+            let mut old = MemoryFlash::new(128);
+            old.program(0, 0, magic).unwrap();
+            old.program(0, 127, &[0]).unwrap();
+            assert!(matches!(Journal::open(old, KEY), Err(Error::IncompatibleState)));
+        }
     }
 
     #[test]
@@ -556,14 +590,14 @@ mod tests {
         let (mut journal, _) = Journal::open(MemoryFlash::new(128), KEY).unwrap();
         journal.commit(b"authenticated state").unwrap();
         let base = journal.into_flash();
-        let record_len = 16 + 19 + 16;
+        let record_len = HEADER_BYTES + 19 + 16;
         for offset in 0..record_len {
             let Some(bit) = (0..8).find(|bit| base.slots[0][offset] & (1 << bit) != 0) else {
                 continue;
             };
             let mut tampered = base.clone();
             tampered.slots[0][offset] &= !(1 << bit);
-            assert!(matches!(Journal::open(tampered, KEY), Err(Error::Storage)));
+            assert!(Journal::open(tampered, KEY).is_err());
         }
     }
 
@@ -577,9 +611,9 @@ mod tests {
         // The second commit is in slot 1. Clear one programmed payload bit while
         // retaining its commit marker, simulating post-commit corruption.
         let bit = (0..8)
-            .find(|bit| flash.slots[1][17] & (1 << bit) != 0)
+            .find(|bit| flash.slots[1][HEADER_BYTES + 1] & (1 << bit) != 0)
             .unwrap();
-        flash.slots[1][17] &= !(1 << bit);
+        flash.slots[1][HEADER_BYTES + 1] &= !(1 << bit);
         assert!(matches!(Journal::open(flash, KEY), Err(Error::Storage)));
     }
 
@@ -651,8 +685,8 @@ mod tests {
     #[test]
     fn failed_anchor_advance_poisoned_journal_recovers_on_reopen() {
         let mut flash = MemoryFlash::new(128);
-        // erase(128) + record(35) + commit marker(1), then fail before the anchor word.
-        flash.fail_after = Some(164);
+        // nonce reservation(4) + erase(128) + record(43) + commit marker(1).
+        flash.fail_after = Some(176);
         let (mut journal, _) = Journal::open(flash, KEY).unwrap();
         assert_eq!(journal.commit(b"one"), Err(Error::Storage));
         assert_eq!(journal.commit(b"two"), Err(Error::Storage));
@@ -666,9 +700,11 @@ mod tests {
 
     #[test]
     fn exhausted_anchor_rejects_before_mutating_the_journal() {
+        for nonce_only in [false, true] {
         let (mut journal, _) = Journal::open(MemoryFlash::new(64), KEY).unwrap();
         for _ in 0..journal.flash.monotonic_capacity() {
-            journal.commit(b"x").unwrap();
+            if nonce_only { journal.flash.reserve_nonce().unwrap(); }
+            else { journal.commit(b"x").unwrap(); }
         }
         let slots = journal.flash.slots.clone();
         let monotonic = journal.flash.monotonic.clone();
@@ -676,6 +712,7 @@ mod tests {
         assert_eq!(journal.commit(b"y"), Err(Error::Quota));
         assert_eq!(journal.flash.slots, slots);
         assert_eq!(journal.flash.monotonic, monotonic);
+        }
     }
 
     #[test]
@@ -683,7 +720,7 @@ mod tests {
         let (mut journal, _) = Journal::open(MemoryFlash::new(128), KEY).unwrap();
         journal.commit(b"old").unwrap();
         let mut flash = journal.into_flash();
-        flash.program(1, 0, b"MJ02partial").unwrap();
+        flash.program(1, 0, b"MJ03partial").unwrap();
         let (_, data) = Journal::open(flash, KEY).unwrap();
         assert_eq!(data.as_ref().map(|d| d.as_slice()), Some(b"old".as_slice()));
     }
@@ -727,9 +764,10 @@ mod tests {
     #[test]
     fn three_slot_reuse_recovers_old_or_new_at_every_mutation() {
         let (mut journal, _) = Journal::open(MemoryFlash::with_slots(128, 3), KEY).unwrap();
-        journal.commit(b"one").unwrap();
-        journal.commit(b"two").unwrap();
-        journal.commit(b"three").unwrap();
+        let mut initial = RecordingProvider::default();
+        for state in [b"one".as_slice(), b"two", b"three"] {
+            journal.commit_with(state, &mut initial).unwrap();
+        }
         let base = journal.into_flash();
 
         let (mut measured, _) = Journal::open(base.clone(), KEY).unwrap();
@@ -741,50 +779,60 @@ mod tests {
         for cut in 0..=mutations {
             let (mut interrupted, _) = Journal::open(base.clone(), KEY).unwrap();
             interrupted.flash.fail_after = Some(cut);
-            let _ = interrupted.commit(b"four");
+            let mut provider = RecordingProvider { nonces: initial.nonces.clone(), ..Default::default() };
+            let _ = interrupted.commit_with(b"four", &mut provider);
             let mut flash = interrupted.into_flash();
             flash.fail_after = None;
-            let (_, recovered) = Journal::open(flash, KEY).unwrap();
+            let (mut resumed, recovered) = Journal::open(flash, KEY).unwrap();
             assert!(
                 recovered.as_deref().map(|data| data.as_slice()) == Some(b"three".as_slice())
                     || recovered.as_deref().map(|data| data.as_slice())
                         == Some(b"four".as_slice()),
                 "partial three-slot reuse at cut {cut}: {recovered:?}"
             );
+            resumed.commit_with(b"different retry", &mut provider).unwrap();
+            let (_, recovered) = Journal::open(resumed.into_flash(), KEY).unwrap();
+            assert_eq!(recovered.unwrap().as_slice(), b"different retry");
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingProvider {
+        encrypts: usize,
+        decrypts: usize,
+        nonces: Vec<[u8; 13]>,
+        fail_encrypt: bool,
+    }
+    impl CryptoProvider for RecordingProvider {
+        fn aes_ccm_encrypt(
+            &mut self,
+            key: &[u8; 16],
+            nonce: &[u8; 13],
+            aad: &[u8],
+            plaintext: &[u8],
+            output: &mut [u8],
+        ) -> Result<usize> {
+            assert!(!self.nonces.contains(nonce), "encryption nonce reused");
+            self.nonces.push(*nonce);
+            self.encrypts += 1;
+            if self.fail_encrypt { return Err(Error::Native); }
+            crate::crypto::ccm_encrypt_into(key, nonce, aad, plaintext, output)
+        }
+
+        fn aes_ccm_decrypt_in_place(
+            &mut self,
+            key: &[u8; 16],
+            nonce: &[u8; 13],
+            aad: &[u8],
+            ciphertext: &mut [u8],
+        ) -> Result<usize> {
+            self.decrypts += 1;
+            crate::crypto::ccm_decrypt_in_place(key, nonce, aad, ciphertext)
         }
     }
 
     #[test]
     fn journal_uses_provider_and_preserves_provider_failures() {
-        #[derive(Default)]
-        struct RecordingProvider {
-            encrypts: usize,
-            decrypts: usize,
-        }
-        impl CryptoProvider for RecordingProvider {
-            fn aes_ccm_encrypt(
-                &mut self,
-                key: &[u8; 16],
-                nonce: &[u8; 13],
-                aad: &[u8],
-                plaintext: &[u8],
-                output: &mut [u8],
-            ) -> Result<usize> {
-                self.encrypts += 1;
-                crate::crypto::ccm_encrypt_into(key, nonce, aad, plaintext, output)
-            }
-
-            fn aes_ccm_decrypt_in_place(
-                &mut self,
-                key: &[u8; 16],
-                nonce: &[u8; 13],
-                aad: &[u8],
-                ciphertext: &mut [u8],
-            ) -> Result<usize> {
-                self.decrypts += 1;
-                crate::crypto::ccm_decrypt_in_place(key, nonce, aad, ciphertext)
-            }
-        }
 
         let mut provider = RecordingProvider::default();
         let (mut journal, _) =
@@ -830,14 +878,21 @@ mod tests {
             Err(Error::Native)
         ));
         let (mut blank, _) = Journal::open(MemoryFlash::new(128), KEY).unwrap();
+        let mut failed = RecordingProvider { fail_encrypt: true, ..Default::default() };
         assert!(matches!(
-            blank.commit_with(b"must not commit", &mut FailingProvider),
+            blank.commit_with(b"must not commit", &mut failed),
             Err(Error::Native)
         ));
         assert!(blank
-            .into_flash()
+            .flash
             .slots
             .iter()
             .all(|slot| slot.iter().all(|byte| *byte == 0xff)));
+        failed.fail_encrypt = false;
+        blank.commit_with(b"different live retry", &mut failed).unwrap();
+        assert_eq!(failed.nonces.len(), 2);
+        let mut flash = blank.into_flash();
+        flash.nonces.fill(0xff);
+        assert!(matches!(Journal::open(flash, KEY), Err(Error::Storage)));
     }
 }

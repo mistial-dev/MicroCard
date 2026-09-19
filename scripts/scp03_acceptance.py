@@ -242,10 +242,10 @@ def main():
   storage_key=cmac(management_keys[:16],b'MicroCard journal AEAD v1\0'+management_keys[16:])
   snapshots=[]
   for file in (td/'state').glob('slot*.bin'):
-   raw=file.read_bytes();generation=int.from_bytes(raw[4:12],'little');n=int.from_bytes(raw[12:16],'little')
-   if raw[:4]==b'MJ02' and raw[-1]==0 and 16<=n<=len(raw)-19:
-    nonce=b'MCJNL'+generation.to_bytes(8,'little')
-    try: plaintext=AESCCM(storage_key,tag_length=16).decrypt(nonce,raw[16:16+n],raw[:16])
+   raw=file.read_bytes();generation=int.from_bytes(raw[4:12],'little');n=int.from_bytes(raw[20:24],'little')
+   if raw[:4]==b'MJ03' and raw[-1]==0 and 16<=n<=len(raw)-27:
+    nonce=b'MCJN3'+raw[12:20]
+    try: plaintext=AESCCM(storage_key,tag_length=16).decrypt(nonce,raw[24:24+n],raw[:24])
     except Exception: continue
     from device_cbor import decode
     snapshot=decode(plaintext);assert snapshot[:2]==[2,0]

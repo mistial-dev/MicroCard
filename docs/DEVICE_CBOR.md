@@ -43,7 +43,7 @@ Envelope authentication does not establish that a manifest or image is supported
 
 ## Internal state snapshot, version 2
 
-The authenticated MJ02 journal plaintext is `[2, 0, scp03_sequence, isd, domains]`.
+The authenticated MJ03 journal plaintext is `[2, 0, scp03_sequence, isd, domains]`.
 The second field identifies MC04; other engines and versions are rejected. The sequence
 is uint32. `domains` contains at most eight `[name, domain]` records in strictly
 increasing identifier order, excluding the reserved `ISD` name. The entire snapshot

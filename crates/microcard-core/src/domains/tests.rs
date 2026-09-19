@@ -112,6 +112,8 @@ impl Flash for SharedJournalFlash {
     fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
         self.0.borrow_mut().advance_monotonic(generation)
     }
+    fn nonce_generation(&self) -> Result<u64> { self.0.borrow().nonce_generation() }
+    fn reserve_nonce(&mut self) -> Result<u64> { self.0.borrow_mut().reserve_nonce() }
     fn is_erased(&self, slot: usize) -> Result<bool> {
         self.0.borrow().is_erased(slot)
     }
@@ -1952,10 +1954,10 @@ fn cooperative_cancellation_rolls_back_all_writes() {
 // storage phase and the state changes that must commit together.
 fn commit_cuts(snapshot_bytes: usize, image_bytes: usize) -> Vec<usize> {
     let image_end = if image_bytes == 0 { 0 } else { 16384 + image_bytes };
-    let journal_header = image_end + 1 + 16384;
-    let ciphertext_end = journal_header + 32 + snapshot_bytes;
+    let journal_header = image_end + 4 + 1 + 16384;
+    let ciphertext_end = journal_header + 40 + snapshot_bytes;
     let mut cuts = alloc::vec![0, 1];
-    for boundary in [16384.min(image_end), image_end, image_end + 1, journal_header,
+    for boundary in [16384.min(image_end), image_end, image_end + 1, image_end + 4, journal_header,
         ciphertext_end, ciphertext_end + 1, ciphertext_end + 2, ciphertext_end + 6] {
         cuts.extend([boundary.saturating_sub(1), boundary, boundary + 1]);
     }
@@ -2463,7 +2465,7 @@ fn first_load_power_loss_never_pins_alone() {
         f.fail_after = Some(cut);
         let mut c = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
         let _ = load(&mut c, &p);
-        let marker_cut = 16384 + p.len() + 16384 + 35 + serialized.len();
+        let marker_cut = 16384 + p.len() + 16384 + 47 + serialized.len();
         if cut == marker_cut {
             // The candidate is durable even though advancing the anchor failed.
             // A later upload must not recycle its slot before reboot resolves that.

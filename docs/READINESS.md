@@ -27,9 +27,13 @@ images. Both board layouts reserve eight 16 KiB image slots; the simulator uses 
 Runtime package views still occupy RAM. JCVM heap partitioning and its management
 adapter remain unfinished.
 
+MJ03 reserves a durable nonce before each encryption attempt, separately from the
+committed generation. Recovery tests track nonce uniqueness across interrupted writes,
+reboot, and provider failures. Both board layouts dedicate a 4 KiB nonce-counter region;
+MJ01/MJ02 and simulator state without a nonce counter are rejected without migration.
+
 ## Required implementation work
 
-- Give every journal encryption attempt a durable unique nonce. MJ02 derives it from the committed generation, which can repeat after an interrupted attempt; recovery tests do not establish nonce uniqueness.
 - Produce separate MC04 and JCVM firmware builds, with only the selected engine linked.
 - MP05 manifests, lifecycle management names, and journal snapshots now use [bounded deterministic CBOR](DEVICE_CBOR.md), with coordinated repository clients. Allocate the separate JCVM heap journal in both board layouts.
 - Finish CC310 size reduction and hardware validation before making the hardware profile the default. The explicit hardware build excludes RustCrypto; the current vendor implementation is larger than the software reference.
@@ -40,7 +44,7 @@ CBOR removes device JSON parsing and canonical re-encoding. The snapshot migrati
 
 ## Crypto replacement measurements
 
-`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 185,684 text bytes, SHA-256 replacement 188,584, SHA-256 plus P-256 202,692, and all hardware providers 211,688. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
+`python3 scripts/crypto_provider_matrix.py --output work/crypto-provider-matrix.json` builds each replacement stage and rejects RustCrypto dependencies in the hardware-only build. [Recorded measurements](CRYPTO_PROVIDER_MEASUREMENTS.json) compare the same tree and development configuration: software 186,356 text bytes, SHA-256 replacement 189,080, SHA-256 plus P-256 203,172, and all hardware providers 212,320. These are regressions, not achieved optimization budgets. The default remains the software reference while this is resolved.
 
 For a hardware-only cross-link, run `cargo build --release --locked --no-default-features --features cc310` in `board/nrf52840`. Missing primitive implementations are compile errors, not software retries. The in-place CCM recovery adapter now uses the hardware boundary; shared conformance includes valid, corrupted, and truncated in-place inputs with output clearing. Execution of that adapter, including vendor buffer aliasing behavior, remains unverified on hardware. Static RAM includes the reserved heap; these measurements establish neither heap high-water nor device latency.
 

@@ -1282,11 +1282,8 @@ impl Nvm {
             .iter().any(|byte| *byte != 0xff) {
             return Ok(false);
         }
-        Ok(unsafe {
-            core::slice::from_raw_parts(Self::MONOTONIC_BASE as *const u8, Self::MONOTONIC_BYTES)
-        }
-        .iter()
-        .all(|byte| *byte == 0xff))
+        Ok(Self::bit_counter(Self::MONOTONIC_BASE, Self::MONOTONIC_BYTES)? == 0
+            && Self::bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES)? == 0)
     }
 
     fn ownership_marker() -> u32 {
@@ -1441,6 +1438,40 @@ impl microcard_core::image_store::ImageFlash for Nvm {
         Nvm::program_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES, offset, bytes)
     }
 }
+impl Nvm {
+    fn bit_counter(base: usize, capacity: usize) -> Result<u64> {
+        decode_monotonic_bits(unsafe { core::slice::from_raw_parts(base as *const u8, capacity) })
+    }
+    fn advance_bit_counter(base: usize, capacity: usize, generation: u64) -> Result<()> {
+        let current = Self::bit_counter(base, capacity)?;
+        if current.checked_add(1) != Some(generation) {
+            return Err(Error::Storage);
+        }
+        let index = usize::try_from(generation.checked_sub(1).ok_or(Error::Storage)?)
+            .map_err(|_| Error::Storage)?;
+        let byte_offset = index / 8;
+        if byte_offset >= capacity {
+            return Err(Error::Quota);
+        }
+        let word_offset = byte_offset & !3;
+        let bit = (byte_offset % 4) * 8 + index % 8;
+        let address = base + word_offset;
+        let word = unsafe { read(address) };
+        let mask = 1u32 << bit;
+        if word & mask == 0 {
+            return Err(Error::Storage);
+        }
+        unsafe {
+            write(NVMC + 0x504, 1);
+            write(address, word & !mask);
+        }
+        let result = Self::ready();
+        unsafe {
+            write(NVMC + 0x504, 0);
+        }
+        result
+    }
+}
 impl Flash for Nvm {
     fn slot_count(&self) -> usize {
         3
@@ -1457,33 +1488,14 @@ impl Flash for Nvm {
         })
     }
     fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
-        let current = self.monotonic_generation()?;
-        if current.checked_add(1) != Some(generation) {
-            return Err(Error::Storage);
-        }
-        let index = usize::try_from(generation.checked_sub(1).ok_or(Error::Storage)?)
-            .map_err(|_| Error::Storage)?;
-        let byte_offset = index / 8;
-        if byte_offset >= Self::MONOTONIC_BYTES {
-            return Err(Error::Quota);
-        }
-        let word_offset = byte_offset & !3;
-        let bit = (byte_offset % 4) * 8 + index % 8;
-        let address = Self::MONOTONIC_BASE + word_offset;
-        let word = unsafe { read(address) };
-        let mask = 1u32 << bit;
-        if word & mask == 0 {
-            return Err(Error::Storage);
-        }
-        unsafe {
-            write(NVMC + 0x504, 1);
-            write(address, word & !mask);
-        }
-        let result = Self::ready();
-        unsafe {
-            write(NVMC + 0x504, 0);
-        }
-        result
+        Self::advance_bit_counter(Self::MONOTONIC_BASE, Self::MONOTONIC_BYTES, generation)
+    }
+    fn nonce_capacity(&self) -> u64 { (crate::layout::NONCES_BYTES * 8) as u64 }
+    fn nonce_generation(&self) -> Result<u64> { Self::bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES) }
+    fn reserve_nonce(&mut self) -> Result<u64> {
+        let next = self.nonce_generation()?.checked_add(1).ok_or(Error::Quota)?;
+        Self::advance_bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES, next)?;
+        Ok(next)
     }
     fn is_erased(&self, slot: usize) -> Result<bool> {
         let base = Self::base(slot)?;
