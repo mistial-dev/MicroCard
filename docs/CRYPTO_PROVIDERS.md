@@ -47,3 +47,19 @@ The allocation-free `hal::conformance::run_crypto` runner applies the same stand
 SCP03 command verification consumes the parsed command. MAC validation borrows its payload, then removes the received MAC by truncating the existing vector. Unencrypted commands keep that allocation through trusted dispatch. Encrypted commands allocate only the separate plaintext buffer required by Rust's nonaliasing input and output contract.
 
 Long-running validation follows the repository cadence: focused provider tests during development, the complete host and fault-injection gate after consolidated security batches or before device/release acceptance, and sustained fuzz campaigns only at dedicated fuzz checkpoints or release candidates.
+
+## Replacement measurements
+
+Run `python3 scripts/crypto_provider_matrix.py --output work/crypto-mc04-dk.json`.
+Use `--engine jcvm` and `--layout dongle` to inspect the other engine/layout pairs.
+Each stage has its own cached ELF and link map under `board/nrf52840/target/profiles/`;
+the report records the ELF hash, actual Cargo dependencies, archive text/constant-data
+contributions, and non-profile algorithm symbols. Hardware-only stages reject linked
+RustCrypto implementation symbols as well as dependencies. All stages reject exact C
+`malloc`, `calloc`, `realloc`, or `free` entry points.
+
+[The MC04 DK record](CRYPTO_PROVIDER_MEASUREMENTS.json) measures 185,708 software text
+bytes and 211,608 hardware text bytes. The latter excludes RustCrypto but still links
+ChaCha20/Poly1305 through generic vendor dispatch. Cargo feature removal alone cannot
+eliminate those archive branches. Compile/link evidence does not validate device
+operation or justify removing cryptographic checks.

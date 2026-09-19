@@ -51,11 +51,13 @@ board's reserved heap.
 
 - Complete JCVM P-256/AES applet bindings through shared providers, with explicit
   errors for unsupported algorithms and no software fallback.
-- Resolve CC310's size regression and select hardware-only firmware defaults. The
-  explicit hardware profile excludes RustCrypto, but the current default remains
-  the software reference. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
-  record the earlier comparison: 187,188 software text bytes versus 213,124 with all
-  hardware providers. Remeasure the final tree; this is not an achieved optimization.
+- Select hardware-only firmware defaults and make the pinned vendor toolchain
+  reproducible in the normal build and CI paths. Keep software as an explicit reference
+  profile and continue reducing vendor dispatch overhead. The explicit hardware profile
+  excludes RustCrypto, but the current default remains the software reference. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
+  record the current MC04 DK comparison: 185,708 software text bytes versus 211,608
+  with all hardware providers. Vendor dispatch also links non-profile ChaCha20/Poly1305
+  symbols despite the absence of RustCrypto. Remeasure the final tree; this is not an achieved optimization.
 - Remove remaining MC04 runtime image ownership, finish domain modularization, and
   reduce affected-application staging where bounded undo improves measured cost
   while preserving rollback, cancellation, quota, and persistence invariants.

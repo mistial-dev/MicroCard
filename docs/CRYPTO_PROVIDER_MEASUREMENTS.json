@@ -6,9 +6,17 @@
   "device_latency_measured": false,
   "stages": {
     "software": {
-      "text_bytes": 187188,
+      "text_bytes": 185708,
       "data_bytes": 0,
       "bss_bytes": 196636,
+      "elf_sha256": "d58cba9f60646ddf54394c7a8fa8286f94772bb0f1bf446c201ed4d9aa7b012a",
+      "link_map": "board/nrf52840/target/profiles/crypto-mc04-dk-software/microcard-mc04.map",
+      "link_inspection": {
+        "c_allocator_symbols": [],
+        "archive_text_rodata_bytes": {},
+        "largest_archive_members": {},
+        "non_profile_algorithm_symbols": []
+      },
       "software_dependencies": [
         "aes",
         "ccm",
@@ -26,9 +34,30 @@
       ]
     },
     "sha256": {
-      "text_bytes": 189876,
+      "text_bytes": 188396,
       "data_bytes": 128,
       "bss_bytes": 196668,
+      "elf_sha256": "6748723a23f16b4bc3dd19ffa3f3880440601042f002c9698645fe9b1871967b",
+      "link_map": "board/nrf52840/target/profiles/crypto-mc04-dk-sha256/microcard-mc04.map",
+      "link_inspection": {
+        "c_allocator_symbols": [],
+        "archive_text_rodata_bytes": {
+          "libnrf_cc310_platform_0.9.22.a": 1636
+        },
+        "largest_archive_members": {
+          "libnrf_cc310_platform_0.9.22.a(nrf_cc3xx_platform_sha256.c.obj)": 636,
+          "libnrf_cc310_platform_0.9.22.a(nrf_cc3xx_platform_mutex.c.obj)": 212,
+          "libnrf_cc310_platform_0.9.22.a(cc_pal_pm.c.obj)": 192,
+          "libnrf_cc310_platform_0.9.22.a(cc_pal.c.obj)": 188,
+          "libnrf_cc310_platform_0.9.22.a(nrf_cc3xx_platform_abort.c.obj)": 108,
+          "libnrf_cc310_platform_0.9.22.a(nrf_cc3xx_platform.c.obj)": 84,
+          "libnrf_cc310_platform_0.9.22.a(cc_pal_mutex.c.obj)": 76,
+          "libnrf_cc310_platform_0.9.22.a(cc_hal.c.obj)": 60,
+          "libnrf_cc310_platform_0.9.22.a(cc_lib.c.obj)": 44,
+          "libnrf_cc310_platform_0.9.22.a(cc_pal_interrupt_ctrl.c.obj)": 24
+        },
+        "non_profile_algorithm_symbols": []
+      },
       "software_dependencies": [
         "aes",
         "ccm",
@@ -49,9 +78,33 @@
       ]
     },
     "p256": {
-      "text_bytes": 203904,
+      "text_bytes": 202428,
       "data_bytes": 144,
       "bss_bytes": 197692,
+      "elf_sha256": "0daa8fc46070abc5d1eba073938b045827b54aba51a45ebc631563eb092d55de",
+      "link_map": "board/nrf52840/target/profiles/crypto-mc04-dk-p256/microcard-mc04.map",
+      "link_inspection": {
+        "c_allocator_symbols": [],
+        "archive_text_rodata_bytes": {
+          "libmicrocard_cc310_psa.a": 2156,
+          "libnrf_cc310_core_0.9.22.a": 16354,
+          "libnrf_cc310_platform_0.9.22.a": 12016,
+          "libnrf_cc310_psa_crypto_0.9.22.a": 5536
+        },
+        "largest_archive_members": {
+          "libnrf_cc310_core_0.9.22.a(pka_ec_wrst.c.obj)": 3264,
+          "libnrf_cc310_core_0.9.22.a(pki_modular_arithmetic.c.obj)": 1956,
+          "libmicrocard_cc310_psa.a(public_cc3xx_psa_asymmetric_signature.o)": 1420,
+          "libnrf_cc310_platform_0.9.22.a(pka.c.obj)": 1388,
+          "libnrf_cc310_core_0.9.22.a(ec_wrst_dsa.c.obj)": 1296,
+          "libnrf_cc310_psa_crypto_0.9.22.a(cc3xx_internal_hmac_drbg.c.obj)": 1176,
+          "libnrf_cc310_platform_0.9.22.a(cc3xx_drbg_ctr.c.obj)": 1152,
+          "libnrf_cc310_core_0.9.22.a(pka_ec_wrst_smul_no_scap.c.obj)": 1140,
+          "libnrf_cc310_platform_0.9.22.a(cc3xx_aes.c.obj)": 1128,
+          "libnrf_cc310_platform_0.9.22.a(nrf_cc3xx_platform_ctr_drbg.c.obj)": 896
+        },
+        "non_profile_algorithm_symbols": []
+      },
       "software_dependencies": [
         "aes",
         "ccm",
@@ -69,9 +122,54 @@
       ]
     },
     "hardware": {
-      "text_bytes": 213124,
+      "text_bytes": 211608,
       "data_bytes": 148,
       "bss_bytes": 197692,
+      "elf_sha256": "e7b7aaf25bebd13be8185746ff16cc7dd5dbcf501f61a6aca6f73d88a925b14f",
+      "link_map": "board/nrf52840/target/profiles/crypto-mc04-dk-hardware/microcard-mc04.map",
+      "link_inspection": {
+        "c_allocator_symbols": [],
+        "archive_text_rodata_bytes": {
+          "libmicrocard_cc310_psa.a": 4047,
+          "libnrf_cc310_core_0.9.22.a": 16954,
+          "libnrf_cc310_platform_0.9.22.a": 17964,
+          "libnrf_cc310_psa_crypto_0.9.22.a": 14748
+        },
+        "largest_archive_members": {
+          "libnrf_cc310_core_0.9.22.a(pka_ec_wrst.c.obj)": 3264,
+          "libnrf_cc310_psa_crypto_0.9.22.a(cc3xx_psa_cipher.c.obj)": 2516,
+          "libnrf_cc310_core_0.9.22.a(pki_modular_arithmetic.c.obj)": 1956,
+          "libnrf_cc310_platform_0.9.22.a(aes_driver.c.obj)": 1912,
+          "libnrf_cc310_psa_crypto_0.9.22.a(cc3xx_psa_mac.c.obj)": 1812,
+          "libnrf_cc310_platform_0.9.22.a(poly.c.obj)": 1784,
+          "libmicrocard_cc310_psa.a(public_cc3xx_psa_asymmetric_signature.o)": 1420,
+          "libnrf_cc310_platform_0.9.22.a(pka.c.obj)": 1388,
+          "libnrf_cc310_psa_crypto_0.9.22.a(cc3xx_psa_aead.c.obj)": 1380,
+          "libnrf_cc310_psa_crypto_0.9.22.a(cc3xx_internal_ccm.c.obj)": 1376
+        },
+        "non_profile_algorithm_symbols": [
+          "ProcessChacha",
+          "cc3xx_chacha20_finish",
+          "cc3xx_chacha20_free",
+          "cc3xx_chacha20_init",
+          "cc3xx_chacha20_poly1305_finish",
+          "cc3xx_chacha20_poly1305_gen_otk",
+          "cc3xx_chacha20_poly1305_set_lengths",
+          "cc3xx_chacha20_poly1305_set_otk",
+          "cc3xx_chacha20_poly1305_update",
+          "cc3xx_chacha20_poly1305_update_ad",
+          "cc3xx_chacha20_poly1305_verify",
+          "cc3xx_chacha20_set_counter",
+          "cc3xx_chacha20_set_nonce",
+          "cc3xx_chacha20_setkey",
+          "cc3xx_chacha20_update",
+          "cc_platform_cleanup_chacha_key",
+          "cc_platform_load_chacha_key",
+          "cc_platform_prepare_chacha_key",
+          "invalid_chacha_256_bit_key",
+          "write_invalid_chacha20_key"
+        ]
+      },
       "software_dependencies": [],
       "features": [
         "engine-mc04",
