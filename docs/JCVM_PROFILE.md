@@ -74,8 +74,8 @@ a status from the subsequent `process()` does not undo accepted selection.
 Selection changes call and commit `deselect()` before switching. Applet exceptions do
 not prevent deselection; engine errors or failed commits trigger authenticated recovery.
 Reset discards the live session without calling deselect. Reselecting the same instance
-reuses its heap, but switching to another instance currently drops reset-scoped volatile
-data. Preserving that data until reset remains incomplete.
+reuses its heap. Switching instances retains reset-scoped transient data in the bounded
+RAM cache described below; deselection-scoped data is cleared.
 
 ## What holds this claim up
 
@@ -287,11 +287,44 @@ operations require end-to-end acceptance.
 Applet-owned GlobalPlatform secure channels are unavailable. `GPSystem.getSecureChannel`
 throws `SystemException.NO_RESOURCE`; it never exposes the transport's management channel.
 
+### OpenFIPS201 provisioning blocker
+
+The pinned applet revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716` requires
+`AUTHENTICATED | C_DECRYPTION | C_MAC` and a successful `SecureChannel.unwrap`
+before treating an administrative command as secure. The current transport verifies
+and decrypts SCP03, then clears the protected CLA bit before dispatching to JCVM.
+Consequently the applet cannot recognize that authorization.
+
+On MicroCard `3b3cc70`, after the managed acceptance's load/install/select sequence,
+the encrypted command `DB FF FF` with data
+`66128B019B8C017F8D01008E01088F0101900114` returns `6982`. This is the upstream
+AES-128 management-key definition for reference `9B`; it should return `9000` in
+an authorized provisioning session. The remaining managed lifecycle acceptance passes.
+This probe establishes the first blocker, not successful provisioning.
+
+The platform bridge must bind authorization to the verified command, selected
+installation, and owning security domain. It must expose the applet's secure-channel
+operations without decrypting twice or accepting applet-supplied claims of verification.
+Reset, deselection, failed authentication, and replay must not retain authority.
+Ordinary PIV commands need a separate unauthenticated transport path whose access
+decisions remain with the applet; card management remains authenticated.
+
+Extend the existing managed lifecycle acceptance into one personalized flow: define
+and import the management key, set the PIN, create and generate a P-256 signing key,
+store and retrieve its certificate, sign a challenge, independently verify the signature,
+then reboot and repeat. Include rejected unauthorized administration and loss of PIN
+validation across reboot in that same flow. Upstream tests mock the secure channel;
+they supply command encodings but do not prove this platform integration.
+
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
 ## Authorization
 
-A Java Card package carries no signature of its own, so on-card verification and the secure channel are the whole safety boundary. That is a weaker position than the MC04 path, where every package carries an P-256 ECDSA signature that binds it to a domain. GlobalPlatform DAP blocks are the standards-native way to restore an offline code signer, and the tooling already supports them.
+A raw Java Card CAP carries no MicroCard signature. Device installation requires its
+MP05 envelope, whose P-256 signature binds the image digest and versioned manifest,
+including the security domain and incarnation. The authenticated transport, signed
+package verification, and registry ownership checks are distinct requirements.
+The raw simulator loader is a development entry point, not the board loading path.
 
 ## Sources
 
