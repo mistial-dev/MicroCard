@@ -145,6 +145,12 @@ activation must advance that version. Child domains inherit the ISD signer; fres
 domain and installation identities come from the platform, not the package author.
 Physical storage may impose lower quotas than these registry limits.
 
+Installation identities are a durably reserved registry nonce counter value (eight
+little-endian bytes) followed by `JCVMv1\0\0`. Failed installations consume their
+reservation. The registry counter must never reset during service. Installation
+commits a fresh, unreferenced heap before publishing its metadata; cancellation or
+failure leaves an orphan that a later installation may explicitly reclaim.
+
 The store resolves uncertain commits with the reboot scan and disables state access
 if recovery fails. Its caller must verify referenced image and heap storage before
 execution, and must not reclaim formerly referenced storage before metadata commits.
@@ -166,10 +172,16 @@ static length must match the load file, and the complete record must fit the jou
 payload capacity. Engine recovery validates object and reference structure and
 requires volatile values to be cleared. Unknown versions and trailing bytes fail.
 
-`jcvm_storage::Store` authenticates records through the shared journal provider and
-uses its commit/recovery protocol. The caller still must authenticate the code image,
-allocate the dedicated flash region, and roll back live mutations on commit failure.
-Board partitioning and GlobalPlatform activation are not integrated yet.
+Each heap key is the first 16 bytes of HMAC-SHA256 under the root heap key over
+`MicroCard JCVM heap key v1\0 || bank:u8 || installation_bytes16 || image_sha256_bytes32`.
+Only an unreferenced bank may be erased, including its local counters, and it must
+receive a fresh installation identity and derived key before reuse.
+
+`jcvm_storage::Session` rolls back live mutations through authenticated recovery on
+failure. The registry coordinator verifies code, commits installation before metadata,
+and reopens only the committed heap. Missing or incompatible committed state fails
+without reinstalling. Board partitioning and authenticated management dispatch still
+need integration.
 
 ## Migration status
 

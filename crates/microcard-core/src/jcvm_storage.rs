@@ -14,6 +14,9 @@ use microcard_engine_jcvm::{
 use zeroize::Zeroizing;
 mod session;
 pub use session::Session;
+mod banks;
+pub use banks::HeapBanks;
+pub(crate) use banks::heap_key;
 
 pub struct Store<F: Flash> {
     journal: Journal<F>,

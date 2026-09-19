@@ -5,6 +5,99 @@ use crate::{
     journal::MemoryFlash,
 };
 use microcard_engine_jcvm::{applet::Sizes, cap::LoadFile};
+use crate::{crypto::CryptoProvider, hal::Entropy, jcvm_storage::HeapBanks, journal::{Flash, JournalKey}};
+use alloc::rc::Rc;
+use core::cell::RefCell;
+
+struct Provider;
+impl CryptoProvider for Provider {}
+impl Entropy for Provider {
+    fn fill_entropy(&mut self, bytes: &mut [u8]) -> Result<()> { bytes.fill(7); Ok(()) }
+}
+
+struct Bank(Rc<RefCell<MemoryFlash>>);
+impl Flash for Bank {
+    fn slot_size(&self) -> usize { self.0.borrow().slot_size() }
+    fn monotonic_capacity(&self) -> u64 { self.0.borrow().monotonic_capacity() }
+    fn monotonic_generation(&self) -> Result<u64> { self.0.borrow().monotonic_generation() }
+    fn advance_monotonic(&mut self, value: u64) -> Result<()> { self.0.borrow_mut().advance_monotonic(value) }
+    fn nonce_generation(&self) -> Result<u64> { self.0.borrow().nonce_generation() }
+    fn reserve_nonce(&mut self) -> Result<u64> { self.0.borrow_mut().reserve_nonce() }
+    fn is_erased(&self, slot: usize) -> Result<bool> { self.0.borrow().is_erased(slot) }
+    fn read(&self, slot: usize, offset: usize, bytes: &mut [u8]) -> Result<()> { self.0.borrow().read(slot, offset, bytes) }
+    fn erase(&mut self, slot: usize) -> Result<()> { self.0.borrow_mut().erase(slot) }
+    fn program(&mut self, slot: usize, offset: usize, bytes: &[u8]) -> Result<()> { self.0.borrow_mut().program(slot, offset, bytes) }
+}
+struct Heaps {
+    banks: [Rc<RefCell<MemoryFlash>>; 2],
+    preparations: [usize; 2],
+    fail_write: Option<usize>,
+}
+impl HeapBanks for Heaps {
+    type Bank = Bank;
+    fn bank_count(&self) -> usize { self.banks.len() }
+    fn open(&mut self, bank: u8) -> Result<Bank> { Ok(Bank(Rc::clone(self.banks.get(usize::from(bank)).ok_or(Error::Bounds)?))) }
+    fn prepare(&mut self, bank: u8) -> Result<Bank> {
+        let cell = self.banks.get(usize::from(bank)).ok_or(Error::Bounds)?;
+        self.preparations[usize::from(bank)] += 1;
+        let mut flash = MemoryFlash::new(65536); flash.fail_after = self.fail_write;
+        *cell.borrow_mut() = flash;
+        self.open(bank)
+    }
+}
+
+#[test]
+fn heap_publication_failures_preserve_existing_instances_and_never_reuse_identity() {
+    let raw = signed(7, 1, 7);
+    let mut provider = Provider;
+    let mut scratch = alloc::vec![0; 16384];
+    let package = Package::verify(&raw, &mut provider, &mut scratch).unwrap();
+    let file = LoadFile::parse(package.envelope.image).unwrap();
+    let module = file.applets().unwrap().iter().next().unwrap().aid;
+    let mut store = Store::open(MemoryFlash::new(4096), [3; 16], Registry::new([1; 16], None), &mut provider).unwrap();
+    let mut images = crate::image_store::Images::new(MemoryFlash::with_images(4096, 2, 65536).unwrap()).unwrap();
+    store.load(&mut images, &raw, &mut scratch, &mut provider, &mut || false).unwrap();
+    let mut heaps = Heaps { banks: core::array::from_fn(|_| Rc::new(RefCell::new(MemoryFlash::new(65536)))), preparations: [0; 2], fail_write: None };
+    let root = JournalKey::from([9; 16]);
+    let mut request = crate::globalplatform::ApplicationInstall {
+        load_aid: package.manifest.package, module_aid: module,
+        instance_aid: &[0xf0, 1, 2, 3, 4], privileges: &[0], parameters: &[],
+    };
+    let first = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false).unwrap();
+    let select = [0, 0xa4, 4, 0, 0];
+    let wrong_pin = [0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 255, 255];
+    let mut session = store.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider).unwrap();
+    assert_eq!(session.process(&select, true, &mut provider, &mut || false).unwrap().sw, 0x9000);
+    let before = session.process(&wrong_pin, false, &mut provider, &mut || false).unwrap().sw;
+    assert_eq!(before & 0xfff0, 0x63c0);
+    drop(session);
+
+    request.instance_aid = &[0xf0, 1, 2, 3, 5];
+    heaps.fail_write = Some(128);
+    assert!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false).is_err());
+    assert_eq!(store.state().unwrap().instances().count(), 1);
+    heaps.fail_write = None;
+    // Let identity reservation finish, then fail publication after the heap commits.
+    store.journal.flash_mut().fail_after = Some(4);
+    assert_eq!(store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false), Err(Error::Storage));
+    assert_eq!(store.state().unwrap().instances().count(), 1);
+    let consumed = store.journal.flash_mut().nonce_generation().unwrap();
+    store.journal.flash_mut().fail_after = None;
+    let second = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false).unwrap();
+    assert!(u64::from_le_bytes(second.identity[..8].try_into().unwrap()) > consumed);
+    assert_ne!(first.identity, second.identity);
+    assert_eq!(heaps.preparations, [1, 3]);
+    let mut session = store.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider).unwrap();
+    assert_eq!(session.process(&select, true, &mut provider, &mut || false).unwrap().sw, 0x9000);
+    assert_eq!(session.process(&wrong_pin, false, &mut provider, &mut || false).unwrap().sw + 1, before);
+    drop(session);
+    assert!(store.open_session(second.aid, &images, &mut heaps, &JournalKey::from([8; 16]), &mut scratch, &mut provider).is_err());
+    assert!(store.open_session(second.aid, &images, &mut heaps, &root, &mut scratch, &mut provider).unwrap().installed().unwrap());
+    // Referenced erased heaps are errors, not an instruction to rerun install.
+    *heaps.banks[0].borrow_mut() = MemoryFlash::new(65536);
+    assert!(matches!(store.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider), Err(Error::Storage)));
+    assert_eq!(heaps.preparations, [1, 3]);
+}
 
 fn signed(version: u32, incarnation: u8, private: u8) -> Vec<u8> {
     let image = include_bytes!(

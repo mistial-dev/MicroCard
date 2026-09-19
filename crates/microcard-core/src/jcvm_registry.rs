@@ -580,6 +580,69 @@ impl<F: crate::journal::Flash> Store<F> {
         Ok(())
     }
 
+    /// Prepare and commit an unreferenced heap before publishing the instance.
+    #[allow(clippy::too_many_arguments)]
+    pub fn install<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks>(
+        &mut self,
+        request: &crate::globalplatform::ApplicationInstall<'_>,
+        images: &crate::image_store::Images<I>,
+        heaps: &mut H,
+        root: &crate::journal::JournalKey,
+        scratch: &mut [u8],
+        provider: &mut (impl crate::crypto::CryptoProvider + crate::hal::Entropy),
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<Instance> {
+        let mut next = *self.state()?;
+        if cancel() { return Err(Error::Cancelled); }
+        let load = Aid::new(request.load_aid)?;
+        let module = Aid::new(request.module_aid)?;
+        let aid = Aid::new(request.instance_aid)?;
+        if next.in_use(aid) { return Err(Error::Busy); }
+        if !(1..=MAX_INSTANCES).contains(&heaps.bank_count()) { return Err(Error::Storage); }
+        let bank = (0..heaps.bank_count() as u8).find(|bank| !next.instances().any(|i| i.heap_bank == *bank)).ok_or(Error::Quota)?;
+        let nonce = self.journal.reserve_identity_nonce()?;
+        let mut identity = *b"\0\0\0\0\0\0\0\0JCVMv1\0\0";
+        identity[..8].copy_from_slice(&nonce.to_le_bytes());
+        let (image, sizes, digest) = self.with_package(load, images, scratch, provider, |package| {
+            next.register(package, module, aid, identity, bank)?;
+            session_image(package)
+        })?;
+        let key = crate::jcvm_storage::heap_key(provider, root, bank, &identity, &digest)?;
+        if cancel() { return Err(Error::Cancelled); }
+        let flash = heaps.prepare(bank)?;
+        let mut session = crate::jcvm_storage::Session::open(flash, key, image, identity, sizes, provider)?;
+        session.install_globalplatform(request, provider, cancel)?;
+        // Release all installation memory before serializing metadata. On any failure,
+        // this heap remains an orphan until a later authorized installation reclaims it.
+        drop(session);
+        if cancel() { return Err(Error::Cancelled); }
+        self.commit(next, provider)?;
+        Ok(*self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Storage)?)
+    }
+
+    /// Reopen exactly the heap named by committed metadata. Missing or incompatible
+    /// state is an error, never permission to reinstall or erase it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_session<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks>(
+        &self,
+        aid: Aid,
+        images: &crate::image_store::Images<I>,
+        heaps: &mut H,
+        root: &crate::journal::JournalKey,
+        scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+    ) -> Result<crate::jcvm_storage::Session<H::Bank>> {
+        let instance = *self.state()?.instances().find(|i| i.aid == aid).ok_or(Error::Missing)?;
+        if usize::from(instance.heap_bank) >= heaps.bank_count() { return Err(Error::Storage); }
+        let (image, sizes, digest) = self.with_package(instance.load, images, scratch, provider, |package| {
+            session_image(package)
+        })?;
+        let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &instance.identity, &digest)?;
+        let session = crate::jcvm_storage::Session::open(heaps.open(instance.heap_bank)?, key, image, instance.identity, sizes, provider)?;
+        if !session.installed()? { return Err(Error::Storage); }
+        Ok(session)
+    }
+
     /// Verify the persisted image and its current registry binding before using it.
     pub fn with_package<I: crate::image_store::ImageFlash, P: crate::crypto::CryptoProvider, T>(
         &self,
@@ -626,6 +689,13 @@ impl<F: crate::journal::Flash> Store<F> {
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }
+}
+
+fn session_image(package: &Package<'_>) -> Result<(Vec<u8>, microcard_engine_jcvm::applet::Sizes, [u8; 32])> {
+    let mut image = Vec::new();
+    image.try_reserve_exact(package.envelope.image.len()).map_err(|_| Error::Quota)?;
+    image.extend_from_slice(package.envelope.image);
+    Ok((image, package.manifest.sizes, package.envelope.image_digest))
 }
 
 #[cfg(all(test, feature = "software-crypto"))]

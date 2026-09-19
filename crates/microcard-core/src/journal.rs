@@ -66,6 +66,14 @@ pub struct Journal<F: Flash> {
     key: JournalKey,
 }
 impl<F: Flash> Journal<F> {
+    /// Domain-separated consumers may burn counter values for fresh identities.
+    #[cfg(feature = "jcvm")]
+    pub(crate) fn reserve_identity_nonce(&mut self) -> Result<u64> {
+        if self.poisoned { return Err(Error::Storage); }
+        let value = self.flash.reserve_nonce()?;
+        if value == 0 || value > self.flash.nonce_capacity() { return Err(Error::Storage); }
+        Ok(value)
+    }
     #[cfg(feature = "software-crypto")]
     pub fn open(
         flash: F,

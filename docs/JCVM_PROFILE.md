@@ -52,9 +52,10 @@ now persists ownership, rollback history, image references, and installation ide
 The registry loader now authorizes signed packages before erasing, stages images in
 unreferenced slots, verifies readback, and commits activation metadata. It protects
 the old image through write failures and cancellation. Package reads verify both flash
-and the current registry binding. The management adapter still needs to coordinate
-heap activation and dispatch selection by instance AID, and boards need the storage
-partitions connected to these services.
+and the current registry binding. Installation now commits a dedicated heap before
+publishing its instance, using a fresh derived key even after an interrupted attempt.
+Reopening verifies the committed image and heap without reinstalling. Authenticated
+management dispatch and board storage partitions still need integration.
 
 ## What holds this claim up
 
@@ -133,7 +134,7 @@ One detail that only real packages show. The Directory records a size for the De
 
 MC04 now journals image descriptors and stores code in dedicated flash slots. JCVM
 has an authenticated applet-state journal bound to its image and installation, but
-its image and heap regions still need board allocation and atomic management activation.
+its image and heap regions still need board allocation and management dispatch.
 
 ## Verification
 
@@ -166,7 +167,7 @@ retry counts survive restoration; saving does not clear the live session.
 The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
 binding the snapshot to the exact code image and installation identity using the
 [JCVM state contract](DEVICE_CBOR.md#dedicated-jcvm-state-journal). Board flash
-partitioning, atomic image activation, complete deselection callbacks, and transaction
+partitioning, authenticated management dispatch, complete deselection callbacks, and transaction
 undo still need integration before board delivery.
 
 ## Cryptography
