@@ -457,32 +457,32 @@
     },
     {
       "assembly": "SecurityConsumer",
-      "source_pe_bytes": 5632,
-      "mc04_bytes": 1384,
+      "source_pe_bytes": 6144,
+      "mc04_bytes": 1886,
       "sections": {
         "header": 56,
-        "tables": 305,
-        "strings": 409,
-        "blob": 186,
-        "code": 428
+        "tables": 445,
+        "strings": 555,
+        "blob": 207,
+        "code": 623
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 10,
+        "TypeRef": 15,
         "TypeDef": 2,
-        "MethodDef": 3,
-        "MemberRef": 16,
-        "CustomAttribute": 2,
+        "MethodDef": 8,
+        "MemberRef": 23,
+        "CustomAttribute": 6,
         "Assembly": 1,
         "AssemblyRef": 3
       },
-      "method_defs": 3,
-      "member_refs": 16,
-      "build_metadata_bytes": 555,
-      "debug_map_bytes": 158,
-      "representative_manifest_bytes": 158,
+      "method_defs": 8,
+      "member_refs": 23,
+      "build_metadata_bytes": 579,
+      "debug_map_bytes": 432,
+      "representative_manifest_bytes": 164,
       "package_fixed_bytes": 201,
-      "representative_package_bytes": 1743,
+      "representative_package_bytes": 2251,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
