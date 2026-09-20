@@ -126,7 +126,9 @@ execution of the current JCVM firmware remains a separate acceptance gate.
 
 Image storage provides scoped range guards: nRF52840 and memory backends borrow
 slot bytes, while the file backend owns the requested range. Multiple read guards
-can coexist; image authentication remains a separate required step. MC04 still
+can coexist. `Descriptor::read_verified` checks geometry, length and the complete
+image digest before returning a guard; callback reads use the same verification.
+The provider borrow ends after verification. MC04 still
 retains runtime image buffers until its execution graph uses these scoped reads.
 
 MC04 domain internals separate application staging, lifecycle execution, metadata

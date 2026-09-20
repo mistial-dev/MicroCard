@@ -99,6 +99,21 @@ mod tests {
         assert_eq!(first.as_ptr(), baseline.slots[0].as_ptr());
         assert_eq!(second.as_ptr(), baseline.slots[1][4..].as_ptr());
         assert_eq!(first, b"old");
+        let verified = committed.read_verified(&baseline, &mut SoftwareCrypto).unwrap();
+        assert_eq!(verified.as_ptr(), first.as_ptr());
+        for invalid in [Descriptor { length: 0, ..committed }, Descriptor { slot: 2, ..committed }] {
+            assert_eq!(invalid.read_verified(&baseline, &mut SoftwareCrypto), Err(Error::Bounds));
+        }
+        let invalid = Descriptor { digest: [0; 32], ..committed };
+        assert_eq!(invalid.read_verified(&baseline, &mut SoftwareCrypto), Err(Error::Authentication));
+        struct FailedHash;
+        impl CryptoProvider for FailedHash {
+            fn sha256_into(&mut self, _: &[u8], output: &mut [u8; 32]) -> Result<()> {
+                output.fill(0);
+                Err(Error::Native)
+            }
+        }
+        assert_eq!(committed.read_verified(&baseline, &mut FailedHash), Err(Error::Native));
         assert_eq!(second, &[255; 4]);
         for (slot, start, end) in [(2, 0, 1), (0, 31, 33), (0, 5, 4)] {
             assert_eq!(baseline.read_range(slot, start..end), Err(Error::Bounds));
@@ -259,6 +274,28 @@ pub struct Descriptor {
     pub digest: [u8; 32],
 }
 
+impl Descriptor {
+    fn validate(&self, slot_count: usize, slot_size: usize) -> Result<()> {
+        if !(2..=64).contains(&slot_count) || usize::from(self.slot) >= slot_count
+            || self.length == 0 || self.length as usize > slot_size {
+            return Err(Error::Bounds);
+        }
+        Ok(())
+    }
+
+    /// Authenticate the complete descriptor before lending its scoped storage guard.
+    /// The provider is released after verification so execution can use it independently.
+    pub fn read_verified<'a, F: ImageFlash, P: CryptoProvider>(
+        &self, flash: &'a F, provider: &mut P,
+    ) -> Result<F::Image<'a>> {
+        self.validate(flash.slot_count(), flash.slot_size())?;
+        let bytes = flash.read_range(usize::from(self.slot), 0..self.length as usize)?;
+        if bytes.len() != self.length as usize { return Err(Error::Storage); }
+        if provider.sha256(&bytes)? != self.digest { return Err(Error::Authentication); }
+        Ok(bytes)
+    }
+}
+
 #[cfg(feature = "jcvm")]
 struct Shared<F> {
     flash: RefCell<F>,
@@ -389,18 +426,9 @@ impl<F: ImageFlash> Images<F> {
         provider: &mut P,
         read: impl FnOnce(&[u8], &mut P) -> Result<T>,
     ) -> Result<T> {
-        self.validate(descriptor)?;
         self.with_flash(|flash| {
-            flash.with_range(
-                usize::from(descriptor.slot),
-                0..descriptor.length as usize,
-                |bytes| {
-                    if provider.sha256(bytes)? != descriptor.digest {
-                        return Err(Error::Authentication);
-                    }
-                    read(bytes, provider)
-                },
-            )
+            let bytes = descriptor.read_verified(flash, provider)?;
+            read(&bytes, provider)
         })
     }
 
@@ -433,13 +461,7 @@ impl<F: ImageFlash> Images<F> {
     }
 
     fn validate(&self, descriptor: &Descriptor) -> Result<()> {
-        if usize::from(descriptor.slot) >= self.slot_count
-            || descriptor.length == 0
-            || descriptor.length as usize > self.slot_size
-        {
-            return Err(Error::Bounds);
-        }
-        Ok(())
+        descriptor.validate(self.slot_count, self.slot_size)
     }
 
     #[cfg(test)]
