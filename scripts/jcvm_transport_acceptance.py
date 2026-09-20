@@ -11,6 +11,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 
+from heap_profile import mark_phase
 from device_cbor import decode, jcvm_manifest
 from package_envelope import create
 from scp03_acceptance import Client, SIM, ROOT, sign_package, signer_public_key, aes, modes
@@ -154,6 +155,7 @@ def main():
         keys, state = root / "keys", root / "state"
         keys.write_bytes(bytes(range(32)))
         mode = "serve-jcvm-managed"
+        mark_phase("provisioning")
         client = Client(keys, state, mode)
         client.connect()
         discovery = decode(client.command(0xe2, b"\0"))
@@ -194,6 +196,7 @@ def main():
         read_certificate(client, certificate_object)
         # Two 32767-byte backing arrays cannot fit the 64 KiB applet heap.
         # Allocation failure must not destroy the existing certificate or keys.
+        mark_phase("oversized_object_failure")
         client.command(0xdb, bytes.fromhex("64128B035FC10B8C017F8D017F91019B92027FFF"),
                        p1=0xff, p2=0xff, status=0x6f00)
         read_certificate(client, certificate_object)
@@ -210,6 +213,7 @@ def main():
         assert client.p.wait(timeout=5) != 0
         client.p.stdin.close()
         client.p.stdout.close()
+        mark_phase("interrupted_replacement_reboot")
         client = Client(keys, state, mode)
         assert piv(client, 0xa4, instance, p1=4, le=256) == selected
         read_certificate(client, certificate_object)
@@ -225,6 +229,7 @@ def main():
                        cla=0x04, status=0x6d00)
         pin = bytes.fromhex("0020008008313233343536FFFF")
         client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c5)
+        mark_phase("two_applet_selection")
         # Keep both heap banks occupied and retain the second applet's reset-scoped
         # arrays while exercising the personalized instance.
         second = instance[:-1] + bytes([instance[-1] + 1])
@@ -246,12 +251,14 @@ def main():
         nonces.write_bytes(b"\0" * reserve + counter[reserve:])
         registry_before = files(state / "registry")
 
+        mark_phase("forced_renewal")
         client = Client(keys, state, mode)
         # A normal PIV client can select and read after boot without ever opening SCP03.
         piv(client, 0xa4, second, p1=4, le=256)
         assert piv(client, 0xa4, instance, p1=4, le=256) == selected
         assert nonces.read_bytes()[reserve - 4:] == b"\xff" * (len(counter) - reserve + 4)
         assert files(state / "registry") != registry_before, "renewal must publish its new identity"
+        mark_phase("post_renewal")
         read_certificate(client, certificate_object)
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]

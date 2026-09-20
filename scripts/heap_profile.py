@@ -9,6 +9,14 @@ import subprocess
 import tempfile
 
 
+def mark_phase(name):
+    """Label subsequent samples after the caller's previous command has completed."""
+    path = os.environ.get("MICROCARD_HEAP_REPORT")
+    if path:
+        with open(path, "a") as output:
+            output.write(json.dumps({"phase": name}) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=pathlib.Path, required=True)
@@ -24,26 +32,36 @@ def main():
     if not samples:
         raise SystemExit("no samples: build microcard-sim with --features heap-metrics first")
     stages = {}
+    phases = {}
+    phase = "unlabelled"
+    measurements = []
     for sample in samples:
+        if "phase" in sample:
+            phase = sample["phase"]
+            continue
+        measurements.append(sample)
         if sample["peak_bytes"] < max(sample["before_bytes"], sample["live_bytes"]):
             raise SystemExit("invalid heap accounting")
         name = sample["stage"]
         if sample["ins"] >= 0:
             name += f"_{sample['ins']:02x}"
-        stage = stages.setdefault(name, {"samples": 0, "peak_bytes": 0, "live_bytes": 0,
-                                        "allocated_bytes": 0, "host_microseconds": 0})
-        stage["samples"] += 1
-        for field in ("peak_bytes", "live_bytes"):
-            stage[field] = max(stage[field], sample[field])
-        for field in ("allocated_bytes", "host_microseconds"):
-            stage[field] += sample[field]
+        for group in (stages, phases.setdefault(phase, {})):
+            stage = group.setdefault(name, {"samples": 0, "peak_bytes": 0, "live_bytes": 0,
+                                           "allocated_bytes": 0, "host_microseconds": 0})
+            stage["samples"] += 1
+            for field in ("peak_bytes", "live_bytes"):
+                stage[field] = max(stage[field], sample[field])
+            for field in ("allocated_bytes", "host_microseconds"):
+                stage[field] += sample[field]
+    if not measurements:
+        raise SystemExit("no allocation samples: build microcard-sim with --features heap-metrics first")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
     report = {"format": 1, "source_revision": revision, "working_tree_dirty": dirty, "platform": platform.platform(), "command": command,
               "exit_code": result.returncode, "measurement": "host requested allocation bytes",
               "excludes": ["allocator metadata", "stack", "device latency"],
               "note": "Host file reads and pointer sizes differ from memory-mapped board flash.",
-              "peak_bytes": max(s["peak_bytes"] for s in samples), "stages": stages}
+              "peak_bytes": max(s["peak_bytes"] for s in measurements), "stages": stages, "phases": phases}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Host heap peak: {report['peak_bytes']} bytes; report: {args.output}")

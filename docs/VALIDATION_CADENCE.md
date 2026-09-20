@@ -64,7 +64,13 @@ python3 scripts/heap_profile.py --output work/jcvm-heap.json -- python3 scripts/
 python3 scripts/heap_profile.py --output work/mc04-heap.json -- python3 scripts/credential_acceptance.py
 ```
 
-The report groups startup and APDU operations by instruction. It records live and peak
+The report groups startup and APDU operations by instruction. The JCVM workload also
+labels provisioning, oversized-object failure, interrupted-replacement reboot,
+two-applet selection, forced renewal, and post-renewal operations in `phases`.
+These labels separate different paths that share the SELECT instruction. Markers
+are written only after the previous command completes and only when profiling is
+enabled; they contain no APDU payloads or keys. Aggregate `stages` remain available.
+The report records live and peak
 requested allocation bytes, allocation traffic, and host execution time. It does not
 include allocator metadata or stack use. Host file reads and pointer sizes differ from
 the board, so these figures are optimization evidence, not a safe device heap bound.
