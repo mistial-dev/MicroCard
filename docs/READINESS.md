@@ -54,6 +54,8 @@ board's reserved heap.
   Abrupt simulator termination between encrypted certificate fragments preserves
   the prior certificate; a fresh authenticated upload then replaces it and survives
   reboot. This covers command-boundary recovery, not arbitrary torn flash writes.
+  The real applet object-update test separately samples byte-write failures across
+  journal stages and verifies complete old/new content after reopening storage.
   P-256 keys, generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Ordinary PIV access, reselect,
   secure-channel reset, chained certificate upload, and certificate retrieval now pass
   through the managed simulator path.

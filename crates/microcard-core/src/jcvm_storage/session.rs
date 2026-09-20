@@ -344,7 +344,9 @@ mod tests {
 
     #[test]
     fn openfips_object_commit_survives_cancellation_before_apdu_completion() {
-        for fail_checkpoint in [false, true] {
+        let mut cuts = alloc::vec![usize::MAX];
+        let mut measured = None;
+        while let Some(cut) = cuts.pop() {
             let mut provider = Provider::default();
             let mut session = installed_session(&mut provider);
             let select = [0, 0xa4, 4, 0, 0];
@@ -356,11 +358,24 @@ mod tests {
             let previous = session.process(&read, false, &mut provider, &mut || false).unwrap();
             let encryptions = provider.encryptions.clone();
             let before = encryptions.get();
-            if fail_checkpoint { session.store.journal.flash_mut().fail_after = Some(4); }
+            let slot_size = session.store.journal.flash_mut().slot_size();
+            session.store.journal.flash_mut().fail_after = Some(cut);
             let result = session.process_command(&write, false, Some(3), &mut provider,
-                &mut || !fail_checkpoint && encryptions.get() > before);
-            assert_eq!(result, Err(if fail_checkpoint { Error::Storage } else { Error::Cancelled }));
-            assert_eq!(encryptions.get(), before + 1, "only the in-command checkpoint was attempted");
+                &mut || encryptions.get() > before);
+            let remaining = session.store.journal.flash_mut().fail_after.unwrap();
+            if cut == usize::MAX {
+                let mutations = cut - remaining;
+                measured = Some(mutations);
+                // Nonce reservation, reclamation/erase, payload, commit marker,
+                // and monotonic anchor each have a distinct recovery invariant.
+                cuts.extend([0, 2, 4, 5 + slot_size / 2,
+                    5 + slot_size + (mutations - 5 - slot_size) / 2,
+                    mutations - 6, mutations - 5, mutations - 1, mutations]);
+            }
+            let complete = cut >= measured.unwrap();
+            assert_eq!(result, Err(if complete { Error::Cancelled } else { Error::Storage }), "cut {cut}");
+            assert_eq!(encryptions.get(), before + usize::from(cut >= 4),
+                "only the in-command checkpoint may encrypt at cut {cut}");
             let sizes = session.sizes;
             let image = session.image.clone();
             let mut flash = session.into_flash();
@@ -368,11 +383,11 @@ mod tests {
             let mut rebooted = Session::open(flash, [3; 16], image, [4; 16], sizes, &mut provider).unwrap();
             rebooted.process(&select, true, &mut provider, &mut || false).unwrap();
             let response = rebooted.process(&read, false, &mut provider, &mut || false).unwrap();
-            if fail_checkpoint {
-                assert_eq!(response, previous, "a failed checkpoint must preserve the previous content");
+            let updated = response.sw == 0x9000 && response.data == [0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00];
+            if complete {
+                assert!(updated, "completed checkpoint lost at cut {cut}");
             } else {
-                assert_eq!(response.sw, 0x9000);
-                assert_eq!(response.data, [0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00]);
+                assert!(response == previous || updated, "torn object recovered at cut {cut}: {response:?}");
             }
         }
     }

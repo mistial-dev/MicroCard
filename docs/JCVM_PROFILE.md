@@ -354,8 +354,10 @@ discarding its undo log. Cancellation or failure afterward recovers that committ
 state. A failed checkpoint stops execution and recovers the last valid journal record.
 Installation publishes only after its complete callback succeeds. Storage serializes
 a borrowed view into its existing staging buffer, clearing volatile contents there.
-Host tests cover OpenFIPS201 object activation followed by cancellation and a failed
-checkpoint, including reopening the journal and reading the object.
+Host tests cover OpenFIPS201 object activation followed by cancellation and sampled
+byte-write failures during nonce reservation, erase, payload, commit marker, and
+monotonic anchoring. Reopening the journal must expose the complete old or new object;
+a completed checkpoint must expose the new object.
 Transport acceptance also kills the simulator between encrypted certificate-upload
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
