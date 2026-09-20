@@ -697,11 +697,19 @@ impl<F: crate::journal::Flash> Store<F> {
         provider: &mut impl crate::crypto::CryptoProvider,
         validate: impl FnOnce(&Package<'_>) -> Result<()>,
     ) -> Result<(PinnedImage<I>, microcard_engine_jcvm::applet::Sizes, [u8; 32])> {
-        let (length, sizes, digest) = self.with_package(load, images, scratch, provider, |package| {
+        Self::session_image_from(self.state()?, load, images, scratch, provider, validate)
+    }
+
+    fn session_image_from<I: crate::image_store::ImageFlash>(
+        state: &Registry, load: Aid, images: &crate::image_store::Images<I>, scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+        validate: impl FnOnce(&Package<'_>) -> Result<()>,
+    ) -> Result<(PinnedImage<I>, microcard_engine_jcvm::applet::Sizes, [u8; 32])> {
+        let (length, sizes, digest) = Self::with_package_from(state, load, images, scratch, provider, |package| {
             validate(package)?;
             Ok((package.envelope.image.len(), package.manifest.sizes, package.envelope.image_digest))
         })?;
-        let descriptor = self.state()?.loads().find(|item| item.aid == load)
+        let descriptor = state.loads().find(|item| item.aid == load)
             .and_then(|item| item.image).ok_or(Error::Storage)?;
         let end = usize::try_from(descriptor.length).map_err(|_| Error::Bounds)?;
         let start = end.checked_sub(length).ok_or(Error::Bounds)?;
@@ -718,7 +726,13 @@ impl<F: crate::journal::Flash> Store<F> {
         provider: &mut P,
         read: impl FnOnce(&Package<'_>) -> Result<T>,
     ) -> Result<T> {
-        let state = self.state()?;
+        Self::with_package_from(self.state()?, aid, images, scratch, provider, read)
+    }
+
+    fn with_package_from<I: crate::image_store::ImageFlash, P: crate::crypto::CryptoProvider, T>(
+        state: &Registry, aid: Aid, images: &crate::image_store::Images<I>, scratch: &mut [u8],
+        provider: &mut P, read: impl FnOnce(&Package<'_>) -> Result<T>,
+    ) -> Result<T> {
         let load = state.loads().find(|p| p.aid == aid).ok_or(Error::Missing)?;
         let image = load.image.ok_or(Error::Missing)?;
         images.with_verified_image(&image, provider, |raw, provider| {
@@ -739,6 +753,10 @@ impl<F: crate::journal::Flash> Store<F> {
         provider: &mut impl crate::crypto::CryptoProvider,
     ) -> Result<()> {
         self.state()?;
+        self.commit_snapshot(next, provider)
+    }
+
+    fn commit_snapshot(&mut self, next: Registry, provider: &mut impl crate::crypto::CryptoProvider) -> Result<()> {
         let result = self.journal.commit_owned_with(zeroize::Zeroizing::new(next.encode()?), provider);
         match result {
             Ok(()) => {

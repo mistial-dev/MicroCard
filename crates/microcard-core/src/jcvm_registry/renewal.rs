@@ -43,3 +43,53 @@ impl Renewal {
         })
     }
 }
+
+impl<F: crate::journal::Flash> Store<F> {
+    /// Resolve authenticated staging ownership before uploads or applet execution.
+    /// Failure retains the pending descriptor; no command is replayed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recover_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
+            S: crate::staging::PackageStaging>(
+        &mut self, images: &crate::image_store::Images<I>, heaps: &mut H,
+        root: &crate::journal::JournalKey, staging: &S, scratch: &mut [u8],
+        provider: &mut impl crate::crypto::CryptoProvider,
+    ) -> Result<()> {
+        use crate::image_store::CodeImage;
+        let Some(renewal) = self.pending_renewal()?.copied() else { return Ok(()); };
+        renewal.validate(&self.state)?;
+        let size = heaps.slot_size(renewal.bank)?;
+        let length = renewal.record_length as usize;
+        if size < crate::journal::OVERHEAD || length > size - 3 { return Err(Error::Bounds); }
+        if staging.persistent_capacity() == 0 { return Err(Error::Unsupported); }
+        if length > staging.persistent_capacity() { return Err(Error::Bounds); }
+        if self.journal.remaining_commits()? == 0 { return Err(Error::Quota); }
+        let mut record = crate::crypto::zeroizing_buffer(length)?;
+        staging.read_persistent(0, &mut record)?;
+        let mut hash = [0; 32];
+        provider.sha256_into(&record, &mut hash)?;
+        if hash != renewal.record_digest { return Err(Error::Authentication); }
+        let load = self.state.instances().find(|instance| instance.aid == renewal.aid).ok_or(Error::Storage)?.load;
+        let (image, sizes, digest) = Self::session_image_from(&self.state, load, images, scratch, provider, |_| Ok(()))?;
+        let key = crate::jcvm_storage::heap_key(provider, root, renewal.bank, &renewal.new_identity, &digest)?;
+        let seed = image.with_bytes(provider, |bytes, provider| {
+            let file = microcard_engine_jcvm::cap::LoadFile::parse(bytes).map_err(|_| Error::Format)?;
+            crate::journal::SeedRecord::authenticate(&record, &key, provider, |snapshot| {
+                crate::jcvm_storage::validate_seed_snapshot(snapshot, &file, sizes, digest, renewal.new_identity)
+            })
+        })?;
+        let mut next = self.state;
+        next.instances.iter_mut().flatten().find(|instance| instance.aid == renewal.aid)
+            .ok_or(Error::Storage)?.identity = renewal.new_identity;
+        next.renewal = None;
+        next.validate()?;
+        // Everything needed for recovery is authenticated before the first erase.
+        let mut flash = heaps.prepare(renewal.bank)?;
+        seed.install_empty_bank(&mut flash)?;
+        drop(record);
+        let session = crate::jcvm_storage::Session::open(flash, key, image, renewal.new_identity, sizes, provider)?;
+        if !session.installed()? { return Err(Error::Storage); }
+        drop(session);
+        // Copying the heap does not authorize execution. Publication does.
+        self.commit_snapshot(next, provider)
+    }
+}

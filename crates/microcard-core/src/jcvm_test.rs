@@ -64,6 +64,9 @@ impl HeapBanks for Heaps {
     fn bank_count(&self) -> usize {
         self.banks.len()
     }
+    fn slot_size(&self, bank: u8) -> Result<usize> {
+        Ok(self.banks.get(bank as usize).ok_or(Error::Bounds)?.borrow().slot_size())
+    }
     fn open(&mut self, bank: u8) -> Result<Bank> {
         Ok(Bank(Rc::clone(
             self.banks.get(usize::from(bank)).ok_or(Error::Bounds)?,

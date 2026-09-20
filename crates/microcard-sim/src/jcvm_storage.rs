@@ -42,6 +42,7 @@ impl HeapBanks for Heaps {
     fn bank_count(&self) -> usize {
         2
     }
+    fn slot_size(&self, bank: u8) -> Result<usize> { self.region(bank)?; Ok(65536) }
     fn open(&mut self, bank: u8) -> Result<Heap> {
         let heap = self.region(bank)?;
         heap.require_existing()?;

@@ -421,3 +421,104 @@ fn pending_renewal_binds_staging_and_blocks_ordinary_use_after_reboot() {
         }
     }
 }
+
+#[test]
+fn renewal_recovery_authenticates_before_reclaim_and_never_reencrypts_the_heap() {
+    use crate::{crypto::CryptoProvider, hal::StagingFlash, staging::BoundedFlashStaging};
+    struct Scratch(Vec<u8>);
+    impl StagingFlash for Scratch {
+        fn capacity(&self) -> usize { self.0.len() }
+        fn read(&self, at: usize, out: &mut [u8]) -> Result<()> {
+            out.copy_from_slice(self.0.get(at..at.checked_add(out.len()).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?); Ok(())
+        }
+        fn erase(&mut self) -> Result<()> { panic!("recovery erased its source") }
+        fn program(&mut self, _: usize, _: &[u8]) -> Result<()> { panic!("recovery changed its source") }
+    }
+    struct RecoveryProvider([u8; 16]);
+    impl CryptoProvider for RecoveryProvider {
+        fn aes_ccm_encrypt_in_place(&mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], output: &mut [u8]) -> Result<usize> {
+            assert_ne!(key, &self.0, "recovery encrypted under the renewed heap key");
+            SoftwareCrypto.aes_ccm_encrypt_in_place(key, nonce, aad, output)
+        }
+    }
+    let raw = signed(7, 1, 7);
+    let mut provider = Provider;
+    let mut scratch = alloc::vec![0; 16384];
+    let package = Package::verify(&raw, &mut provider, &mut scratch).unwrap();
+    let module = LoadFile::parse(package.envelope.image).unwrap().applets().unwrap().iter().next().unwrap().aid;
+    let mut store = Store::open(MemoryFlash::new(4096), [3; 16], Registry::new([1; 16], None), &mut provider).unwrap();
+    let mut images = crate::image_store::Images::new(MemoryFlash::with_images(4096, 2, 65536).unwrap()).unwrap();
+    store.load(&mut images, &raw, &mut scratch, &mut provider, &mut || false).unwrap();
+    let mut heaps = Heaps { banks: core::array::from_fn(|_| Rc::new(RefCell::new(MemoryFlash::new(65536)))), preparations: [0; 2], fail_write: None };
+    let root = JournalKey::from([9; 16]);
+    let mut request = crate::globalplatform::ApplicationInstall {
+        load_aid: package.manifest.package, module_aid: module, instance_aid: &[0xf0, 1, 2, 3, 4], privileges: &[0], parameters: &[],
+    };
+    let (first, _) = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 65536).unwrap();
+    request.instance_aid = &[0xf0, 1, 2, 3, 5];
+    let (second, _) = store.install(&request, &images, &mut heaps, &root, &mut scratch, &mut provider, &mut || false, 65536).unwrap();
+    request.instance_aid = first.aid.as_slice();
+    let mut identity = *b"\0\0\0\0\0\0\0\0JCVMv1\0\0";
+    identity[..8].copy_from_slice(&store.journal.reserve_identity_nonce().unwrap().to_le_bytes());
+    let key = crate::jcvm_storage::heap_key(&mut provider, &root, first.heap_bank, &identity, &package.envelope.image_digest).unwrap();
+    let forbidden = *key.as_ref();
+    let mut prepared = crate::jcvm_storage::Session::open(MemoryFlash::new(65536), key,
+        package.envelope.image.to_vec(), identity, package.manifest.sizes, &mut provider).unwrap();
+    prepared.install_globalplatform(&request, &mut provider, &mut || false).unwrap();
+    let flash = prepared.into_flash();
+    let mut header = [0; 24]; flash.read(0, 0, &mut header).unwrap();
+    let length = 24 + u32::from_le_bytes(header[20..24].try_into().unwrap()) as usize;
+    let mut record = alloc::vec![0; length]; flash.read(0, 0, &mut record).unwrap();
+    let mut hash = [0; 32]; provider.sha256_into(&record, &mut hash).unwrap();
+    let renewal = Renewal { aid: first.aid, bank: first.heap_bank, old_identity: first.identity,
+        new_identity: identity, package_digest: package.envelope.package_digest,
+        record_length: length as u32, record_digest: hash };
+    let mut pending = *store.state().unwrap(); pending.renewal = Some(renewal);
+    store.commit(pending, &mut provider).unwrap();
+    let base = store.into_flash();
+    let staging = BoundedFlashStaging::<_, 65536>::new(Scratch(record.clone()));
+    let mut corrupt = record; corrupt[24] ^= 1;
+    let bad_staging = BoundedFlashStaging::<_, 65536>::new(Scratch(corrupt));
+    let mut store = Store::open(base.clone(), [3; 16], pending, &mut provider).unwrap();
+    let preparations = heaps.preparations;
+    assert_eq!(store.recover_renewal(&images, &mut heaps, &root, &bad_staging, &mut scratch, &mut provider), Err(Error::Authentication));
+    assert_eq!(heaps.preparations, preparations);
+    assert!(store.recover_renewal(&images, &mut heaps, &JournalKey::from([8; 16]), &staging, &mut scratch, &mut provider).is_err());
+    assert_eq!(heaps.preparations, preparations);
+    assert_eq!(store.pending_renewal().unwrap(), Some(&renewal));
+
+    // Both banks remain occupied. Only the named bank can be prepared.
+    let untouched_generation = heaps.banks[second.heap_bank as usize].borrow().monotonic_generation().unwrap();
+    let mut final_state = pending;
+    final_state.renewal = None;
+    final_state.instances.iter_mut().flatten().find(|i| i.aid == first.aid).unwrap().identity = identity;
+    // Registry nonce, reclaim intent, erase, header/tag/payload, markers, anchor.
+    let publication_bytes = 4 + 1 + 4096 + 40 + final_state.encode().unwrap().len() + 1 + 1 + 4;
+    for (bank_cut, registry_cut) in [(Some(0), None), (Some(length / 2), None),
+            (None, Some(0)), (None, Some(4)), (None, Some(publication_bytes - 5)),
+            (None, Some(publication_bytes - 1)), (None, None)] {
+        let mut store = Store::open(base.clone(), [3; 16], pending, &mut provider).unwrap();
+        heaps.fail_write = bank_cut;
+        store.journal.flash_mut().fail_after = registry_cut;
+        let mut recovery_provider = RecoveryProvider(forbidden);
+        let result = store.recover_renewal(&images, &mut heaps, &root, &staging, &mut scratch, &mut recovery_provider);
+        if bank_cut.is_some() || registry_cut.is_some() { assert_eq!(result, Err(Error::Storage)); }
+        else { result.unwrap(); }
+        let mut flash = store.into_flash(); flash.fail_after = None;
+        heaps.fail_write = None;
+        let mut rebooted = Store::open(flash, [3; 16], pending, &mut provider).unwrap();
+        rebooted.recover_renewal(&images, &mut heaps, &root, &staging, &mut scratch, &mut recovery_provider).unwrap();
+        assert!(rebooted.pending_renewal().unwrap().is_none());
+        assert_eq!(rebooted.state().unwrap().instances().count(), 2);
+        assert_eq!(rebooted.state().unwrap().instances().find(|i| i.aid == first.aid).unwrap().identity, identity);
+        let bank = heaps.banks[first.heap_bank as usize].borrow();
+        assert_eq!(bank.monotonic_generation(), Ok(1)); assert_eq!(bank.nonce_generation(), Ok(1)); drop(bank);
+        let preparations = heaps.preparations;
+        rebooted.recover_renewal(&images, &mut heaps, &root, &bad_staging, &mut scratch, &mut recovery_provider).unwrap();
+        assert_eq!(heaps.preparations, preparations, "completed renewal must not repeat preparation");
+        let mut session = rebooted.open_session(first.aid, &images, &mut heaps, &root, &mut scratch, &mut provider).unwrap();
+        assert_eq!(session.process(&[0, 0xa4, 4, 0, 0], true, &mut provider, &mut || false).unwrap().sw, 0x9000);
+    }
+    assert_eq!(heaps.preparations[second.heap_bank as usize], 1);
+    assert_eq!(heaps.banks[second.heap_bank as usize].borrow().monotonic_generation(), Ok(untouched_generation));
+}

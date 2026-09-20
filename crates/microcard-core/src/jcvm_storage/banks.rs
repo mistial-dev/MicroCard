@@ -23,9 +23,12 @@ pub trait HeapBanks {
     type Bank: Flash;
 
     fn bank_count(&self) -> usize;
+    /// Geometry must remain available even after interrupted bank preparation.
+    fn slot_size(&self, bank: u8) -> Result<usize>;
     /// Open existing bytes without erasing or repairing an incompatible state.
     fn open(&mut self, bank: u8) -> Result<Self::Bank>;
-    /// Explicitly erase an unreferenced bank, including its local counters.
+    /// Erase an unreferenced bank, or one protected by an authenticated renewal copy,
+    /// including its local counters.
     /// The caller must use a newly reserved installation identity and derived key.
     /// Partial preparation fails; it must never affect another bank.
     fn prepare(&mut self, bank: u8) -> Result<Self::Bank>;

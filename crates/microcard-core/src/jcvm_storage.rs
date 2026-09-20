@@ -277,6 +277,12 @@ fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {
         .into_iter().try_fold(54usize, |size, part| size.checked_add(part).ok_or(Error::Quota))
 }
 
+pub(crate) fn validate_seed_snapshot(snapshot: &[u8], file: &LoadFile, sizes: Sizes,
+        image: [u8; 32], installation: [u8; 16]) -> Result<()> {
+    decode_card(Some(snapshot), file, sizes, image, installation)?.ok_or(Error::Storage)?;
+    Ok(())
+}
+
 fn decode_card(
     snapshot: Option<&[u8]>,
     file: &LoadFile,

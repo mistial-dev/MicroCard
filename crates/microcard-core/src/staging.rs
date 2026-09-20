@@ -6,6 +6,9 @@ use crate::{Error, Result, hal::StagingFlash};
 use alloc::vec::Vec;
 
 pub trait PackageStaging {
+    /// Durable bytes are addressed by authenticated registry metadata, not upload length.
+    fn persistent_capacity(&self) -> usize { 0 }
+    fn read_persistent(&self, _offset: usize, _output: &mut [u8]) -> Result<()> { Err(Error::Unsupported) }
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -104,6 +107,8 @@ impl<S, const MAX: usize> BoundedFlashStaging<S, MAX> {
 }
 
 impl<S: StagingFlash, const MAX: usize> PackageStaging for BoundedFlashStaging<S, MAX> {
+    fn persistent_capacity(&self) -> usize { self.flash.capacity() }
+    fn read_persistent(&self, offset: usize, output: &mut [u8]) -> Result<()> { self.flash.read(offset, output) }
     fn len(&self) -> usize {
         self.len
     }

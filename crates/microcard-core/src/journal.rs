@@ -298,6 +298,14 @@ impl<F: Flash> Journal<F> {
 
     pub fn generation(&self) -> u64 { self.generation }
 
+    /// Remaining successful commits, bounded by both independent counters.
+    pub fn remaining_commits(&self) -> Result<u64> {
+        if self.poisoned || self.flash.monotonic_generation()? != self.generation { return Err(Error::Storage); }
+        let generations = self.flash.monotonic_capacity().checked_sub(self.generation).ok_or(Error::Storage)?;
+        let attempts = self.flash.nonce_capacity().checked_sub(self.flash.nonce_generation()?).ok_or(Error::Storage)?;
+        Ok(generations.min(attempts))
+    }
+
     #[cfg(any(test, feature = "jcvm"))]
     pub fn append_capacity(&self) -> Result<usize> {
         if self.poisoned { return Err(Error::Storage); }

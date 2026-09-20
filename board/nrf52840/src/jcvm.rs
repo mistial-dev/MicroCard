@@ -33,6 +33,7 @@ impl HeapBanks for Heaps {
     fn bank_count(&self) -> usize {
         2
     }
+    fn slot_size(&self, bank: u8) -> Result<usize> { Ok(Self::region(bank)?.size) }
     fn open(&mut self, bank: u8) -> Result<Nvm> {
         Self::region(bank)
     }

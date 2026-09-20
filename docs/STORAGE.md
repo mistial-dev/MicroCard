@@ -59,7 +59,7 @@ Their marker is at frame offset 1,020. Unused padding stays erased. The frame's
 header, ciphertext, and tag use the existing 24-byte header, AES-CCM provider, and
 `MCJN3 || attempt_le64` nonce construction; MJ04 is authenticated in the header.
 
-## JCVM counter renewal design (not implemented)
+## JCVM counter renewal
 
 Instruction checkpoints make the 32,768-attempt heap counters a service-life limit.
 Resetting them under the existing key would reuse nonces and remove the rollback
@@ -71,7 +71,14 @@ Registry v2 now encodes the pending owner and rejects inconsistent instance, ban
 identity, package, and record-length bindings. Ordinary operations and applet opening
 fail closed while ownership is pending. Interrupted metadata publication retains the
 old registry or the complete pending descriptor, verified by host fault tests.
-The renewal writer and automatic recovery below are not yet implemented.
+Startup recovery now authenticates the staged digest, package, heap binding and
+applet state, checks target geometry and registry counter capacity, then prepares
+the bank. It copies the seed, verifies normal journal recovery, and publishes the
+new identity before allowing execution or upload reset. Failures retain protected
+pending ownership or recover a completed final publication. Host tests cover two
+occupied banks, corrupted staging, wrong keys, partial bank copies, and interrupted
+final publication; the recovery provider refuses heap-key encryption. The writer
+that initiates renewal from live state is not yet implemented.
 `SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,
@@ -117,14 +124,15 @@ Thus restart may repeat bank preparation without losing newer applet writes or
 reusing a nonce for different plaintext. Registry commit uncertainty must be resolved
 before choosing either phase.
 
-The implementation still needs explicit durable staging ownership and reopening
-from authenticated metadata; the upload API's volatile length and unconditional
-reset are insufficient. The JCVM simulator now uses a fixed 64 KiB `staging.bin`
+Startup reads staging using the authenticated record length, independently of the
+volatile upload length, and resolves ownership before resetting upload state.
+The API that stages and publishes a new renewal remains to be implemented. The JCVM simulator now uses a fixed 64 KiB `staging.bin`
 with synced writes and the same clear-bits-only programming rule as flash. Layout
 v2 requires this file; v1 layouts and missing/truncated staging fail without repair.
 Card opening preserves its bytes, although it discards incomplete upload lengths.
 An integration test covers reopening, bounds, forbidden bit restoration, and
-incompatible/incomplete storage sets. Protected renewal ownership is not yet wired.
+incompatible/incomplete storage sets. Volatile-only staging explicitly refuses
+pending renewal recovery; both board and simulator builds provide durable staging.
 Counter renewal happens between commands. A command that exhausts its remaining
 budget fails normally, with committed ordinary writes retained and an open
 transaction rolled back; renewal must not silently replay the command.

@@ -157,10 +157,12 @@ actual snapshot quota before bank preparation. The staged record digest binds ex
 ciphertext. Unknown versions, trailing data, malformed fields, and inconsistent
 bindings are rejected. Registry v1 has no migration path.
 
-While renewal is pending, ordinary registry operations and applet opening return
-`Busy`; only authenticated ownership inspection is available. Staging must remain
-untouched. Automatic renewal recovery is not yet implemented, so this state currently
-fails closed. See [the renewal transition](STORAGE.md#jcvm-counter-renewal-design-not-implemented).
+While renewal is pending, ordinary registry operations return `Busy`. Card startup
+resolves renewal before opening applets or resetting upload state. Recovery authenticates
+the staged record and its applet binding before bank preparation, copies it without
+re-encryption, and publishes the new identity only after normal journal recovery
+succeeds. Missing or changed recovery data fails closed. Initiating renewal from live
+state is not yet implemented. See [the renewal transition](STORAGE.md#jcvm-counter-renewal).
 
 Installation identities are a durably reserved registry nonce counter value (eight
 little-endian bytes) followed by `JCVMv1\0\0`. Failed installations consume their
