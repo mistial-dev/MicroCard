@@ -349,11 +349,18 @@ session-termination behavior in [JCSystem.abortTransaction](https://docs.oracle.
 Older snapshots with a persistent APDU-buffer header are explicitly rejected by
 runtime-layout validation; there is no automatic erase or conversion.
 
-**Durability is still incomplete:** the storage layer commits on successful APDU
-completion. An in-command `commitTransaction()` is not yet a durable flash boundary,
-and cancellation or an engine failure still recovers the previous APDU snapshot.
-Connect durable transaction boundaries and unconditional PIN retry updates to storage,
-finish native-API transaction auditing, and test interrupted provisioning before
+An in-command `commitTransaction()` now saves an authenticated snapshot before
+discarding its undo log. Cancellation or failure afterward recovers that committed
+state. A failed checkpoint stops execution and recovers the last valid journal record.
+Installation publishes only after its complete callback succeeds. Storage serializes
+a borrowed view into its existing staging buffer, clearing volatile contents there.
+Host tests cover OpenFIPS201 object activation followed by cancellation and a failed
+checkpoint, including reopening the journal and reading the object.
+
+**Durability is still incomplete:** unconditional PIN retry updates and persistent
+writes outside explicit transactions still rely on successful APDU completion.
+Connect these boundaries to storage, finish native-API transaction auditing, and
+test interrupted provisioning before
 claiming Java Card transaction guarantees. A passing simulator workflow does not
 establish those guarantees or physical execution.
 

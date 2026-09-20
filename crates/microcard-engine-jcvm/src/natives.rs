@@ -74,6 +74,8 @@ pub struct Jcre {
     pub buffer: Reference,
     /// The applet instance, once it has registered itself.
     pub instance: Option<Reference>,
+    /// Installation publishes state only after the whole callback succeeds.
+    pub installing: bool,
     /// Bytes of command data in the buffer, after the header.
     pub incoming: u16,
     /// Bytes of response the applet has asked to send.
@@ -109,6 +111,7 @@ impl Jcre {
             apdu,
             buffer,
             instance: None,
+            installing: false,
             incoming: 0,
             outgoing: 0,
             response: [0; 256],
@@ -202,7 +205,7 @@ pub fn call_with_budget(
             apdu(name, heap, frame, jcre, context)
         }
         (PackageId::javacard_framework, ClassId::JCSystem, name) => {
-            jcsystem(name, heap, frame, context, jcre, statics)
+            jcsystem(name, heap, frame, context, jcre, statics, host)
         }
         (PackageId::javacard_framework, ClassId::Applet, MethodId::register) => {
             if jcre.instance.is_some() { return Err(Error::Unauthorized); }
@@ -381,6 +384,7 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
 }
 
 /// `javacard.framework.JCSystem`, JCRE §7.
+#[allow(clippy::too_many_arguments)]
 fn jcsystem(
     name: MethodId,
     heap: &mut Heap,
@@ -388,6 +392,7 @@ fn jcsystem(
     context: heap::Context,
     jcre: &mut Jcre,
     statics: &mut [u8],
+    host: &mut dyn crate::host::Host,
 ) -> Result<Native> {
     match name {
         MethodId::makeTransientByteArray | MethodId::makeTransientBooleanArray | MethodId::makeTransientShortArray
@@ -439,7 +444,15 @@ fn jcsystem(
             if heap.transaction_remaining().is_none() {
                 return transaction_exception(heap, jcre, context, 2); // NOT_IN_PROGRESS
             }
-            if name == MethodId::commitTransaction { heap.commit_transaction()?; }
+            if name == MethodId::commitTransaction {
+                if !jcre.installing {
+                    let instance = jcre.instance.ok_or(Error::Missing)?;
+                    host.checkpoint(crate::applet::PersistentView {
+                        heap: heap.image(), statics, instance, buffer: jcre.buffer, context,
+                    })?;
+                }
+                heap.commit_transaction()?;
+            }
             else if heap.abort_transaction(statics)? { return Err(Error::TransactionAborted); }
         }
         _ => return Ok(Native::Unimplemented),
@@ -635,8 +648,8 @@ mod tests {
         }
         assert_eq!(heap.get_word(pin, 4), Ok(1));
         let mut jcre = idle();
-        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
-        let Native::Threw(exception) = jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap()
+        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
+        let Native::Threw(exception) = jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
             else { panic!("nested transaction accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
         invoke_security(ClassId::OwnerPIN, MethodId::update,
@@ -651,21 +664,21 @@ mod tests {
         }
         util(MethodId::arrayCopyNonAtomic, &mut heap, &mut frame, 1, &mut 100).unwrap();
         assert_eq!(frame.pop_short(), Ok(4));
-        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
         let material = heap.get_word(pin, 2).unwrap();
         assert_eq!(heap.byte_slice(material, 0, 4).unwrap(), b"1234");
         assert_eq!(heap.get_word(pin, 4), Ok(2), "PIN presentation must survive aborting its update");
         assert_eq!(heap.byte_slice(destination, 0, 4).unwrap(), b"9999");
         let used = heap.used();
-        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
         invoke_security(ClassId::OwnerPIN, MethodId::check,
             &[(true, pin), (true, original), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
         assert_eq!(frame.pop_short(), Ok(1));
-        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
         assert_eq!(heap.get_word(pin, 3), Ok(1));
         assert_eq!(heap.get_word(pin, 4), Ok(3));
         assert_eq!(heap.used(), used, "transaction exceptions are reused");
-        let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap()
+        let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
             else { panic!("commit without begin accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
     }
@@ -709,10 +722,10 @@ mod tests {
             for event in [1, 2, 0, 3] {
                 frame.push_short(2).unwrap();
                 frame.push_short(event).unwrap();
-                let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle(), &mut []).unwrap();
+                let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
                 if matches!(event, 1 | 2) {
                     assert!(matches!(result, Native::Returned));
-                    jcsystem(MethodId::isTransient, &mut heap, &mut frame, 1, &mut idle(), &mut []).unwrap();
+                    jcsystem(MethodId::isTransient, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
                     assert_eq!(frame.pop_short().unwrap(), event);
                 } else {
                     let Native::Threw(exception) = result else { panic!("invalid clear event accepted"); };

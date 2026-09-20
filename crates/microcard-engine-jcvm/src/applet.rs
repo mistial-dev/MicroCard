@@ -21,7 +21,7 @@ use crate::{Error, Result};
 use alloc::vec::Vec;
 use zeroize::Zeroize;
 mod persistence;
-pub use persistence::{PersistentState, VolatileState};
+pub use persistence::{PersistentState, PersistentView, VolatileState};
 
 /// Status words the runtime environment produces itself, ISO 7816-4.
 pub const SW_SUCCESS: u16 = 0x9000;
@@ -225,6 +225,8 @@ impl Card {
         heap.byte_slice_mut(array, 0, parameters.len())?
             .copy_from_slice(parameters);
         let outcome = {
+            let mut jcre = Jcre::new(self.apdu, self.buffer);
+            jcre.installing = true;
             let mut machine = Machine::new(
                 &mut heap,
                 host,
@@ -236,7 +238,7 @@ impl Card {
                     int: file.header()?.int(),
                     ..Limits::IMPLEMENTED
                 },
-                Jcre::new(self.apdu, self.buffer),
+                jcre,
             ).with_cancel(cancel);
             let mut budget = self.sizes.budget;
             let mut arena = Arena {
@@ -385,6 +387,7 @@ impl Card {
             Err(error) => return Err(error),
         };
         let mut jcre = Jcre::new(self.apdu, self.buffer);
+        jcre.instance = Some(instance);
         jcre.reselecting = self.reselecting;
         jcre.selecting = matches!(callback, Callback::Select | Callback::Process { selecting: true });
         jcre.incoming = lengths.0;
@@ -929,7 +932,19 @@ mod tests {
 
     #[test]
     fn transactions_restore_fields_and_statics_at_real_callback_boundaries() {
-        for ending in ["commit", "abort", "return", "throw", "allocate-abort", "cancel", "full", "full-caught"] {
+        #[derive(Default)]
+        struct CheckpointHost { saved: Option<(Vec<u8>, Vec<u8>, Reference)>, fail: bool, calls: usize }
+        impl Host for CheckpointHost {
+            fn checkpoint(&mut self, state: PersistentView<'_>) -> Result<()> {
+                self.calls += 1;
+                if self.fail { return Err(Error::Storage); }
+                let mut heap = vec![0; state.heap_bytes()];
+                let saved = state.save_into(&mut heap)?;
+                self.saved = Some((saved.heap.to_vec(), saved.statics.to_vec(), saved.instance));
+                Ok(())
+            }
+        }
+        for ending in ["commit", "commit-throw", "commit-cancel", "commit-fail", "abort", "return", "throw", "allocate-abort", "cancel", "full", "full-caught"] {
             // Constants 6..12: begin, commit, abort, static field, instance field,
             // ISOException.throwIt, Util.arrayCopy.
             let mut process = vec![
@@ -947,7 +962,17 @@ mod tests {
                 op::SCONST_0, op::SSPUSH, 0, 42, 56,
             ]);
             match ending {
-                "commit" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 7]),
+                "commit" | "commit-fail" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 7]),
+                "commit-throw" | "commit-cancel" => {
+                    process.extend_from_slice(&[
+                        op::INVOKESTATIC, 0, 7, op::INVOKESTATIC, 0, 6,
+                        op::SSPUSH, 0, 99, 0x81, 0, 9,
+                        op::ALOAD_0, op::SSPUSH, 0, 99, 0x89, 10,
+                    ]);
+                    if ending == "commit-throw" {
+                        process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]);
+                    } else { process.extend_from_slice(&[112, 0]); }
+                },
                 "abort" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 8]),
                 "throw" => process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]),
                 "allocate-abort" => process.extend_from_slice(&[op::NEW, 0, 3, op::ASTORE_0 + 2, op::INVOKESTATIC, 0, 8]),
@@ -994,20 +1019,30 @@ mod tests {
             let mut card = Card::new(&file, Sizes { heap_bytes: 16384, ..Sizes::default() }).unwrap();
             card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
             let mut polls = 0;
-            let result = card.process_with_cancel(&file, &mut crate::host::NoHost, &[0, 1, 0, 0], false, &mut || {
+            let mut host = CheckpointHost { fail: ending == "commit-fail", ..Default::default() };
+            let result = card.process_with_cancel(&file, &mut host, &[0, 1, 0, 0], false, &mut || {
                 polls += 1;
-                ending == "cancel" && polls == 100
+                ending.ends_with("cancel") && polls == 100
             });
-            if ending == "cancel" { assert_eq!(result, Err(Error::Cancelled)); }
+            if ending.ends_with("cancel") { assert_eq!(result, Err(Error::Cancelled)); }
+            else if ending == "commit-fail" { assert_eq!(result, Err(Error::Storage)); }
             else {
                 assert_eq!(result.unwrap().sw, if matches!(ending, "commit" | "abort" | "full-caught") { SW_SUCCESS } else { SW_UNKNOWN }, "{ending}");
             }
-            let expected: u16 = if ending == "commit" { 12 } else { 9 };
+            let expected: u16 = if ending.starts_with("commit") && ending != "commit-fail" { 12 } else { 9 };
             assert_eq!(card.statics, if ending == "full-caught" { 3u16 } else { expected }.to_be_bytes(), "{ending}");
             let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
             assert_eq!(heap.get_word(card.instance.unwrap(), 0).unwrap(), expected, "{ending}");
             assert_eq!(heap.array_get(card.buffer, 0), Ok(42), "APDU bytes are transient: {ending}");
-            if ending != "cancel" {
+            assert_eq!(host.calls, usize::from(ending.starts_with("commit")));
+            if let Some((heap, statics, instance)) = host.saved {
+                let mut restored = Card::restore(&file, card.sizes, PersistentState { heap: &heap, statics: &statics, instance }).unwrap();
+                assert_eq!(restored.statics, 12u16.to_be_bytes());
+                let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+                assert_eq!(heap.get_word(instance, 0), Ok(12), "{ending}: durable boundary");
+                assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
+            }
+            if !ending.ends_with("cancel") && ending != "commit-fail" {
                 let mut saved = vec![0; card.persistent_heap_bytes()];
                 let mut restored = Card::restore(&file, card.sizes, card.save_into(&mut saved).unwrap()).unwrap();
                 assert_eq!(restored.statics, card.statics);

@@ -60,12 +60,14 @@ board's reserved heap.
   reboot does not preserve PIN validation. These do not establish hardware execution.
 - Complete JCVM transaction durability. Heap/static rollback, callback-end abort,
   commit-buffer exceptions, and allocation-abort session termination are implemented.
-  Flash still commits at successful APDU completion, so an in-command commit and PIN
-  retry updates are not yet independently durable. Integrate these boundaries with
-  storage and finish native-API transaction auditing and interruption tests.
+  In-command commits now checkpoint flash before releasing undo records; the real
+  OpenFIPS201 object-update path survives cancellation after commit and preserves
+  prior content on checkpoint failure. PIN retry updates and persistent writes outside
+  explicit transactions still need independent durability. Finish these boundaries,
+  native-API transaction auditing, and interruption tests.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 196,404 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 196,844 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded

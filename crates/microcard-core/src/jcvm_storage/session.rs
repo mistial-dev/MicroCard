@@ -71,9 +71,11 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         }
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            let mut services = Services::new(provider);
+            let mut checkpoint = |view: PersistentView<'_>, provider: &mut _| self.store.commit_view(view, provider);
+            let mut services = Services::new(provider).with_checkpoint(&mut checkpoint);
             let result = self.card.as_mut().ok_or(Error::Missing)?
-                .deselect_with_cancel(&file, &mut services, cancel).map_err(engine_error);
+                .deselect_with_cancel(&file, &mut services, cancel)
+                .map_err(|error| services.take_persistence_error().unwrap_or_else(|| engine_error(error)));
             self.reset_requested |= services.reset_requested();
             result
         });
@@ -210,13 +212,14 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         let protected_length = if command.len() > 5 { 5 + usize::from(command[4]) } else { 5.min(command.len()) };
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
+            let mut checkpoint = |view: PersistentView<'_>, provider: &mut _| self.store.commit_view(view, provider);
             let mut services = match security {
                 Some(level) => Services::verified(provider, command.get(..protected_length).ok_or(Error::Format)?, level),
                 None => Services::new(provider),
-            };
+            }.with_checkpoint(&mut checkpoint);
             let result = self.card.as_mut().unwrap()
                 .process_with_cancel(&file, &mut services, command, selecting, cancel)
-                .map_err(engine_error);
+                .map_err(|error| services.take_persistence_error().unwrap_or_else(|| engine_error(error)));
             self.reset_requested |= services.reset_requested();
             result
         });
@@ -255,6 +258,7 @@ fn engine_error(error: microcard_engine_jcvm::Error) -> Error {
     match error {
         E::Cancelled => Error::Cancelled,
         E::Quota => Error::Quota,
+        E::Storage => Error::Storage,
         E::Bounds => Error::Bounds,
         E::Missing => Error::Missing,
         E::Unsupported => Error::Unsupported,
@@ -271,8 +275,15 @@ mod tests {
     #[derive(Default)]
     struct Provider {
         fail_recovery: bool,
+        encryptions: alloc::rc::Rc<core::cell::Cell<usize>>,
     }
     impl CryptoProvider for Provider {
+        fn aes_ccm_encrypt(&mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], plaintext: &[u8], output: &mut [u8]) -> Result<usize> {
+            let written = SoftwareCrypto.aes_ccm_encrypt(key, nonce, aad, plaintext, output)?;
+            self.encryptions.set(self.encryptions.get() + 1);
+            Ok(written)
+        }
+
         fn sha256_into(&mut self, data: &[u8], output: &mut [u8; 32]) -> Result<()> {
             if self.fail_recovery {
                 output.fill(0);
@@ -288,8 +299,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn command_boundaries_preserve_pin_retries_and_refuse_use_until_recovery_succeeds() {
+    fn installed_session(provider: &mut Provider) -> Session<MemoryFlash> {
         let image = include_bytes!(
             "../../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
         );
@@ -298,7 +308,6 @@ mod tests {
             frame_words: 8192,
             ..Sizes::default()
         };
-        let mut provider = Provider::default();
         let module = LoadFile::parse(image)
             .unwrap()
             .applets()
@@ -313,7 +322,7 @@ mod tests {
             image.to_vec(),
             [4; 16],
             sizes,
-            &mut provider,
+            provider,
         )
         .unwrap();
         let request = crate::globalplatform::ApplicationInstall {
@@ -328,8 +337,50 @@ mod tests {
             parameters: &[],
         };
         session
-            .install_globalplatform(&request, &mut provider, &mut || false)
+            .install_globalplatform(&request, provider, &mut || false)
             .unwrap();
+        session
+    }
+
+    #[test]
+    fn openfips_object_commit_survives_cancellation_before_apdu_completion() {
+        for fail_checkpoint in [false, true] {
+            let mut provider = Provider::default();
+            let mut session = installed_session(&mut provider);
+            let select = [0, 0xa4, 4, 0, 0];
+            session.process(&select, true, &mut provider, &mut || false).unwrap();
+            let define = [0x84, 0xdb, 0xff, 0xff, 0x14, 0x64, 0x12, 0x8b, 0x03, 0x5f, 0xc1, 0x0a, 0x8c, 0x01, 0x7f, 0x8d, 0x01, 0x7f, 0x91, 0x01, 0x9b, 0x92, 0x02, 0x10, 0x00];
+            assert_eq!(session.process_command(&define, false, Some(3), &mut provider, &mut || false).unwrap().sw, 0x9000);
+            let write = [0x04, 0xdb, 0x3f, 0xff, 0x0c, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00];
+            let read = [0x00, 0xcb, 0x3f, 0xff, 0x05, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x00];
+            let previous = session.process(&read, false, &mut provider, &mut || false).unwrap();
+            let encryptions = provider.encryptions.clone();
+            let before = encryptions.get();
+            if fail_checkpoint { session.store.journal.flash_mut().fail_after = Some(4); }
+            let result = session.process_command(&write, false, Some(3), &mut provider,
+                &mut || !fail_checkpoint && encryptions.get() > before);
+            assert_eq!(result, Err(if fail_checkpoint { Error::Storage } else { Error::Cancelled }));
+            assert_eq!(encryptions.get(), before + 1, "only the in-command checkpoint was attempted");
+            let sizes = session.sizes;
+            let image = session.image.clone();
+            let mut flash = session.into_flash();
+            flash.fail_after = None;
+            let mut rebooted = Session::open(flash, [3; 16], image, [4; 16], sizes, &mut provider).unwrap();
+            rebooted.process(&select, true, &mut provider, &mut || false).unwrap();
+            let response = rebooted.process(&read, false, &mut provider, &mut || false).unwrap();
+            if fail_checkpoint {
+                assert_eq!(response, previous, "a failed checkpoint must preserve the previous content");
+            } else {
+                assert_eq!(response.sw, 0x9000);
+                assert_eq!(response.data, [0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00]);
+            }
+        }
+    }
+
+    #[test]
+    fn command_boundaries_preserve_pin_retries_and_refuse_use_until_recovery_succeeds() {
+        let mut provider = Provider::default();
+        let mut session = installed_session(&mut provider);
         let select = [0, 0xa4, 4, 0, 0];
         let wrong_pin = [
             0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 255, 255,

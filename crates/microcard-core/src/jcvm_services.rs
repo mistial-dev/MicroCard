@@ -1,27 +1,39 @@
 //! Java Card's supported algorithms use the same providers as transport and persistence.
 use crate::{crypto::CryptoProvider, hal::Entropy};
 use microcard_engine_jcvm::{Error, Result, host::Host};
+use microcard_engine_jcvm::applet::PersistentView;
 
 mod ecdsa;
 mod ec_parameters;
+
+type Checkpoint<'a, P> = dyn FnMut(PersistentView<'_>, &mut P) -> crate::Result<()> + 'a;
 
 pub struct Services<'a, P> {
     provider: &'a mut P,
     command: Option<&'a [u8]>,
     security_level: u8,
     reset_requested: bool,
+    checkpoint: Option<&'a mut Checkpoint<'a, P>>,
+    persistence_error: Option<crate::Error>,
 }
 
 impl<'a, P> Services<'a, P> {
     pub fn new(provider: &'a mut P) -> Self {
-        Self { provider, command: None, security_level: 0, reset_requested: false }
+        Self { provider, command: None, security_level: 0, reset_requested: false, checkpoint: None, persistence_error: None }
     }
 
     pub(crate) fn reset_requested(&self) -> bool { self.reset_requested }
 
+    pub(crate) fn with_checkpoint(mut self, checkpoint: &'a mut Checkpoint<'a, P>) -> Self {
+        self.checkpoint = Some(checkpoint);
+        self
+    }
+
+    pub(crate) fn take_persistence_error(&mut self) -> Option<crate::Error> { self.persistence_error.take() }
+
     // Only the persistent session's Verified-command entry point grants this context.
     pub(crate) fn verified(provider: &'a mut P, command: &'a [u8], level: u8) -> Self {
-        Self { provider, command: Some(command), security_level: 0x80 | level, reset_requested: false }
+        Self { provider, command: Some(command), security_level: 0x80 | level, reset_requested: false, checkpoint: None, persistence_error: None }
     }
 }
 
@@ -105,6 +117,14 @@ impl<P: CryptoProvider> Services<'_, P> {
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn checkpoint(&mut self, state: PersistentView<'_>) -> Result<()> {
+        let Some(checkpoint) = self.checkpoint.as_mut() else { return Err(Error::Storage); };
+        if let Err(error) = checkpoint(state, self.provider) {
+            self.persistence_error = Some(error);
+            return Err(Error::Storage);
+        }
+        Ok(())
+    }
     fn secure_channel_available(&self) -> bool { true }
     fn secure_channel_level(&self) -> u8 { self.security_level }
     fn reset_secure_channel(&mut self) -> Result<()> {

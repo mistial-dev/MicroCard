@@ -10,6 +10,11 @@ pub const SHA256_STATE_BYTES: usize = 256;
 
 /// The services an applet's cryptography needs.
 pub trait Host {
+    /// Return only after this state is durable. Failure stops execution and requires
+    /// recovery; cryptographic availability alone does not imply storage support.
+    fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>) -> Result<()> {
+        Err(Error::Storage)
+    }
     /// Current command protection, in GlobalPlatform SecureChannel bit assignments.
     /// A saved applet handle never supplies authority for a later command.
     fn secure_channel_available(&self) -> bool { false }
@@ -99,4 +104,7 @@ pub trait Host {
 /// predictable answer from a random source is worse than no answer at all.
 pub struct NoHost;
 
-impl Host for NoHost {}
+impl Host for NoHost {
+    // This explicitly volatile engine host is used without a persistent session.
+    fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>) -> Result<()> { Ok(()) }
+}

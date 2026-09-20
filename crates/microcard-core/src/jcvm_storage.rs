@@ -8,7 +8,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 use microcard_engine_jcvm::{
-    applet::{Card, PersistentState, Sizes},
+    applet::{Card, PersistentState, PersistentView, Sizes},
     cap::LoadFile,
 };
 use zeroize::Zeroizing;
@@ -219,14 +219,18 @@ impl<F: Flash> Store<F> {
     /// Commit state of the applet installed from the image passed to `open`.
     /// The caller must roll back live mutations if this operation fails.
     pub fn commit(&mut self, card: &Card, provider: &mut impl CryptoProvider) -> Result<()> {
-        if card.persistent_heap_bytes() > self.maximum {
+        self.commit_view(card.persistent_view().map_err(|_| Error::Format)?, provider)
+    }
+
+    pub(crate) fn commit_view(&mut self, view: PersistentView<'_>, provider: &mut impl CryptoProvider) -> Result<()> {
+        if view.heap_bytes() > self.maximum {
             return Err(Error::Quota);
         }
-        let (instance, statics) = card.persistent_metadata().map_err(|_| Error::Format)?;
+        let (instance, statics) = view.metadata();
         // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
         // appending statics cannot double a buffer already holding the heap.
-        let capacity = card
-            .persistent_heap_bytes()
+        let capacity = view
+            .heap_bytes()
             .checked_add(statics.len())
             .and_then(|length| length.checked_add(80))
             .ok_or(Error::Quota)?;
@@ -237,8 +241,8 @@ impl<F: Flash> Store<F> {
         encoder.bytes(&self.image)?;
         encoder.bytes(&self.installation)?;
         encoder.unsigned(u64::from(instance))?;
-        encoder.bytes_with(card.persistent_heap_bytes(), |output| {
-            card.save_into(output)
+        encoder.bytes_with(view.heap_bytes(), |output| {
+            view.save_into(output)
                 .map(|_| ())
                 .map_err(|_| Error::Format)
         })?;

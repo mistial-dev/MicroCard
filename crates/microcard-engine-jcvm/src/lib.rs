@@ -42,6 +42,8 @@ pub enum Error {
     TransactionFull,
     /// Aborting newly allocated objects requires ending this applet session.
     TransactionAborted,
+    /// A durable boundary failed; the platform must recover before reusing the card.
+    Storage,
     /// Transport cancellation, outside the applet's exception mechanism.
     Cancelled,
     /// A word was used as the wrong kind of value, such as a number as a reference.

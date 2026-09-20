@@ -8,6 +8,37 @@ pub struct PersistentState<'a> {
     pub instance: Reference,
 }
 
+/// Borrowed live state at a durable boundary. Saving sanitizes volatile contents into
+/// the storage layer's existing staging buffer, without cloning the running card.
+#[derive(Clone, Copy)]
+pub struct PersistentView<'a> {
+    pub(crate) heap: &'a [u8],
+    pub(crate) statics: &'a [u8],
+    pub(crate) instance: Reference,
+    pub(crate) buffer: Reference,
+    pub(crate) context: heap::Context,
+}
+
+impl<'a> PersistentView<'a> {
+    pub fn heap_bytes(self) -> usize { self.heap.len() }
+
+    pub fn metadata(self) -> (Reference, &'a [u8]) { (self.instance, self.statics) }
+
+    pub fn save_into<'b>(self, output: &'b mut [u8]) -> Result<PersistentState<'b>> where 'a: 'b {
+        let result = (|| {
+            if output.len() != self.heap.len() { return Err(Error::Bounds); }
+            output.copy_from_slice(self.heap);
+            let mut heap = Heap::resume(output, output.len())?;
+            heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
+            let length = heap.info(self.buffer)?.length as usize;
+            heap.byte_slice_mut(self.buffer, 0, length)?.fill(0);
+            natives::reset_pin_validations(&mut heap)
+        })();
+        if let Err(error) = result { output.zeroize(); return Err(error); }
+        Ok(PersistentState { heap: output, statics: self.statics, instance: self.instance })
+    }
+}
+
 /// RAM-only reset-scoped array contents. Bind this to the installation that produced it.
 /// Dropping it wipes all retained payloads; it must never enter persistent storage.
 pub struct VolatileState {
@@ -83,32 +114,19 @@ impl Card {
         Ok((self.instance.ok_or(Error::Missing)?, &self.statics))
     }
 
+    pub fn persistent_view(&self) -> Result<PersistentView<'_>> {
+        Ok(PersistentView {
+            heap: &self.heap[..self.heap_used], statics: &self.statics,
+            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer, context: self.context,
+        })
+    }
+
     /// Save into the caller's staging buffer, without copying execution frames or code.
     /// The buffer contains secrets and must be encrypted and cleared by its owner.
     pub fn save_into<'a>(&'a self, output: &'a mut [u8]) -> Result<PersistentState<'a>> {
-        let result = (|| {
-            let (instance, _) = self.persistent_metadata()?;
-            if output.len() != self.heap_used {
-                return Err(Error::Bounds);
-            }
-            output.copy_from_slice(&self.heap[..self.heap_used]);
-            let mut heap = Heap::resume(output, self.heap_used)?;
-            heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
-            heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?
-                .fill(0);
-            natives::reset_pin_validations(&mut heap)?;
-            Ok(instance)
-        })();
-        match result {
-            Ok(instance) => Ok(PersistentState {
-                heap: output,
-                statics: &self.statics,
-                instance,
-            }),
-            Err(error) => {
-                output.zeroize();
-                Err(error)
-            }
+        match self.persistent_view() {
+            Ok(view) => view.save_into(output),
+            Err(error) => { output.zeroize(); Err(error) }
         }
     }
 
