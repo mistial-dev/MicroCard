@@ -355,7 +355,14 @@ pub fn call(
             }
             frame.push_short(matched as i16)?;
         }
-        (ClassId::OwnerPIN, MethodId::isValidated) => {
+        (ClassId::OwnerPIN, MethodId::setValidatedFlag) => {
+            let value = frame.pop_short()? != 0;
+            let this = frame.pop_reference()?;
+            // Unlike PIN presentation, this accessor has no transaction exception
+            // in the API contract; internal state follows JCRE §9.3.
+            heap.put_word(this, READY, u16::from(value))?;
+        }
+        (ClassId::OwnerPIN, MethodId::isValidated | MethodId::getValidatedFlag) => {
             let this = frame.pop_reference()?;
             frame.push_short(word_field(heap, this, READY)? as i16)?;
         }

@@ -704,6 +704,24 @@ mod tests {
         }
         invoke_security(ClassId::OwnerPIN, MethodId::Constructor,
             &[(true, pin), (false, 3), (false, 126)], &mut heap, &mut frame, &mut host).unwrap();
+        // The protected accessors share the public flag, but the setter follows
+        // the default conditional-state rule rather than PIN presentation semantics.
+        heap.begin_transaction(0).unwrap();
+        assert!(matches!(invoke_security(ClassId::OwnerPIN, MethodId::setValidatedFlag,
+            &[(true, pin), (false, 1)], &mut heap, &mut frame, &mut host), Err(Error::TransactionFull)));
+        heap.abort_transaction(&mut []).unwrap();
+        heap.begin_transaction(16).unwrap();
+        invoke_security(ClassId::OwnerPIN, MethodId::setValidatedFlag,
+            &[(true, pin), (false, 1)], &mut heap, &mut frame, &mut host).unwrap();
+        for method in [MethodId::getValidatedFlag, MethodId::isValidated] {
+            invoke_security(ClassId::OwnerPIN, method,
+                &[(true, pin)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short(), Ok(1));
+        }
+        heap.abort_transaction(&mut []).unwrap();
+        invoke_security(ClassId::OwnerPIN, MethodId::getValidatedFlag,
+            &[(true, pin)], &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short(), Ok(0));
         let source = heap.new_array(heap::KIND_BYTE, 127, 1).unwrap();
         heap.byte_slice_mut(source, 0, 127).unwrap().fill(0x42);
         let material = heap.get_word(pin, 2).unwrap();

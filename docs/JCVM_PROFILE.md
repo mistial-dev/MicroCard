@@ -376,6 +376,9 @@ Transport acceptance also kills the simulator between encrypted certificate-uplo
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
 
+The protected `OwnerPIN` validation-flag accessors share the public validation
+state. `setValidatedFlag` follows the default conditional-state rule in JCRE §9.3;
+PIN presentation and reset methods retain their explicit API exceptions.
 PIN replacement honors the configured maximum without a separate 32-byte staging
 limit. It reserves the complete conditional update before changing PIN bytes or
 metadata; invalid constructor limits and oversized replacements report
