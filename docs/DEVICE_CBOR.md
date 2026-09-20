@@ -54,7 +54,7 @@ The signed JCVM manifest is an eight-field array, distinct from the twelve-field
 Both AIDs are 5–16 bytes. The second field identifies JCVM. The manifest is at most
 128 bytes, rollback version is nonzero, and package AID/version must equal the CAP
 Header. Heap size is even and 512–65,536 bytes; frame storage is 8–8,192 words; the
-APDU buffer is 261 bytes; instruction budget is 1–1,000,000. These are upper profile
+APDU buffer is 261 bytes; execution work budget is 1–4,000,000 (bytecode instructions plus charged native work). These are upper profile
 bounds, not a promise that every permitted combination fits a board.
 
 The verifier authenticates MP05, validates this record, resolves imports, and runs

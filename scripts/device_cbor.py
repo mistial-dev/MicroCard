@@ -144,7 +144,7 @@ def jcvm_manifest(value):
     if set(limits) != set(names) or any(type(limits[n]) is not int for n in names):
         raise ValueError("invalid limits")
     heap, frames, buffer, budget = [limits[n] for n in names]
-    if not (512 <= heap <= 65536 and heap % 2 == 0 and 8 <= frames <= 8192 and buffer == 261 and 1 <= budget <= 1_000_000):
+    if not (512 <= heap <= 65536 and heap % 2 == 0 and 8 <= frames <= 8192 and buffer == 261 and 1 <= budget <= 4_000_000):
         raise ValueError("limits exceed JCVM profile")
     return encode([1, 1, binary("domain", 5, 16), binary("incarnation", 16, 16),
                    binary("package", 5, 16), package_version, version, [heap, frames, buffer, budget]])

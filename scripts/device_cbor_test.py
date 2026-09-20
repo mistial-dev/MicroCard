@@ -30,6 +30,15 @@ for invalid in (wire + b"\0", b"\x89" + wire[1:], wire[:1] + b"\x02" + wire[2:],
     except ValueError:
         continue
     raise AssertionError("accepted invalid JCVM manifest")
+for budget in (1, 4_000_000, 0, 4_000_001):
+    candidate = {**vector["manifest"], "limits": {**vector["manifest"]["limits"], "budget": budget}}
+    try:
+        encoded = jcvm_manifest(candidate)
+    except ValueError:
+        assert budget in (0, 4_000_001)
+    else:
+        assert budget in (1, 4_000_000)
+        assert decode_jcvm_manifest(encoded) == candidate
 print("PASS: JCVM manifest CBOR shared vector and version/shape rejection")
 
 from device_cbor import encode, decode

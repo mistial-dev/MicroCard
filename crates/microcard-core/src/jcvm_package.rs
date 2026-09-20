@@ -10,6 +10,8 @@ use microcard_engine_jcvm::{applet::Sizes, cap::LoadFile, link::Linked, verify};
 
 pub const MAX_PACKAGE_BYTES: usize = 60 * 1024;
 pub const MAX_MANIFEST_BYTES: usize = 128;
+// OpenFIPS201 validates peer EC points in bytecode before provider ECDH.
+pub const MAX_EXECUTION_WORK: u32 = 4_000_000;
 
 #[derive(Clone, Debug)]
 pub struct Manifest<'a> {
@@ -33,7 +35,7 @@ impl<'a> Manifest<'a> {
             || !self.sizes.heap_bytes.is_multiple_of(2)
             || !(8..=8192).contains(&self.sizes.frame_words)
             || self.sizes.buffer_bytes != 261
-            || !(1..=1_000_000).contains(&self.sizes.budget)
+            || !(1..=MAX_EXECUTION_WORK).contains(&self.sizes.budget)
         {
             return Err(Error::Quota);
         }
@@ -182,6 +184,16 @@ mod tests {
         let mut trailing = bytes.clone();
         trailing.push(0);
         assert!(Manifest::decode(&trailing).is_err());
+        for budget in [1, MAX_EXECUTION_WORK] {
+            let mut bounded = manifest.clone();
+            bounded.sizes.budget = budget;
+            assert_eq!(Manifest::decode(&bounded.encode().unwrap()).unwrap().sizes.budget, budget);
+        }
+        for budget in [0, MAX_EXECUTION_WORK + 1] {
+            let mut invalid = manifest.clone();
+            invalid.sizes.budget = budget;
+            assert_eq!(invalid.encode(), Err(Error::Quota));
+        }
         let mut oversized = manifest.clone();
         oversized.sizes.heap_bytes += 1;
         assert_eq!(oversized.encode(), Err(Error::Quota));

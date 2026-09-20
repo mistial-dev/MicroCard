@@ -474,12 +474,23 @@ measurements, not device latency.
 Remaining profile gaps include absent CCC, CHUID, fingerprint, facial-image, Security
 Object and Discovery objects. The adapter now provisions 9B with both external and
 mutual authentication through authenticated administration. The unchanged upstream
-`GenerateAsymmetricKeyPairCommand:1` reaches 14 of 19 requirements: mutual authentication,
-9A/9C signing, and 9D key generation succeed. The 9D ECDH request exhausts the
-one-million-instruction execution budget and resets selection; subsequent failures
-in that vector follow the reset. Temporary host diagnostics identified instruction
-budget exhaustion, not heap exhaustion or a provider authentication error. The
-required execution work and a full rerun with this profile remain to be established.
+`GenerateAsymmetricKeyPairCommand:1` now passes all 19 requirements, including 9D
+ECDH and subsequent 9E authentication. The complete contact run reports **37 passed,
+25 failed, 1 skipped** (`work/nist-mutual-bounded-contact`); preparation took 4.611
+seconds and vector execution 31.791 seconds on the host.
+
+The signed OpenFIPS201 package requests 4,000,000 execution work units, within the
+updated JCVM manifest bound. The engine default remains 1,000,000. Temporary host
+instrumentation measured one valid ECDH request at 2,548,595 units, including the
+applet’s Java EC-point validation before native ECDH. This is a newly covered
+workload, not a flash or RAM budget change. Cancellation and declared work limits
+remain enforced; this sample does not establish worst-case device latency. The
+ordinary transport acceptance now checks PIN-gated ECDH with a recovered key,
+independent host agreement, and off-curve rejection without losing selection.
+`GeneralAuthenticateCommand:1` still fails its symmetric 9E algorithm-03 (3DES)
+step; the configured P-256 and AES operations pass. 3DES remains unsupported, and
+this failure is neither skipped nor rewritten. Other failures include missing PIV
+objects and certificate-profile requirements.
 A passing applicable suite and complete matching personalization are still open.
 
 The run retains preparation logs, runner logs, JUnit results, and a manifest with vector

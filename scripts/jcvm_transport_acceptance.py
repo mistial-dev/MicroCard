@@ -88,6 +88,27 @@ def sign_with_pin(client, public_key, pin):
     piv(client, 0x87, request, p1=0x11, p2=0x9c, status=0x6982)
 
 
+def generate_key(client, slot):
+    generated = client.command(0x47, bytes.fromhex("AC03800111"), p2=slot, le=256)
+    assert len(generated) == 70 and generated[:5] == bytes.fromhex("7F49438641"), generated.hex()
+    return ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), generated[5:])
+
+
+def agree_with_pin(client, public_key, pin):
+    peer = ec.derive_private_key(13, ec.SECP256R1())
+    encoded = peer.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    request = tlv(0x7c, tlv(0x85, encoded) + tlv(0x82, b""))
+    piv(client, 0x20, p1=0xff, p2=0x80)
+    piv(client, 0x87, request, p1=0x11, p2=0x9d, status=0x6982)
+    piv(client, 0x20, pin, p2=0x80)
+    response = piv(client, 0x87, request, p1=0x11, p2=0x9d, le=256)
+    assert response == tlv(0x7c, tlv(0x82, peer.exchange(ec.ECDH(), public_key)))
+    # (0, 0) is correctly encoded but is not on P-256. Rejection must keep selection.
+    malformed = tlv(0x7c, tlv(0x85, b"\x04" + bytes(64)) + tlv(0x82, b""))
+    piv(client, 0x87, malformed, p1=0x11, p2=0x9d, status=0x6a80)
+    piv(client, 0x20, p2=0x80)
+
+
 def install_openfips(client, discovery):
     """Load the pinned applet through signed management and return its installation data."""
     package = bytes.fromhex("A00000030800001000")
@@ -96,7 +117,7 @@ def install_openfips(client, discovery):
     image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
     manifest = jcvm_manifest(dict(domain=discovery[4].hex(), incarnation=discovery[5].hex(),
         package=package.hex(), package_version=[1, 10], version=1,
-        limits=dict(heap_bytes=65536, frame_words=8192, buffer_bytes=261, budget=1000000)))
+        limits=dict(heap_bytes=65536, frame_words=8192, buffer_bytes=261, budget=4000000)))
     seed = bytes([7]) * 32
     raw = create(manifest, image, signer_public_key(seed), lambda value: sign_package(seed, value), 60 * 1024)
     client.command(0xe6, lv(package, discovery[4], hashlib.sha256(raw).digest(), b"", b""), p1=2)
@@ -146,9 +167,10 @@ def main():
         client.command(0x24, signing_pin, p1=1, p2=0x80)
         client.command(0xdb, bytes.fromhex("66128B019C8C01028D010A8E01118F0104900110"),
                        p1=0xff, p2=0xff)
-        generated = client.command(0x47, bytes.fromhex("AC03800111"), p2=0x9c, le=256)
-        assert len(generated) == 70 and generated[:5] == bytes.fromhex("7F49438641"), generated.hex()
-        public_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), generated[5:])
+        public_key = generate_key(client, 0x9c)
+        client.command(0xdb, bytes.fromhex("66128B019D8C01018D01098E01118F0102900110"),
+                       p1=0xff, p2=0xff)
+        agreement_key = generate_key(client, 0x9d)
         sign_with_pin(client, public_key, signing_pin)
         certificate = certificate_for(public_key)
         container = tlv(0x70, certificate) + bytes.fromhex("710100FE00")
@@ -211,6 +233,7 @@ def main():
         client.connect()
         assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
         sign_with_pin(client, public_key, signing_pin)
+        agree_with_pin(client, agreement_key, signing_pin)
         # A reselect runs deselect/select callbacks but retains the PIV PIN validation.
         piv(client, 0x20, signing_pin, p2=0x80)
         assert piv(client, 0xa4, instance, p1=4, le=256) == selected
@@ -252,7 +275,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing, interrupted certificate replacement/reboot, reclaim and fail-closed storage")
+    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing/ECDH, interrupted certificate replacement/reboot, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":
