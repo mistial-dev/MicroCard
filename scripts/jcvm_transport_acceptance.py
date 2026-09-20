@@ -192,6 +192,11 @@ def main():
                        p1=0xff, p2=0xff)
         write_certificate(client, certificate_object)
         read_certificate(client, certificate_object)
+        # Two 32767-byte backing arrays cannot fit the 64 KiB applet heap.
+        # Allocation failure must not destroy the existing certificate or keys.
+        client.command(0xdb, bytes.fromhex("64128B035FC10B8C017F8D017F91019B92027FFF"),
+                       p1=0xff, p2=0xff, status=0x6f00)
+        read_certificate(client, certificate_object)
         check_lifecycle(client, 0x07)
         client.command(0xdb, bytes.fromhex("6900"), p1=0xff, p2=0xff)
         check_lifecycle(client, 0x0f)
@@ -315,7 +320,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, durable personalization, management-key authentication and PIN-gated P-256 signing/ECDH, interrupted certificate replacement/reboot, counter renewal, reclaim and fail-closed storage")
+    print("PASS: JCVM load, durable personalization, management-key authentication and PIN-gated P-256 signing/ECDH, oversized-object allocation failure, interrupted certificate replacement/reboot, counter renewal, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":

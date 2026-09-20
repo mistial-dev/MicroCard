@@ -132,6 +132,10 @@ board's reserved heap.
   (`work/jcvm-max-certificate-heap.json`). The acceptance runner's argument range is
   an allocation probe, not a promise that every capacity is supported. A supported
   personalization profile must budget all current and replacement buffers together.
+  The transport workload also rejects an oversized second certificate object after
+  provisioning, then verifies the original certificate, reboot, replacement, signing,
+  and key agreement. This checks preservation of existing data, not reclamation of
+  unreachable allocations left by a failed applet constructor.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
