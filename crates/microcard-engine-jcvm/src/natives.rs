@@ -96,6 +96,7 @@ pub struct Jcre {
     pub expected: u16,
     incoming_started: bool,
     outgoing_started: bool,
+    outgoing_combined: bool,
     outgoing_length: Option<u16>,
     /// Where the command data starts in the buffer. Five for a short APDU, JCRE §4.
     pub data_offset: u16,
@@ -129,6 +130,7 @@ impl Jcre {
             expected: 256,
             incoming_started: false,
             outgoing_started: false,
+            outgoing_combined: false,
             outgoing_length: None,
             data_offset: 5,
             selecting: false,
@@ -352,15 +354,15 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
         }
         MethodId::setOutgoing | MethodId::setOutgoingNoChaining => {
             frame.pop_reference()?;
-            if jcre.outgoing_started { return Err(Error::Inconsistent); }
+            if jcre.outgoing_started { return apdu_exception(heap, context, 1); }
             jcre.outgoing_started = true;
             frame.push_short(jcre.expected as i16)?;
         }
         MethodId::setOutgoingLength => {
             let length = frame.pop_short()?;
             frame.pop_reference()?;
-            if !jcre.outgoing_started || jcre.outgoing_length.is_some() { return Err(Error::Inconsistent); }
-            if length < 0 || length as usize > jcre.response.len() { return Err(Error::Bounds); }
+            if !jcre.outgoing_started || jcre.outgoing_length.is_some() { return apdu_exception(heap, context, 1); }
+            if length < 0 || length as usize > jcre.response.len() { return apdu_exception(heap, context, 3); }
             jcre.outgoing_length = Some(length as u16);
         }
         MethodId::setOutgoingAndSend | MethodId::sendBytes | MethodId::sendBytesLong => {
@@ -368,20 +370,33 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
             let offset = frame.pop_short()?;
             let source = if name == MethodId::sendBytesLong { frame.pop_reference()? } else { jcre.buffer };
             frame.pop_reference()?;
-            if offset < 0 || length < 0 {
-                return Err(Error::Bounds);
-            }
-            if name == MethodId::setOutgoingAndSend {
-                if jcre.outgoing_started { return Err(Error::Inconsistent); }
-                jcre.outgoing_started = true;
-                jcre.outgoing_length = Some(length as u16);
-            }
+            let combined = name == MethodId::setOutgoingAndSend;
+            let declared = if combined {
+                if jcre.outgoing_started { return apdu_exception(heap, context, 1); }
+                if length < 0 || length as usize > jcre.response.len() { return apdu_exception(heap, context, 3); }
+                length as u16
+            } else {
+                if jcre.outgoing_combined { return apdu_exception(heap, context, 1); }
+                let Some(declared) = jcre.outgoing_length else { return apdu_exception(heap, context, 1); };
+                declared
+            };
+            if offset < 0 || length < 0 { return apdu_exception(heap, context, 2); }
             let start = usize::from(jcre.outgoing);
-            let end = start.checked_add(length as usize).ok_or(Error::Bounds)?;
-            let declared = jcre.outgoing_length.ok_or(Error::Inconsistent)?;
-            if end > usize::from(declared) || end > jcre.response.len() { return Err(Error::Bounds); }
+            let end = start + length as usize;
+            if end > usize::from(declared) { return apdu_exception(heap, context, 1); }
             heap.check_access(source, context)?;
-            jcre.response[start..end].copy_from_slice(heap.byte_slice(source, offset as usize, length as usize)?);
+            let bytes = match heap.byte_slice(source, offset as usize, length as usize) {
+                Ok(bytes) => bytes,
+                Err(Error::Bounds) => return apdu_exception(heap, context, 2),
+                Err(error) => return Err(error),
+            };
+            // Publish output state only after the source and destination are admitted.
+            jcre.response[start..end].copy_from_slice(bytes);
+            if combined {
+                jcre.outgoing_started = true;
+                jcre.outgoing_combined = true;
+                jcre.outgoing_length = Some(declared);
+            }
             jcre.outgoing = end as u16;
         }
         MethodId::isCommandChainingCLA | MethodId::isSecureMessagingCLA => {
@@ -1076,6 +1091,7 @@ mod tests {
     fn apdu_sends_capture_bytes_before_buffer_reuse_and_enforce_the_declared_length() {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
+        reserve_runtime_exceptions(&mut heap, 1).unwrap();
         let buffer = heap.new_array(heap::KIND_BYTE, 8, 1).unwrap();
         heap.byte_slice_mut(buffer, 0, 8).unwrap().copy_from_slice(b"abcdefgh");
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
@@ -1096,10 +1112,49 @@ mod tests {
         }
         assert_eq!(jcre.response_data(), Ok(&b"bcXX"[..]));
         frame.push_reference(0).unwrap(); frame.push_short(0).unwrap(); frame.push_short(1).unwrap();
-        assert!(matches!(apdu(MethodId::sendBytes, &mut heap, &mut frame, &mut jcre, 1), Err(Error::Bounds)));
+        let Native::Threw(exception) = apdu(MethodId::sendBytes, &mut heap, &mut frame, &mut jcre, 1).unwrap() else { panic!("excess response accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
         assert_eq!(jcre.outgoing, 4);
         frame.push_reference(0).unwrap();
-        assert!(matches!(apdu(MethodId::setOutgoing, &mut heap, &mut frame, &mut jcre, 1), Err(Error::Inconsistent)));
+        let Native::Threw(exception) = apdu(MethodId::setOutgoing, &mut heap, &mut frame, &mut jcre, 1).unwrap() else { panic!("repeated outgoing accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+
+        for combined in [false, true] {
+            let mut next = Jcre::new(0, buffer);
+            if !combined {
+                frame.push_reference(0).unwrap();
+                apdu(MethodId::setOutgoingNoChaining, &mut heap, &mut frame, &mut next, 1).unwrap();
+                frame.pop_short().unwrap();
+            }
+            for length in [-1, 257] {
+                frame.push_reference(0).unwrap();
+                if combined { frame.push_short(0).unwrap(); }
+                frame.push_short(length).unwrap();
+                let method = if combined { MethodId::setOutgoingAndSend } else { MethodId::setOutgoingLength };
+                let Native::Threw(exception) = apdu(method, &mut heap, &mut frame, &mut next, 1).unwrap() else { panic!("invalid length accepted"); };
+                assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(3));
+                assert_eq!(next.outgoing_length, None);
+                assert_eq!(next.outgoing, 0);
+            }
+        }
+        let mut next = Jcre::new(0, buffer);
+        for offset in [-1, 8] {
+            frame.push_reference(0).unwrap(); frame.push_short(offset).unwrap(); frame.push_short(1).unwrap();
+            let Native::Threw(exception) = apdu(MethodId::setOutgoingAndSend, &mut heap, &mut frame, &mut next, 1).unwrap() else { panic!("invalid source accepted"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
+            assert!(!next.outgoing_started);
+        }
+        frame.push_reference(0).unwrap(); frame.push_short(0).unwrap(); frame.push_short(1).unwrap();
+        apdu(MethodId::setOutgoingAndSend, &mut heap, &mut frame, &mut next, 1).unwrap();
+        assert_eq!(next.response_data(), Ok(&b"X"[..]));
+        for method in [MethodId::sendBytes, MethodId::sendBytesLong] {
+            frame.push_reference(0).unwrap();
+            if method == MethodId::sendBytesLong { frame.push_reference(buffer).unwrap(); }
+            frame.push_short(0).unwrap(); frame.push_short(0).unwrap();
+            let Native::Threw(exception) = apdu(method, &mut heap, &mut frame, &mut next, 1).unwrap() else { panic!("send after combined output accepted"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+            assert_eq!(next.response_data(), Ok(&b"X"[..]));
+        }
     }
 
     #[test]

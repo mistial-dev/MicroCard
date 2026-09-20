@@ -79,6 +79,10 @@ per command; `getIncomingLength()` and `getOffsetCdata()` require that call and
 remain valid only before switching to outgoing transfer. Invalid sequences throw
 `APDUException.ILLEGAL_USE` using a reserved exception object, including when the
 transaction undo capacity is exhausted. Each callback starts fresh receive state.
+Outgoing setup and send calls report catchable `APDUException` reasons for invalid
+sequences, response lengths, and source bounds. Rejected sends retain the previously
+accepted response. A successful `setOutgoingAndSend()` forbids later sends, including
+zero-length calls; source bounds are checked before publishing its outgoing state.
 MC04 continues to require SCP03. The former JCVM INS 10 tunnel is no longer decoded.
 SELECT calls `select()` and then `process()` with the
 selection flag, returning the applet's data and status. A refusal leaves no selection;
