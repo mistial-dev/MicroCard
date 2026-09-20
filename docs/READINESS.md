@@ -91,7 +91,9 @@ board's reserved heap.
   Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
   allocation-abort session termination, key updates, crypto initialization and persistence
   failure. PIN presentation checkpoints consume retries outside transactions, including
-  invalid inputs; PIN replacement reserves its complete conditional update and honors
+  invalid inputs; PIN construction reserves allocation and undo capacity before changing
+  fields, so a caught capacity error cannot commit partial initialization. PIN
+  replacement reserves its complete conditional update and honors
   the configured capacity. Runtime exception reasons clear on reset; recovery and
   reference stores enforce temporary-object restrictions. Installation parameters use
   the protected global buffer. See [JCVM semantics and source clauses](JCVM_PROFILE.md)

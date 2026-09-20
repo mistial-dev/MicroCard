@@ -18,6 +18,9 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
                 heap.put_word_unconditional(exception, REASON_FIELD, 1)?;
                 return Ok(Native::Threw(exception));
             }
+            // A caught undo-capacity error must not publish a partially initialized PIN.
+            heap.check_allocations(&[(heap::KIND_BYTE, max_size as u16)])?;
+            heap.prepare_payload_writes(&[(this, 0, (COUNTER + 1) * 2)])?;
             let material = heap.new_array(heap::KIND_BYTE, max_size as u16, context)?;
             heap.put_word(this, KIND, tries as u16)?;
             heap.put_word(this, SIZE, 0)?;

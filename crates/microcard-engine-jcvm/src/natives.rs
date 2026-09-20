@@ -772,6 +772,13 @@ mod tests {
                 else { panic!("invalid PIN limits accepted"); };
             assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
         }
+        let before = heap.image().to_vec();
+        heap.begin_transaction(8).unwrap();
+        assert!(matches!(invoke_security(ClassId::OwnerPIN, MethodId::Constructor,
+            &[(true, pin), (false, 3), (false, 126)], &mut heap, &mut frame, &mut host), Err(Error::TransactionFull)));
+        assert_eq!(heap.transaction_remaining(), Some(8));
+        heap.commit_transaction().unwrap();
+        assert!(heap.image() == before, "catching constructor failure must not commit a partial PIN");
         invoke_security(ClassId::OwnerPIN, MethodId::Constructor,
             &[(true, pin), (false, 3), (false, 126)], &mut heap, &mut frame, &mut host).unwrap();
         // The protected accessors share the public flag, but the setter follows
