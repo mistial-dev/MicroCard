@@ -376,6 +376,10 @@ Transport acceptance also kills the simulator between encrypted certificate-uplo
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
 
+`RandomData.generateData` returns no value; `nextBytes` returns the ending offset.
+Both reject empty requests with `CryptoException.ILLEGAL_VALUE` before calling the
+entropy provider, as required by the 3.0.5 API.
+
 The protected `OwnerPIN` validation-flag accessors share the public validation
 state. `setValidatedFlag` follows the default conditional-state rule in JCRE §9.3;
 PIN presentation and reset methods retain their explicit API exceptions.

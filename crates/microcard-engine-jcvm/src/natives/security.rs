@@ -587,11 +587,10 @@ pub fn call(
             if length < 0 || offset < 0 {
                 return Err(Error::Bounds);
             }
+            if length == 0 { return crypto_exception(heap, context, 1); }
             // Straight into the applet's array, so the bytes never sit anywhere else.
             host.random(heap.byte_slice_mut(array, offset as usize, length as usize)?)?;
             if method == MethodId::nextBytes {
-                // nextBytes answers nothing, generateData answers the offset past the end.
-            } else {
                 frame.push_short(offset.wrapping_add(length))?;
             }
         }

@@ -690,6 +690,41 @@ mod tests {
     }
 
     #[test]
+    fn random_data_methods_obey_return_contracts_and_reject_empty_requests() {
+        struct Entropy { calls: usize }
+        impl crate::host::Host for Entropy {
+            fn random(&mut self, output: &mut [u8]) -> Result<()> {
+                self.calls += 1;
+                output.fill(0x42);
+                Ok(())
+            }
+        }
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+        let mut host = Entropy { calls: 0 };
+        let random = new_native(&mut heap, ClassId::RandomData, 6, 1).unwrap();
+        let output = heap.new_array(heap::KIND_BYTE, 6, 1).unwrap();
+        for method in [MethodId::generateData, MethodId::nextBytes] {
+            invoke_security(ClassId::RandomData, method,
+                &[(true, random), (true, output), (false, 1), (false, 4)],
+                &mut heap, &mut frame, &mut host).unwrap();
+            if method == MethodId::nextBytes { assert_eq!(frame.pop_short(), Ok(5)); }
+            assert_eq!(frame.depth(), 0);
+            assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0, 0x42, 0x42, 0x42, 0x42, 0]);
+            let calls = host.calls;
+            let Native::Threw(exception) = invoke_security(ClassId::RandomData, method,
+                &[(true, random), (true, output), (false, 1), (false, 0)],
+                &mut heap, &mut frame, &mut host).unwrap()
+                else { panic!("empty random request accepted"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+            assert_eq!(host.calls, calls);
+            assert_eq!(frame.depth(), 0);
+        }
+        assert_eq!(host.calls, 2);
+    }
+
+    #[test]
     fn pin_replacement_honors_configured_capacity_and_reserves_the_complete_update() {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
