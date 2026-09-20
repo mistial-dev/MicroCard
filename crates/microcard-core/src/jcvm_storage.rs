@@ -107,6 +107,9 @@ mod tests {
         assert_eq!(replayed, expected);
         let (instance, statics) = view.metadata();
         Card::restore(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
+        Card::validate_persistent(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
+        assert_eq!(Card::validate_persistent(&file, Sizes { heap_bytes: replayed.len() - 1, ..sizes },
+            PersistentState { heap: &replayed, statics, instance }), Err(microcard_engine_jcvm::Error::Bounds));
         store.commit(&card, &mut SoftwareCrypto).unwrap();
         let flash = store.into_flash();
         for (key, installation) in [([2; 16], [4; 16]), ([3; 16], [5; 16])] {

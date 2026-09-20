@@ -86,7 +86,8 @@ raw state with the live committed projection in bounded windows, then replaces o
 the journal. It does not construct a second applet. It retains
 the existing applet object, selection and transient state; mismatch prevents stale
 execution. Seed validation reuses the complete restore validator with no execution
-frames; it still allocates a temporary heap. Before applet callbacks, the card renews a live session when either counter has
+frames and only the saved heap length after checking the configured quota. It still
+allocates a temporary heap. Before applet callbacks, the card renews a live session when either counter has
 1024 or fewer commits remaining. Active uploads, including zero-byte uploads,
 prevent renewal. A maintenance failure drops selection; pending ownership protects
 staging from transport reset. This threshold does not guarantee that every command

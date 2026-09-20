@@ -163,8 +163,10 @@ impl Card {
         }
     }
 
-    /// Check authenticated state without allocating unused execution frames.
+    /// Check authenticated state without allocating spare heap or execution frames.
     pub fn validate_persistent(file: &LoadFile, mut sizes: Sizes, saved: PersistentState<'_>) -> Result<()> {
+        if saved.heap.len() > sizes.heap_bytes { return Err(Error::Bounds); }
+        sizes.heap_bytes = saved.heap.len();
         sizes.frame_words = 0;
         Self::restore(file, sizes, saved).map(drop)
     }
