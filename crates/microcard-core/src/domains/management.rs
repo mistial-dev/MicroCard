@@ -56,7 +56,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 return Ok(());
             }
             let assembly = domain.instances.get(aid).ok_or(Error::Missing)?;
-            let units = execution_units(&self.state, id, assembly)?;
+            let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+                &mut self.platform, id, assembly)?;
+            let units = images.units()?;
             let deselect = units[0]
                 .package
                 .manifest
@@ -79,6 +81,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     &mut self.platform,
                     &mut retries.control(domain.registry_aid, should_cancel)?,
                 )?;
+                drop(units);
+                drop(images);
                 self.commit_application_changes(next)?;
             }
             Ok(())
@@ -321,7 +325,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if count >= MAX_TOTAL_INSTANCES {
             return Err(Error::Quota);
         }
-        let units = execution_units(&self.state, domain_id, assembly)?;
+        let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+            &mut self.platform, domain_id, assembly)?;
+        let units = images.units()?;
         let package = &units[0].package;
         let entry = package
             .manifest
@@ -346,6 +352,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .map(|(name, _)| Rc::clone(name)).ok_or(Error::Storage)?;
         instances.insert(instance_aid, canonical)?;
         if should_cancel() { return Err(Error::Cancelled); }
+        drop(units);
+        drop(images);
         self.commit_instance_lifecycle(owner, instances, application)
     }
 

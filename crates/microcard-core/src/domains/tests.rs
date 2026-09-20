@@ -1767,22 +1767,26 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
         load(&mut card, &signed_compiled_package(&manifest, view.image, 7)).unwrap();
         card.manage(command(0xec, &management_names_wire(name, aid).unwrap())).unwrap();
     }
+    // Every remaining callback must execute verified flash, not the resident cache.
+    for domain in core::iter::once(&mut card.state.isd).chain(card.state.domains.values_mut()) {
+        for (_, raw) in domain.assemblies.iter_mut() { *raw = Rc::new(Vec::new()); }
+    }
     card.select("F04D431001").unwrap();
     card.select("F04D431001").unwrap();
     assert_eq!(card.state.domains["first"].store.get(&1), Some(&3));
 
     // The old callback succeeds before the target overflows. Neither write publishes.
-    let mut next = card.state.clone();
-    next.domains.get_mut("second").unwrap().store.insert(1, i32::MAX).unwrap();
-    card.commit(next).unwrap();
+    let mut next = ApplicationChanges::new();
+    next.view(&card.state.domains["second"]).unwrap().store.insert(1, i32::MAX).unwrap();
+    card.commit_application_changes(next).unwrap();
     let before = card.state.encode_snapshot().unwrap().to_vec();
     assert!(card.select("F04D431002").is_err());
     assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
     assert_eq!(card.selected.as_ref().unwrap().2, "F04D431001");
 
-    let mut next = card.state.clone();
-    next.domains.get_mut("second").unwrap().store.insert(1, 0).unwrap();
-    card.commit(next).unwrap();
+    let mut next = ApplicationChanges::new();
+    next.view(&card.state.domains["second"]).unwrap().store.insert(1, 0).unwrap();
+    card.commit_application_changes(next).unwrap();
     let before = card.state.encode_snapshot().unwrap().to_vec();
     card.journal.flash_mut().fail_after = Some(0);
     assert_eq!(card.select("F04D431002"), Err(Error::Storage));

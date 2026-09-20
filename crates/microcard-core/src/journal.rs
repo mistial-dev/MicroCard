@@ -301,6 +301,8 @@ impl<F: Flash> Journal<F> {
     pub(crate) fn flash_mut(&mut self) -> &mut F {
         &mut self.flash
     }
+    #[cfg(feature = "mc04")]
+    pub(crate) fn flash(&self) -> &F { &self.flash }
     #[cfg(all(test, feature = "mc04"))]
     pub(crate) fn flash_for_test(&self) -> &F { &self.flash }
 }

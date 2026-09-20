@@ -22,78 +22,86 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         retries: &mut lifecycle::LifecycleRetries,
     ) -> Result<()> {
         self.abort_transaction();
-        let old = self
-            .selected
-            .as_ref()
-            .map(|(id, incarnation, old_aid)| {
-                let domain = self.state.domains.get(id).ok_or(Error::Missing)?;
-                if domain.incarnation != *incarnation {
-                    return Ok(None);
-                }
-                let assembly = domain.instances.get(old_aid).ok_or(Error::Missing)?;
-                let units = execution_units(&self.state, id, assembly)?;
-                let entry = units[0]
-                    .package
-                    .manifest
-                    .entry_points
-                    .iter()
-                    .find(|entry| entry.aid == *old_aid)
-                    .ok_or(Error::Missing)?
-                    .deselect;
-                Ok(Some((domain, units, entry)))
-            })
-            .transpose()?
-            .flatten();
-        let (id, domain) = self
-            .state
-            .domains
-            .iter()
-            .find(|(_, domain)| domain.instances.contains_key(aid))
-            .ok_or(Error::Missing)?;
-        let assembly = domain.instances.get(aid).ok_or(Error::Missing)?;
-        let units = execution_units(&self.state, id, assembly)?;
-        let entry = units[0]
-            .package
-            .manifest
-            .entry_points
-            .iter()
-            .find(|entry| entry.aid == aid)
-            .ok_or(Error::Missing)?
-            .select;
-        let selected = (
-            fallible_string(id)?,
-            domain.incarnation,
-            fallible_string(aid)?,
-        );
-        let mut next = ApplicationChanges::new();
-        if let Some((old_domain, old_units, Some(old_entry))) = old {
-            run_lifecycle(
-                next.view(old_domain)?,
-                &old_units[0].package,
-                Some(&old_units),
-                old_entry,
-                InvocationInput {
-                    data: &[],
-                    level: 0,
-                },
-                &mut self.platform,
-                &mut retries.control(old_domain.registry_aid, should_cancel)?,
-            )?;
-        }
-        if let Some(entry) = entry {
-            run_lifecycle(
-                next.view(domain)?,
-                &units[0].package,
-                Some(&units),
-                entry,
-                InvocationInput {
-                    data: &[],
-                    level: 0,
-                },
-                &mut self.platform,
-                &mut retries.control(domain.registry_aid, should_cancel)?,
-            )?;
-        }
+        let (next, selected) = {
+            let old = self
+                .selected
+                .as_ref()
+                .map(|(id, incarnation, old_aid)| {
+                    let domain = self.state.domains.get(id).ok_or(Error::Missing)?;
+                    if domain.incarnation != *incarnation {
+                        return Ok(None);
+                    }
+                    let assembly = domain.instances.get(old_aid).ok_or(Error::Missing)?;
+                    let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+                        &mut self.platform, id, assembly)?;
+                    let entry = domain.package_metadata(assembly)?
+                        .manifest
+                        .entry_points
+                        .iter()
+                        .find(|entry| entry.aid == *old_aid)
+                        .ok_or(Error::Missing)?
+                        .deselect;
+                    Ok(Some((domain, images, entry)))
+                })
+                .transpose()?
+                .flatten();
+            let (id, domain) = self
+                .state
+                .domains
+                .iter()
+                .find(|(_, domain)| domain.instances.contains_key(aid))
+                .ok_or(Error::Missing)?;
+            let assembly = domain.instances.get(aid).ok_or(Error::Missing)?;
+            let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+                &mut self.platform, id, assembly)?;
+            let units = images.units()?;
+            let entry = units[0]
+                .package
+                .manifest
+                .entry_points
+                .iter()
+                .find(|entry| entry.aid == aid)
+                .ok_or(Error::Missing)?
+                .select;
+            let selected = (
+                fallible_string(id)?,
+                domain.incarnation,
+                fallible_string(aid)?,
+            );
+            let mut next = ApplicationChanges::new();
+            if let Some((old_domain, old_images, Some(old_entry))) = old {
+                let old_units = old_images.units()?;
+                run_lifecycle(
+                    next.view(old_domain)?,
+                    &old_units[0].package,
+                    Some(&old_units),
+                    old_entry,
+                    InvocationInput {
+                        data: &[],
+                        level: 0,
+                    },
+                    &mut self.platform,
+                    &mut retries.control(old_domain.registry_aid, should_cancel)?,
+                )?;
+            }
+            if let Some(entry) = entry {
+                run_lifecycle(
+                    next.view(domain)?,
+                    &units[0].package,
+                    Some(&units),
+                    entry,
+                    InvocationInput {
+                        data: &[],
+                        level: 0,
+                    },
+                    &mut self.platform,
+                    &mut retries.control(domain.registry_aid, should_cancel)?,
+                )?;
+            }
+            drop(units);
+            drop(images);
+            (next, selected)
+        };
         self.commit_application_changes(next)?;
         self.selected = Some(selected);
         Ok(())
@@ -192,7 +200,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let source_assembly = source.instances.get(aid).ok_or(Error::Missing)?;
         let incarnation = source.incarnation;
         let domain_registry_aid = source.registry_aid;
-        let images = match linking::BorrowedExecution::new(&self.state, &*self.journal.flash_mut(),
+        let images = match linking::BorrowedExecution::new(&self.state, self.journal.flash(),
             &mut self.platform, domain_id, source_assembly) {
             Ok(images) => images,
             Err(error) => { self.transaction = None; return Err(error); }

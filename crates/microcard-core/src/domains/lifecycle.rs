@@ -306,7 +306,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let source = self.state.domain(id).ok_or(Error::Domain)?;
         let owner = source.registry_aid;
         let assembly = source.instances.get(aid).ok_or(Error::Missing)?;
-        let units = execution_units(&self.state, id, assembly)?;
+        let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+            &mut self.platform, id, assembly)?;
+        let units = images.units()?;
         let package = &units[0].package;
         let entry = package
             .manifest
@@ -338,6 +340,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if cancel() {
             return Err(Error::Cancelled);
         }
+        drop(units);
+        drop(images);
         self.commit_instance_lifecycle(owner, instances, application)
     }
 }

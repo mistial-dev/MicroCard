@@ -128,10 +128,11 @@ Image storage provides scoped range guards: nRF52840 and memory backends borrow
 slot bytes, while the file backend owns the requested range. Multiple read guards
 can coexist. `Descriptor::read_verified` checks geometry, length and the complete
 image digest before returning a guard; callback reads use the same verification.
-The provider borrow ends after verification. MC04 invocation borrows only the
-reachable dependency images, validates the linked program, and releases image
-guards before committing application state. Loading and lifecycle paths still
-retain runtime image buffers; removing that ownership remains release work.
+The provider borrow ends after verification. MC04 invocation and lifecycle callbacks
+borrow verified dependency images, validate the linked program before execution,
+and release image guards before committing application state. Loading and recovery
+validation still retain runtime image buffers; removing that ownership remains
+release work.
 
 MC04 domain internals separate application staging, lifecycle execution, metadata
 mutations, snapshot encoding, and linking. `domains/linking.rs` owns dependency
