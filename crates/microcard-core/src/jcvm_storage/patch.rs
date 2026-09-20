@@ -113,21 +113,24 @@ pub(super) fn replay_snapshot(snapshot: &mut Zeroizing<Vec<u8>>, generation: u64
     let heap_length = validate(heap_patch, generation, heap.len(), maximum)?;
     let static_length = validate(static_patch, generation, statics.len(), maximum)?;
     if super::snapshot_size(instance, heap_length, static_length)? > maximum { return Err(Error::Quota); }
-    let mut heap_output = crate::crypto::zeroizing_buffer(heap.len().max(heap_length))?;
-    let mut static_output = crate::crypto::zeroizing_buffer(statics.len().max(static_length))?;
-    heap_output[..heap.len()].copy_from_slice(heap);
-    static_output[..statics.len()].copy_from_slice(statics);
-    apply(heap_patch, generation, &mut heap_output, heap.len())?;
-    apply(static_patch, generation, &mut static_output, statics.len())?;
-    let mut encoder = Encoder::new(maximum);
+    let capacity = super::snapshot_size(instance, heap_length, static_length)?;
+    let mut encoder = Encoder::with_capacity(maximum, capacity)?;
     encoder.array(7)?;
     encoder.unsigned(1)?;
     encoder.unsigned(1)?;
     encoder.bytes(&image)?;
     encoder.bytes(&installation)?;
     encoder.unsigned(instance)?;
-    encoder.bytes(&heap_output[..heap_length])?;
-    encoder.bytes(&static_output[..static_length])?;
+    encoder.bytes_with(heap_length, |output| {
+        let common = heap.len().min(output.len());
+        output[..common].copy_from_slice(&heap[..common]);
+        apply_spans(heap_patch, output)
+    })?;
+    encoder.bytes_with(static_length, |output| {
+        let common = statics.len().min(output.len());
+        output[..common].copy_from_slice(&statics[..common]);
+        apply_spans(static_patch, output)
+    })?;
     *snapshot = Zeroizing::new(encoder.finish());
     Ok(())
 }
@@ -135,11 +138,18 @@ pub(super) fn replay_snapshot(snapshot: &mut Zeroizing<Vec<u8>>, generation: u64
 /// Validate the complete record before copying any replacement bytes.
 /// Authentication and installation binding belong to the enclosing journal.
 /// The caller supplies the exact existing state; this format does not allocate.
+#[cfg(test)]
 pub(super) fn apply(encoded: &[u8], generation: u64, state: &mut [u8], used: usize) -> Result<usize> {
     if used > state.len() { return Err(Error::Bounds); }
     let length = validate(encoded, generation, used, state.len())?;
     // The allocation tail starts zeroed; truncated plaintext must not survive reuse.
     state[used.min(length)..used.max(length)].fill(0);
+    apply_spans(encoded, state)?;
+    Ok(length)
+}
+
+// Call only after validate has checked all spans against this output's length.
+fn apply_spans(encoded: &[u8], state: &mut [u8]) -> Result<()> {
     let mut decoder = Decoder::new(encoded);
     decoder.record(5)?;
     decoder.unsigned()?;
@@ -153,8 +163,7 @@ pub(super) fn apply(encoded: &[u8], generation: u64, state: &mut [u8], used: usi
         let bytes = decoder.bytes(state.len())?;
         state[offset..offset + bytes.len()].copy_from_slice(bytes);
     }
-    decoder.finish()?;
-    Ok(length)
+    decoder.finish()
 }
 
 fn validate(encoded: &[u8], generation: u64, used: usize, capacity: usize) -> Result<usize> {
@@ -227,6 +236,31 @@ mod tests {
                 output[..before.len()].copy_from_slice(before);
                 assert_eq!(apply(&encoded, 11, &mut output, before.len()), Ok(after.len()));
                 assert_eq!(&output[..after.len()], after);
+                let snapshot = |heap: &[u8], statics: &[u8]| {
+                    let mut e = Encoder::new(256);
+                    e.array(7).unwrap();
+                    e.unsigned(1).unwrap();
+                    e.unsigned(1).unwrap();
+                    e.bytes(&[2; 32]).unwrap();
+                    e.bytes(&[3; 16]).unwrap();
+                    e.unsigned(4).unwrap();
+                    e.bytes(heap).unwrap();
+                    e.bytes(statics).unwrap();
+                    Zeroizing::new(e.finish())
+                };
+                let mut delta = Encoder::new(256);
+                delta.array(4).unwrap();
+                delta.unsigned(1).unwrap();
+                delta.unsigned(4).unwrap();
+                delta.bytes(&encoded).unwrap();
+                delta.bytes(&encode_diff(&[5, 6], &[7], 11, 128).unwrap()).unwrap();
+                let delta = delta.finish();
+                let mut saved = snapshot(before, &[5, 6]);
+                let original = saved.clone();
+                assert!(replay_snapshot(&mut saved, 12, &delta, 256).is_err());
+                assert_eq!(saved, original);
+                replay_snapshot(&mut saved, 11, &delta, 256).unwrap();
+                assert_eq!(saved, snapshot(after, &[7]));
             }
         }
         let before = [0; MAX_SPANS * 2 + 1];

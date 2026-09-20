@@ -90,7 +90,7 @@ board's reserved heap.
   See [renewal and recovery invariants](STORAGE.md#jcvm-counter-renewal).
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 222,184 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 222,120 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the

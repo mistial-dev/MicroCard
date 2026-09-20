@@ -695,3 +695,9 @@ The default remains 4,096 bytes. OpenFIPS201 reserves both current and pending
 certificate buffers. The 20,000-byte case passes functional acceptance but reaches
 341,421 requested host bytes at revision `5e3efcc`; it does not fit the board heap
 on that metric. This is a capacity stress workload, not a maximum-allocation proof.
+
+Patch recovery validates both heap and static-field changes before allocating the
+replacement snapshot. It copies the unchanged prefixes and applies spans directly
+inside the final CBOR byte strings, avoiding separate heap/static scratch copies.
+The original authenticated snapshot remains intact until the replacement is complete;
+growth starts zeroed and shrinkage excludes the discarded tail.
