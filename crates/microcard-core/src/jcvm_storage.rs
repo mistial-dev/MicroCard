@@ -12,6 +12,7 @@ use microcard_engine_jcvm::{
     cap::LoadFile,
 };
 use zeroize::Zeroizing;
+mod patch;
 mod session;
 pub use session::Session;
 mod banks;
@@ -23,6 +24,7 @@ pub struct Store<F: Flash> {
     image: [u8; 32],
     installation: [u8; 16],
     maximum: usize,
+    heap_length: Option<usize>,
 }
 
 #[cfg(all(test, feature = "software-crypto"))]
@@ -88,6 +90,23 @@ mod tests {
         .jcvm_parameters()
         .unwrap();
         card.install(&file, &mut Host, &parameters).unwrap();
+        // Rebuild a real installed applet from bounded sanitized records. Windows
+        // split object headers and native fields; recovery must accept the result.
+        let view = card.persistent_view().unwrap();
+        let mut replayed = alloc::vec![0xa5; view.heap_bytes()];
+        let mut used = 0;
+        let mut generation = 1;
+        for start in (0..view.heap_bytes()).step_by(127) {
+            let end = (start + 127).min(view.heap_bytes());
+            let record = patch::encode_heap_window(view, start..end, used, generation, 192).unwrap();
+            used = patch::apply(&record, generation, &mut replayed, used).unwrap();
+            generation += 1;
+        }
+        let mut expected = alloc::vec![0; view.heap_bytes()];
+        view.save_into(&mut expected).unwrap();
+        assert_eq!(replayed, expected);
+        let (instance, statics) = view.metadata();
+        Card::restore(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
         store.commit(&card, &mut SoftwareCrypto).unwrap();
         let flash = store.into_flash();
         for (key, installation) in [([2; 16], [4; 16]), ([3; 16], [5; 16])] {
@@ -108,7 +127,8 @@ mod tests {
             (2, Error::IncompatibleState),
             (3, Error::Format),
         ] {
-            let (mut journal, snapshot) = Journal::open(flash.clone(), [3; 16]).unwrap();
+            let (mut journal, snapshot) = Journal::open_with_replay(flash.clone(), [3; 16], &mut SoftwareCrypto,
+                |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, 65536)).unwrap();
             let mut snapshot = snapshot.unwrap();
             match case {
                 0 => snapshot[5] ^= 1, // image digest follows the fixed CBOR prefix
@@ -174,7 +194,8 @@ impl<F: Flash> Store<F> {
         let mut image = [0; 32];
         provider.sha256_into(verified_image, &mut image)?;
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
-        let (journal, snapshot) = Journal::open_with(flash, key, provider)?;
+        let (journal, snapshot) = Journal::open_with_replay(flash, key, provider,
+            |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, maximum))?;
         let card = decode_card(
             snapshot.as_deref().map(Vec::as_slice),
             &file,
@@ -188,6 +209,7 @@ impl<F: Flash> Store<F> {
                 image,
                 installation,
                 maximum,
+                heap_length: card.as_ref().map(Card::persistent_heap_bytes),
             },
             card,
         ))
@@ -206,14 +228,17 @@ impl<F: Flash> Store<F> {
             return Err(Error::KeyMismatch);
         }
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
-        let snapshot = self.journal.recover_with(provider)?;
-        decode_card(
+        let snapshot = self.journal.recover_with_replay(provider,
+            |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, self.maximum))?;
+        let card = decode_card(
             snapshot.as_deref().map(Vec::as_slice),
             &file,
             sizes,
             self.image,
             self.installation,
-        )
+        )?;
+        self.heap_length = card.as_ref().map(Card::persistent_heap_bytes);
+        Ok(card)
     }
 
     /// Commit state of the applet installed from the image passed to `open`.
@@ -223,10 +248,28 @@ impl<F: Flash> Store<F> {
     }
 
     pub(crate) fn commit_view(&mut self, view: PersistentView<'_>, provider: &mut impl CryptoProvider) -> Result<()> {
-        if view.heap_bytes() > self.maximum {
+        let (instance, statics) = view.metadata();
+        if snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())? > self.maximum {
             return Err(Error::Quota);
         }
-        let (instance, statics) = view.metadata();
+        if let Some(before_length) = self.heap_length {
+            let capacity = match self.journal.append_capacity() {
+                Ok(capacity) => capacity,
+                Err(Error::Quota) => 0,
+                Err(error) => return Err(error),
+            };
+            if capacity != 0 {
+                match patch::encode_view(view, before_length, self.journal.generation(), capacity) {
+                    Ok(delta) => {
+                        self.journal.append_owned_with(delta, provider)?;
+                        self.heap_length = Some(view.heap_bytes());
+                        return Ok(());
+                    }
+                    Err(Error::Quota) => {},
+                    Err(error) => return Err(error),
+                }
+            }
+        }
         // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
         // appending statics cannot double a buffer already holding the heap. Keep
         // journal header/tag headroom so encryption can consume this allocation.
@@ -249,12 +292,21 @@ impl<F: Flash> Store<F> {
         })?;
         encoder.bytes(statics)?;
         let snapshot = Zeroizing::new(encoder.finish());
-        self.journal.commit_owned_with(snapshot, provider)
+        self.journal.commit_owned_with(snapshot, provider)?;
+        self.heap_length = Some(view.heap_bytes());
+        Ok(())
     }
 
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }
+}
+
+fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {
+    // Array/version/engine plus the fixed image and installation byte strings.
+    [crate::cbor::argument_size(instance), crate::cbor::argument_size(heap as u64), heap,
+        crate::cbor::argument_size(statics as u64), statics]
+        .into_iter().try_fold(54usize, |size, part| size.checked_add(part).ok_or(Error::Quota))
 }
 
 fn decode_card(

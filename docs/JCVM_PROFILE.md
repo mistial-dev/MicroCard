@@ -426,49 +426,41 @@ trigger another snapshot. Storage
 failure stops execution instead of reporting a successful cancellation checkpoint.
 
 **Durability is still incomplete:** arbitrary power loss between ordinary persistent
-writes and a checkpoint can still lose those writes. `vm/heap.rs` records only a
-boolean write marker; `vm/exec.rs` consumes it when cancellation is observed.
-`checkpoint_committed` projects committed heap/static state, and
-`jcvm_storage::commit_view` encodes the entire projection into one journal record.
-The journal erases a destination slot for each commit. Calling this path after every
-ordinary write would therefore turn each write into a full snapshot and slot erase.
-The board also consumes one bit from separate 4 KiB generation and nonce counters
-per commit/encryption attempt, limiting each to 32,768 values. Incremental records
-must account for this lifetime limit while preserving nonce uniqueness and rollback
-protection; changing only the payload encoding cannot close the gap.
+writes and a checkpoint can still lose those writes. Checkpoints now append small
+heap/static changes in authenticated 1,024-byte frames. Larger changes, transaction
+commits, and exhausted append space use a full snapshot in the next journal slot.
+Recovery replays complete frames, checks generation continuity and the rollback
+anchor, and refuses to reuse partial tails. Interrupted rotation preserves the
+previous committed chain or the completed replacement snapshot.
 
-For a reproducible host write-traffic baseline, build `microcard-sim` with
-`--features heap-metrics`, set `MICROCARD_FLASH_REPORT` to a fresh JSONL path, and
-run `scripts/jcvm_transport_acceptance.py`. Each completed journal-slot erase,
-program, nonce reservation, and generation advance emits its operation, requested
-byte count, and slot size. Records contain no state contents. Reporting is optional
-and does not change storage errors; a missing report must not be treated as zero I/O.
-This counts successful operations, not partially completed writes, physical NVMC
-word traffic, image writes, or counter-page initialization.
+`PersistentView.save_range` stages bounded committed windows, projects undo records,
+and clears transient payloads, PIN validation, and runtime exception reasons. The
+fixed-size write tracker merges heap/static intervals and excludes uncommitted
+allocation tails. Heap and static changes share one authenticated record. Both are
+validated before replay mutates scratch state; the complete resulting snapshot must
+fit its storage quota. A provider or flash failure stops the operation. Full snapshots
+and records use the same providers, with no software retry.
 
-The host lifecycle baseline at `95c5c37` with instrumentation recorded 114 slot
-erases (6,897,664 bytes), 426 program calls (1,179,061 bytes), 110 nonce reservations,
-and 108 generation advances. The acceptance run passed. Counts aggregate setup and
-all simulator sessions in the workload; they are not a single-card lifetime estimate.
+The board still consumes one bit from separate 4 KiB generation and nonce counters
+per commit/encryption attempt, limiting each to 32,768 values. Append records reduce
+erases but do not extend these counters. Remaining work includes publication before
+execution proceeds past ordinary persistent operations, native bulk-write/allocation
+boundaries, counter lifetime, and the remaining native-API transaction audit.
+A passing host workflow does not establish Java Card guarantees or physical execution.
 
-`PersistentView.save_range` now copies a bounded window of the committed heap,
-projects overlapping undo records, and clears transient payloads, PIN validation,
-and runtime exception reasons. Full snapshots use the same sanitization path.
-Invalid ranges clear the output and fail. A fixed-size tracker merges heap and static
-writes into conservative intervals, clips uncommitted allocation tails, and requests
-a full snapshot for transaction commits or unrepresentable ranges. Checkpoint
-acknowledgement clears the tracker. This enables bounded record staging;
-it does not yet publish ordinary writes or change the snapshot journal format.
+To measure host flash traffic, build `microcard-sim` with `--features heap-metrics`,
+set `MICROCARD_FLASH_REPORT` to a fresh JSONL path, and run
+`scripts/jcvm_transport_acceptance.py`. Reports contain operation names, requested
+byte counts, and slot sizes, never state contents. A missing report is not zero I/O.
+Counts exclude partial failed writes, physical NVMC word traffic, image writes, and
+counter-page initialization; they aggregate setup and all simulator sessions.
 
-Closing this gap requires bounded authenticated write records for heap and static
-changes, ordered before execution proceeds past the persistent operation. Recovery
-must apply committed records to the last snapshot, preserve transaction atomicity,
-and safely compact records without discarding the only recoverable state. Native
-bulk writes and allocations need explicit publication boundaries as well as bytecode
-stores. Validate interruption at record, commit-marker, and compaction boundaries;
-measure programmed bytes and erase counts on the same OpenFIPS201 workload. Finish
-the native-API transaction audit before claiming Java Card transaction guarantees.
-A passing simulator workflow does not establish those guarantees or physical execution.
+The matched lifecycle run passed with checkpoint appends: 97 slot erases
+(5,783,552 bytes) and 392 program calls (958,294 bytes), versus 114 erases
+(6,897,664 bytes) and 426 program calls (1,179,061 bytes) at baseline `95c5c37`.
+Both used 110 nonce reservations and 108 generation advances. Raw reports are
+`work/jcvm-mj04-checkpoints.jsonl` and `work/jcvm-flash-baseline-95c5c37.jsonl`.
+These are workload totals, not a single-card lifetime estimate.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
@@ -558,8 +550,8 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-runtime-exceptions-contact`, based on `9449537` with runtime exception fixes):
-preparation took 14.592 seconds and vectors 96.361 seconds on the host.
+(`work/nist-mj04-checkpoints-contact`, based on `3894f97` with checkpoint append records):
+preparation took 15.277 seconds and vectors 93.153 seconds on the host.
 Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests

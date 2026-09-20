@@ -26,3 +26,35 @@ Once a commit starts modifying journal slots, any flash error disables further c
 until authenticated recovery succeeds. Clearing an injected I/O fault alone does not
 authorize a retry or consume another nonce. The byte-cut recovery sweep checks this
 alongside recovery of the previous or newly committed state.
+
+JCVM checkpoint changes can follow a snapshot in fixed 1,024-byte append frames.
+Append-enabled snapshots and frames use the distinct MJ04 authenticated header.
+Each append frame holds at most 980 plaintext bytes and has a four-byte commit
+marker at a fixed position at the frame end. Heap and
+static patches share a bounded CBOR envelope tied to the base generation and
+instance. Recovery validates the complete envelope before changing scratch state,
+then selects the latest complete chain and reconciles its generation anchor.
+Partially programmed tails require rotation to a new full snapshot. Oversized
+changes and transaction commits also use snapshots. Snapshot-only readers reject
+MJ04 even before the first append, so an interrupted
+counter advance cannot hide an appended record. JCVM rejects old MJ03 heap journals
+without erasing them. MC04 retains MJ03 and does not include the append scanner.
+
+Appending reserves a fresh nonce and advances the generation counter just as a full
+snapshot does. It avoids a slot erase but does not extend counter lifetime. These
+records currently serve existing JCVM checkpoints; persistence after each ordinary
+operation remains unfinished. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
+
+The MJ04 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
+is a CBOR byte string encoding `[1, base_generation, before_length, after_length,
+[[offset, replacement_bytes], ...]]`. Each patch has at most 64 nonempty, ordered,
+nonoverlapping spans. Replay checks both patches completely, exact base lengths and
+generation, the instance, and the resulting snapshot quota before replacing state.
+Growth is zero-initialized; truncation clears removed plaintext. Unknown versions,
+noncanonical CBOR, malformed lengths, overlaps, and trailing bytes are rejected.
+
+Frames start at the next four-byte boundary after the encrypted snapshot record,
+then advance in 1,024-byte steps without overlapping the slot's three trailer bytes.
+Their marker is at frame offset 1,020. Unused padding stays erased. The frame's
+header, ciphertext, and tag use the existing 24-byte header, AES-CCM provider, and
+`MCJN3 || attempt_le64` nonce construction; MJ04 is authenticated in the header.

@@ -21,7 +21,7 @@ This page is the authoritative list of supported behavior and release blockers.
   configurations with both or neither engine and check that the unselected interpreter
   and diagnostic name tables are absent.
 - **Device formats:** bounded deterministic CBOR, MP05 packages, MDB2 bundles, and
-  MJ03 journals. Old formats are rejected without automatic erasure. Packages use
+  MJ03 management journals and MJ04 JCVM heap journals. Old formats are rejected without automatic erasure. Packages use
   P-256, 65-byte uncompressed SEC1 keys, low-S signatures, and 32-byte dependency
   key hashes. Capability 21 remains reserved. [Device contracts](DEVICE_CBOR.md)
   define the bytes and bounds; [protocol](PROTOCOL.md) defines the transport.
@@ -31,7 +31,7 @@ This page is the authoritative list of supported behavior and release blockers.
 Immutable images occupy dedicated flash slots. Journal activation protects the prior
 committed generation and uncertain candidates. JCVM holds authenticated image handles;
 MC04 retains metadata and descriptors, borrowing verified flash images for loading,
-recovery and execution. Both board layouts reserve separate JCVM heap banks. MJ03 reserves a durable nonce before every encryption attempt,
+recovery and execution. Both board layouts reserve separate JCVM heap banks. Both journal formats reserve a durable nonce before every encryption attempt,
 independently of the committed generation, including failed attempts.
 
 MC04 domain management separates state/recovery, authenticated commands, execution,
@@ -89,15 +89,15 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 199,172 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 209,336 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   All seven profiles cross-linked in the consolidated checkpoint described below. MC04 no
   longer retains package image buffers in runtime state; recovery reads verified
-  flash guards and retains metadata. MC04 hardware release text is 212,180 bytes
-  against 212,000, and software reference text is 186,044 against 186,000. Five text
+  flash guards and retains metadata. MC04 hardware release text is 212,524 bytes
+  against 212,000, and software reference text is 186,412 against 186,000. Seven text
   ceilings still fail; none were raised. The matched credential workload reduced host
   heap peak from 43,227 to 35,137 bytes and reopened retained allocations from 13,215
   to 4,989 bytes; [measurement evidence](HEAP_MEASUREMENTS.json) records both binaries.
@@ -148,11 +148,11 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The checkpoint at
-`5210b30` took 49.821 seconds with two workers and incremental rebuilding
-(`work/checkpoint-runtime-and-allocation.json`). Host, wallet, recovery,
-generated-artifact, and fuzz-build stages passed. All seven firmware profiles linked;
-the checkpoint overall fails on the five unchanged flash optimization ceilings. This is not a cold-build measurement. Historical
+reuses outputs with bounded workers and isolated logs/state. The MJ04 checkpoint, based on `3894f97` with append checkpoints, took 51.084 seconds
+with two workers and incremental rebuilding (`work/checkpoint-mj04.json`). Host,
+wallet, recovery, generated-artifact, and fuzz-build stages passed; workspace Clippy
+also passed. All seven firmware profiles linked; the checkpoint overall fails on
+the seven unchanged flash optimization ceilings. This is not a cold-build measurement. Historical
 comparisons remain in Git; reproducible cold/warm final-tree measurements are still
 required.
 

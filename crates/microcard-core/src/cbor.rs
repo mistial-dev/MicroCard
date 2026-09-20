@@ -4,6 +4,16 @@ use crate::{Error, Result};
 use alloc::{string::String, vec::Vec};
 use zeroize::Zeroize;
 
+pub(crate) fn argument_size(value: u64) -> usize {
+    match value {
+        0..=23 => 1,
+        24..=255 => 2,
+        256..=65535 => 3,
+        65536..=4294967295 => 5,
+        _ => 9,
+    }
+}
+
 pub struct Decoder<'a> {
     remaining: &'a [u8],
 }
@@ -182,13 +192,8 @@ impl Encoder {
 
     fn argument(&mut self, major: u8, value: u64) -> Result<()> {
         let mut header = [0; 9];
-        let (additional, length) = match value {
-            0..=23 => (value as u8, 0),
-            24..=255 => (24, 1),
-            256..=65535 => (25, 2),
-            65536..=4294967295 => (26, 4),
-            _ => (27, 8),
-        };
+        let length = argument_size(value) - 1;
+        let additional = match length { 0 => value as u8, 1 => 24, 2 => 25, 4 => 26, _ => 27 };
         header[0] = major << 5 | additional;
         header[1..1 + length].copy_from_slice(&value.to_be_bytes()[8 - length..]);
         self.append(&header[..1 + length])
