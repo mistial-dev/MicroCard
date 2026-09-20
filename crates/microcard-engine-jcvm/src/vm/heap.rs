@@ -481,10 +481,13 @@ impl<'a> Heap<'a> {
     }
 
     /// Reserve before-images for a compound write before publishing any component.
+    /// Spans use byte offsets into object or array payloads, excluding headers.
     /// Failure releases only these reservations, preserving earlier transaction writes.
-    pub(crate) fn prepare_byte_writes(&mut self, spans: &[(Reference, usize, usize)]) -> Result<()> {
+    pub(crate) fn prepare_payload_writes(&mut self, spans: &[(Reference, usize, usize)]) -> Result<()> {
         for &(reference, offset, length) in spans {
-            self.byte_slice(reference, offset, length)?;
+            let info = self.info(reference)?;
+            let end = offset.checked_add(length).ok_or(Error::Bounds)?;
+            if end > info.length as usize * info.element_size() { return Err(Error::Bounds); }
         }
         let Some(remaining) = self.transaction_remaining() else { return Ok(()); };
         for &(reference, offset, length) in spans {
@@ -597,12 +600,12 @@ mod tests {
         let transient = heap.new_transient_array(KIND_BYTE, 1, 1, CLEAR_ON_DESELECT).unwrap();
         heap.begin_transaction(24).unwrap();
         heap.byte_slice_mut(array, 0, 4).unwrap().fill(1);
-        assert_eq!(heap.prepare_byte_writes(&[(array, 4, 2), (array, 6, 2)]),
+        assert_eq!(heap.prepare_payload_writes(&[(array, 4, 2), (array, 6, 2)]),
             Err(Error::TransactionFull));
         assert_eq!(heap.transaction_remaining(), Some(14));
-        assert_eq!(heap.prepare_byte_writes(&[(array, 4, 2), (array, 8, 1)]), Err(Error::Bounds));
+        assert_eq!(heap.prepare_payload_writes(&[(array, 4, 2), (array, 8, 1)]), Err(Error::Bounds));
         assert_eq!(heap.transaction_remaining(), Some(14));
-        heap.prepare_byte_writes(&[(array, 0, 4), (transient, 0, 1)]).unwrap();
+        heap.prepare_payload_writes(&[(array, 0, 4), (transient, 0, 1)]).unwrap();
         assert_eq!(heap.transaction_remaining(), Some(14));
         heap.array_put(transient, 0, 3).unwrap();
         assert!(!heap.abort_transaction(&mut []).unwrap());

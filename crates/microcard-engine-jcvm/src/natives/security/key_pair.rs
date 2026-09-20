@@ -75,7 +75,7 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     let mut scalar = Zeroizing::new([0; 32]);
     let mut point = Zeroizing::new([0; 65]);
     host.p256_generate(&mut scalar, &mut point)?;
-    heap.prepare_byte_writes(&[(public_material, 0, 66), (private_material, 0, 33)])?;
+    heap.prepare_payload_writes(&[(public_material, 0, 66), (private_material, 0, 33)])?;
     heap.byte_slice_mut(public_material, 1, 65)?.copy_from_slice(&point[..]);
     heap.byte_slice_mut(private_material, 1, 32)?.copy_from_slice(&scalar[..]);
     // Every accepted parameter set is the same fixed curve, including default K=1.

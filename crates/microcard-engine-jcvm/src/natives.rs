@@ -861,6 +861,38 @@ mod tests {
                         assert!(heap.byte_slice(material, 0, length).unwrap().iter().all(|byte| *byte == 0));
                     }
                 }
+                if class == ClassId::AESKey {
+                    // Persistent updates must reject insufficient undo before either bytes
+                    // or readiness changes. Transient key state needs no undo space.
+                    heap.byte_slice_mut(input, 0, 16).unwrap().fill(0x77);
+                    invoke_security(class, MethodId::setKey,
+                        &[(true, key), (true, input), (false, 0)],
+                        &mut heap, &mut frame, &mut crate::host::NoHost).unwrap();
+                    for method in [MethodId::clearKey, MethodId::setKey] {
+                        heap.byte_slice_mut(input, 0, 16).unwrap().fill(0x33);
+                        let before = heap.image().to_vec();
+                        let capacities: &[usize] = if lifetime == 2 { &[22, 30] } else { &[0] };
+                        for &capacity in capacities {
+                            heap.begin_transaction(capacity).unwrap();
+                            let arguments = [(true, key), (true, input), (false, 0)];
+                            let count = if method == MethodId::clearKey { 1 } else { 3 };
+                            let result = invoke_security(class, method, &arguments[..count],
+                                &mut heap, &mut frame, &mut crate::host::NoHost);
+                            if capacity == 22 {
+                                assert!(matches!(result, Err(Error::TransactionFull)));
+                                assert_eq!(heap.transaction_remaining(), Some(capacity));
+                                heap.commit_transaction().unwrap();
+                                assert_eq!(heap.image(), before);
+                            } else {
+                                assert!(matches!(result, Ok(Native::Returned)));
+                                assert_eq!(heap.transaction_remaining(), Some(0));
+                                assert_ne!(heap.image(), before);
+                                assert!(!heap.abort_transaction(&mut []).unwrap());
+                                assert_eq!(heap.image() == before, lifetime == 2);
+                            }
+                        }
+                    }
+                }
                 frame.push_reference(key).unwrap();
                 invoke(class, MethodId::clearKey, &mut heap, &mut frame);
                 frame.push_reference(key).unwrap();

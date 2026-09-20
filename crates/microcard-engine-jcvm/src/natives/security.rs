@@ -187,15 +187,18 @@ pub fn call(
         }
         (name, MethodId::clearKey) if name.is_security() => {
             let key = frame.pop_reference()?;
-            // The material goes before the flag, so a failure between the two leaves a key
-            // that says it holds nothing rather than one that says it holds something it
-            // no longer does.
+            let kind = word_field(heap, key, KIND)?;
+            let separate_flag = !ec::key_kind(kind) && symmetric_key_clear_event(kind) == 0;
             let material = heap.get_word(key, MATERIAL)?;
             if material != NULL {
                 let length = heap.info(material)?.length as usize;
+                if separate_flag {
+                    heap.byte_slice(material, 0, length)?;
+                    heap.prepare_payload_writes(&[(key, READY * 2, 2), (material, 0, length)])?;
+                }
                 heap.byte_slice_mut(material, 0, length)?.fill(0);
             }
-            heap.put_word(key, READY, 0)?;
+            if separate_flag { heap.put_word(key, READY, 0)?; }
         }
 
         // Symmetric key material, JCRE §5.3. The bytes are copied into the key's own
@@ -234,14 +237,15 @@ pub fn call(
                 }
                 array => array,
             };
-            heap.byte_slice_mut(material, prefix, bytes)?
-                .copy_from_slice(&staging[..bytes]);
-            // The flag shares the clearing event and snapshot rules of the key bytes.
+            // Admit bytes and readiness together, including catch-and-commit failures.
+            heap.byte_slice(material, 0, bytes + prefix)?;
             if event == 0 {
-                heap.put_word(this, READY, 1)?;
-            } else {
-                heap.byte_slice_mut(material, 0, 1)?[0] = 1;
+                heap.prepare_payload_writes(&[(this, READY * 2, 2), (material, 0, bytes)])?;
             }
+            let destination = heap.byte_slice_mut(material, 0, bytes + prefix)?;
+            destination[prefix..].copy_from_slice(&staging[..bytes]);
+            if event == 0 { heap.put_word(this, READY, 1)?; }
+            else { destination[0] = 1; }
         }
         (ClassId::AESKey, MethodId::getKey)
         | (ClassId::DESKey, MethodId::getKey)
