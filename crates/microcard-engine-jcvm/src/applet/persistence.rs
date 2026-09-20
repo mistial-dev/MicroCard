@@ -24,6 +24,11 @@ impl<'a> PersistentView<'a> {
 
     pub fn metadata(self) -> (Reference, &'a [u8]) { (self.instance, self.statics) }
 
+    /// None means this view has no live write tracker and requires a full snapshot.
+    pub fn pending_writes(self) -> Option<heap::PendingWrites> {
+        self.projection.map(|heap| heap.pending_writes().for_committed_heap(self.heap_bytes()))
+    }
+
     /// Copy a sanitized window without allocating a complete heap projection.
     pub fn save_range(self, at: usize, output: &mut [u8]) -> Result<()> {
         let result = (|| {

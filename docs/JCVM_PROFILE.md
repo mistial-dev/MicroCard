@@ -454,7 +454,10 @@ all simulator sessions in the workload; they are not a single-card lifetime esti
 `PersistentView.save_range` now copies a bounded window of the committed heap,
 projects overlapping undo records, and clears transient payloads, PIN validation,
 and runtime exception reasons. Full snapshots use the same sanitization path.
-Invalid ranges clear the output and fail. This enables bounded record staging;
+Invalid ranges clear the output and fail. A fixed-size tracker merges heap and static
+writes into conservative intervals, clips uncommitted allocation tails, and requests
+a full snapshot for transaction commits or unrepresentable ranges. Checkpoint
+acknowledgement clears the tracker. This enables bounded record staging;
 it does not yet publish ordinary writes or change the snapshot journal format.
 
 Closing this gap requires bounded authenticated write records for heap and static
