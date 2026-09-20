@@ -14,6 +14,7 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
             return crypto_exception(heap, context, 1).map(Some);
         }
         if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2).map(Some); }
+        heap.prepare_payload_writes(&[(this, MATERIAL * 2, (READY + 1 - MATERIAL) * 2)])?;
         heap.put_word(this, MATERIAL, key)?;
         heap.put_word(this, READY, 1)?;
         return Ok(Some(Native::Returned));
@@ -80,10 +81,21 @@ mod tests {
         let mut tags = [0; 8];
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
         let mut host = Provider { fail: false, calls: 0 };
+        let before = heap.image().to_vec();
+        heap.begin_transaction(8).unwrap();
+        frame.push_reference(agreement).unwrap();
+        frame.push_reference(key).unwrap();
+        assert!(matches!(call(MethodId::init, &mut heap, &mut host, &mut frame, 1, &mut 100),
+            Err(Error::TransactionFull)));
+        heap.commit_transaction().unwrap();
+        assert_eq!(heap.image(), before, "failed init must not retain a partial key binding");
+        heap.begin_transaction(10).unwrap();
         frame.push_reference(agreement).unwrap();
         frame.push_reference(key).unwrap();
         assert!(matches!(call(MethodId::init, &mut heap, &mut host, &mut frame, 1, &mut 100),
             Ok(Some(Native::Returned))));
+        assert_eq!(heap.transaction_remaining(), Some(0));
+        heap.commit_transaction().unwrap();
         for case in 0..4 {
             heap.byte_slice_mut(array, 0, 65).unwrap().fill(4);
             host.fail = case == 0;

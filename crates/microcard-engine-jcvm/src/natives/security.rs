@@ -493,6 +493,8 @@ pub fn call(
             }
             if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2); }
             let pending = heap.get_word(this, PENDING)?;
+            heap.byte_slice(pending, 0, if cbc { 32 } else { 16 })?;
+            heap.prepare_payload_writes(&[(this, MATERIAL * 2, (COUNTER + 1 - MATERIAL) * 2)])?;
             heap.byte_slice_mut(pending, 0, 16)?.fill(0);
             if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&iv[..]); }
             heap.put_word(this, MATERIAL, key)?;

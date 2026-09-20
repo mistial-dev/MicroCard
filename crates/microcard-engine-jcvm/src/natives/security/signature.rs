@@ -24,11 +24,16 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
             return crypto_exception(heap, context, 1).map(Some);
         }
         if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2).map(Some); }
-        let state = match heap.get_word(this, PENDING)? {
-            NULL => heap.new_transient_array(heap::KIND_BYTE, SHA256_STATE_BYTES as u16,
-                context, heap::CLEAR_ON_RESET)?,
-            state => state,
-        };
+        let state = heap.get_word(this, PENDING)?;
+        if state == NULL {
+            heap.check_allocations(&[(heap::KIND_BYTE, SHA256_STATE_BYTES as u16)])?;
+        } else { heap.byte_slice(state, 0, SHA256_STATE_BYTES)?; }
+        // Admit metadata before allocating or resetting the current digest state.
+        heap.prepare_payload_writes(&[(this, MATERIAL * 2, (PENDING + 1 - MATERIAL) * 2)])?;
+        let state = if state == NULL {
+            heap.new_transient_array(heap::KIND_BYTE, SHA256_STATE_BYTES as u16,
+                context, heap::CLEAR_ON_RESET)?
+        } else { state };
         heap.byte_slice_mut(state, 0, SHA256_STATE_BYTES)?.fill(0);
         heap.put_word(this, PENDING, state)?;
         heap.put_word(this, MATERIAL, key)?;
@@ -148,11 +153,14 @@ mod tests {
         let mut tags = [0; 8];
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
         let mut host = Provider { fail: false };
+        heap.begin_transaction(14).unwrap();
         frame.push_reference(signer).unwrap();
         frame.push_reference(key).unwrap();
         frame.push_short(1).unwrap();
         assert!(matches!(call(MethodId::init, signature, &mut heap, &mut host, &mut frame, 1, &mut 100),
             Ok(Some(Native::Returned))));
+        assert_eq!(heap.transaction_remaining(), Some(0));
+        heap.commit_transaction().unwrap();
         let pending = heap.get_word(signer, PENDING).unwrap();
         heap.byte_slice_mut(array, 0, 2).unwrap().copy_from_slice(&[1, 2]);
         frame.push_reference(signer).unwrap();
@@ -162,6 +170,15 @@ mod tests {
         assert!(matches!(call(MethodId::update, signature, &mut heap, &mut host, &mut frame, 1, &mut 100),
             Ok(Some(Native::Returned))));
         assert_eq!(heap.array_get(pending, 0), Ok(3));
+        let before = heap.image().to_vec();
+        heap.begin_transaction(8).unwrap();
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(key).unwrap();
+        frame.push_short(1).unwrap();
+        assert!(matches!(call(MethodId::init, signature, &mut heap, &mut host, &mut frame, 1, &mut 100),
+            Err(Error::TransactionFull)));
+        heap.commit_transaction().unwrap();
+        assert_eq!(heap.image(), before, "failed init must preserve the accumulated digest");
         for case in 0..4 {
             host.fail = case == 0;
             heap.byte_slice_mut(array, 0, 96).unwrap().fill(0xaa);

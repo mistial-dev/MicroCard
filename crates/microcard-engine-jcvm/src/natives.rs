@@ -995,13 +995,25 @@ mod tests {
             heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x19);
             invoke_security(ClassId::Cipher, MethodId::getInstance, &[(false,13),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
             let cipher = frame.pop_reference().unwrap();
+            heap.begin_transaction(12).unwrap();
             invoke_security(ClassId::Cipher, MethodId::init, &[(true,cipher),(true,key),(false,mode),(true,data),(false,0),(false,16)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(heap.transaction_remaining(), Some(0));
+            heap.commit_transaction().unwrap();
             heap.byte_slice_mut(data, 0, 64).unwrap().fill(7);
             for (offset, length, written) in [(0,5,0),(5,27,32)] {
                 invoke_security(ClassId::Cipher, MethodId::update, &[(true,cipher),(true,data),(false,offset),(false,length),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
                 assert_eq!(frame.pop_short().unwrap(), written);
             }
             assert_eq!(host.calls, [([0x19;16],32,mode == 2)]);
+            if mode == 1 {
+                let before = heap.image().to_vec();
+                heap.begin_transaction(8).unwrap();
+                assert!(matches!(invoke_security(ClassId::Cipher, MethodId::init,
+                    &[(true,cipher),(true,key),(false,2),(true,data),(false,0),(false,16)],
+                    &mut heap, &mut frame, &mut host), Err(Error::TransactionFull)));
+                heap.commit_transaction().unwrap();
+                assert_eq!(heap.image(), before, "failed init must preserve CBC state and mode");
+            }
             invoke_security(ClassId::Cipher, MethodId::doFinal, &[(true,cipher),(true,data),(false,32),(false,16),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
             assert_eq!(frame.pop_short().unwrap(), 16);
             assert_eq!(host.calls[1], ([if mode == 2 { 0x31 } else { 7 };16],16,mode == 2));
