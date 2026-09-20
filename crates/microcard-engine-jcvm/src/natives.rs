@@ -254,6 +254,7 @@ pub fn call_with_budget(
                 context,
                 jcre,
                 budget,
+                statics,
             )?;
             if let Native::Unimplemented = handled {
                 #[cfg(feature = "diagnostics")]
@@ -448,7 +449,7 @@ fn jcsystem(
                 if !jcre.installing {
                     let instance = jcre.instance.ok_or(Error::Missing)?;
                     host.checkpoint(crate::applet::PersistentView {
-                        heap: heap.image(), statics, instance, buffer: jcre.buffer, context,
+                        heap: heap.image(), statics, instance, buffer: jcre.buffer, context, projection: None,
                     })?;
                 }
                 heap.commit_transaction()?;
@@ -654,9 +655,32 @@ mod tests {
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
         invoke_security(ClassId::OwnerPIN, MethodId::update,
             &[(true, pin), (true, replacement), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
-        invoke_security(ClassId::OwnerPIN, MethodId::check,
-            &[(true, pin), (true, original), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+        struct PinCheckpoint { saved: alloc::vec::Vec<u8>, fail: bool }
+        impl crate::host::Host for PinCheckpoint {
+            fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>) -> Result<()> {
+                if self.fail { return Err(Error::Storage); }
+                self.saved.resize(state.heap_bytes(), 0);
+                state.save_into(&mut self.saved)?;
+                Ok(())
+            }
+        }
+        let mut checkpoint = PinCheckpoint { saved: vec![], fail: false };
+        jcre.instance = Some(pin);
+        jcre.buffer = destination;
+        for value in [(pin, true), (original, true), (0, false), (4, false)] {
+            frame.push_raw(value).unwrap();
+        }
+        let signature = framework(ClassId::OwnerPIN, MethodId::check, false).method.signature;
+        security::call(ClassId::OwnerPIN, MethodId::check, signature, &mut heap,
+            &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]).unwrap();
         assert_eq!(frame.pop_short().unwrap(), 0);
+        let saved_length = checkpoint.saved.len();
+        let saved = Heap::resume(&mut checkpoint.saved, saved_length).unwrap();
+        let saved_material = saved.get_word(pin, 2).unwrap();
+        assert_eq!(saved.byte_slice(saved_material, 0, 4).unwrap(), b"1234",
+            "PIN checkpoint must not publish the conditional PIN update");
+        assert_eq!(saved.get_word(pin, 4), Ok(2));
+        assert_eq!(saved.get_word(pin, 3), Ok(0));
         // Save a conditional image first, then overwrite it through the non-atomic API.
         heap.byte_slice_mut(destination, 0, 4).unwrap().fill(7);
         for (reference, value) in [(true, replacement), (false, 0), (true, destination), (false, 0), (false, 4)] {
@@ -681,6 +705,14 @@ mod tests {
         let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
             else { panic!("commit without begin accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
+        checkpoint.fail = true;
+        for value in [(pin, true), (original, true), (0, false), (4, false)] {
+            frame.push_raw(value).unwrap();
+        }
+        assert!(matches!(security::call(ClassId::OwnerPIN, MethodId::check, signature, &mut heap,
+            &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]), Err(Error::Storage)));
+        assert_eq!(heap.get_word(pin, 4), Ok(2), "failure must stop before a matching PIN resets retries");
+        assert_eq!(heap.get_word(pin, 3), Ok(0));
     }
 
     #[test]
@@ -740,7 +772,7 @@ mod tests {
     fn symmetric_keys_clear_material_and_initialization_with_their_lifetime() {
         let signature = framework(ClassId::KeyBuilder, MethodId::buildKey, true).method.signature;
         let invoke = |class, method, heap: &mut Heap, frame: &mut Frame| {
-            security::call(class, method, signature, heap, &mut crate::host::NoHost, frame, 1, &mut idle(), &mut { u32::MAX }).unwrap()
+            security::call(class, method, signature, heap, &mut crate::host::NoHost, frame, 1, &mut idle(), &mut { u32::MAX }, &[]).unwrap()
         };
         for (class, first) in [(ClassId::DESKey, 1), (ClassId::AESKey, 13), (ClassId::HMACKey, 19)] {
             for lifetime in 0..3 {
@@ -808,7 +840,7 @@ mod tests {
                 target.class.methods.iter().find(|entry| entry.id == method && entry.signature.init_vector() == (args.len() == 6)).unwrap().signature
             } else { target.method.signature };
             security::call(class, method, signature,
-                heap, host, frame, 1, &mut idle(), &mut { u32::MAX })
+                heap, host, frame, 1, &mut Jcre { installing: true, ..idle() }, &mut { u32::MAX }, &[])
         }
     #[test]
     fn aes_cipher_streams_overlapping_buffers_and_preserves_output_on_failure() {
@@ -962,7 +994,7 @@ mod tests {
             frame.push_short(offset).unwrap();
             let actual = security::call(ClassId::MessageDigest, MethodId::doFinal,
                 framework(ClassId::MessageDigest, MethodId::doFinal, false).method.signature,
-                &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut { u32::MAX });
+                &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut { u32::MAX }, &[]);
             assert_eq!(actual.is_ok(), succeeds);
             assert_eq!(host.calls, calls);
             assert_eq!(heap.byte_slice(array, 0, 32).unwrap(), &[if succeeds { 0x99 } else { 0x42 }; 32]);
@@ -1000,7 +1032,7 @@ mod tests {
             let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
             frame.push_short(algorithm).unwrap();
             if class != ClassId::RandomData { frame.push_short(i16::from(external)).unwrap(); }
-            let result = security::call(class, MethodId::getInstance, framework(class, MethodId::getInstance, true).method.signature, &mut heap, &mut Capabilities, &mut frame, 1, &mut idle(), &mut { u32::MAX }).unwrap();
+            let result = security::call(class, MethodId::getInstance, framework(class, MethodId::getInstance, true).method.signature, &mut heap, &mut Capabilities, &mut frame, 1, &mut idle(), &mut { u32::MAX }, &[]).unwrap();
             if supported {
                 assert!(matches!(result, Native::Returned));
                 let instance = frame.pop_reference().unwrap();

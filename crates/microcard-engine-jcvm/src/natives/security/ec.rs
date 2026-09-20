@@ -183,7 +183,7 @@ mod tests {
             frame.push_short(size).unwrap();
             frame.push_short(encrypted).unwrap();
             let result = super::super::call(ClassId::KeyBuilder, MethodId::buildKey, signature,
-                &mut heap, &mut host, &mut frame, 1, &mut Jcre::new(0, 0), &mut { u32::MAX }).unwrap();
+                &mut heap, &mut host, &mut frame, 1, &mut Jcre::new(0, 0), &mut { u32::MAX }, &[]).unwrap();
             if accepted {
                 assert!(matches!(result, Native::Returned));
                 let key = frame.pop_reference().unwrap();

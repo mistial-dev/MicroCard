@@ -357,9 +357,17 @@ a borrowed view into its existing staging buffer, clearing volatile contents the
 Host tests cover OpenFIPS201 object activation followed by cancellation and a failed
 checkpoint, including reopening the journal and reading the object.
 
-**Durability is still incomplete:** unconditional PIN retry updates and persistent
-writes outside explicit transactions still rely on successful APDU completion.
-Connect these boundaries to storage, finish native-API transaction auditing, and
+PIN checks checkpoint their retry decrement before comparison and checkpoint a
+successful counter reset before returning. Reset/unblock also checkpoint their
+counter changes. During an active transaction these snapshots restore conditional
+heap/static before-images in staging and exclude new allocations, preserving the
+live transaction. PIN validation and transient buffers remain absent from snapshots.
+Checkpoint failure stops execution; host cancellation tests confirm a consumed attempt
+survives recovery. Installation still publishes only its completed state.
+
+**Durability is still incomplete:** other persistent writes outside explicit
+transactions still rely on successful APDU completion. Connect these boundaries
+to storage, finish native-API transaction auditing, and
 test interrupted provisioning before
 claiming Java Card transaction guarantees. A passing simulator workflow does not
 establish those guarantees or physical execution.

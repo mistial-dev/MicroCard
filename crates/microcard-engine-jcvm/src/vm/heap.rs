@@ -105,6 +105,22 @@ impl<'a> Heap<'a> {
 
     pub fn allocations_aborted(&self) -> bool { self.aborted_allocations }
 
+    pub(crate) fn committed_bytes(&self) -> usize {
+        self.transaction.as_ref().map_or(self.next, |(start, _)| *start)
+    }
+
+    pub(crate) fn project_heap(&self, output: &mut [u8]) -> Result<()> {
+        if output.len() != self.committed_bytes() { output.fill(0); return Err(Error::Bounds); }
+        output.copy_from_slice(&self.bytes[..output.len()]);
+        if let Some((_, undo)) = &self.transaction { undo.project(output, false)?; }
+        Ok(())
+    }
+
+    pub(crate) fn project_statics(&self, output: &mut [u8]) -> Result<()> {
+        if let Some((_, undo)) = &self.transaction { undo.project(output, true)?; }
+        Ok(())
+    }
+
     /// Project committed state into caller-owned staging without ending the live
     /// transaction. The returned length excludes allocations made since begin.
     /// Callers must sanitize transient contents before persisting this projection.
@@ -114,15 +130,12 @@ impl<'a> Heap<'a> {
             static_output.fill(0);
             return Err(Error::Bounds);
         }
-        heap_output.copy_from_slice(self.image());
+        let used = self.committed_bytes();
+        self.project_heap(&mut heap_output[..used])?;
+        heap_output[used..].fill(0);
         static_output.copy_from_slice(statics);
-        if let Some((start, undo)) = &self.transaction {
-            undo.restore(heap_output, static_output);
-            heap_output[*start..].fill(0);
-            Ok(*start)
-        } else {
-            Ok(self.next)
-        }
+        self.project_statics(static_output)?;
+        Ok(used)
     }
 
     pub fn commit_transaction(&mut self) -> Result<()> {

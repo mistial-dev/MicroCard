@@ -72,6 +72,23 @@ impl Undo {
         }
     }
 
+    pub(super) fn project(&self, output: &mut [u8], statics: bool) -> Result<()> {
+        let mut cursor = self.records.len();
+        while cursor != 0 {
+            let (start, offset, length) = self.entry(cursor);
+            if (offset >> 16 != 0) == statics {
+                let offset = offset & 0xffff;
+                // A heap projection excludes objects allocated after begin.
+                if statics || offset < output.len() {
+                    output.get_mut(offset..offset + length).ok_or(Error::Bounds)?
+                        .copy_from_slice(&self.records[start..start + length]);
+                }
+            }
+            cursor = start;
+        }
+        Ok(())
+    }
+
     fn entry(&self, end: usize) -> (usize, usize, usize) {
         let offset = u32::from_be_bytes(self.records[end - 6..end - 2].try_into().unwrap()) as usize;
         let length = u16::from_be_bytes([self.records[end - 2], self.records[end - 1]]) as usize;

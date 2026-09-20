@@ -17,17 +17,19 @@ pub struct PersistentView<'a> {
     pub(crate) instance: Reference,
     pub(crate) buffer: Reference,
     pub(crate) context: heap::Context,
+    pub(crate) projection: Option<&'a Heap<'a>>,
 }
 
 impl<'a> PersistentView<'a> {
-    pub fn heap_bytes(self) -> usize { self.heap.len() }
+    pub fn heap_bytes(self) -> usize { self.projection.map_or(self.heap.len(), Heap::committed_bytes) }
 
     pub fn metadata(self) -> (Reference, &'a [u8]) { (self.instance, self.statics) }
 
     pub fn save_into<'b>(self, output: &'b mut [u8]) -> Result<PersistentState<'b>> where 'a: 'b {
         let result = (|| {
-            if output.len() != self.heap.len() { return Err(Error::Bounds); }
-            output.copy_from_slice(self.heap);
+            if output.len() != self.heap_bytes() { return Err(Error::Bounds); }
+            if let Some(heap) = self.projection { heap.project_heap(output)?; }
+            else { output.copy_from_slice(self.heap); }
             let mut heap = Heap::resume(output, output.len())?;
             heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
             let length = heap.info(self.buffer)?.length as usize;
@@ -117,7 +119,7 @@ impl Card {
     pub fn persistent_view(&self) -> Result<PersistentView<'_>> {
         Ok(PersistentView {
             heap: &self.heap[..self.heap_used], statics: &self.statics,
-            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer, context: self.context,
+            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer, context: self.context, projection: None,
         })
     }
 

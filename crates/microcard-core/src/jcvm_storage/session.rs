@@ -407,15 +407,15 @@ mod tests {
         assert_eq!(session.installed(), Ok(true));
         session.store.journal.flash_mut().fail_after = None;
 
-        let mut polls = 0;
+        let encryptions = provider.encryptions.clone();
+        let checkpoint_count = encryptions.get();
         assert_eq!(
             session.process(&wrong_pin, false, &mut provider, &mut || {
-                polls += 1;
-                polls == 100
+                encryptions.get() > checkpoint_count
             }),
             Err(Error::Cancelled)
         );
-        assert_eq!(polls, 100);
+        assert_eq!(encryptions.get(), checkpoint_count + 1);
 
         // Recovery failure leaves no callable applet, even after the provider recovers.
         provider.fail_recovery = true;
@@ -443,7 +443,7 @@ mod tests {
                 .process(&wrong_pin, false, &mut provider, &mut || false)
                 .unwrap()
                 .sw
-                + 1,
+                + 2,
             before
         );
     }
