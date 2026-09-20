@@ -1543,6 +1543,15 @@ impl StagingNvm {
     }
 }
 impl StagingFlash for StagingNvm {
+    fn mapped(&self, offset: usize, length: usize) -> Result<Option<&[u8]>> {
+        if offset.checked_add(length).is_none_or(|end| end > Self::BANK_BYTES) {
+            return Err(Error::Bounds);
+        }
+        let base = self.bank_base()?;
+        // This bank is exclusively owned by staging. Mutations require &mut self,
+        // and registry/heap writes use disjoint flash regions.
+        Ok(Some(unsafe { core::slice::from_raw_parts((base + offset) as *const u8, length) }))
+    }
     fn capacity(&self) -> usize {
         Self::BANK_BYTES
     }

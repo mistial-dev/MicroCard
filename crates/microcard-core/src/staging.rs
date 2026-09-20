@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 pub trait PackageStaging {
     /// Durable bytes are addressed by authenticated registry metadata, not upload length.
     fn persistent_capacity(&self) -> usize { 0 }
+    fn mapped_persistent(&self, _offset: usize, _length: usize) -> Result<Option<&[u8]>> { Ok(None) }
     fn read_persistent(&self, _offset: usize, _output: &mut [u8]) -> Result<()> { Err(Error::Unsupported) }
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
@@ -108,6 +109,12 @@ impl<S, const MAX: usize> BoundedFlashStaging<S, MAX> {
 
 impl<S: StagingFlash, const MAX: usize> PackageStaging for BoundedFlashStaging<S, MAX> {
     fn persistent_capacity(&self) -> usize { self.flash.capacity() }
+    fn mapped_persistent(&self, offset: usize, length: usize) -> Result<Option<&[u8]>> {
+        if offset.checked_add(length).is_none_or(|end| end > self.flash.capacity()) {
+            return Err(Error::Bounds);
+        }
+        self.flash.mapped(offset, length)
+    }
     fn read_persistent(&self, offset: usize, output: &mut [u8]) -> Result<()> { self.flash.read(offset, output) }
     fn len(&self) -> usize {
         self.len
@@ -197,6 +204,10 @@ mod tests {
     }
 
     impl StagingFlash for MemoryStaging {
+        fn mapped(&self, offset: usize, length: usize) -> Result<Option<&[u8]>> {
+            Ok(Some(self.bytes.get(offset..offset.checked_add(length).ok_or(Error::Bounds)?)
+                .ok_or(Error::Bounds)?))
+        }
         fn capacity(&self) -> usize {
             self.bytes.len()
         }
@@ -242,6 +253,11 @@ mod tests {
         assert!(staging.matches(1, &[2, 3]).unwrap());
         let bytes = staging.take().unwrap();
         assert_eq!(bytes, [1, 2, 3, 4]);
+        let mapped = staging.mapped_persistent(0, 4).unwrap().unwrap();
+        assert_eq!(mapped, bytes);
+        assert_eq!(mapped.as_ptr(), staging.flash.bytes.as_ptr());
+        assert!(matches!(staging.mapped_persistent(usize::MAX, 1), Err(Error::Bounds)));
+        assert!(matches!(staging.mapped_persistent(31, 2), Err(Error::Bounds)));
         staging.restore(bytes).unwrap();
         assert_eq!(staging.flash.erase_count, 1);
         staging.reset();

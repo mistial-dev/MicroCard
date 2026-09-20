@@ -71,10 +71,16 @@ impl<F: crate::journal::Flash> Store<F> {
             staging.append(&record)?;
             if !staging.matches(0, &record)? { return Err(Error::Authentication); }
             let mut hash = [0; 32]; provider.sha256_into(&record, &mut hash)?;
+            let record_length = record.len();
+            let mapped = staging.mapped_persistent(0, record_length)?;
+            if mapped.is_some_and(|bytes| bytes != record.as_slice()) { return Err(Error::Authentication); }
+            let owned = if mapped.is_some() { drop(record); None } else { Some(record) };
+            let record = mapped.or_else(|| owned.as_deref().map(Vec::as_slice)).ok_or(Error::Storage)?;
+            if record.len() != record_length { return Err(Error::Bounds); }
             let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &identity, &digest)?;
             image.with_bytes(provider, |bytes, provider| {
                 let file = microcard_engine_jcvm::cap::LoadFile::parse(bytes).map_err(|_| Error::Format)?;
-                crate::journal::SeedRecord::authenticate(&record, &key, provider, |snapshot| {
+                crate::journal::SeedRecord::authenticate(record, &key, provider, |snapshot| {
                     crate::jcvm_storage::validate_seed_snapshot(snapshot, &file, sizes, digest, identity)
                 }).map(|_| ())
             })?;
@@ -127,17 +133,23 @@ impl<F: crate::journal::Flash> Store<F> {
         if staging.persistent_capacity() == 0 { return Err(Error::Unsupported); }
         if length > staging.persistent_capacity() { return Err(Error::Bounds); }
         if self.journal.remaining_commits()? == 0 { return Err(Error::Quota); }
-        let mut record = crate::crypto::zeroizing_buffer(length)?;
-        staging.read_persistent(0, &mut record)?;
+        let mapped = staging.mapped_persistent(0, length)?;
+        let owned = if mapped.is_none() {
+            let mut bytes = crate::crypto::zeroizing_buffer(length)?;
+            staging.read_persistent(0, &mut bytes)?;
+            Some(bytes)
+        } else { None };
+        let record = mapped.or_else(|| owned.as_deref().map(Vec::as_slice)).ok_or(Error::Storage)?;
+        if record.len() != length { return Err(Error::Bounds); }
         let mut hash = [0; 32];
-        provider.sha256_into(&record, &mut hash)?;
+        provider.sha256_into(record, &mut hash)?;
         if hash != renewal.record_digest { return Err(Error::Authentication); }
         let load = self.state.instances().find(|instance| instance.aid == renewal.aid).ok_or(Error::Storage)?.load;
         let (image, sizes, digest) = Self::session_image_from(&self.state, load, images, scratch, provider, |_| Ok(()))?;
         let key = crate::jcvm_storage::heap_key(provider, root, renewal.bank, &renewal.new_identity, &digest)?;
         let seed = image.with_bytes(provider, |bytes, provider| {
             let file = microcard_engine_jcvm::cap::LoadFile::parse(bytes).map_err(|_| Error::Format)?;
-            crate::journal::SeedRecord::authenticate(&record, &key, provider, |snapshot| {
+            crate::journal::SeedRecord::authenticate(record, &key, provider, |snapshot| {
                 crate::jcvm_storage::validate_seed_snapshot(snapshot, &file, sizes, digest, renewal.new_identity)
             })
         })?;
@@ -149,7 +161,7 @@ impl<F: crate::journal::Flash> Store<F> {
         // Everything needed for recovery is authenticated before the first erase.
         let mut flash = heaps.prepare(renewal.bank)?;
         seed.install_empty_bank(&mut flash)?;
-        drop(record);
+        drop(owned);
         image.with_bytes(provider, |bytes, provider| {
             crate::jcvm_storage::Store::validate_journal(flash, key, bytes, renewal.new_identity, sizes, provider)
         })?;

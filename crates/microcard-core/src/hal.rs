@@ -81,6 +81,9 @@ pub fn send_response<T: ApduTransport>(
 }
 
 pub trait StagingFlash {
+    /// Immutable memory-mapped bytes. Erase/program must be impossible while borrowed.
+    /// Backends without a stable mapping return None and callers use read instead.
+    fn mapped(&self, _offset: usize, _length: usize) -> Result<Option<&[u8]>> { Ok(None) }
     fn capacity(&self) -> usize;
     fn read(&self, offset: usize, output: &mut [u8]) -> Result<()>;
     fn erase(&mut self) -> Result<()>;

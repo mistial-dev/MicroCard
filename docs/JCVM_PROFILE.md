@@ -701,3 +701,13 @@ replacement snapshot. It copies the unchanged prefixes and applies spans directl
 inside the final CBOR byte strings, avoiding separate heap/static scratch copies.
 The original authenticated snapshot remains intact until the replacement is complete;
 growth starts zeroed and shrinkage excludes the discarded tail.
+
+On nRF52840, renewal borrows its ciphertext directly from the exclusively owned
+staging flash bank. After staging and byte-for-byte verification, the writer drops
+the owned ciphertext before authenticating the mapped copy. Recovery checks the
+record digest and authentication before preparing the destination bank, then copies
+that same immutable ciphertext without re-encryption. The borrow prevents staging
+mutation; heap and registry writes use disjoint regions. This removes one record-sized
+RAM allocation during authentication. File-backed staging retains the buffered path;
+its 20,000-byte capacity workload still peaks at 251,517 requested host bytes.
+This source-level allocation reduction is not a physical device heap measurement.

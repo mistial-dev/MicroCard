@@ -116,6 +116,9 @@ pub(crate) fn signed(version: u32, incarnation: u8, private: u8) -> Vec<u8> {
 
 pub(crate) struct Scratch(pub Vec<u8>);
 impl crate::hal::StagingFlash for Scratch {
+    fn mapped(&self, at: usize, length: usize) -> Result<Option<&[u8]>> {
+        Ok(Some(self.0.get(at..at.checked_add(length).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?))
+    }
     fn capacity(&self) -> usize { self.0.len() }
     fn read(&self, at: usize, out: &mut [u8]) -> Result<()> {
         out.copy_from_slice(self.0.get(at..at.checked_add(out.len()).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?); Ok(())
