@@ -2141,6 +2141,22 @@ mod tests {
             execute_package(&package).unwrap(),
             Outcome::Short(0x6a80u16 as i16)
         );
+
+        // Util.getShort must enter the typed Java handler for either invalid input.
+        package.imports.push((vec![0xa0, 0x00, 0x00, 0x00, 0x62, 0x00, 0x01], 1, 0));
+        for (input, exception_token) in [(vec![op::ACONST_NULL], 7),
+            (vec![op::SCONST_0, op::NEWARRAY, 11], 5)] {
+            package.code = input;
+            package.code.extend([op::SCONST_0, 0x8d, 0, 0, op::SRETURN]);
+            let end = package.code.len() as u16;
+            package.code.extend([op::POP, op::BSPUSH, 7, op::SRETURN]);
+            package.handlers = vec![handler(body, end, body + end, 1, true)];
+            package.constants = vec![
+                [CONSTANT_STATIC_METHODREF, 0x80, 16, 4], // Util.getShort
+                [CONSTANT_CLASSREF, 0x81, exception_token, 0],
+            ];
+            assert_eq!(execute_package(&package).unwrap(), Outcome::Short(7));
+        }
     }
 
     #[test]

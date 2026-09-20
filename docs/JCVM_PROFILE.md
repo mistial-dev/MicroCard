@@ -376,6 +376,14 @@ Transport acceptance also kills the simulator between encrypted certificate-uplo
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
 
+`Util.arrayCompare` validates both complete ranges before comparing, including empty
+requests and ranges whose first byte differs. Utility bounds and null errors throw
+catchable `ArrayIndexOutOfBoundsException` and `NullPointerException` objects, as
+required by the 3.0.5 `Util` contract. Work-budget exhaustion still ends execution.
+Bulk copy, fill and comparison charge one work unit per requested byte before the
+operation. Insufficient work leaves fill/copy destinations unchanged; atomic fills
+participate in rollback and non-atomic fills do not.
+
 `RandomData.generateData` returns no value; `nextBytes` returns the ending offset.
 Both reject empty requests with `CryptoException.ILLEGAL_VALUE` before calling the
 entropy provider, as required by the 3.0.5 API.
@@ -495,9 +503,9 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-current-contact`, clean revision `c44ea59723c1af62250ad541ef5a07fdb2dd0fb9`,
-using the same derived identity): preparation took 14.221 seconds and vectors
-96.526 seconds on the host. Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
+(`work/nist-util-exceptions-contact`, based on `19295c8` with the utility API fixes):
+preparation took 14.371 seconds and vectors 95.135 seconds on the host.
+Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain

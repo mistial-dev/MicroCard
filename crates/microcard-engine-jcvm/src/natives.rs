@@ -207,7 +207,13 @@ pub fn call_with_budget(
             frame.pop_reference()?;
             Ok(Native::Returned)
         }
-        (PackageId::javacard_framework, ClassId::Util, name) => util(name, heap, frame, context, budget),
+        (PackageId::javacard_framework, ClassId::Util, name) => {
+            match util(name, heap, frame, context, budget) {
+                Err(Error::Bounds) => Ok(Native::Threw(new_exception(heap, ClassId::ArrayIndexOutOfBoundsException, context)?)),
+                Err(Error::Null) => Ok(Native::Threw(new_exception(heap, ClassId::NullPointerException, context)?)),
+                result => result,
+            }
+        }
         (PackageId::javacard_framework, ClassId::APDU, name) => {
             apdu(name, heap, frame, jcre, context)
         }
@@ -555,16 +561,19 @@ fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Conte
         }
         MethodId::arrayFill | MethodId::arrayFillNonAtomic => {
             let value = frame.pop_short()?;
-            let length = frame.pop_short()?;
+            let length = index(frame.pop_short()?)?;
             let offset = frame.pop_short()?;
             let array = frame.pop_reference()?;
             heap.check_access(array, context)?;
+            let start = index(offset)?;
+            heap.byte_slice(array, start, length)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             if name == MethodId::arrayFill {
-                heap.byte_slice_mut(array, index(offset)?, index(length)?)?.fill(value as u8);
+                heap.byte_slice_mut(array, start, length)?.fill(value as u8);
             } else {
-                heap.fill_bytes_unconditional(array, index(offset)?, index(length)?, value as u8)?;
+                heap.fill_bytes_unconditional(array, start, length, value as u8)?;
             }
-            frame.push_short(offset.wrapping_add(length))?;
+            frame.push_short(offset.wrapping_add(length as i16))?;
         }
         MethodId::arrayCompare => {
             let length = frame.pop_short()?;
@@ -575,18 +584,15 @@ fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Conte
             heap.check_access(left, context)?;
             heap.check_access(right, context)?;
             let length = index(length)?;
-            // It answers an ordering rather than equality, so this cannot be a constant
-            // time comparison. A caller wanting one compares the answer against zero and
-            // accepts that the card leaks where the first difference is.
-            let mut answer = 0i16;
-            for at in 0..length {
-                let left_byte = heap.byte_slice(left, index(left_offset)? + at, 1)?[0];
-                let right_byte = heap.byte_slice(right, index(right_offset)? + at, 1)?[0];
-                if left_byte != right_byte {
-                    answer = if left_byte < right_byte { -1 } else { 1 };
-                    break;
-                }
-            }
+            // Validate the entire request, even when comparison stops at the first byte.
+            let left = heap.byte_slice(left, index(left_offset)?, length)?;
+            let right = heap.byte_slice(right, index(right_offset)?, length)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
+            let answer = match left.cmp(right) {
+                core::cmp::Ordering::Less => -1,
+                core::cmp::Ordering::Equal => 0,
+                core::cmp::Ordering::Greater => 1,
+            };
             frame.push_short(answer)?;
         }
         _ => return Ok(Native::Unimplemented),
@@ -1442,6 +1448,66 @@ mod tests {
         assert_eq!(run(&mut heap, &mut frame), -1);
         heap.byte_slice_mut(right, 2, 1).unwrap()[0] = 1;
         assert_eq!(run(&mut heap, &mut frame), 1);
+
+        // A first-byte mismatch must not hide an invalid tail or empty range.
+        heap.byte_slice_mut(right, 0, 1).unwrap()[0] = 0;
+        for (source, source_offset, destination, destination_offset, length, expected) in [
+            (left, 0, right, 0, 5, ClassId::ArrayIndexOutOfBoundsException),
+            (left, -1, right, 0, 0, ClassId::ArrayIndexOutOfBoundsException),
+            (left, 0, right, -1, 0, ClassId::ArrayIndexOutOfBoundsException),
+            (left, 5, right, 0, 0, ClassId::ArrayIndexOutOfBoundsException),
+            (left, 0, right, 5, 0, ClassId::ArrayIndexOutOfBoundsException),
+            (left, 0, right, 0, -1, ClassId::ArrayIndexOutOfBoundsException),
+            (0, 0, right, 0, 0, ClassId::NullPointerException),
+            (left, 0, 0, 0, 0, ClassId::NullPointerException),
+        ] {
+            frame.push_reference(source).unwrap();
+            frame.push_short(source_offset).unwrap();
+            frame.push_reference(destination).unwrap();
+            frame.push_short(destination_offset).unwrap();
+            frame.push_short(length).unwrap();
+            let Native::Threw(exception) = call(compare, &mut heap, &mut crate::host::NoHost,
+                &mut frame, 1, &mut idle()).unwrap() else { panic!("invalid comparison accepted"); };
+            assert_eq!(exception, new_exception(&mut heap, expected, 1).unwrap());
+        }
+        for (offset, length, available, expected) in [(4, 0, 0, Ok(0)), (0, 4, 3, Err(Error::Quota)), (0, 4, 4, Ok(1))] {
+            frame.push_reference(left).unwrap();
+            frame.push_short(offset).unwrap();
+            frame.push_reference(right).unwrap();
+            frame.push_short(offset).unwrap();
+            frame.push_short(length).unwrap();
+            let mut budget = available;
+            let result = call_with_budget(compare, &mut heap, &mut crate::host::NoHost,
+                &mut frame, 1, &mut idle(), &mut budget, &mut []).and_then(|_| frame.pop_short());
+            assert_eq!(result, expected);
+            assert_eq!(budget, if expected.is_ok() { available - length as u32 } else { available });
+        }
+
+        for method in [MethodId::arrayFill, MethodId::arrayFillNonAtomic] {
+            heap.byte_slice_mut(left, 0, 4).unwrap().fill(7);
+            heap.begin_transaction(TRANSACTION_CAPACITY).unwrap();
+            for available in [3, 4] {
+                frame.push_reference(left).unwrap();
+                frame.push_short(0).unwrap();
+                frame.push_short(4).unwrap();
+                frame.push_short(9).unwrap();
+                let mut budget = available;
+                let result = call_with_budget(framework(ClassId::Util, method, true), &mut heap,
+                    &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut []);
+                if available == 3 {
+                    assert!(matches!(result, Err(Error::Quota)));
+                    assert_eq!(budget, 3);
+                    assert_eq!(heap.byte_slice(left, 0, 4).unwrap(), [7; 4]);
+                } else {
+                    result.unwrap();
+                    assert_eq!(frame.pop_short().unwrap(), 4);
+                    assert_eq!(budget, 0);
+                }
+            }
+            heap.abort_transaction(&mut []).unwrap();
+            assert_eq!(heap.byte_slice(left, 0, 4).unwrap(),
+                [if method == MethodId::arrayFill { 7 } else { 9 }; 4]);
+        }
     }
 
     #[test]
