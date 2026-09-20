@@ -270,6 +270,11 @@ impl Card {
                         return Err(Error::Format);
                     }
                     if info.length == 6 {
+                        // NEW can be durable before KeyPair's constructor runs. Only
+                        // the exact zero state is unconstructed, never a partial pair.
+                        if class.id == ClassId::KeyPair && payload.iter().all(|byte| *byte == 0) {
+                            return Ok(());
+                        }
                         let word =
                             |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);
                         let material = word(2);

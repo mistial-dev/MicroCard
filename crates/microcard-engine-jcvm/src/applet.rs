@@ -798,6 +798,10 @@ mod tests {
         heap.put_word_unconditional(explicit_exception, natives::REASON_FIELD, 4).unwrap();
         let retained_references = heap.new_array(heap::KIND_REFERENCE, 1, 1).unwrap();
         heap.array_put(retained_references, 0, explicit_exception as i16).unwrap();
+        let pair_class = PACKAGES.iter().flat_map(|package| package.classes)
+            .find(|class| class.id == ClassId::KeyPair).unwrap();
+        // NEW checkpoints before invokespecial runs the constructor.
+        let unconstructed_pair = natives::new_api_object(&mut heap, pair_class, 1).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -842,7 +846,7 @@ mod tests {
         assert_eq!(live.get_word(reserved_exception, natives::REASON_FIELD), Ok(2));
         assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
         assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
-        for case in 0..25 {
+        for case in 0..26 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -872,6 +876,7 @@ mod tests {
                     instance
                 }
                 23 => { invalid[pin as usize + heap::HEADER + 3] = 65; instance } // Exceeds configured PIN capacity.
+                24 => { invalid[unconstructed_pair as usize + heap::HEADER + 1] = 5; instance }
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
