@@ -37,6 +37,38 @@ impl AsMut<[u8; 16]> for JournalKey {
 pub const OVERHEAD: usize = 43;
 const HEADER_BYTES: usize = 24;
 
+struct RecordHeader {
+    generation: u64,
+    attempt: u64,
+    payload_length: u32,
+}
+
+impl RecordHeader {
+    fn encode(&self) -> [u8; HEADER_BYTES] {
+        let mut bytes = [0; HEADER_BYTES];
+        bytes[..4].copy_from_slice(b"MJ03");
+        bytes[4..12].copy_from_slice(&self.generation.to_le_bytes());
+        bytes[12..20].copy_from_slice(&self.attempt.to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.payload_length.to_le_bytes());
+        bytes
+    }
+
+    fn decode(bytes: &[u8; HEADER_BYTES], capacity: usize, reserved_nonce: u64) -> Result<Self> {
+        if matches!(&bytes[..4], b"MJ01" | b"MJ02") { return Err(Error::IncompatibleState); }
+        if &bytes[..4] != b"MJ03" { return Err(Error::Storage); }
+        let header = Self {
+            generation: u64::from_le_bytes(bytes[4..12].try_into().unwrap()),
+            attempt: u64::from_le_bytes(bytes[12..20].try_into().unwrap()),
+            payload_length: u32::from_le_bytes(bytes[20..24].try_into().unwrap()),
+        };
+        if header.attempt == 0 || header.attempt > reserved_nonce
+            || header.payload_length < 16 || header.payload_length as usize > capacity {
+            return Err(Error::Storage);
+        }
+        Ok(header)
+    }
+}
+
 pub trait Flash {
     /// Stable number of independently erasable snapshot slots.
     fn slot_count(&self) -> usize {
@@ -124,18 +156,17 @@ impl<F: Flash> Journal<F> {
             }
             let mut header = [0; HEADER_BYTES];
             flash.read(slot, 0, &mut header)?;
-            if matches!(&header[..4], b"MJ01" | b"MJ02") { return Err(Error::IncompatibleState); }
-            if &header[..4] != b"MJ03" {
-                saw_corrupt_committed = true;
-                continue;
-            }
-            let generation = u64::from_le_bytes(header[4..12].try_into().unwrap());
-            let attempt = u64::from_le_bytes(header[12..20].try_into().unwrap());
-            let n = u32::from_le_bytes(header[20..24].try_into().unwrap()) as usize;
-            if attempt == 0 || attempt > reserved_nonce || n < 16 || n > size - HEADER_BYTES - 3 {
-                saw_corrupt_committed = true;
-                continue;
-            }
+            let decoded = match RecordHeader::decode(&header, size - HEADER_BYTES - 3, reserved_nonce) {
+                Ok(decoded) => decoded,
+                Err(Error::IncompatibleState) => return Err(Error::IncompatibleState),
+                Err(_) => {
+                    saw_corrupt_committed = true;
+                    continue;
+                }
+            };
+            let generation = decoded.generation;
+            let attempt = decoded.attempt;
+            let n = decoded.payload_length as usize;
             let mut plaintext = crate::crypto::zeroizing_buffer(n)?;
             flash.read(slot, header.len(), &mut plaintext)?;
             let nonce = nonce(attempt);
@@ -254,10 +285,9 @@ impl<F: Flash> Journal<F> {
         let mut record = data;
         // Burn a distinct attempt number before any encryption, even if later I/O fails.
         let attempt = self.flash.reserve_nonce()?;
-        record[..4].copy_from_slice(b"MJ03");
-        record[4..12].copy_from_slice(&generation.to_le_bytes());
-        record[12..20].copy_from_slice(&attempt.to_le_bytes());
-        record[20..24].copy_from_slice(&encoded_payload_length.to_le_bytes());
+        record[..HEADER_BYTES].copy_from_slice(&RecordHeader {
+            generation, attempt, payload_length: encoded_payload_length,
+        }.encode());
         let (aad, ciphertext) = record.split_at_mut(HEADER_BYTES);
         let written =
             match provider.aes_ccm_encrypt_in_place(
