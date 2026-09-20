@@ -35,6 +35,34 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         })
     }
 
+    /// Keep the live applet, including selection and transient state, while replacing
+    /// its journal after registry renewal. A failed handoff forbids stale execution.
+    pub fn adopt_renewed_store(&mut self, renewed: Self) -> Result<()> {
+        self.installed()?;
+        self.recovery_required = true;
+        if !renewed.installed()? || self.store.installation == renewed.store.installation
+            || self.store.image != renewed.store.image || self.store.maximum != renewed.store.maximum {
+            return Err(Error::KeyMismatch);
+        }
+        let live = self.card.as_ref().ok_or(Error::Missing)?.persistent_view().map_err(engine_error)?;
+        let restored = renewed.card.as_ref().ok_or(Error::Missing)?.persistent_view().map_err(engine_error)?;
+        if live.metadata() != restored.metadata() || live.heap_bytes() != restored.heap_bytes() {
+            return Err(Error::KeyMismatch);
+        }
+        // Compare sanitized state in bounded windows, without cloning either heap.
+        let mut left = zeroize::Zeroizing::new([0u8; 64]);
+        let mut right = zeroize::Zeroizing::new([0u8; 64]);
+        for start in (0..live.heap_bytes()).step_by(left.len()) {
+            let length = left.len().min(live.heap_bytes() - start);
+            live.save_range(start, &mut left[..length]).map_err(engine_error)?;
+            restored.save_range(start, &mut right[..length]).map_err(engine_error)?;
+            if left[..length] != right[..length] { return Err(Error::KeyMismatch); }
+        }
+        self.store = renewed.store;
+        self.recovery_required = false;
+        Ok(())
+    }
+
     pub(crate) fn renewal_snapshot(&self, old_identity: [u8; 16], image: [u8; 32],
             new_identity: [u8; 16]) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         self.installed()?;
@@ -458,6 +486,22 @@ mod tests {
             .sw;
         assert_eq!(before & 0xfff0, 0x63c0);
 
+        // Handoff changes only persistence ownership, never the live engine object.
+        let live_card = session.card.as_ref().unwrap() as *const Card;
+        let snapshot = session.renewal_snapshot([4; 16], session.store.image, [5; 16]).unwrap();
+        let record = crate::journal::SeedRecord::seal_new_epoch(snapshot,
+            JournalKey::from([6; 16]), &mut provider).unwrap();
+        let seed = crate::journal::SeedRecord::authenticate(&record, &JournalKey::from([6; 16]),
+            &mut SoftwareCrypto, |_| Ok(())).unwrap();
+        let mut bank = MemoryFlash::new(65536);
+        seed.install_empty_bank(&mut bank).unwrap();
+        let renewed = Session::open(bank, [6; 16], session.image.clone(), [5; 16],
+            session.sizes, &mut provider).unwrap();
+        session.adopt_renewed_store(renewed).unwrap();
+        assert_eq!(session.card.as_ref().unwrap() as *const Card, live_card);
+        assert_eq!(session.selected(), Ok(true));
+        assert_eq!(session.store.installation, [5; 16]);
+
         // A rejected commit must not retain the PIN decrement in live memory.
         session.store.journal.flash_mut().fail_after = Some(0);
         assert_eq!(
@@ -506,5 +550,9 @@ mod tests {
                 + 2,
             before
         );
+        let unchanged = Session::open(session.store.journal.flash_mut().clone(), [6; 16],
+            session.image.clone(), [5; 16], session.sizes, &mut provider).unwrap();
+        assert_eq!(session.adopt_renewed_store(unchanged), Err(Error::KeyMismatch));
+        assert_eq!(session.process(&wrong_pin, false, &mut provider, &mut || false), Err(Error::Storage));
     }
 }

@@ -81,8 +81,11 @@ final publication; the recovery provider refuses heap-key encryption. The writer
 now stages a live committed heap under a fresh reserved identity, verifies the
 written record, and publishes pending ownership. It leaves the old bank and live
 selection untouched. Encryption failure consumes its identity; an uncertain
-publication retains staging until registry recovery decides ownership. Automatic
-triggering and switching the live session to the new journal remain incomplete.
+publication retains staging until registry recovery decides ownership. The session handoff primitive compares the authenticated restored state with the
+live committed state in bounded windows, then replaces only the journal. It retains
+the existing applet object, selection and transient state; mismatch prevents stale
+execution. Automatic triggering and wiring this handoff into registry renewal remain
+incomplete.
 `SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,
