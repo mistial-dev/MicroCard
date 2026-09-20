@@ -163,13 +163,14 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The MJ04 checkpoint, based on `3894f97` with append checkpoints, took 51.084 seconds
-with two workers and incremental rebuilding (`work/checkpoint-mj04.json`). Host,
-wallet, recovery, generated-artifact, and fuzz-build stages passed; workspace Clippy
-also passed. All seven firmware profiles linked; the checkpoint overall fails on
-the seven unchanged flash optimization ceilings. This is not a cold-build measurement. Historical
-comparisons remain in Git; reproducible cold/warm final-tree measurements are still
-required.
+reuses outputs with bounded workers and isolated logs/state. The renewal checkpoint
+at clean revision `8601fde` took 57.646 seconds with two workers and incremental
+rebuilding (`work/checkpoint-renewal.json`). Host, Java wallet, recovery, generated
+artifacts, and fuzz-target builds passed; workspace Clippy also passed. The workspace
+run includes the JCVM registry, transport lifecycle, and session recovery tests.
+All seven firmware profiles linked with engine/provider isolation checks. The only
+failing stage was the seven unchanged flash optimization ceilings. This is not a
+cold-build measurement; final-tree cold/warm measurements remain required.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.
