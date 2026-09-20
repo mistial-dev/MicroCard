@@ -711,3 +711,11 @@ mutation; heap and registry writes use disjoint regions. This removes one record
 RAM allocation during authentication. File-backed staging retains the buffered path;
 its 20,000-byte capacity workload still peaks at 251,517 requested host bytes.
 This source-level allocation reduction is not a physical device heap measurement.
+
+At the idle counter-renewal boundary, the live applet wipes and releases execution
+words and reference tags. Heap objects, statics, selection, and reset-scoped arrays
+remain owned by the same applet. After journal handoff, the runtime restores zeroed
+execution buffers before permitting another callback. Any maintenance or allocation
+failure follows the existing path that discards the session rather than executing
+with incomplete scratch storage. The 8,192-word profile releases 17,408 requested
+bytes during renewal; supported frame limits are unchanged.

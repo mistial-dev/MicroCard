@@ -74,6 +74,17 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.store.journal.remaining_commits()
     }
 
+    pub(crate) fn release_execution_frames(&mut self) -> Result<()> {
+        self.installed()?;
+        self.card.as_mut().ok_or(Error::Missing)?.release_execution_frames();
+        Ok(())
+    }
+
+    pub(crate) fn restore_execution_frames(&mut self) -> Result<()> {
+        self.installed()?;
+        self.card.as_mut().ok_or(Error::Missing)?.restore_execution_frames().map_err(engine_error)
+    }
+
     pub(crate) fn renewal_snapshot(&self, old_identity: [u8; 16], image: [u8; 32],
             new_identity: [u8; 16]) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         self.installed()?;

@@ -112,6 +112,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         // promise that an arbitrary applet command fits the remaining counter space.
         if session.remaining_commits()? > 1024 { return Ok(()); }
         if self.upload.is_some() { return Err(Error::Busy); }
+        session.release_execution_frames()?;
         self.storage.registry.begin_renewal(aid, session, &self.storage.images,
             &self.storage.heaps, &self.storage.heap_key, &mut self.staging,
             &mut self.scratch, &mut self.provider)?;
@@ -122,6 +123,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         self.storage.registry.handoff_renewed_session(aid, session, &self.storage.images,
             &mut self.storage.heaps, &self.storage.heap_key, &mut self.scratch, &mut self.provider)?;
         self.staging.reset();
+        session.restore_execution_frames()?;
         if cancel() { return Err(Error::Cancelled); }
         Ok(())
     }

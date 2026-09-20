@@ -92,6 +92,25 @@ pub struct Installation<'a> {
 }
 
 impl Card {
+    /// Release callback scratch only at an idle maintenance boundary.
+    pub fn release_execution_frames(&mut self) {
+        self.words.zeroize();
+        self.tags.zeroize();
+        self.words = Vec::new();
+        self.tags = Vec::new();
+    }
+
+    /// Recreate zeroed callback scratch before resuming execution.
+    pub fn restore_execution_frames(&mut self) -> Result<()> {
+        if self.words.len() != self.sizes.frame_words {
+            reserve_words(&mut self.words, self.sizes.frame_words)?;
+        }
+        if self.tags.len() != self.sizes.frame_words.div_ceil(8) {
+            reserve(&mut self.tags, self.sizes.frame_words.div_ceil(8))?;
+        }
+        Ok(())
+    }
+
     /// Lay out the memory one applet gets, and build the objects the runtime hands it.
     pub fn new(file: &LoadFile, sizes: Sizes) -> Result<Self> {
         let statics = file.static_fields()?;
@@ -817,6 +836,11 @@ mod tests {
         let instance = saved.instance;
         let saved_statics = saved.statics.to_vec();
         let mut restored = Card::restore(&file, Sizes::default(), saved).unwrap();
+        restored.release_execution_frames();
+        assert_eq!((restored.words.capacity(), restored.tags.capacity()), (0, 0));
+        restored.restore_execution_frames().unwrap();
+        assert!(restored.words.iter().all(|word| *word == 0));
+        assert!(restored.tags.iter().all(|tag| *tag == 0));
         assert!(!restored.selected());
         let recovered = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
         assert_eq!(recovered.lifecycle(), Ok(0x0f));
