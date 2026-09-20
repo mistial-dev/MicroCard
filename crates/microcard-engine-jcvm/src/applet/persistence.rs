@@ -16,7 +16,6 @@ pub struct PersistentView<'a> {
     pub(crate) statics: &'a [u8],
     pub(crate) instance: Reference,
     pub(crate) buffer: Reference,
-    pub(crate) context: heap::Context,
     pub(crate) projection: Option<&'a Heap<'a>>,
 }
 
@@ -25,20 +24,47 @@ impl<'a> PersistentView<'a> {
 
     pub fn metadata(self) -> (Reference, &'a [u8]) { (self.instance, self.statics) }
 
-    pub fn save_into<'b>(self, output: &'b mut [u8]) -> Result<PersistentState<'b>> where 'a: 'b {
+    /// Copy a sanitized window without allocating a complete heap projection.
+    pub fn save_range(self, at: usize, output: &mut [u8]) -> Result<()> {
         let result = (|| {
-            if output.len() != self.heap_bytes() { return Err(Error::Bounds); }
-            if let Some(heap) = self.projection { heap.project_heap(output)?; }
-            else { output.copy_from_slice(self.heap); }
-            let mut heap = Heap::resume(output, output.len())?;
-            heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
-            let length = heap.info(self.buffer)?.length as usize;
-            heap.byte_slice_mut(self.buffer, 0, length)?.fill(0);
-            natives::reset_native_volatile(&mut heap)
+            let total = self.heap_bytes();
+            let end = at.checked_add(output.len()).filter(|end| *end <= total).ok_or(Error::Bounds)?;
+            if total < 2 || !total.is_multiple_of(2) { return Err(Error::Bounds); }
+            if let Some(heap) = self.projection { heap.project_heap_range(at, output)?; }
+            else { output.copy_from_slice(self.heap.get(at..end).ok_or(Error::Bounds)?); }
+            let mut cursor = 2;
+            let mut found_buffer = false;
+            while cursor < total {
+                let reference = u16::try_from(cursor).map_err(|_| Error::Bounds)?;
+                let info = heap::Info::read(self.heap, total, reference)?;
+                let payload = cursor + heap::HEADER;
+                let length = info.length as usize * info.element_size();
+                let clear = if reference == self.buffer {
+                    if info.kind != heap::KIND_BYTE { return Err(Error::Type); }
+                    found_buffer = true;
+                    Some(0..length)
+                } else if info.clear_event != 0 { Some(0..length) }
+                else { natives::native_volatile_range(info)? };
+                if let Some(range) = clear {
+                    let lo = at.max(payload + range.start);
+                    let hi = end.min(payload + range.end);
+                    if lo < hi { output[lo - at..hi - at].fill(0); }
+                }
+                cursor = (payload + length).next_multiple_of(2);
+            }
+            if cursor != total || !found_buffer { return Err(Error::Format); }
+            Ok(())
         })();
-        if let Err(error) = result { output.zeroize(); return Err(error); }
+        if result.is_err() { output.zeroize(); }
+        result
+    }
+
+    pub fn save_into<'b>(self, output: &'b mut [u8]) -> Result<PersistentState<'b>> where 'a: 'b {
+        if output.len() != self.heap_bytes() { output.zeroize(); return Err(Error::Bounds); }
+        self.save_range(0, output)?;
         Ok(PersistentState { heap: output, statics: self.statics, instance: self.instance })
     }
+
 }
 
 /// RAM-only reset-scoped array contents. Bind this to the installation that produced it.
@@ -119,7 +145,7 @@ impl Card {
     pub fn persistent_view(&self) -> Result<PersistentView<'_>> {
         Ok(PersistentView {
             heap: &self.heap[..self.heap_used], statics: &self.statics,
-            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer, context: self.context, projection: None,
+            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer, projection: None,
         })
     }
 

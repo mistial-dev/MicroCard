@@ -79,15 +79,27 @@ impl Undo {
     }
 
     pub(super) fn project(&self, output: &mut [u8], statics: bool) -> Result<()> {
+        self.project_range(output, 0, output.len(), statics)
+    }
+
+    pub(super) fn project_range(&self, output: &mut [u8], at: usize, total: usize,
+            statics: bool) -> Result<()> {
+        let end = at.checked_add(output.len()).filter(|end| *end <= total).ok_or(Error::Bounds)?;
         let mut cursor = self.records.len();
         while cursor != 0 {
             let (start, offset, length) = self.entry(cursor);
             if (offset >> 16 != 0) == statics {
                 let offset = offset & 0xffff;
                 // A heap projection excludes objects allocated after begin.
-                if statics || offset < output.len() {
-                    output.get_mut(offset..offset + length).ok_or(Error::Bounds)?
-                        .copy_from_slice(&self.records[start..start + length]);
+                if statics || offset < total {
+                    let record_end = offset.checked_add(length)
+                        .filter(|end| *end <= total).ok_or(Error::Bounds)?;
+                    let lo = at.max(offset);
+                    let hi = end.min(record_end);
+                    if lo < hi {
+                        output[lo - at..hi - at]
+                            .copy_from_slice(&self.records[start + lo - offset..start + hi - offset]);
+                    }
                 }
             }
             cursor = start;

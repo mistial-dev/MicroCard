@@ -801,6 +801,13 @@ mod tests {
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
+        for width in [1, 3, 17, 127] {
+            let mut windowed = vec![0xa5; saved.heap.len()];
+            for (index, chunk) in windowed.chunks_mut(width).enumerate() {
+                card.persistent_view().unwrap().save_range(index * width, chunk).unwrap();
+            }
+            assert_eq!(windowed, saved.heap);
+        }
         let instance = saved.instance;
         let saved_statics = saved.statics.to_vec();
         let mut restored = Card::restore(&file, Sizes::default(), saved).unwrap();

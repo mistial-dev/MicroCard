@@ -451,6 +451,12 @@ erases (6,897,664 bytes), 426 program calls (1,179,061 bytes), 110 nonce reserva
 and 108 generation advances. The acceptance run passed. Counts aggregate setup and
 all simulator sessions in the workload; they are not a single-card lifetime estimate.
 
+`PersistentView.save_range` now copies a bounded window of the committed heap,
+projects overlapping undo records, and clears transient payloads, PIN validation,
+and runtime exception reasons. Full snapshots use the same sanitization path.
+Invalid ranges clear the output and fail. This enables bounded record staging;
+it does not yet publish ordinary writes or change the snapshot journal format.
+
 Closing this gap requires bounded authenticated write records for heap and static
 changes, ordered before execution proceeds past the persistent operation. Recovery
 must apply committed records to the last snapshot, preserve transaction atomicity,

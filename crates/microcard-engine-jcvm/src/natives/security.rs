@@ -36,23 +36,30 @@ const COUNTER: usize = 4;
 /// Reset-scoped cipher state: count/seen-input flag, fifteen pending bytes, then CBC IV.
 const PENDING: usize = 5;
 
+pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops::Range<usize>>> {
+    if info.kind != heap::KIND_OBJECT { return Ok(None); }
+    let Some(class) = super::api_class(info.class) else { return Ok(None); };
+    if class.id == ClassId::OwnerPIN {
+        if info.length as usize <= READY { return Err(Error::Bounds); }
+        return Ok(Some(READY * 2..READY * 2 + 2));
+    }
+    if info.length == 1 && super::is_exception_class(class) {
+        // Runtime exception reasons reset; explicit six-word exceptions persist.
+        return Ok(Some(0..2));
+    }
+    Ok(None)
+}
+
 pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
     heap.visit_objects(|_, info, payload| {
-        if info.kind != heap::KIND_OBJECT { return Ok(()); }
-        let Some(class) = super::api_class(info.class) else { return Ok(()); };
-        if class.id == ClassId::OwnerPIN {
-            payload.get_mut(READY * 2..READY * 2 + 2).ok_or(Error::Bounds)?.fill(0);
-        } else if info.length == 1 && super::is_exception_class(class) {
-            // Runtime exception reasons reset; explicit six-word exceptions persist.
-            payload.fill(0);
-        }
+        if let Some(range) = native_volatile_range(info)? { payload[range].fill(0); }
         Ok(())
     })
 }
 
 // Persist unconditional PIN changes without publishing conditional heap/static writes.
 pub(crate) fn checkpoint_committed(heap: &mut Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
-        context: heap::Context, statics: &[u8]) -> Result<()> {
+        _context: heap::Context, statics: &[u8]) -> Result<()> {
     if jcre.installing { return Ok(()); }
     let instance = jcre.instance.ok_or(Error::Missing)?;
     let mut projected = Zeroizing::new(alloc::vec::Vec::new());
@@ -64,7 +71,7 @@ pub(crate) fn checkpoint_committed(heap: &mut Heap, host: &mut dyn crate::host::
     } else { statics };
     host.checkpoint(crate::applet::PersistentView {
         heap: heap.image(), statics, instance, buffer: jcre.buffer,
-        context, projection: Some(heap),
+        projection: Some(heap),
     })?;
     heap.mark_checkpointed();
     Ok(())

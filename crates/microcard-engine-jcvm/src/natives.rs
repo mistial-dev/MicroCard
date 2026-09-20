@@ -14,7 +14,7 @@ use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
 mod security;
-pub(crate) use security::checkpoint_committed;
+pub(crate) use security::{checkpoint_committed, native_volatile_range};
 pub(crate) use security::{symmetric_key_clear_event, ec_key_clear_event, ec_key_kind};
 
 /// A class the card provides, encoded so it cannot collide with a class in a package.
@@ -469,7 +469,7 @@ fn jcsystem(
                 if !jcre.installing {
                     let instance = jcre.instance.ok_or(Error::Missing)?;
                     host.checkpoint(crate::applet::PersistentView {
-                        heap: heap.image(), statics, instance, buffer: jcre.buffer, context, projection: None,
+                        heap: heap.image(), statics, instance, buffer: jcre.buffer, projection: None,
                     })?;
                 }
                 heap.commit_transaction()?;

@@ -55,6 +55,31 @@ pub struct Info {
 }
 
 impl Info {
+    pub(crate) fn read(bytes: &[u8], used: usize, reference: Reference) -> Result<Self> {
+        if used > bytes.len() { return Err(Error::Bounds); }
+        let at = reference as usize;
+        if reference == NULL {
+            return Err(Error::Null);
+        }
+        if !at.is_multiple_of(2) || at + HEADER > used {
+            return Err(Error::Bounds);
+        }
+        let info = Info {
+            class: u16::from_be_bytes([bytes[at], bytes[at + 1]]),
+            length: u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]),
+            kind: bytes[at + 4] & KIND_MASK,
+            owner: bytes[at + 5],
+            clear_event: bytes[at + 4] >> 4,
+        };
+        if !matches!(info.kind, KIND_OBJECT | KIND_BOOLEAN..=KIND_REFERENCE)
+            || info.clear_event > CLEAR_ON_DESELECT
+            || (info.kind == KIND_OBJECT && info.clear_event != 0)
+            || (info.is_array() && info.class != 0)
+        { return Err(Error::Format); }
+        if at + HEADER + info.length as usize * info.element_size() > used { return Err(Error::Bounds); }
+        Ok(info)
+    }
+
     pub fn is_array(&self) -> bool {
         self.kind != KIND_OBJECT
     }
@@ -118,9 +143,22 @@ impl<'a> Heap<'a> {
 
     pub(crate) fn project_heap(&self, output: &mut [u8]) -> Result<()> {
         if output.len() != self.committed_bytes() { output.fill(0); return Err(Error::Bounds); }
-        output.copy_from_slice(&self.bytes[..output.len()]);
-        if let Some((_, undo)) = &self.transaction { undo.project(output, false)?; }
-        Ok(())
+        self.project_heap_range(0, output)
+    }
+
+    // Raw committed bytes; persistence must still sanitize volatile native state.
+    pub(crate) fn project_heap_range(&self, at: usize, output: &mut [u8]) -> Result<()> {
+        let result = (|| {
+            let total = self.committed_bytes();
+            let end = at.checked_add(output.len()).filter(|end| *end <= total).ok_or(Error::Bounds)?;
+            output.copy_from_slice(&self.bytes[at..end]);
+            if let Some((_, undo)) = &self.transaction {
+                undo.project_range(output, at, total, false)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() { output.fill(0); }
+        result
     }
 
     pub(crate) fn project_statics(&self, output: &mut [u8]) -> Result<()> {
@@ -292,27 +330,7 @@ impl<'a> Heap<'a> {
     /// A reference that is null, misaligned or outside what has been allocated is refused
     /// here, so nothing downstream has to repeat the check.
     pub fn info(&self, reference: Reference) -> Result<Info> {
-        let at = reference as usize;
-        if reference == NULL {
-            return Err(Error::Null);
-        }
-        if !at.is_multiple_of(2) || at + HEADER > self.next {
-            return Err(Error::Bounds);
-        }
-        let info = Info {
-            class: u16::from_be_bytes([self.bytes[at], self.bytes[at + 1]]),
-            length: u16::from_be_bytes([self.bytes[at + 2], self.bytes[at + 3]]),
-            kind: self.bytes[at + 4] & KIND_MASK,
-            owner: self.bytes[at + 5],
-            clear_event: self.bytes[at + 4] >> 4,
-        };
-        if !matches!(info.kind, KIND_OBJECT | KIND_BOOLEAN..=KIND_REFERENCE)
-            || info.clear_event > CLEAR_ON_DESELECT
-            || (info.kind == KIND_OBJECT && info.clear_event != 0)
-            || (info.is_array() && info.class != 0)
-        { return Err(Error::Format); }
-        if at + HEADER + info.length as usize * info.element_size() > self.next { return Err(Error::Bounds); }
-        Ok(info)
+        Info::read(self.bytes, self.next, reference)
     }
 
     /// Check that `context` may touch this object, JCRE §6.2.
@@ -569,6 +587,18 @@ mod tests {
         let remaining = heap.transaction_remaining();
         assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
         assert_eq!(projected_statics, [4, 5]);
+        // Windows can split words and overlapping before-images without publishing
+        // conditional values. They must agree with the existing full projection.
+        for width in [1, 3, 7, 17] {
+            let mut windowed = vec![0; projected.len()];
+            for (index, chunk) in windowed.chunks_mut(width).enumerate() {
+                heap.project_heap_range(index * width, chunk).unwrap();
+            }
+            assert_eq!(windowed, projected);
+        }
+        let mut invalid = [0xa5; 4];
+        assert_eq!(heap.project_heap_range(usize::MAX, &mut invalid), Err(Error::Bounds));
+        assert_eq!(invalid, [0; 4]);
         assert_eq!(statics, [9, 9]);
         assert_eq!(heap.get_word(object, 1), Ok(8));
         assert_eq!(heap.transaction_remaining(), remaining);
