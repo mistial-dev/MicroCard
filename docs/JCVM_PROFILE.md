@@ -423,40 +423,22 @@ lowest matching installed AID, with exact matches preceding their extensions, an
 passes the original requested AID bytes to the applet. Missing targets retain the
 current selection. Next-occurrence selection remains unsupported.
 
-The 2026-09-20 `card-contact` run with upstream `OpenFIPS201-ECC256.xml` and a
-blank seed reports **63 vectors: 26 passed, 36 failed, 1 skipped**. The configuration
-expects personalized PINs, keys, and objects; this is a diagnostic baseline, not a
-passing applicable suite. For example, `SelectCommand:2` requires a valid PIN and a
-fingerprint object. Those failures remain failures until matching personalization is
-supplied and the vectors pass. The SELECT-prefix fix accounts for one additional
-pass compared with the initial run.
+### Run upstream acceptance
 
-After building the simulator and wallet, check the binding without NIST jars:
+Build the simulator and wallet first. The upstream checkout must match the pinned
+revision above; NIST modes also need its separately installed Test Runner 5.0.1 and
+compiled tools. All output directories must be new. Each vector receives an isolated
+copy of a closed seed. No physical card is accessed.
+
+Check transport selection, retry persistence, state isolation, and contactless rejection
+without NIST jars:
 
 ```sh
 python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
   --check-transport --out work/nist-transport
 ```
 
-With the upstream NIST package installed and upstream tools compiled, run the
-verified selection vector:
-
-```sh
-python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
-  --config /path/to/OpenFIPS201/tools/piv_test_runner/config/OpenFIPS201-ECC256.xml \
-  --test SelectCommand:1 --out work/nist-select
-```
-
-Output directories must be new. The default seed is a blank installed applet. Use
-`--seed DIR` containing `keys` and `state` for a closed, pre-personalized simulator;
-its objects and keys must match the supplied configuration.
-
-`--provision-config` reads the configured PIN/PUK, AES-128 management key, and four
-P-256 certificates. It validates that the published upstream private-key fixtures match
-those certificates, then uses the upstream `ConformanceProvisioner` over real SCP03 to
-import the keys and write the certificate objects. Exact readback must succeed before
-a closed personalized seed is copied for individual vectors. It does not modify NIST
-expectations or manufacture missing identity/biometric objects.
+Run the original ECC256 configuration, with its matching published keys and certificates:
 
 ```sh
 python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
@@ -464,38 +446,51 @@ python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
   --provision-config --suite card-contact --out work/nist-p256-contact
 ```
 
-The initial external-authentication-only profile reports **36 passed, 26 failed, 1 skipped** across the same 63 vectors.
-`ChangeReferenceDataCommand:1` passes all 21 requirements and
-`ResetRetryCounterCommand:1` all 16. Preparing one seed instead of provisioning each
-vector preserves every pass/fail/skip outcome; the sampled seed preparation took 4.952
-seconds and vector execution 40.950 seconds, excluding compilation. These are host
-measurements, not device latency.
+This profile reports **37 passed, 25 failed, 1 skipped**. It lacks identity/biometric
+objects and still declares a 3DES 9E key, which is unsupported. Those failures remain
+visible. Use `--test SelectCommand:1` for one vector, or `--seed DIR` containing
+`keys` and `state` for an existing closed simulator with matching personalization.
 
-Remaining profile gaps include absent CCC, CHUID, fingerprint, facial-image, Security
-Object and Discovery objects. The adapter now provisions 9B with both external and
-mutual authentication through authenticated administration. The unchanged upstream
-`GenerateAsymmetricKeyPairCommand:1` now passes all 19 requirements, including 9D
-ECDH and subsequent 9E authentication. The complete contact run reports **37 passed,
-25 failed, 1 skipped** (`work/nist-mutual-bounded-contact`); preparation took 4.611
-seconds and vector execution 31.791 seconds on the host.
+The signed OpenFIPS201 package requests 4,000,000 execution work units; the engine
+default remains 1,000,000. One measured ECDH request consumed 2,548,595 units,
+including Java EC-point validation. This does not establish worst-case device latency.
+The ordinary transport check covers independently verified ECDH after reboot and
+rejection of an off-curve point without losing selection.
 
-The signed OpenFIPS201 package requests 4,000,000 execution work units, within the
-updated JCVM manifest bound. The engine default remains 1,000,000. Temporary host
-instrumentation measured one valid ECDH request at 2,548,595 units, including the
-applet’s Java EC-point validation before native ECDH. This is a newly covered
-workload, not a flash or RAM budget change. Cancellation and declared work limits
-remain enforced; this sample does not establish worst-case device latency. The
-ordinary transport acceptance now checks PIN-gated ECDH with a recovered key,
-independent host agreement, and off-curve rejection without losing selection.
-`GeneralAuthenticateCommand:1` still fails its symmetric 9E algorithm-03 (3DES)
-step; the configured P-256 and AES operations pass. 3DES remains unsupported, and
-this failure is neither skipped nor rewritten. Other failures include missing PIV
-objects and certificate-profile requirements.
-A passing applicable suite and complete matching personalization are still open.
+### Complete derived P-256 identity
 
-The original GSA golden identities require RSA private keys and cannot serve as a
-complete P-256 test identity. Keep their object checks separate from the ECC256
-NIST seed rather than combining unrelated CHUIDs and certificates:
+The original GSA golden identities require RSA private keys. The following generator
+preserves GSA 46 data objects and identity fields, issues matching P-256 certificates
+from a public test-only CA, and writes a corresponding NIST configuration:
+
+```sh
+python3 scripts/nist_identity.py --upstream /path/to/OpenFIPS201 --out work/p256-identity
+python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
+  --config work/p256-identity/config.xml --identity-folder work/p256-identity/identity \
+  --provision-config --suite card-contact --out work/p256-identity-contact
+```
+
+The combined identity now imports all 11 objects and four keys and passes exact
+readback after reopening. This exposed and fixed persistent-heap growth from repeated
+ISO status exceptions: runtime exceptions are reused without aliasing explicitly
+created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
+(`work/nist-derived-p256-v3-contact`): preparation took 14.539 seconds and vectors
+98.900 seconds on the host. Remaining failures concern the original CHUID’s
+2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
+policies under the NIST profile. Its 9D certificate binding check also requests
+a signature from the agreement-only key; ECDH passes separately. These remain
+failures, not exclusions, and the key role is not relaxed for the test.
+
+This is a **derived test identity**, not an original golden image or production
+credential. The manifest records source/output hashes and the public PKCS#12 password.
+The configuration declares P-256 authentication and no symmetric 9E key; test code and
+expected status words are unchanged. GSA signed objects retain their original dates,
+signatures, and policies. The test issuer URLs use `.invalid`; live revocation and
+chain trust are not established.
+
+### Original ICAM object recovery
+
+Keep original object-storage evidence separate from private-key conformance:
 
 ```sh
 python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
@@ -503,17 +498,14 @@ python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
   --out work/icam-object-recovery
 ```
 
-This check passed exact upstream readback of all **11 objects**, including the
-6,326-byte facial image, after closing SCP03 and reopening the simulator. It uses
-original fixture data and the upstream loader/provisioner. It imports **no private
-keys**, runs **no NIST vectors**, and makes no certificate-validity or full-credential
-claim. The separate `object-results.json` records fixture hashes, runtime identity,
-result and host elapsed time. No physical card is accessed.
+All **11 original objects**, including the 6,326-byte facial image, pass exact
+upstream readback after closing SCP03 and reopening the simulator. This mode imports
+no private keys and runs no NIST vectors. Its separate `object-results.json` records
+fixture hashes, runtime identity, status, and elapsed host time.
 
-The run retains preparation logs, runner logs, JUnit results, and a manifest with vector
-selection, source/configuration/simulator hashes, separate preparation/execution timings,
-and a dirty-tree marker. Skips are counted separately from passes. Do not count upstream
-JVM results or altered expectations as interpreter passes.
+NIST reports retain preparation/runner logs, JUnit results, source/configuration/simulator
+hashes, separate preparation/execution timings, and a dirty-tree marker. Skips remain
+separate from passes. Host timings and upstream JVM results are not hardware evidence.
 
 ## Authorization
 

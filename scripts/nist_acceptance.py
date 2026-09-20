@@ -66,6 +66,7 @@ def main():
     parser.add_argument("--config", type=pathlib.Path)
     parser.add_argument("--out", required=True, type=pathlib.Path, help="New result directory")
     parser.add_argument("--provision-config", action="store_true", help="Provision the upstream P-256 test keys, certificates, PIN/PUK and AES management key")
+    parser.add_argument("--identity-folder", type=pathlib.Path, help="Complete P-256 ICAM-style identity matching --config; requires --provision-config")
     parser.add_argument("--seed", type=pathlib.Path, help="Closed simulator seed directory containing keys and state; default: blank applet")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--test", help="One upstream vector identifier")
@@ -82,6 +83,8 @@ def main():
         parser.error("--check-objects uses an isolated blank applet")
     if not args.check_transport and not args.check_objects and args.config is None:
         parser.error("--config is required for NIST vectors")
+    if args.identity_folder and not args.provision_config:
+        parser.error("--identity-folder requires --provision-config")
     upstream, output = args.upstream.resolve(), args.out.resolve()
     config = args.config.resolve() if args.config else None
     revision = subprocess.check_output(["git", "-C", upstream, "rev-parse", "HEAD"], text=True).strip()
@@ -172,6 +175,9 @@ def main():
             config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
             test=args.test, suite=args.suite, list_only=args.list_tests, blank_seed=args.seed is None,
             provision_config=args.provision_config,
+            identity_folder=str(args.identity_folder.resolve()) if args.identity_folder else None,
+            identity_sha256={str(p.relative_to(args.identity_folder)): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(args.identity_folder.rglob("*")) if p.is_file()} if args.identity_folder else None,
             synthetic_atr=True,
             unsupported=["contactless transport", "full GSA ICAM credential provisioning (RSA)", "VCI suites"],
             status="running")
@@ -183,7 +189,8 @@ def main():
             with (output / "provision.log").open("w") as log:
                 provision = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
                     "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".MicroCardNistProfile",
-                    config, upstream, personalized], env=env, stdout=log, stderr=subprocess.STDOUT)
+                    config, upstream, personalized,
+                    *([args.identity_folder.resolve()] if args.identity_folder else [])], env=env, stdout=log, stderr=subprocess.STDOUT)
             manifest["provision_seconds"] = round(time.perf_counter() - started, 3)
             if provision.returncode:
                 manifest.update(status="provision_failed", exit_code=provision.returncode)

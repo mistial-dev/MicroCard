@@ -51,6 +51,14 @@ board's reserved heap.
 ## Required before the pre-hardware release candidate
 
 - Complete host interruption coverage for personalized OpenFIPS201 provisioning.
+  The original ICAM object-only workflow passes exact readback of 11 objects after
+  reopening, and the separate P-256 NIST profile passes 37 of 63 contact vectors.
+  The combined derived P-256 identity now imports all objects and keys and verifies
+  readback after reopening. Repeated ISO status exceptions previously grew the heap
+  until the snapshot exceeded capacity; runtime exception reuse fixes that failure.
+  The combined profile passes 58 of 63 contact vectors, with four CHUID/certificate
+  failures and one skip. These profile limitations remain visible. See the reproducible
+  commands and profile distinctions in [JCVM acceptance](JCVM_PROFILE.md).
   Abrupt simulator termination between encrypted certificate fragments preserves
   the prior certificate; a fresh authenticated upload then replaces it and survives
   reboot. This covers command-boundary recovery, not arbitrary torn flash writes.
@@ -75,7 +83,7 @@ board's reserved heap.
   native-API transaction auditing, and interruption tests.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 197,936 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 197,952 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the

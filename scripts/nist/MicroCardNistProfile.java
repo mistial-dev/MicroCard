@@ -5,6 +5,7 @@ import dev.mistial.tools.openfips201.common.ScpConfig;
 import dev.mistial.tools.openfips201.common.CardTransport;
 import dev.mistial.tools.openfips201.common.GlobalPlatformSession;
 import dev.mistial.tools.openfips201.provisioning.StandardCardProfile;
+import dev.mistial.tools.openfips201.provisioning.IcamCardFolder;
 import apdu4j.core.CommandAPDU;
 import apdu4j.core.ResponseAPDU;
 import dev.mistial.tools.openfips201.provisioning.AdminTlv;
@@ -24,7 +25,8 @@ import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 /** Loads the published P-256 key fixtures without replacing the NIST expectations. */
 final class MicroCardNistProfile {
     public static void main(String[] args) throws Exception {
-        var profile = load(new Configuration(Path.of(args[0]).toFile()), Path.of(args[1]));
+        var config = new Configuration(Path.of(args[0]).toFile());
+        var profile = args.length == 4 ? loadIdentity(config, Path.of(args[3])) : load(config, Path.of(args[1]));
         try (var card = new MicroCardNistTransport()) {
             // The generic upstream provisioner enables external authentication only.
             // NIST management vectors require mutual authentication as well.
@@ -57,13 +59,25 @@ final class MicroCardNistProfile {
         } finally { Arrays.fill(keys, (byte) 0); }
     }
 
+    private static ConformancePackage loadIdentity(Configuration config, Path directory) throws Exception {
+        var original = IcamCardFolder.load(directory, "microcard-test".toCharArray());
+        if (original.keys.size() != 4) throw new IllegalArgumentException("Expected four P-256 identity keys");
+        for (var key : original.keys) {
+            if (key.algorithm != 0x11) throw new IllegalArgumentException("Unsupported identity key algorithm");
+            String slot = String.format("%02X", key.slot & 0xff);
+            byte[] pem = value(config, "keytypealgorithmkeys:KEY_" + slot + "_11").getBytes(StandardCharsets.US_ASCII);
+            var expected = CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(pem));
+            if (!Arrays.equals(expected.getEncoded(), key.certificate.getEncoded()))
+                throw new IllegalArgumentException("Identity certificate differs from NIST configuration: " + slot);
+        }
+        return new ConformancePackage(original.credentialId, directory,
+            pin(value(config, "PIN_VALID")), pin(value(config, "PUK_VALID")),
+            managementKey(config), original.dataObjects, original.keys);
+    }
+
     static ConformancePackage load(Configuration config, Path upstream) throws Exception {
         byte[] pin = pin(value(config, "PIN_VALID"));
         byte[] puk = pin(value(config, "PUK_VALID"));
-        if (!value(config, "KEY_ALGORITHMS_CARD_MANAGEMENT").equals("08"))
-            throw new IllegalArgumentException("This profile requires AES-128 management");
-        byte[] management = HexFormat.of().parseHex(value(config, "keytypealgorithmkeys:KEY_9B_08"));
-        if (management.length != 16) throw new IllegalArgumentException("Invalid AES-128 test key");
         String[] roles = {"AUTHENTICATION", "DIGITAL_SIGNATURE", "KEY_MANAGEMENT", "CARD_AUTHENTICATION"};
         String[] slots = {"9A", "9C", "9D", "9E"};
         int[] ids = {0x05, 0x0a, 0x0b, 0x01};
@@ -99,7 +113,15 @@ final class MicroCardNistProfile {
                     new byte[]{0x71, 1, 0, (byte) 0xfe, 0})));
         }
         return new ConformancePackage("upstream-p256-keys", upstream, pin, puk,
-            new ConformancePackage.ManagementKeyMaterial((byte) 8, management), objects, keys);
+            managementKey(config), objects, keys);
+    }
+
+    private static ConformancePackage.ManagementKeyMaterial managementKey(Configuration config) {
+        if (!value(config, "KEY_ALGORITHMS_CARD_MANAGEMENT").equals("08"))
+            throw new IllegalArgumentException("This profile requires AES-128 management");
+        byte[] key = HexFormat.of().parseHex(value(config, "keytypealgorithmkeys:KEY_9B_08"));
+        if (key.length != 16) throw new IllegalArgumentException("Invalid AES-128 test key");
+        return new ConformancePackage.ManagementKeyMaterial((byte) 8, key);
     }
 
     private static String value(Configuration config, String name) {
