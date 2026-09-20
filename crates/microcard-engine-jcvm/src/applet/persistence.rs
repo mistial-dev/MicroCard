@@ -349,7 +349,6 @@ impl Card {
                                 if word(0) == 0
                                     || word(4) > word(0)
                                     || word(1) > length
-                                    || word(1) > 32
                                 {
                                     return Err(Error::Format);
                                 }

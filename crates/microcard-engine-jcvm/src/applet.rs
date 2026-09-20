@@ -736,11 +736,12 @@ mod tests {
         let transient = heap.new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_RESET).unwrap();
         let on_deselect = heap.new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_DESELECT).unwrap();
         heap.array_put(on_deselect, 0, 8).unwrap();
-        let persistent = heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
+        let persistent = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
         let pin = heap.new_object(native_class_of(ClassId::OwnerPIN).unwrap(), 6, 1).unwrap();
         heap.array_put(transient, 0, 7).unwrap();
-        heap.array_put(persistent, 0, 9).unwrap();
+        heap.byte_slice_mut(persistent, 0, 64).unwrap().fill(9);
         heap.put_word(pin, 0, 3).unwrap();
+        heap.put_word(pin, 1, 64).unwrap(); // PIN length is bounded by its configured material array.
         heap.put_word(pin, 2, persistent).unwrap();
         heap.put_word(pin, 3, 1).unwrap(); // Validated flag.
         heap.put_word(pin, 4, 2).unwrap(); // Remaining attempts are persistent.
@@ -815,6 +816,8 @@ mod tests {
         let recovered = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
         assert_eq!(recovered.array_get(transient, 0), Ok(0));
         assert_eq!(recovered.array_get(persistent, 0), Ok(9));
+        assert_eq!(recovered.get_word(pin, 1), Ok(64));
+        assert_eq!(recovered.byte_slice(persistent, 0, 64).unwrap(), &[9; 64]);
         assert_eq!(recovered.get_word(pin, 3), Ok(0));
         assert_eq!(recovered.get_word(pin, 4), Ok(2));
         assert_eq!(recovered.get_word(reserved_exception, natives::REASON_FIELD), Ok(0));
@@ -840,7 +843,7 @@ mod tests {
         assert_eq!(live.get_word(reserved_exception, natives::REASON_FIELD), Ok(2));
         assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
         assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
-        for case in 0..24 {
+        for case in 0..25 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -869,6 +872,7 @@ mod tests {
                     invalid[at..at + 2].copy_from_slice(&reference.to_be_bytes());
                     instance
                 }
+                23 => { invalid[pin as usize + heap::HEADER + 3] = 65; instance } // Exceeds configured PIN capacity.
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());

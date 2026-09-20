@@ -404,8 +404,8 @@ entropy provider, as required by the 3.0.5 API.
 The protected `OwnerPIN` validation-flag accessors share the public validation
 state. `setValidatedFlag` follows the default conditional-state rule in JCRE §9.3;
 PIN presentation and reset methods retain their explicit API exceptions.
-PIN replacement honors the configured maximum without a separate 32-byte staging
-limit. It reserves the complete conditional update before changing PIN bytes or
+PIN replacement and reboot validation honor the configured maximum without a
+separate 32-byte limit. It reserves the complete conditional update before changing PIN bytes or
 metadata; invalid constructor limits and oversized replacements report
 `PINException.ILLEGAL_VALUE`.
 Invalid PIN presentations throw the API-specified null or bounds exception while
