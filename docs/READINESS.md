@@ -107,7 +107,10 @@ board's reserved heap.
   it (previously 266,721). This is below the 196,608-byte board reservation for this
   workload, but does not establish device heap safety. The expanded personalization
   workload at clean revision `5fb8307` reproduces the same 184,681-byte peak
-  (`work/jcvm-personalized-heap.json`). Bound supported workloads and
+  (`work/jcvm-personalized-heap.json`). The two-applet extension at clean
+  revision `37a95dd` peaks at 185,913 bytes with both banks occupied and one blank
+  applet's reset-scoped arrays retained (`work/jcvm-two-applet-clean-heap.json`).
+  Neither run fills both applets to their maximum supported allocations. Bound supported workloads and
   board allocations before declaring this path ready for hardware. Host figures
   exclude allocator metadata and stack and include file-backed image reads.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
