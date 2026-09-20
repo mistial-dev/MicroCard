@@ -1648,6 +1648,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(frame.pop_short().unwrap(), 0x1234);
+
+        // setShort must admit both bytes before either changes, even if the
+        // caller catches a capacity failure and commits instead of aborting.
+        for capacity in [0, TRANSACTION_CAPACITY] {
+            heap.begin_transaction(capacity).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(2).unwrap();
+            frame.push_short(-128).unwrap();
+            let result = call(framework(ClassId::Util, MethodId::setShort, true),
+                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle());
+            if capacity == 0 {
+                assert!(matches!(result, Err(Error::TransactionFull)));
+                heap.commit_transaction().unwrap();
+            } else {
+                assert!(matches!(result, Ok(Native::Returned)));
+                assert_eq!(frame.pop_short(), Ok(4));
+                assert_eq!(heap.byte_slice(array, 2, 2).unwrap(), [0xff, 0x80]);
+                heap.abort_transaction(&mut []).unwrap();
+            }
+            assert_eq!(heap.byte_slice(array, 2, 2).unwrap(), [0x12, 0x34]);
+        }
     }
 
     #[test]

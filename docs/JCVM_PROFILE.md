@@ -416,6 +416,9 @@ required by the 3.0.5 `Util` contract. Work-budget exhaustion still ends executi
 Bulk copy, fill and comparison charge one work unit per requested byte before the
 operation. Insufficient work leaves fill/copy destinations unchanged; atomic fills
 participate in rollback and non-atomic fills do not.
+`Util.setShort` reserves both destination bytes before writing. Capacity failure
+leaves both bytes unchanged even if the caller commits; aborting a successful write
+restores both bytes, following the [Java Card 3.0.5 atomicity contract](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/Util.html).
 
 Cipher creation preflights its holder and streaming-state array together. If the heap
 cannot fit both, it leaves no incomplete holder or consumed allocation tail.
