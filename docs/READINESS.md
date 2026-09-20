@@ -118,7 +118,10 @@ board's reserved heap.
   overlap and separate host file buffers from board costs before hardware readiness. Direct
   patch replay reduces that matched workload to **251,517 bytes** at clean revision
   `54c67b1` (`work/jcvm-direct-replay-clean-heap.json`), saving 89,904 bytes.
-  The remaining SELECT peak still exceeds the board reservation. Bound supported workloads and
+  Releasing idle execution frames reduces the matched file-backed host peak further
+  to **234,109 bytes** at clean revision `502d921` (`work/jcvm-idle-frames-clean-heap.json`).
+  The host fallback still exceeds the board reservation. Board renewal additionally
+  borrows mapped staging ciphertext; its physical peak remains unmeasured. Bound supported workloads and
   board allocations before declaring this path ready for hardware. Host figures
   exclude allocator metadata and stack and include file-backed image reads.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
