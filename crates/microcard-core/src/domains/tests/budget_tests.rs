@@ -272,10 +272,10 @@ fn credential_profile_has_measured_runtime_and_journal_budgets() {
     let active_package_bytes = card
         .state
         .isd
-        .assemblies
+        .image_refs
         .values()
-        .chain(card.state.domains["credential-budget"].assemblies.values())
-        .map(|package| package.len())
+        .chain(card.state.domains["credential-budget"].image_refs.values())
+        .map(|descriptor| descriptor.length as usize)
         .sum::<usize>();
     let serialized_state_bytes = card.state.encode_snapshot().unwrap().len();
     assert_eq!(

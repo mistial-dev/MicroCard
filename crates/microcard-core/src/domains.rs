@@ -29,7 +29,7 @@ use execution::run_context;
 #[cfg(test)]
 use native::{BufferResult, NativeArgument};
 use linking::{CallTarget, ExecutionUnit, PackageData, ResolvedCall, ResolvedDependency,
-    execution_units, resolve_calls, resolve_dependency};
+    resolve_calls, resolve_dependency};
 #[cfg(test)]
 use linking::{validate_program_graph, push_execution_source, validate_linked_program, push_link_edge};
 use application::{ApplicationChanges, ApplicationView, StagedApplication};
@@ -475,7 +475,7 @@ impl State {
         }
     }
     fn is_owned(&self) -> bool {
-        self.isd.key.is_some() && self.isd.assemblies.contains_key("mscorlib")
+        self.isd.key.is_some() && self.isd.image_refs.contains_key("mscorlib")
     }
     fn assembly_by_digest(&self, digest: &[u8; 32]) -> Result<(&str, &str, &Domain)> {
         let mut found = None;
@@ -515,7 +515,7 @@ impl State {
                 .chain(self.domains.values())
                 .any(|domain| {
                     domain
-                        .assemblies
+                        .image_refs
                         .keys()
                         .filter_map(|assembly| domain.versions.get(assembly))
                         .any(|(_, digest)| RegistryAid::synthetic(0x4c, digest) == aid)
@@ -855,8 +855,6 @@ struct Domain {
     registry_aid: RegistryAid,
     key: Option<[u8; 32]>,
 
-    assemblies: NameMap<Rc<Vec<u8>>>,
-
     packages: NameMap<Rc<StoredPackage>>,
     image_refs: NameMap<crate::image_store::Descriptor>,
     bindings: NameMap<Vec<ResolvedDependency>>,
@@ -884,18 +882,11 @@ impl Domain {
         self.packages.get(name).map(Rc::as_ref).ok_or(Error::Missing)
     }
 
-    fn package(&self, name: &str) -> Result<StoredPackageView<'_>> {
-        let metadata = self.package_metadata(name)?;
-        let raw = self.assemblies.get(name).ok_or(Error::Storage)?;
-        metadata.view(raw)
-    }
-
     fn new(incarnation: [u8; 16], registry_aid: RegistryAid, policy: DomainPolicy) -> Self {
         Self {
             incarnation,
             registry_aid,
             key: None,
-            assemblies: NameMap::new(),
             packages: NameMap::new(),
             image_refs: NameMap::new(),
             bindings: NameMap::new(),
@@ -922,7 +913,7 @@ impl Domain {
 
     fn intern_assembly_names(&mut self) -> Result<()> {
         fn rekey<T>(
-            assemblies: &NameMap<Rc<Vec<u8>>>,
+            assemblies: &NameMap<crate::image_store::Descriptor>,
             values: &mut NameMap<T>,
             require_active: bool,
         ) -> Result<()> {
@@ -936,12 +927,12 @@ impl Domain {
             Ok(())
         }
 
-        rekey(&self.assemblies, &mut self.versions, false)?;
-        rekey(&self.assemblies, &mut self.bindings, true)?;
-        rekey(&self.assemblies, &mut self.imports, true)?;
+        rekey(&self.image_refs, &mut self.versions, false)?;
+        rekey(&self.image_refs, &mut self.bindings, true)?;
+        rekey(&self.image_refs, &mut self.imports, true)?;
         for assembly in self.instances.values_mut() {
             let (canonical, _) = self
-                .assemblies
+                .image_refs
                 .get_key_value(assembly.as_ref())
                 .ok_or(Error::Storage)?;
             *assembly = Rc::clone(canonical);
@@ -990,7 +981,7 @@ impl Domain {
 
     fn is_unbound_and_empty(&self) -> bool {
         self.key.is_none()
-            && self.assemblies.is_empty()
+            && self.image_refs.is_empty()
             && self.bindings.is_empty()
             && self.imports.is_empty()
             && self.versions.is_empty()
@@ -1068,7 +1059,7 @@ fn visit_registry<'a>(
                     .iter()
                     .map(|(id, domain)| (id.as_str(), domain)),
             ) {
-                for assembly in domain.assemblies.keys() {
+                for assembly in domain.image_refs.keys() {
                     let digest = domain.versions.get(assembly).ok_or(Error::Storage)?.1;
                     let aid = crate::globalplatform::synthetic_aid(0x4c, &digest);
                     visit(
@@ -1325,18 +1316,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 state
             }
         };
-        let images = crate::image_store::Images::new(journal.flash_mut())?;
-        for domain in core::iter::once(&mut state.isd).chain(state.domains.0.iter_mut().map(|(_, domain)| domain)) {
-            for (name, raw) in domain.assemblies.iter_mut() {
-                let descriptor = domain.image_refs.get(name).ok_or(Error::Storage)?;
-                *raw = images.with_image(descriptor, &mut platform, |bytes| {
-                    let mut raw = Vec::new();
-                    raw.try_reserve_exact(bytes.len()).map_err(|_| Error::Quota)?;
-                    raw.extend_from_slice(bytes);
-                    Ok(Rc::new(raw))
-                })?;
-            }
-        }
+        // Check backend geometry even when no packages have been installed.
+        crate::image_store::Images::new(journal.flash_mut())?;
         if state.domains.len() > MAX_SSDS {
             return Err(Error::Storage);
         }
@@ -1362,8 +1343,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .try_reserve_exact(MAX_TOTAL_ASSEMBLIES)
             .map_err(|_| Error::Quota)?;
         for domain in core::iter::once(&mut state.isd).chain(state.domains.values_mut()) {
-            for (name, raw) in domain.assemblies.iter() {
-                let verified = PackageView::verify_with(raw, &mut platform)?;
+            for (name, descriptor) in domain.image_refs.iter() {
+                let raw = descriptor.read_verified(journal.flash(), &mut platform)?;
+                let verified = PackageView::verify_with(&raw, &mut platform)?;
                 domain.packages.insert(Rc::clone(name), Rc::new(StoredPackage::from_verified(verified)))?;
             }
         }
@@ -1374,15 +1356,15 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         {
             if !crate::package::valid_identifier(id)
                 || !d.policy.valid()
-                || d.assemblies.len() > d.policy.max_assemblies as usize
-                || d.bindings.len() != d.assemblies.len()
-                || d.imports.len() != d.assemblies.len()
+                || d.image_refs.len() > d.policy.max_assemblies as usize
+                || d.bindings.len() != d.image_refs.len()
+                || d.imports.len() != d.image_refs.len()
                 || d.bindings
                     .keys()
-                    .any(|name| !d.assemblies.contains_key(name))
+                    .any(|name| !d.image_refs.contains_key(name))
                 || d.imports
                     .keys()
-                    .any(|name| !d.assemblies.contains_key(name))
+                    .any(|name| !d.image_refs.contains_key(name))
                 || d.versions.len() > d.policy.max_assemblies as usize
                 || d.storage_schema.len() > MAX_DOMAIN_STORAGE_DECLARATIONS
                 || !d.storage_schema.iter().all(StorageDeclaration::valid)
@@ -1405,7 +1387,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 || d.blobs.values().map(Vec::len).sum::<usize>() > d.policy.max_blob_bytes as usize
                 || d.keys.len() > d.policy.max_key_slots as usize
                 || (d.key.is_none()
-                    && (!d.assemblies.is_empty()
+                    && (!d.image_refs.is_empty()
                         || !d.versions.is_empty()
                         || !d.storage_schema.is_empty()
                         || !d.instances.is_empty()
@@ -1422,10 +1404,11 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             d.keys.validate()?;
             d.credentials.validate(d.incarnation)?;
             let mut domain_package_bytes = 0usize;
-            for (name, raw) in d.assemblies.iter() {
-                total_bytes += raw.len();
-                domain_package_bytes += raw.len();
-                let p = d.package(name)?;
+            for (name, descriptor) in d.image_refs.iter() {
+                total_bytes += descriptor.length as usize;
+                domain_package_bytes += descriptor.length as usize;
+                let raw = descriptor.read_verified(journal.flash(), &mut platform)?;
+                let p = d.package_metadata(name)?.view(&raw)?;
                 if p.image.starts_with(b"MC04") {
                     linked_roots.push((id, name.as_ref()));
                 }
@@ -1483,7 +1466,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 }
             }
         }
-        if state.isd.key.is_some() != state.isd.assemblies.contains_key("mscorlib")
+        if state.isd.key.is_some() != state.isd.image_refs.contains_key("mscorlib")
             || (state.isd.key.is_none() && !state.isd.is_unbound_and_empty())
         {
             return Err(Error::Storage);
@@ -1492,7 +1475,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             return Err(Error::Storage);
         }
         for (id, assembly) in linked_roots {
-            execution_units(&state, id, assembly)?;
+            linking::BorrowedExecution::new(&state, journal.flash(), &mut platform, id, assembly)?.units()?;
         }
         #[cfg(feature = "scp03-pseudo-random")]
         let sequence = (state.scp03_sequence, state.scp03_sequence);

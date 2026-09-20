@@ -130,9 +130,10 @@ can coexist. `Descriptor::read_verified` checks geometry, length and the complet
 image digest before returning a guard; callback reads use the same verification.
 The provider borrow ends after verification. MC04 invocation and lifecycle callbacks
 borrow verified dependency images, validate the linked program before execution,
-and release image guards before committing application state. Loading and recovery
-validation still retain runtime image buffers; removing that ownership remains
-release work. Import resolution borrows each referenced provider once per pass.
+and release image guards before committing application state. Recovery reconstructs
+metadata from verified image guards without retaining package bytes in domain state.
+Stored descriptors supply package names and quota sizes. Import resolution borrows
+each referenced provider once per pass.
 Activation validates the already-verified candidate with flash-backed dependencies
 before staging writes; its new root does not require an existing image descriptor.
 

@@ -168,21 +168,6 @@ fn execution_sources<'a>(state: &'a State, domain: &str, assembly: &str) -> Resu
     Ok(sources)
 }
 
-pub(super) fn execution_units<'a>(state: &'a State, domain: &str, assembly: &str) -> Result<Vec<ExecutionUnit<'a>>> {
-    let sources = execution_sources(state, domain, assembly)?;
-    let mut units = Vec::new();
-    units.try_reserve_exact(sources.len()).map_err(|_| Error::Quota)?;
-    for (_, name, source) in sources {
-        units.push(ExecutionUnit {
-            package: source.package(name)?,
-            bindings: source.bindings.get(name).ok_or(Error::Storage)?,
-            calls: source.imports.get(name).ok_or(Error::Storage)?,
-        });
-    }
-    validate_linked_program(&units)?;
-    Ok(units)
-}
-
 enum PackageBytes<'a, F: crate::image_store::ImageFlash + 'a> {
     Stored(F::Image<'a>),
     Candidate(&'a [u8]),

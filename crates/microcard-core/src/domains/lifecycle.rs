@@ -152,11 +152,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         domain.versions.reserve_for(&name)?;
         domain.bindings.reserve_for(&name)?;
         domain.imports.reserve_for(&name)?;
-        domain.assemblies.reserve_for(&name)?;
         domain.packages.reserve_for(&name)?;
         domain.image_refs.reserve_for(&name)?;
-        let assemblies =
-            MapUndo::publish(&mut domain.assemblies, Rc::clone(&name), Rc::clone(&raw));
         let packages =
             MapUndo::publish(&mut domain.packages, Rc::clone(&name), Rc::clone(&metadata));
         let versions = MapUndo::publish(
@@ -203,7 +200,6 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         })();
         if result.is_err() {
             let domain = owner.domain(&mut self.state);
-            assemblies.restore(&mut domain.assemblies);
             packages.restore(&mut domain.packages);
             versions.restore(&mut domain.versions);
             bindings.restore(&mut domain.bindings);
@@ -232,11 +228,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let owner = Owner::resolve(&self.state, domain.registry_aid)?;
         // Resolve every slot before changing anything. Removing retains capacity,
         // so restoring these exact entries cannot fail or allocate.
-        let assembly = domain
-            .assemblies
-            .position(name)
-            .map_err(|_| Error::Missing)?;
-        let package = domain.packages.position(name).map_err(|_| Error::Storage)?;
+        let package = domain.packages.position(name).map_err(|_| Error::Missing)?;
         let image = domain
             .image_refs
             .position(name)
@@ -245,7 +237,6 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let import = domain.imports.position(name).map_err(|_| Error::Storage)?;
         let domain = owner.domain(&mut self.state);
         let previous = (
-            domain.assemblies.0.remove(assembly),
             domain.packages.0.remove(package),
             domain.image_refs.0.remove(image),
             domain.bindings.0.remove(binding),
@@ -254,11 +245,10 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let result = self.commit_metadata_snapshot();
         if result.is_err() {
             let domain = owner.domain(&mut self.state);
-            domain.assemblies.0.insert(assembly, previous.0);
-            domain.packages.0.insert(package, previous.1);
-            domain.image_refs.0.insert(image, previous.2);
-            domain.bindings.0.insert(binding, previous.3);
-            domain.imports.0.insert(import, previous.4);
+            domain.packages.0.insert(package, previous.0);
+            domain.image_refs.0.insert(image, previous.1);
+            domain.bindings.0.insert(binding, previous.2);
+            domain.imports.0.insert(import, previous.3);
         }
         result
     }

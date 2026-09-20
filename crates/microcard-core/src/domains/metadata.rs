@@ -43,7 +43,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let index = self.state.domains.position(id).map_err(|_| Error::Domain)?;
         let domain = &mut self.state.domains.0[index].1;
         if domain.key.is_some()
-            || !domain.assemblies.is_empty()
+            || !domain.image_refs.is_empty()
             || !domain.instances.is_empty()
             || !domain.store.is_empty()
             || !domain.blobs.is_empty()

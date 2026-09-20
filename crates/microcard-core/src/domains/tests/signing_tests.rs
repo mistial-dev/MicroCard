@@ -208,13 +208,9 @@ fn signed_dependency_predicates_and_export_policy_are_enforced() {
     );
     load(&mut c, &pinned).unwrap();
 
-    // Metadata resolution must not require resident image bytes. Execution views
-    // still reject missing storage until the flash-backed read path supplies it.
-    c.state.domains.get_mut("a").unwrap().assemblies = NameMap::new();
     let parsed_consumer = Package::verify(&pinned).unwrap();
     assert_eq!(resolve_dependency(&c.state, "a", &parsed_consumer.manifest.dependencies[0], &parsed_consumer),
         Some(ResolvedDependency { digest: parsed_provider.digest }));
-    assert!(matches!(c.state.domains.get("a").unwrap().package("provider"), Err(Error::Storage)));
 
     let mut private_card = card();
     let private_inc = create(&mut private_card, "private");
@@ -549,7 +545,7 @@ fn empty_domain_retains_versions_and_key_after_reboot() {
     c.manage(command(0xee, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
     c.manage(command(0xf0, &management_names_wire("a", "one").unwrap())).unwrap();
     let mut c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
-    assert!(c.state.domains["a"].assemblies.is_empty());
+    assert!(c.state.domains["a"].image_refs.is_empty());
     assert!(c.state.domains["a"].instances.is_empty());
     rejected(
         &mut c,
@@ -590,7 +586,7 @@ fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
             6 => (), // An extra top-level field is inserted after serialization below.
             7 => d.versions.get_mut("Counter").unwrap().1[0] = 99,
             8 => d.store.0 = (0..513).map(|i| (i, i)).collect(),
-            9 => { d.assemblies = NameMap::new(); d.key = None; }
+            9 => { d.image_refs = NameMap::new(); d.key = None; }
             10 => d.key = Some([0; 32]),
             11 => { let duplicate = d.clone(); state.domains.0.push(("a".into(), duplicate)); }
             12 => d.policy.max_int_records = 0,

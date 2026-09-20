@@ -212,7 +212,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     .map(|(identifier, domain)| (identifier.as_str(), domain)),
             )
             .flat_map(|(identifier, domain)| {
-                domain.assemblies.keys().filter_map(move |assembly| {
+                domain.image_refs.keys().filter_map(move |assembly| {
                     domain
                         .versions
                         .get(assembly)
@@ -348,7 +348,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             )?;
             application = Some(staged);
         }
-        let canonical = source.assemblies.get_key_value(assembly)
+        let canonical = source.image_refs.get_key_value(assembly)
             .map(|(name, _)| Rc::clone(name)).ok_or(Error::Storage)?;
         instances.insert(instance_aid, canonical)?;
         if should_cancel() { return Err(Error::Cancelled); }
@@ -439,7 +439,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 out.extend(d.incarnation);
                 out.push(u8::from(d.key.is_some()));
                 out.extend(d.key.unwrap_or([0; 32]));
-                out.extend([d.assemblies.len() as u8, d.instances.len() as u8]);
+                out.extend([d.image_refs.len() as u8, d.instances.len() as u8]);
                 out.extend(((d.store.len() + d.blobs.len()) as u16).to_le_bytes());
                 Ok(out)
             }
@@ -545,14 +545,14 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 }
                 let existing: usize = core::iter::once(&self.state.isd)
                     .chain(self.state.domains.values())
-                    .flat_map(|d| d.assemblies.values())
-                    .map(|raw| raw.len())
+                    .flat_map(|d| d.image_refs.values())
+                    .map(|descriptor| descriptor.length as usize)
                     .sum();
                 let replaced = self
                     .state
                     .domain(&p.manifest.domain)
-                    .and_then(|d| d.assemblies.get(p.manifest.assembly.as_str()))
-                    .map_or(0, |raw| raw.len());
+                    .and_then(|d| d.image_refs.get(p.manifest.assembly.as_str()))
+                    .map_or(0, |descriptor| descriptor.length as usize);
                 if existing - replaced + p.raw.len() > MAX_TOTAL_PACKAGE_BYTES {
                     return Err(Error::Quota);
                 }
@@ -582,7 +582,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     .domain(&p.manifest.domain)
                     .is_some_and(|domain| {
                         domain
-                            .assemblies
+                            .image_refs
                             .contains_key(p.manifest.assembly.as_str())
                     })
                     && self.state.provider_in_use(&p.manifest.domain, &p.manifest.assembly)
@@ -609,7 +609,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                         return Err(Error::Rollback);
                     }
                     if p.manifest.version == *v
-                        && d.assemblies.contains_key(p.manifest.assembly.as_str())
+                        && d.image_refs.contains_key(p.manifest.assembly.as_str())
                     {
                         drop(p);
                         self.staging.reset();
@@ -623,18 +623,18 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 {
                     return Err(Error::Busy);
                 }
-                let domain_bytes: usize = d.assemblies.values().map(|raw| raw.len()).sum();
+                let domain_bytes: usize = d.image_refs.values().map(|descriptor| descriptor.length as usize).sum();
                 let domain_replaced = d
-                    .assemblies
+                    .image_refs
                     .get(p.manifest.assembly.as_str())
-                    .map_or(0, |raw| raw.len());
+                    .map_or(0, |descriptor| descriptor.length as usize);
                 if domain_bytes - domain_replaced + p.raw.len()
                     > d.policy.max_package_bytes as usize
                 {
                     return Err(Error::Quota);
                 }
-                if !d.assemblies.contains_key(p.manifest.assembly.as_str())
-                    && d.assemblies.len() >= d.policy.max_assemblies as usize
+                if !d.image_refs.contains_key(p.manifest.assembly.as_str())
+                    && d.image_refs.len() >= d.policy.max_assemblies as usize
                 {
                     return Err(Error::Quota);
                 }

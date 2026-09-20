@@ -19,7 +19,6 @@ fn snapshot_matches_python_golden_vector() {
         scp03_sequence: 0,
     };
     state.isd.key = Some([2; 32]);
-    state.isd.assemblies.insert(Rc::from("mscorlib"), Rc::new(Vec::new())).unwrap();
     state.isd.image_refs.insert(Rc::from("mscorlib"), crate::image_store::Descriptor {
         slot: 7, length: 123, digest: [3; 32],
     }).unwrap();
@@ -105,10 +104,9 @@ fn snapshot_rejects_duplicate_and_unsorted_records() {
         let domain = &mut state.isd;
         match collection {
             "duplicate names" => {
-                domain.assemblies.0 = alloc::vec![(Rc::from("a"), Rc::new(Vec::new())); 2];
-                domain.image_refs.insert(Rc::from("a"), crate::image_store::Descriptor {
+                domain.image_refs.0 = alloc::vec![(Rc::from("a"), crate::image_store::Descriptor {
                     slot: 0, length: 1, digest: [0; 32],
-                }).unwrap();
+                }); 2];
             }
             "duplicate instances" => {
                 domain.instances.0 =
@@ -133,12 +131,10 @@ fn snapshot_rejects_duplicate_and_unsorted_records() {
                     .collect()
             }
             "assemblies" => {
-                domain.assemblies.0 = (0..=MAX_ASSEMBLIES_PER_DOMAIN)
-                    .map(|i| (Rc::from(alloc::format!("a{i:02}")), Rc::new(Vec::new())))
-                    .collect();
-                domain.image_refs.0 = domain.assemblies.iter().map(|(name, _)| (Rc::clone(name), crate::image_store::Descriptor {
-                    slot: 0, length: 1, digest: [0; 32],
-                })).collect();
+                domain.image_refs.0 = (0..=MAX_ASSEMBLIES_PER_DOMAIN)
+                    .map(|i| (Rc::from(alloc::format!("a{i:02}")), crate::image_store::Descriptor {
+                        slot: 0, length: 1, digest: [0; 32],
+                    })).collect();
             }
             "instances" => {
                 domain.instances.0 = (0..=MAX_INSTANCES_PER_DOMAIN)

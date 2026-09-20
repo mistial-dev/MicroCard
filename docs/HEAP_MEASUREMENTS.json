@@ -140,12 +140,13 @@
     },
     "mc04": {
       "format": 1,
-      "source_revision": "c1950b141e13571a7f12a972108653199c2d49d8",
-      "working_tree_dirty": false,
+      "source_revision": "77d8660ef31e8a12b8bd63febfbd4f1533593244",
+      "working_tree_dirty": true,
       "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
       "command": [
         "python3",
-        "scripts/credential_acceptance.py"
+        "work/credential_heap_binary.py",
+        "work/mc04-image-current--sim"
       ],
       "exit_code": 0,
       "measurement": "host requested allocation bytes",
@@ -155,111 +156,258 @@
         "device latency"
       ],
       "note": "Host file reads and pointer sizes differ from memory-mapped board flash.",
-      "peak_bytes": 39335,
+      "peak_bytes": 35137,
       "stages": {
         "open": {
           "samples": 2,
-          "peak_bytes": 33182,
-          "live_bytes": 13213,
-          "allocated_bytes": 4598095,
-          "host_microseconds": 53044
+          "peak_bytes": 28688,
+          "live_bytes": 4989,
+          "allocated_bytes": 4610247,
+          "host_microseconds": 49942
+        },
+        "apdu_a4": {
+          "samples": 5,
+          "peak_bytes": 34149,
+          "live_bytes": 14413,
+          "allocated_bytes": 1461775,
+          "host_microseconds": 3430
         },
         "apdu_50": {
           "samples": 4,
-          "peak_bytes": 25648,
-          "live_bytes": 22629,
-          "allocated_bytes": 8324,
-          "host_microseconds": 60306
+          "peak_bytes": 16563,
+          "live_bytes": 14405,
+          "allocated_bytes": 6728,
+          "host_microseconds": 61026
         },
         "apdu_82": {
           "samples": 2,
-          "peak_bytes": 22596,
-          "live_bytes": 22596,
+          "peak_bytes": 14372,
+          "live_bytes": 14372,
           "allocated_bytes": 4,
-          "host_microseconds": 51
+          "host_microseconds": 48
         },
         "apdu_e2": {
           "samples": 6,
-          "peak_bytes": 22887,
-          "live_bytes": 22667,
+          "peak_bytes": 15337,
+          "live_bytes": 15117,
           "allocated_bytes": 2152,
-          "host_microseconds": 642
+          "host_microseconds": 619
         },
         "apdu_e6": {
           "samples": 7,
-          "peak_bytes": 21084,
-          "live_bytes": 21084,
+          "peak_bytes": 15021,
+          "live_bytes": 15021,
           "allocated_bytes": 126,
-          "host_microseconds": 364
+          "host_microseconds": 307
         },
         "apdu_e8": {
           "samples": 71,
-          "peak_bytes": 21482,
-          "live_bytes": 21292,
+          "peak_bytes": 15419,
+          "live_bytes": 15229,
           "allocated_bytes": 75146,
-          "host_microseconds": 11226
+          "host_microseconds": 10611
         },
         "apdu_ea": {
           "samples": 7,
-          "peak_bytes": 38343,
-          "live_bytes": 22465,
-          "allocated_bytes": 8712463,
-          "host_microseconds": 399417
+          "peak_bytes": 34176,
+          "live_bytes": 15005,
+          "allocated_bytes": 8722391,
+          "host_microseconds": 398448
         },
         "apdu_e3": {
           "samples": 5,
-          "peak_bytes": 22670,
-          "live_bytes": 22619,
+          "peak_bytes": 15120,
+          "live_bytes": 15069,
           "allocated_bytes": 585,
-          "host_microseconds": 415
+          "host_microseconds": 406
         },
         "apdu_e0": {
           "samples": 2,
-          "peak_bytes": 21672,
-          "live_bytes": 19162,
-          "allocated_bytes": 11854,
-          "host_microseconds": 58494
+          "peak_bytes": 15289,
+          "live_bytes": 13099,
+          "allocated_bytes": 10014,
+          "host_microseconds": 58214
         },
         "apdu_ec": {
           "samples": 2,
-          "peak_bytes": 38715,
-          "live_bytes": 22603,
-          "allocated_bytes": 1944778,
-          "host_microseconds": 64991
-        },
-        "apdu_a4": {
-          "samples": 3,
-          "peak_bytes": 38476,
-          "live_bytes": 22637,
-          "allocated_bytes": 1445997,
-          "host_microseconds": 2644
+          "peak_bytes": 34413,
+          "live_bytes": 14411,
+          "allocated_bytes": 1952616,
+          "host_microseconds": 65010
         },
         "apdu_10": {
           "samples": 21,
-          "peak_bytes": 39335,
-          "live_bytes": 22965,
-          "allocated_bytes": 20345566,
-          "host_microseconds": 268926
+          "peak_bytes": 35137,
+          "live_bytes": 14877,
+          "allocated_bytes": 20445001,
+          "host_microseconds": 277827
         },
         "apdu_f0": {
           "samples": 2,
-          "peak_bytes": 22691,
-          "live_bytes": 22661,
+          "peak_bytes": 14603,
+          "live_bytes": 14573,
           "allocated_bytes": 68,
-          "host_microseconds": 147
+          "host_microseconds": 98
         },
         "apdu_e4": {
           "samples": 1,
-          "peak_bytes": 25037,
-          "live_bytes": 19029,
-          "allocated_bytes": 5416,
-          "host_microseconds": 29466
+          "peak_bytes": 16619,
+          "live_bytes": 12871,
+          "allocated_bytes": 4634,
+          "host_microseconds": 31694
         }
-      }
+      },
+      "runner_source_revision": "77d8660ef31e8a12b8bd63febfbd4f1533593244",
+      "runner_working_tree_dirty": true,
+      "simulator_sha256": "33827ffb62b44026aa21b42ba9051bbe12e9c78a653dd95755fe1ef2ba3ec2c4",
+      "build_command": "cargo build --locked -p microcard-sim --features heap-metrics",
+      "workload": "scripts/credential_acceptance.py"
     }
   },
   "jcvm_previous_peak": {
     "source_revision": "c1950b141e13571a7f12a972108653199c2d49d8",
     "peak_bytes": 192261
+  },
+  "mc04_image_ownership_comparison": {
+    "baseline": {
+      "format": 1,
+      "source_revision": "77d8660ef31e8a12b8bd63febfbd4f1533593244",
+      "working_tree_dirty": false,
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "command": [
+        "python3",
+        "work/credential_heap_binary.py",
+        "work/mc04-image-baseline-sim"
+      ],
+      "exit_code": 0,
+      "measurement": "host requested allocation bytes",
+      "excludes": [
+        "allocator metadata",
+        "stack",
+        "device latency"
+      ],
+      "note": "Host file reads and pointer sizes differ from memory-mapped board flash.",
+      "peak_bytes": 43227,
+      "stages": {
+        "open": {
+          "samples": 2,
+          "peak_bytes": 33448,
+          "live_bytes": 13215,
+          "allocated_bytes": 4597133,
+          "host_microseconds": 49001
+        },
+        "apdu_a4": {
+          "samples": 5,
+          "peak_bytes": 42368,
+          "live_bytes": 22639,
+          "allocated_bytes": 1461775,
+          "host_microseconds": 3328
+        },
+        "apdu_50": {
+          "samples": 4,
+          "peak_bytes": 24789,
+          "live_bytes": 22631,
+          "allocated_bytes": 6728,
+          "host_microseconds": 65601
+        },
+        "apdu_82": {
+          "samples": 2,
+          "peak_bytes": 22598,
+          "live_bytes": 22598,
+          "allocated_bytes": 4,
+          "host_microseconds": 48
+        },
+        "apdu_e2": {
+          "samples": 6,
+          "peak_bytes": 22889,
+          "live_bytes": 22669,
+          "allocated_bytes": 2152,
+          "host_microseconds": 620
+        },
+        "apdu_e6": {
+          "samples": 7,
+          "peak_bytes": 21086,
+          "live_bytes": 21086,
+          "allocated_bytes": 126,
+          "host_microseconds": 317
+        },
+        "apdu_e8": {
+          "samples": 71,
+          "peak_bytes": 21484,
+          "live_bytes": 21294,
+          "allocated_bytes": 75146,
+          "host_microseconds": 10612
+        },
+        "apdu_ea": {
+          "samples": 7,
+          "peak_bytes": 40265,
+          "live_bytes": 22467,
+          "allocated_bytes": 8722583,
+          "host_microseconds": 410399
+        },
+        "apdu_e3": {
+          "samples": 5,
+          "peak_bytes": 22672,
+          "live_bytes": 22621,
+          "allocated_bytes": 585,
+          "host_microseconds": 409
+        },
+        "apdu_e0": {
+          "samples": 2,
+          "peak_bytes": 21354,
+          "live_bytes": 19164,
+          "allocated_bytes": 10038,
+          "host_microseconds": 65740
+        },
+        "apdu_ec": {
+          "samples": 2,
+          "peak_bytes": 42607,
+          "live_bytes": 22605,
+          "allocated_bytes": 1952616,
+          "host_microseconds": 65075
+        },
+        "apdu_10": {
+          "samples": 21,
+          "peak_bytes": 43227,
+          "live_bytes": 22967,
+          "allocated_bytes": 20445001,
+          "host_microseconds": 278304
+        },
+        "apdu_f0": {
+          "samples": 2,
+          "peak_bytes": 22693,
+          "live_bytes": 22663,
+          "allocated_bytes": 68,
+          "host_microseconds": 99
+        },
+        "apdu_e4": {
+          "samples": 1,
+          "peak_bytes": 24845,
+          "live_bytes": 19031,
+          "allocated_bytes": 4634,
+          "host_microseconds": 37957
+        }
+      },
+      "runner_source_revision": "77d8660ef31e8a12b8bd63febfbd4f1533593244",
+      "runner_working_tree_dirty": true,
+      "simulator_sha256": "f0c2bcf92767eec9271ac94cb347c76cf6cf4bdcdfde1a85961d3ea519077e42",
+      "build_command": "cargo build --locked -p microcard-sim --features heap-metrics",
+      "workload": "scripts/credential_acceptance.py"
+    },
+    "current_workload": "workloads.mc04",
+    "source_change": "Remove resident MC04 package images; retain metadata and authenticated flash descriptors.",
+    "baseline_source": "git archive 77d8660 extracted into work/mc04-image-baseline-source",
+    "baseline_build_command": "cargo build --locked --manifest-path work/mc04-image-baseline-source/Cargo.toml --target-dir target -p microcard-sim --features heap-metrics",
+    "runner_environment": {
+      "MICROCARD_PREBUILT": "1"
+    },
+    "runner_helper_source": "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).resolve().parents[1] / \"scripts\"))\nimport scp03_acceptance\nscp03_acceptance.SIM = Path(sys.argv[1]).resolve()\nimport credential_acceptance\ncredential_acceptance.main()\n",
+    "peak_reduction_bytes": 8090,
+    "reopen_retained_reduction_bytes": 8226,
+    "limitations": [
+      "Requested host allocation only; excludes allocator metadata and stack.",
+      "File-backed host reads allocate; board reads borrow memory-mapped flash.",
+      "Host timings are single-run observations, not a cold/warm or device benchmark."
+    ]
   }
 }

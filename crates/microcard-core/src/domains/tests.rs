@@ -301,7 +301,7 @@ fn globalplatform_registry_reports_isd_domains_and_loads_in_bounded_records() {
         .unwrap();
     assert!(
         !owned.state.domains["payments"]
-            .assemblies
+            .image_refs
             .contains_key("Wallet")
     );
 }
@@ -455,14 +455,14 @@ fn globalplatform_load_stream_activates_only_a_complete_matching_package() {
         if !last {
             assert!(
                 !owned.state.domains["payments"]
-                    .assemblies
+                    .image_refs
                     .contains_key("Wallet")
             );
         }
     }
     assert!(
         owned.state.domains["payments"]
-            .assemblies
+            .image_refs
             .contains_key("Wallet")
     );
     assert!(owned.staging.bytes.is_empty());
@@ -1090,10 +1090,11 @@ fn run_loaded(
     entry: u16,
     data: &[u8],
 ) -> Result<Vec<u8>> {
-    let raw = card.state.domain(domain).unwrap().assemblies[assembly].clone();
+    let descriptor = card.state.domain(domain).unwrap().image_refs[assembly];
+    let raw = descriptor.read_verified(card.journal.flash(), &mut card.platform)?;
     let bindings = card.state.domain(domain).unwrap().bindings[assembly].clone();
     let calls = card.state.domain(domain).unwrap().imports[assembly].clone();
-    let package = PackageView::verify(&raw)?;
+    let package = PackageView::verify(raw)?;
     let units = [ExecutionUnit {
         package: (&package).into(),
         bindings: &bindings,
@@ -1158,7 +1159,7 @@ fn signed_mc04_transaction_bits_drive_linked_effect_validation() {
         .find(|binding| binding.target == CallTarget::Native(11))
         .unwrap()
         .target = CallTarget::Native(6);
-    execution_units(&card.state, "effects", "Counter").unwrap();
+    linking::BorrowedExecution::new(&card.state, card.journal.flash(), &mut card.platform, "effects", "Counter").and_then(|images| images.units().map(|_| ())).unwrap();
 
     let calls = card
         .state
@@ -1174,7 +1175,7 @@ fn signed_mc04_transaction_bits_drive_linked_effect_validation() {
         .unwrap()
         .target = CallTarget::Native(6);
     assert!(matches!(
-        execution_units(&card.state, "effects", "Counter"),
+        linking::BorrowedExecution::new(&card.state, card.journal.flash(), &mut card.platform, "effects", "Counter").and_then(|images| images.units().map(|_| ())),
         Err(Error::Unsupported)
     ));
 }
@@ -1207,7 +1208,7 @@ fn signed_forged_platform_identity_is_rejected_before_binding() {
         assert_eq!(load(&mut card, &package), Err(Error::Unauthorized));
         let domain = &card.state.domains[identifier];
         assert!(domain.key.is_none());
-        assert!(domain.assemblies.is_empty());
+        assert!(domain.image_refs.is_empty());
         assert!(domain.imports.is_empty());
     }
 }
@@ -1767,10 +1768,6 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
         load(&mut card, &signed_compiled_package(&manifest, view.image, 7)).unwrap();
         card.manage(command(0xec, &management_names_wire(name, aid).unwrap())).unwrap();
     }
-    // Every remaining callback must execute verified flash, not the resident cache.
-    for domain in core::iter::once(&mut card.state.isd).chain(card.state.domains.values_mut()) {
-        for (_, raw) in domain.assemblies.iter_mut() { *raw = Rc::new(Vec::new()); }
-    }
     card.select("F04D431001").unwrap();
     card.select("F04D431001").unwrap();
     assert_eq!(card.state.domains["first"].store.get(&1), Some(&3));
@@ -2179,7 +2176,7 @@ fn persistent_storage_schema_is_pinned_until_domain_deletion() {
         ],
     );
     assert_eq!(load(&mut card, &conflicting), Err(Error::KeyMismatch));
-    assert!(card.state.domains["schema"].assemblies.is_empty());
+    assert!(card.state.domains["schema"].image_refs.is_empty());
     assert!(card.state.domains["schema"].storage_declaration(0).is_none());
     assert!(Rc::ptr_eq(
         &pinned_schema,
@@ -2356,34 +2353,24 @@ fn issuer_dependency_code_cannot_reach_caller_domain_storage() {
 fn execution_units_borrow_persisted_packages_and_link_tables() {
     let mut card = card();
     let incarnation = create(&mut card, "borrowed");
-    load(
-        &mut card,
-        &package("borrowed", incarnation, "library", 1, 7, &[0x2a]),
-    )
-    .unwrap();
+    let raw = package("borrowed", incarnation, "library", 1, 7, &[0x2a]);
+    load(&mut card, &raw).unwrap();
     let domain = &card.state.domains["borrowed"];
-    let raw = Rc::clone(&domain.assemblies["library"]);
     let calls = &domain.imports["library"];
-    let units = execution_units(&card.state, "borrowed", "library").unwrap();
-    assert_eq!(units.len(), 1);
-    assert_eq!(units[0].package.raw.as_ptr(), raw.as_ptr());
-    assert_eq!(units[0].calls.as_ptr(), calls.as_ptr());
-    let image_offset = units[0].package.image.as_ptr() as usize - raw.as_ptr() as usize;
-    assert!(image_offset >= 12 && image_offset < raw.len());
-    let descriptor = *domain.image_refs.get("library").unwrap();
-    drop(units);
+    let descriptor = domain.image_refs["library"];
     {
         let flash = &*card.journal.flash_mut();
         let images = linking::BorrowedExecution::new(&card.state, flash, &mut card.platform,
             "borrowed", "library").unwrap();
         let units = images.units().unwrap();
         let bytes = descriptor.read_verified(flash, &mut card.platform).unwrap();
+        assert_eq!(units.len(), 1);
         assert_eq!(units[0].package.raw.as_ptr(), bytes.as_ptr());
+        let image_offset = units[0].package.image.as_ptr() as usize - bytes.as_ptr() as usize;
+        assert!(image_offset >= 12 && image_offset < bytes.len());
         assert_eq!(units[0].calls.as_ptr(), calls.as_ptr());
     }
     card.manage(command(0xec, &management_names_wire("borrowed", "F04D430001").unwrap())).unwrap();
-    // Invocation reads authenticated flash even when the old resident cache is empty.
-    *card.state.domains.get_mut("borrowed").unwrap().assemblies.get_mut("library").unwrap() = Rc::new(Vec::new());
     assert_eq!(card.invoke("F04D430001", &[]).unwrap(), [0x90, 0x00]);
     crate::image_store::ImageFlash::program(card.journal.flash_mut(), usize::from(descriptor.slot), 0, &[0]).unwrap();
     assert_eq!(card.invoke("F04D430001", &[]), Err(Error::Authentication));
@@ -2412,7 +2399,7 @@ fn owned_package_indexes_image_inside_its_signed_envelope() {
 #[test]
 fn package_names_are_shared_after_installation_and_recovery() {
     fn assert_shared_names(domain: &Domain, name: &str) {
-        let package_name = domain.assemblies.get_key_value(name).unwrap().0;
+        let package_name = domain.image_refs.get_key_value(name).unwrap().0;
         let version_name = domain.versions.get_key_value(name).unwrap().0;
         let binding_name = domain.bindings.get_key_value(name).unwrap().0;
         let import_name = domain.imports.get_key_value(name).unwrap().0;
@@ -2564,15 +2551,10 @@ fn activation_moves_staging_and_restores_it_after_commit_failure() {
         data.extend(chunk);
         card.manage(command(0xe8, &data)).unwrap();
     }
-    let staged_pointer = card.staging.bytes.as_ptr();
     card.manage(command(0xea, &[])).unwrap();
     assert!(card.staging.bytes.is_empty());
-    assert_eq!(
-        card.state.domains["move"].assemblies["one"]
-            .as_ref()
-            .as_ptr(),
-        staged_pointer
-    );
+    let descriptor = card.state.domains["move"].image_refs["one"];
+    assert_eq!(descriptor.read_verified(card.journal.flash(), &mut card.platform).unwrap(), initial);
 
     let mut flash = card.into_flash();
     flash.fail_after = Some(0);
@@ -2626,7 +2608,7 @@ fn flash_staging_streams_and_activates_without_a_ram_upload_buffer() {
     assert!(card.staging.as_slice().is_none());
     assert_eq!(erases.get(), 1);
     card.manage(command(0xea, &[])).unwrap();
-    assert_eq!(card.state.isd.assemblies["mscorlib"].as_slice(), package);
+    assert_eq!(card.state.isd.image_refs["mscorlib"].read_verified(card.journal.flash(), &mut card.platform).unwrap(), package.as_slice());
     assert_eq!(card.staging.len(), 0);
 
     let mut corrupted = package.clone();
@@ -2672,7 +2654,7 @@ fn flash_staging_survives_journal_failure_for_activation_retry() {
 
     journal.borrow_mut().fail_after = None;
     card.manage(command(0xea, &[])).unwrap();
-    assert_eq!(card.state.isd.assemblies["mscorlib"].as_slice(), package);
+    assert_eq!(card.state.isd.image_refs["mscorlib"].read_verified(card.journal.flash(), &mut card.platform).unwrap().as_ref(), package.as_slice());
     assert_eq!(card.staging.len(), 0);
     assert_eq!(erases.get(), 1);
 }
@@ -2700,7 +2682,7 @@ fn domain_accepts_packages_above_eight_kib_with_a_sixteen_kib_ceiling() {
     assert!(package.len() <= MAX_PACKAGE_BYTES);
     load(&mut card, &package).unwrap();
     assert_eq!(
-        card.state.domains["large"].assemblies["large"].len(),
+        card.state.domains["large"].image_refs["large"].length as usize,
         package.len()
     );
 
@@ -3444,13 +3426,15 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     let metadata = card.state.isd.packages.get("mscorlib").unwrap();
     let candidate = card.state.clone();
     assert!(Rc::ptr_eq(metadata, candidate.isd.packages.get("mscorlib").unwrap()));
-    let units = execution_units(&card.state, "ISD", "mscorlib").unwrap();
+    let images = linking::BorrowedExecution::new(&card.state, card.journal.flash(), &mut card.platform, "ISD", "mscorlib").unwrap();
+    let units = images.units().unwrap();
     assert!(core::ptr::eq(units[0].package.manifest, &metadata.manifest));
     visit_registry(&card.state, 0x10, |aid, entry| {
         registry_record(0x10, aid, entry).map(|_| ())
     }).unwrap();
-    assert_eq!(calls.get(), [5, 1]);
+    assert_eq!(calls.get(), [6, 1]);
     drop(units);
+    drop(images);
     drop(candidate);
 
     let flash = card.into_flash();
@@ -3462,7 +3446,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
     // Digest and signature again on reopening. A stored identity is the digest of a
     // key rather than a key, so there is nothing left for recovery to revalidate as a
     // curve point. A package whose key is wrong fails its signature instead.
-    assert_eq!(calls.get(), [9, 2]);
+    assert_eq!(calls.get(), [12, 2]);
 }
 
 #[test]
@@ -3495,7 +3479,7 @@ fn management_cbor_matches_shared_vectors_and_rejects_other_encodings() {
 
 // Fixture-only publication for deliberately constructed recovery states.
 impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
-    fn commit(&mut self, mut next: State) -> Result<()> {
+    fn commit(&mut self, next: State) -> Result<()> {
         if self.state == next {
             return Ok(());
         }
@@ -3505,7 +3489,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .map(|domain| domain.image_refs.len()).sum();
         let next_count: usize = core::iter::once(&next.isd)
             .chain(next.domains.0.iter().map(|(_, domain)| domain))
-            .map(|domain| domain.assemblies.len()).sum();
+            .map(|domain| domain.image_refs.len()).sum();
         protected.try_reserve_exact((self.uncommitted_images.len() + current_count + next_count).min(64))
             .map_err(|_| Error::Quota)?;
         protected.extend_from_slice(&self.uncommitted_images);
@@ -3514,22 +3498,13 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 if !protected.contains(descriptor) { protected.push(*descriptor); }
             }
         }
-        let mut images = crate::image_store::Images::new(self.journal.flash_mut())?;
-        for domain in core::iter::once(&mut next.isd).chain(next.domains.0.iter_mut().map(|(_, domain)| domain)) {
-            let mut references = NameMap::new();
-            for (name, raw) in domain.assemblies.iter() {
-                let digest = domain.packages.get(name).ok_or(Error::Storage)?.digest;
-                let descriptor = match domain.image_refs.get(name) {
-                    Some(descriptor) if descriptor.digest == digest && descriptor.length as usize == raw.len() => *descriptor,
-                    _ => images.stage(raw, &protected, &mut self.platform)?,
-                };
-                if !protected.contains(&descriptor) {
+        for domain in core::iter::once(&next.isd).chain(next.domains.values()) {
+            for descriptor in domain.image_refs.values() {
+                if !protected.contains(descriptor) {
                     if protected.len() == 64 { return Err(Error::Quota); }
-                    protected.push(descriptor);
+                    protected.push(*descriptor);
                 }
-                references.insert(Rc::clone(name), descriptor)?;
             }
-            domain.image_refs = references;
         }
         let data = next.encode_snapshot()?;
         if data.len() > 49152 {

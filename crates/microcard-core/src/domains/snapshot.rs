@@ -168,9 +168,6 @@ fn read_domain(d: &mut Decoder<'_>, package_total: &mut usize) -> Result<Domain>
         if *package_total > MAX_TOTAL_PACKAGE_BYTES { return Err(Error::Quota); }
         Ok(descriptor)
     })?;
-    for (name, _) in domain.image_refs.iter() {
-        domain.assemblies.insert(name.as_ref().into(), Rc::new(Vec::new()))?;
-    }
     domain.bindings = read_names(d, |d| {
         let count = d.array(16)?;
         let mut values = Vec::new();
@@ -273,9 +270,8 @@ fn write_domain(e: &mut Encoder, domain: &Domain) -> Result<()> {
         None => e.null()?,
     }
     write_policy(e, &domain.policy)?;
-    e.array(domain.assemblies.len())?;
-    for (name, _) in domain.assemblies.iter() {
-        let descriptor = domain.image_refs.get(name).ok_or(Error::Missing)?;
+    e.array(domain.image_refs.len())?;
+    for (name, descriptor) in domain.image_refs.iter() {
         e.array(2)?;
         e.text(name)?;
         e.array(3)?;

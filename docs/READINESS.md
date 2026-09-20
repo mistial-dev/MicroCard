@@ -30,10 +30,8 @@ This page is the authoritative list of supported behavior and release blockers.
 
 Immutable images occupy dedicated flash slots. Journal activation protects the prior
 committed generation and uncertain candidates. JCVM holds authenticated image handles;
-MC04 invocation and lifecycle callbacks borrow verified flash images for their
-dependency graphs, but loading and recovery validation still own runtime package
-buffers in RAM. Both board layouts reserve separate
-JCVM heap banks. MJ03 reserves a durable nonce before every encryption attempt,
+MC04 retains metadata and descriptors, borrowing verified flash images for loading,
+recovery and execution. Both board layouts reserve separate JCVM heap banks. MJ03 reserves a durable nonce before every encryption attempt,
 independently of the committed generation, including failed attempts.
 
 MC04 domain management separates state/recovery, authenticated commands, execution,
@@ -97,19 +95,22 @@ board's reserved heap.
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the flash ceilings (79.813 seconds with two workers). All seven
-  profiles cross-linked. The intermediate borrowed-execution path still coexists with
-  resident validation images: MC04 hardware release text is 213,996 bytes against
-  212,000, and software reference text is 187,780 against 186,000. All seven text
-  ceilings currently fail; none were raised. Removing the remaining resident-image
-  paths and measuring final heap use remain required.
+  stages, then failed the flash ceilings (71.717 seconds with two workers). All seven
+  profiles cross-linked. MC04 no
+  longer retains package image buffers in runtime state; recovery reads verified
+  flash guards and retains metadata. MC04 hardware release text is 212,220 bytes
+  against 212,000, and software reference text is 186,084 against 186,000. Five text
+  ceilings still fail; none were raised. The matched credential workload reduced host
+  heap peak from 43,227 to 35,137 bytes and reopened retained allocations from 13,215
+  to 4,989 bytes; [measurement evidence](HEAP_MEASUREMENTS.json) records both binaries.
+  Final board-equivalent heap measurements remain required.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
   record the current MC04 DK comparison: 185,708 software text bytes versus 211,608
   with all hardware providers. Vendor dispatch also links non-profile ChaCha20/Poly1305
   symbols despite the absence of RustCrypto. Remeasure the final tree; this is not an achieved optimization.
-- Remove remaining MC04 runtime image ownership and reduce affected-application staging where bounded undo improves measured cost
+- Reduce affected-application staging where bounded undo improves measured cost
   while preserving rollback, cancellation, quota, and persistence invariants.
 - Finish native utility integration and the dead-code/dependency review. Preserve
   useful generated references and provenance; avoid a maintenance fork solely to
