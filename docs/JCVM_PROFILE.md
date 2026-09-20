@@ -557,10 +557,11 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-instruction-checkpoints-contact`, based on `8caa8cb` with instruction checkpoints):
-preparation took 29.634 seconds and vectors 124.225 seconds on the host, compared with
-15.277 / 93.153 seconds before instruction-level publication. Every vector retained
-its previous outcome. Remaining failures concern the original CHUID’s
+(`work/nist-automatic-renewal-contact`, clean revision `6d48d94`):
+preparation took 29.329 seconds and vectors 131.769 seconds on the host. All 63
+individual outcomes match the preceding instruction-checkpoint run (29.634 / 124.225
+seconds). This run uses automatic renewal firmware but does not deliberately exhaust
+counters; the transport acceptance workload covers that transition separately. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain

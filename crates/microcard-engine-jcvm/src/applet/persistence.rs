@@ -163,6 +163,12 @@ impl Card {
         }
     }
 
+    /// Check authenticated state without allocating unused execution frames.
+    pub fn validate_persistent(file: &LoadFile, mut sizes: Sizes, saved: PersistentState<'_>) -> Result<()> {
+        sizes.frame_words = 0;
+        Self::restore(file, sizes, saved).map(drop)
+    }
+
     /// Restore already authenticated state for the exact verified load file.
     /// No installation code runs, and no volatile values are reconstructed from storage.
     pub fn restore(file: &LoadFile, sizes: Sizes, saved: PersistentState<'_>) -> Result<Self> {

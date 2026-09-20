@@ -286,42 +286,31 @@ fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {
 
 pub(crate) fn validate_seed_snapshot(snapshot: &[u8], file: &LoadFile, sizes: Sizes,
         image: [u8; 32], installation: [u8; 16]) -> Result<()> {
-    decode_card(Some(snapshot), file, sizes, image, installation)?.ok_or(Error::Storage)?;
-    Ok(())
+    let saved = decode_snapshot(snapshot, file, sizes, image, installation)?;
+    Card::validate_persistent(file, sizes, saved).map_err(|_| Error::Format)
 }
 
-fn decode_card(
-    snapshot: Option<&[u8]>,
-    file: &LoadFile,
-    sizes: Sizes,
-    image: [u8; 32],
-    installation: [u8; 16],
-) -> Result<Option<Card>> {
-    snapshot
-        .map(|bytes| {
-            let mut decoder = Decoder::new(bytes);
-            decoder.record(7).map_err(|_| Error::IncompatibleState)?;
-            if decoder.unsigned()? != 1 || decoder.unsigned()? != 1 {
-                return Err(Error::IncompatibleState);
-            }
-            if decoder.fixed::<32>()? != image || decoder.fixed::<16>()? != installation {
-                return Err(Error::KeyMismatch);
-            }
-            let instance = decoder.number()?;
-            let heap = decoder.bytes(sizes.heap_bytes)?;
-            let statics = decoder
-                .bytes(file.static_fields().map_err(|_| Error::Format)?.image_size as usize)?;
-            decoder.finish()?;
-            Card::restore(
-                file,
-                sizes,
-                PersistentState {
-                    heap,
-                    statics,
-                    instance,
-                },
-            )
-            .map_err(|_| Error::Format)
-        })
-        .transpose()
+fn decode_card(snapshot: Option<&[u8]>, file: &LoadFile, sizes: Sizes,
+        image: [u8; 32], installation: [u8; 16]) -> Result<Option<Card>> {
+    snapshot.map(|bytes| {
+        let saved = decode_snapshot(bytes, file, sizes, image, installation)?;
+        Card::restore(file, sizes, saved).map_err(|_| Error::Format)
+    }).transpose()
+}
+
+fn decode_snapshot<'a>(bytes: &'a [u8], file: &LoadFile, sizes: Sizes,
+        image: [u8; 32], installation: [u8; 16]) -> Result<PersistentState<'a>> {
+    let mut decoder = Decoder::new(bytes);
+    decoder.record(7).map_err(|_| Error::IncompatibleState)?;
+    if decoder.unsigned()? != 1 || decoder.unsigned()? != 1 {
+        return Err(Error::IncompatibleState);
+    }
+    if decoder.fixed::<32>()? != image || decoder.fixed::<16>()? != installation {
+        return Err(Error::KeyMismatch);
+    }
+    let instance = decoder.number()?;
+    let heap = decoder.bytes(sizes.heap_bytes)?;
+    let statics = decoder.bytes(file.static_fields().map_err(|_| Error::Format)?.image_size as usize)?;
+    decoder.finish()?;
+    Ok(PersistentState { heap, statics, instance })
 }
