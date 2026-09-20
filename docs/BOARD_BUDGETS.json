@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 212364,
+      "text_bytes": 212356,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 212388,
+      "text_bytes": 212380,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 223772,
+      "text_bytes": 223780,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 189364,
+      "text_bytes": 189420,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 199324,
+      "text_bytes": 199380,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -76,9 +76,9 @@
   "budgets_passed": false,
   "budget_failures": [
     "software_reference text_bytes 186084 exceeds 186000",
-    "hardware_release text_bytes 212364 exceeds 212000",
-    "development_debug text_bytes 212388 exceeds 212000",
-    "jcvm_development_debug text_bytes 189364 exceeds 168000",
-    "jcvm_dongle text_bytes 199324 exceeds 178000"
+    "hardware_release text_bytes 212356 exceeds 212000",
+    "development_debug text_bytes 212380 exceeds 212000",
+    "jcvm_development_debug text_bytes 189420 exceeds 168000",
+    "jcvm_dongle text_bytes 199380 exceeds 178000"
   ]
 }
