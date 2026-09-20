@@ -432,6 +432,10 @@ boolean write marker; `vm/exec.rs` consumes it when cancellation is observed.
 `jcvm_storage::commit_view` encodes the entire projection into one journal record.
 The journal erases a destination slot for each commit. Calling this path after every
 ordinary write would therefore turn each write into a full snapshot and slot erase.
+The board also consumes one bit from separate 4 KiB generation and nonce counters
+per commit/encryption attempt, limiting each to 32,768 values. Incremental records
+must account for this lifetime limit while preserving nonce uniqueness and rollback
+protection; changing only the payload encoding cannot close the gap.
 
 Closing this gap requires bounded authenticated write records for heap and static
 changes, ordered before execution proceeds past the persistent operation. Recovery
