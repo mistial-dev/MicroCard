@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise persistent JCVM delivery with the independent Python SCP03/package client."""
+import argparse
 import datetime
 import hashlib
 import pathlib
@@ -142,6 +143,12 @@ def install_openfips(client, discovery):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--certificate-capacity", type=int, default=4096,
+                        help="Fixed certificate-object capacity for allocation qualification (default: 4096)")
+    args = parser.parse_args()
+    if not 1024 <= args.certificate_capacity <= 32767:
+        parser.error("certificate capacity must be between 1024 and 32767 bytes")
     with tempfile.TemporaryDirectory(prefix="microcard-jcvm-") as temporary:
         root = pathlib.Path(temporary)
         keys, state = root / "keys", root / "state"
@@ -181,7 +188,7 @@ def main():
         certificate = certificate_for(public_key)
         container = tlv(0x70, certificate) + bytes.fromhex("710100FE00")
         certificate_object = tlv(0x53, container)
-        client.command(0xdb, bytes.fromhex("64128B035FC10A8C017F8D017F91019B92021000"),
+        client.command(0xdb, bytes.fromhex("64128B035FC10A8C017F8D017F91019B9202") + args.certificate_capacity.to_bytes(2, "big"),
                        p1=0xff, p2=0xff)
         write_certificate(client, certificate_object)
         read_certificate(client, certificate_object)
