@@ -20,6 +20,7 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
             if word_field(heap, public, SIZE)? != 256 || host.p256_parameter(0).is_none() {
                 return crypto_exception(heap, context, 3);
             }
+            prepare_constructor(heap, this, context)?;
             (this, public, private)
         } else {
             let size = frame.pop_short()?;
@@ -30,6 +31,7 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
                 return crypto_exception(heap, context, 3);
             }
             heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS); 2])?;
+            prepare_constructor(heap, this, context)?;
             let public = new_native(heap, ClassId::ECPublicKey, STATE_WORDS, context)?;
             let private = new_native(heap, ClassId::ECPrivateKey, STATE_WORDS, context)?;
             for (key, kind) in [(public, 11), (private, 12)] {
@@ -38,7 +40,6 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
             }
             (this, public, private)
         };
-        heap.check_access(this, context)?;
         heap.put_word(this, KIND, 5)?;
         heap.put_word(this, SIZE, 256)?;
         heap.put_word(this, MATERIAL, public)?;
@@ -82,6 +83,12 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     heap.byte_slice_mut(public_material, 0, 1)?[0] = 0x7f;
     heap.byte_slice_mut(private_material, 0, 1)?[0] = 0x7f;
     Ok(Native::Returned)
+}
+
+fn prepare_constructor(heap: &mut Heap, this: u16, context: heap::Context) -> Result<()> {
+    heap.check_access(this, context)?;
+    // Reserve the container update before allocating components or changing fields.
+    heap.prepare_payload_writes(&[(this, KIND * 2, 6), (this, PENDING * 2, 2)])
 }
 
 #[cfg(test)]
@@ -139,6 +146,23 @@ mod tests {
         assert!(!key_initialized(&heap, public).unwrap());
         assert!(!key_initialized(&heap, private).unwrap());
         let alias = new_native(&mut heap, ClassId::KeyPair, STATE_WORDS, 1).unwrap();
+        for references in [false, true] {
+            let before = heap.image().to_vec();
+            heap.begin_transaction(8).unwrap();
+            frame.push_reference(alias).unwrap();
+            if references {
+                frame.push_reference(public).unwrap();
+                frame.push_reference(private).unwrap();
+            } else {
+                frame.push_short(5).unwrap();
+                frame.push_short(256).unwrap();
+            }
+            assert!(matches!(call(MethodId::Constructor, signature(references), &mut heap,
+                &mut host, &mut frame, 1, &mut 100), Err(Error::TransactionFull)));
+            assert_eq!(heap.transaction_remaining(), Some(8));
+            heap.commit_transaction().unwrap();
+            assert!(heap.image() == before, "caught constructor failure must preserve the container and allocation tail");
+        }
         frame.push_reference(alias).unwrap();
         frame.push_reference(public).unwrap();
         frame.push_reference(private).unwrap();

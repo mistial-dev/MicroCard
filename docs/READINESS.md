@@ -92,7 +92,9 @@ board's reserved heap.
   allocation-abort session termination, key updates, crypto initialization and persistence
   failure. PIN presentation checkpoints consume retries outside transactions, including
   invalid inputs; PIN construction reserves allocation and undo capacity before changing
-  fields, so a caught capacity error cannot commit partial initialization. PIN
+  fields, so a caught capacity error cannot commit partial initialization. Both
+  KeyPair constructors reserve their complete container update before publishing
+  references; the allocating form preflights both component objects. PIN
   replacement reserves its complete conditional update and honors
   the configured capacity. Runtime exception reasons clear on reset; recovery and
   reference stores enforce temporary-object restrictions. Installation parameters use
@@ -100,7 +102,7 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 221,432 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 221,544 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
