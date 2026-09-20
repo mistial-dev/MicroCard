@@ -105,6 +105,26 @@ impl<'a> Heap<'a> {
 
     pub fn allocations_aborted(&self) -> bool { self.aborted_allocations }
 
+    /// Project committed state into caller-owned staging without ending the live
+    /// transaction. The returned length excludes allocations made since begin.
+    /// Callers must sanitize transient contents before persisting this projection.
+    pub fn copy_committed_state(&self, statics: &[u8], heap_output: &mut [u8], static_output: &mut [u8]) -> Result<usize> {
+        if heap_output.len() != self.next || static_output.len() != statics.len() {
+            heap_output.fill(0);
+            static_output.fill(0);
+            return Err(Error::Bounds);
+        }
+        heap_output.copy_from_slice(self.image());
+        static_output.copy_from_slice(statics);
+        if let Some((start, undo)) = &self.transaction {
+            undo.restore(heap_output, static_output);
+            heap_output[*start..].fill(0);
+            Ok(*start)
+        } else {
+            Ok(self.next)
+        }
+    }
+
     pub fn commit_transaction(&mut self) -> Result<()> {
         self.transaction.take().ok_or(Error::Inconsistent)?;
         Ok(())
@@ -487,12 +507,24 @@ mod tests {
         heap.put_word_unconditional(object, 1, 2).unwrap();
         // Later conditional writes must restore the unconditional counter, not 3 or 5.
         heap.put_word(object, 1, 8).unwrap();
-        assert!(!heap.abort_transaction(&mut []).unwrap());
+        let mut statics = [4, 5];
+        heap.remember_static(0, &statics).unwrap();
+        statics.fill(9);
+        let mut projected = vec![0; heap.used()];
+        let mut projected_statics = [0; 2];
+        let remaining = heap.transaction_remaining();
+        assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
+        assert_eq!(projected_statics, [4, 5]);
+        assert_eq!(statics, [9, 9]);
+        assert_eq!(heap.get_word(object, 1), Ok(8));
+        assert_eq!(heap.transaction_remaining(), remaining);
+        assert!(!heap.abort_transaction(&mut statics).unwrap());
         let mut expected = original;
         expected[object as usize + HEADER + 2..object as usize + HEADER + 4]
             .copy_from_slice(&2u16.to_be_bytes());
         expected[transient as usize + HEADER] = 1;
         assert_eq!(heap.image(), expected);
+        assert_eq!(projected, expected);
         assert_eq!(heap.abort_transaction(&mut []), Err(Error::Inconsistent));
 
         heap.begin_transaction(16).unwrap();
@@ -500,6 +532,12 @@ mod tests {
         heap.commit_transaction().unwrap();
         assert_eq!(heap.get_word(object, 0), Ok(12));
         assert_eq!(heap.transaction_remaining(), None);
+        assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
+        assert_eq!(projected, heap.image());
+        assert_eq!(projected_statics, statics);
+        assert_eq!(heap.copy_committed_state(&statics, &mut projected[..1], &mut projected_statics), Err(Error::Bounds));
+        assert_eq!(projected[0], 0);
+        assert_eq!(projected_statics, [0; 2]);
     }
 
     #[test]
@@ -518,6 +556,11 @@ mod tests {
         assert_eq!(heap.array_put(array, 8, 1), Err(Error::Bounds));
         assert_eq!(heap.image(), before);
         let created = heap.new_object(1, 1, 1).unwrap();
+        let mut projected = vec![0; heap.used()];
+        let used = heap.copy_committed_state(&[], &mut projected, &mut []).unwrap();
+        assert_eq!(used, before.len());
+        assert!(projected[used..].iter().all(|byte| *byte == 0));
+        assert!(heap.info(created).is_ok(), "projection must not invalidate live objects");
         assert!(heap.abort_transaction(&mut []).unwrap(), "caller must invalidate new references");
         assert_eq!(heap.byte_slice(array, 0, 8).unwrap(), &[0; 8]);
         assert_eq!(heap.array_get(transient, 0), Ok(3));
