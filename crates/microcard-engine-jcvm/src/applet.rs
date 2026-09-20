@@ -286,7 +286,7 @@ impl Card {
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
         heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
         heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?.fill(0);
-        natives::reset_pin_validations(&mut heap)
+        natives::reset_native_volatile(&mut heap)
     }
 
     /// Hand the applet one command, as a selection or as ordinary processing.
@@ -786,6 +786,10 @@ mod tests {
         heap.put_word(signature, 3, 1).unwrap();
         heap.put_word(signature, 4, 1).unwrap();
         heap.put_word(signature, 5, hash_state).unwrap();
+        let runtime_exception = natives::new_exception(&mut heap, ClassId::CryptoException, 1).unwrap();
+        let explicit_exception = heap.new_object(native_class_of(ClassId::CryptoException).unwrap(), 6, 1).unwrap();
+        heap.put_word_unconditional(runtime_exception, natives::REASON_FIELD, 3).unwrap();
+        heap.put_word_unconditional(explicit_exception, natives::REASON_FIELD, 4).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -798,6 +802,8 @@ mod tests {
         assert_eq!(recovered.array_get(persistent, 0), Ok(9));
         assert_eq!(recovered.get_word(pin, 3), Ok(0));
         assert_eq!(recovered.get_word(pin, 4), Ok(2));
+        assert_eq!(recovered.get_word(runtime_exception, natives::REASON_FIELD), Ok(0));
+        assert_eq!(recovered.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
         assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
         assert_eq!(recovered.byte_slice(pending, 0, 32).unwrap(), &[0; 32]);
         assert_eq!(recovered.get_word(cipher, 2), Ok(key));
@@ -815,7 +821,9 @@ mod tests {
         let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(live.array_get(transient, 0), Ok(7));
         assert_eq!(live.get_word(pin, 3), Ok(1));
-        for case in 0..20 {
+        assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
+        assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
+        for case in 0..21 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -837,6 +845,7 @@ mod tests {
                 16 => { invalid[hash_state as usize + 4] &= 0x0f; instance }
                 17 => { invalid[signature as usize + heap::HEADER + 9] = 2; instance }
                 18 => { invalid[signature as usize + heap::HEADER + 10..signature as usize + heap::HEADER + 12].copy_from_slice(&pending.to_be_bytes()); instance }
+                19 => { invalid[runtime_exception as usize + heap::HEADER + 1] = 3; instance }
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
@@ -873,6 +882,8 @@ mod tests {
         assert_eq!(heap.array_get(persistent, 0), Ok(9));
         assert_eq!(heap.get_word(pin, 3), Ok(0));
         assert_eq!(heap.get_word(pin, 4), Ok(2));
+        assert_eq!(heap.get_word(runtime_exception, natives::REASON_FIELD), Ok(0));
+        assert_eq!(heap.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
         assert!(heap.byte_slice(card.buffer, 0, card.sizes.buffer_bytes as usize).unwrap().iter().all(|byte| *byte == 0));
         // Explicit registration may not change the instance management authorized.
         let bytes = applet_registration(vec![op::RETURN], 1, true).build();

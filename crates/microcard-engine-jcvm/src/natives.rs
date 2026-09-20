@@ -59,8 +59,13 @@ pub fn native_is_a(thrown: u16, caught: u16) -> bool {
 /// Field zero of an `ISOException`, which carries the status word to report.
 pub const REASON_FIELD: usize = 0;
 
-pub fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
-    security::reset_pin_validations(heap)
+pub(crate) fn is_exception_class(class: &ApiClass) -> bool {
+    class.id == ClassId::Throwable || class.supers.contains(&ClassId::Throwable)
+}
+
+/// Clear reset-scoped native fields in live state or a persistence staging buffer.
+pub fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
+    security::reset_native_volatile(heap)
 }
 
 /// What the runtime environment knows while a command is being processed, JCRE §4.

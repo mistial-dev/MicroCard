@@ -35,11 +35,15 @@ const COUNTER: usize = 4;
 /// Reset-scoped cipher state: count/seen-input flag, fifteen pending bytes, then CBC IV.
 const PENDING: usize = 5;
 
-pub(super) fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
+pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
     heap.visit_objects(|_, info, payload| {
-        if info.kind == heap::KIND_OBJECT && super::api_class(info.class)
-            .is_some_and(|class| class.id == ClassId::OwnerPIN) {
+        if info.kind != heap::KIND_OBJECT { return Ok(()); }
+        let Some(class) = super::api_class(info.class) else { return Ok(()); };
+        if class.id == ClassId::OwnerPIN {
             payload.get_mut(READY * 2..READY * 2 + 2).ok_or(Error::Bounds)?.fill(0);
+        } else if info.length == 1 && super::is_exception_class(class) {
+            // Runtime exception reasons reset; explicit six-word exceptions persist.
+            payload.fill(0);
         }
         Ok(())
     })

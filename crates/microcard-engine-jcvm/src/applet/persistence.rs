@@ -34,7 +34,7 @@ impl<'a> PersistentView<'a> {
             heap.clear_transient(heap::CLEAR_ON_RESET, self.context)?;
             let length = heap.info(self.buffer)?.length as usize;
             heap.byte_slice_mut(self.buffer, 0, length)?.fill(0);
-            natives::reset_pin_validations(&mut heap)
+            natives::reset_native_volatile(&mut heap)
         })();
         if let Err(error) = result { output.zeroize(); return Err(error); }
         Ok(PersistentState { heap: output, statics: self.statics, instance: self.instance })
@@ -192,8 +192,10 @@ impl Card {
             } else if info.kind == heap::KIND_OBJECT {
                 if natives::is_native_class(info.class) {
                     let class = natives::api_class(info.class).ok_or(Error::Format)?;
-                    let exception = class.id == ClassId::Throwable
-                        || class.supers.contains(&ClassId::Throwable);
+                    let exception = natives::is_exception_class(class);
+                    if exception && info.length == 1 && payload.iter().any(|byte| *byte != 0) {
+                        return Err(Error::Format);
+                    }
                     if info.length != 6
                         && !(info.length == 1
                             && (exception || class.id == ClassId::APDU))
