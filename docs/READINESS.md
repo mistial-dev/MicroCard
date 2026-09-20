@@ -116,7 +116,12 @@ required. Static RAM includes the reserved heap.
 
 CBOR and image separation reduced the credential metadata snapshot to 1,408 bytes,
 with 5,792 bytes of separately stored packages. The measured credential workload's
-host allocation peak reached 39,313 requested bytes after transaction and slab changes.
+host allocation peak reached 39,335 requested bytes at `c1950b1`. The personalized
+OpenFIPS201 workload, including transaction/PIN checkpoints and interrupted certificate
+replacement, reached 192,261 requested bytes. [Heap measurements](HEAP_MEASUREMENTS.json)
+record both clean-revision runs and per-instruction samples. These host figures omit
+allocator overhead and stack and include host-specific storage costs; they do not
+establish that the board's 196,608-byte reserved heap is sufficient.
 Native copy and TLV services reduce interpreted code but add firmware text; no device
 latency improvement or smaller safe heap has been established. Historical per-change
 comparisons remain in Git history; reproduce current results before using them as budgets.

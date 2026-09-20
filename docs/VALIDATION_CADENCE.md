@@ -71,6 +71,11 @@ the board, so these figures are optimization evidence, not a safe device heap bo
 The ordinary simulator and firmware builds omit the counters. No new applet behavior
 suite is needed for profiling; the existing workload must still pass.
 
+[Recorded heap measurements](HEAP_MEASUREMENTS.json) bind the latest retained runs to
+their source revision, build command, workload, platform, and dirty-tree status.
+Keep `device_heap_safety_established` false until board-equivalent allocation and
+physical peak measurements support a safe bound.
+
 Board size checks use persistent per-profile target directories under
 `board/nrf52840/target/profiles/`. Separate gate invocations cannot substitute another
 profile's ELF or link map between the build and inspection. The first run fills each
