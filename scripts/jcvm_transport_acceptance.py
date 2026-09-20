@@ -41,12 +41,12 @@ def tlv(tag, value):
     return bytes([tag]) + encoded + value
 
 
-def certificate_for(public_key):
+def certificate_for(public_key, serial=1):
     issuer_key = ec.derive_private_key(9, ec.SECP256R1())
     issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "MicroCard acceptance CA")])
     subject = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "OpenFIPS201 signing key")])
     return (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer)
-            .public_key(public_key).serial_number(1)
+            .public_key(public_key).serial_number(serial)
             .not_valid_before(datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
             .not_valid_after(datetime.datetime(2040, 1, 1, tzinfo=datetime.timezone.utc))
             .sign(issuer_key, hashes.SHA256()).public_bytes(serialization.Encoding.DER))
@@ -65,6 +65,14 @@ def read_certificate(client, expected):
         assert status >> 8 == 0x61, response.hex()
         response = client.raw(bytes.fromhex("00C00000C0"))
     raise AssertionError("certificate response did not finish")
+
+
+def write_certificate(client, certificate_object):
+    payload = bytes.fromhex("5C035FC10A") + certificate_object
+    for offset in range(0, len(payload), 180):
+        more = offset + 180 < len(payload)
+        client.command(0xdb, payload[offset:offset + 180], p1=0x3f, p2=0xff,
+                       cla=0x14 if more else 0x04)
 
 
 def sign_with_pin(client, public_key, pin):
@@ -138,11 +146,26 @@ def main():
         certificate_object = tlv(0x53, container)
         client.command(0xdb, bytes.fromhex("64128B035FC10A8C017F8D017F91019B92021000"),
                        p1=0xff, p2=0xff)
-        payload = bytes.fromhex("5C035FC10A") + certificate_object
-        for offset in range(0, len(payload), 180):
-            more = offset + 180 < len(payload)
-            client.command(0xdb, payload[offset:offset + 180], p1=0x3f, p2=0xff,
-                           cla=0x14 if more else 0x04)
+        write_certificate(client, certificate_object)
+        read_certificate(client, certificate_object)
+        # Stop between encrypted chain fragments, without graceful session cleanup.
+        replacement = tlv(0x53, tlv(0x70, certificate_for(public_key, serial=2))
+                          + bytes.fromhex("710100FE00"))
+        incomplete = bytes.fromhex("5C035FC10A") + replacement
+        assert len(incomplete) > 180
+        client.command(0xdb, incomplete[:180], p1=0x3f, p2=0xff, cla=0x14)
+        client.p.kill()
+        assert client.p.wait(timeout=5) != 0
+        client.p.stdin.close()
+        client.p.stdout.close()
+        client = Client(keys, state, mode)
+        assert piv(client, 0xa4, instance, p1=4, le=256) == selected
+        read_certificate(client, certificate_object)
+        # A fresh authenticated upload must replace the object, not resume stale chaining.
+        client.connect()
+        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        write_certificate(client, replacement)
+        certificate_object = replacement
         read_certificate(client, certificate_object)
         # The interindustry class belongs to the applet, even for a GP instruction number.
         client.command(0xe4, b"\x4f" + bytes([len(instance)]) + instance,
@@ -219,7 +242,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing/certificate retrieval after reboot, reclaim and fail-closed storage")
+    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing, interrupted certificate replacement/reboot, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":

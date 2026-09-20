@@ -356,6 +356,9 @@ Installation publishes only after its complete callback succeeds. Storage serial
 a borrowed view into its existing staging buffer, clearing volatile contents there.
 Host tests cover OpenFIPS201 object activation followed by cancellation and a failed
 checkpoint, including reopening the journal and reading the object.
+Transport acceptance also kills the simulator between encrypted certificate-upload
+fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
+This does not simulate interruption inside an individual flash write.
 
 PIN checks checkpoint their retry decrement before comparison and checkpoint a
 successful counter reset before returning. Reset/unblock also checkpoint their

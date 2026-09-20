@@ -51,6 +51,9 @@ board's reserved heap.
 ## Required before the pre-hardware release candidate
 
 - Complete host interruption coverage for personalized OpenFIPS201 provisioning.
+  Abrupt simulator termination between encrypted certificate fragments preserves
+  the prior certificate; a fresh authenticated upload then replaces it and survives
+  reboot. This covers command-boundary recovery, not arbitrary torn flash writes.
   P-256 keys, generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Ordinary PIV access, reselect,
   secure-channel reset, chained certificate upload, and certificate retrieval now pass
   through the managed simulator path.
