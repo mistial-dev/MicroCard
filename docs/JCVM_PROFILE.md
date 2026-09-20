@@ -259,14 +259,12 @@ Symmetric key objects keep transient initialization flags beside their key bytes
 reset and deselection clear both together. Persistent keys retain both. This follows
 [KeyBuilder's lifetime contract](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacard/security/KeyBuilder.html).
 Snapshots sanitize transient key data; RAM suspension retains reset-scoped keys only.
-The first symmetric-key import checks array capacity and reserves the persistent
-reference/readiness update before allocating material. An undo-capacity failure leaves
-the heap unchanged, including when the applet catches the error and commits.
-Initial EC material creation uses the same ordering: reserve the persistent material
-reference before allocating its array, for both persistent and transient key types.
-Key-pair generation reserves both component updates together before allocating either
-material array or calling the provider; the same reservation covers existing material
-during regeneration.
+Key-material creation checks allocation and undo capacity before publishing references.
+Key-pair generation reserves both component updates together. Catching a capacity
+failure and committing therefore cannot retain a partial first import or generation.
+Cipher and signature initialization similarly reserve their complete metadata updates
+before changing state. Provider results are staged before successful key or signature
+publication; transient state follows its declared clear event.
 
 Restoration rejects the former layout that placed transient key material in persistent
 arrays. This storage support does not enable unsupported cipher or signature algorithms.
