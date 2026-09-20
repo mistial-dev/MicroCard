@@ -768,6 +768,29 @@ mod tests {
         let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
             else { panic!("commit without begin accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
+        // Invalid presentations still consume a retry, including when their exception
+        // is caught and the surrounding transaction is aborted (OwnerPIN.check).
+        for (candidate, offset, length, class) in [
+            (crate::vm::NULL, 0, 4, ClassId::NullPointerException),
+            (original, u16::MAX, 4, ClassId::ArrayIndexOutOfBoundsException),
+            (original, 0, u16::MAX, ClassId::ArrayIndexOutOfBoundsException),
+            (original, 3, 2, ClassId::ArrayIndexOutOfBoundsException),
+        ] {
+            // Allocate runtime exceptions before the transaction so abort does not
+            // terminate the session because of a newly allocated object.
+            let exception = new_exception(&mut heap, class, 1).unwrap();
+            heap.put_word_unconditional(pin, 4, 3).unwrap();
+            heap.put_word_unconditional(pin, 3, 1).unwrap();
+            heap.begin_transaction(256).unwrap();
+            let result = invoke_security(ClassId::OwnerPIN, MethodId::check,
+                &[(true, pin), (true, candidate), (false, offset), (false, length)],
+                &mut heap, &mut frame, &mut host).unwrap();
+            assert!(matches!(result, Native::Threw(reference) if reference == exception));
+            heap.abort_transaction(&mut []).unwrap();
+            assert_eq!(heap.get_word(pin, 4), Ok(2));
+            assert_eq!(heap.get_word(pin, 3), Ok(0));
+        }
+        heap.put_word_unconditional(pin, 4, 3).unwrap();
         checkpoint.fail = true;
         for value in [(pin, true), (original, true), (0, false), (4, false)] {
             frame.push_raw(value).unwrap();

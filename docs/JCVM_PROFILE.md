@@ -376,6 +376,8 @@ Transport acceptance also kills the simulator between encrypted certificate-uplo
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
 
+Invalid PIN presentations throw the API-specified null or bounds exception while
+retaining the consumed retry across transaction abort (3.0.5 `OwnerPIN.check`).
 PIN checks checkpoint their retry decrement before comparison and checkpoint a
 successful counter reset before returning. Reset/unblock also checkpoint their
 counter changes. During an active transaction these snapshots restore conditional

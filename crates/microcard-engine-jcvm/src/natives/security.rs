@@ -324,21 +324,25 @@ pub fn call(
             let candidate = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             let tries = heap.get_word(this, COUNTER)?;
-            if tries == 0 {
-                frame.push_short(0)?;
-                return Ok(Native::Returned);
-            }
             // The counter is decremented before the comparison, JCRE §5.1. A card cut off
             // mid check must not give the attempt back.
-            heap.put_word_unconditional(this, COUNTER, tries - 1)?;
+            heap.put_word_unconditional(this, COUNTER, tries.saturating_sub(1))?;
             heap.put_word_unconditional(this, READY, 0)?;
             checkpoint_committed(heap, host, jcre, context, statics)?;
+            if candidate == crate::vm::NULL {
+                return Ok(Native::Threw(super::new_exception(heap, ClassId::NullPointerException, context)?));
+            }
+            heap.check_access(candidate, context)?;
+            if length < 0 || offset < 0
+                || usize::from(offset as u16) + usize::from(length as u16) > usize::from(heap.info(candidate)?.length)
+            {
+                return Ok(Native::Threw(super::new_exception(heap, ClassId::ArrayIndexOutOfBoundsException, context)?));
+            }
             let material = heap.get_word(this, MATERIAL)?;
             let stored = heap.get_word(this, SIZE)? as usize;
-            let matched = if length < 0 || offset < 0 || length as usize != stored {
+            let matched = if tries == 0 || length as usize != stored {
                 false
             } else {
-                heap.check_access(candidate, context)?;
                 let mut equal = true;
                 for at in 0..stored {
                     let left = heap.byte_slice(material, at, 1)?[0];
