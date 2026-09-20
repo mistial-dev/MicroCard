@@ -144,7 +144,7 @@ def create(upstream, output):
                    .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
                    .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()), False)
                    .add_extension(x509.AuthorityInformationAccess([x509.AccessDescription(
-                       AuthorityInformationAccessOID.CA_ISSUERS, x509.UniformResourceIdentifier("https://microcard.invalid/test-issuer.crt"))]), False)
+                       AuthorityInformationAccessOID.CA_ISSUERS, x509.UniformResourceIdentifier("https://microcard.invalid/test-issuer.p7c"))]), False)
                    .add_extension(x509.CRLDistributionPoints([x509.DistributionPoint(
                        [x509.UniformResourceIdentifier("https://microcard.invalid/test-issuer.crl")], None, None, None)]), False))
         certificate = builder.sign(issuer_key, hashes.SHA256())

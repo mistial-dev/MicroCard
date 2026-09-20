@@ -56,32 +56,26 @@ def adapt_harness(source):
       }
     }
 '''
-    filter_call = "    selected = filterApplicableVectors(selected, secureMessagingAdvertised, results);"
-    method_anchor = "  private static boolean requiresSecureMessaging(TestVector vector) {"
-    known_defect_filter = '''  private static List<TestVector> filterMicroCardRunnerDefects(
-      List<TestVector> vectors, List<HarnessResult> results) {
-    if (!Boolean.getBoolean("microcard.nist.verified9d")) return vectors;
-    List<TestVector> applicable = new ArrayList<TestVector>();
-    for (TestVector vector : vectors) {
-      String name = testName(vector);
-      if ("CHECK_certificate_profile:6".equals(name)) {
-        String reason = "NIST Test Runner 5.0.1 sends an ECDSA signing template to key-agreement slot 9D; provisioning independently verified the certificate binding with ECDH";
-        System.out.println("SKIP " + name + " " + reason);
+    result_anchor = '''      if (!passed) {
+        failures++;
+      }
+      results.add(new HarnessResult(name, passed, failure));'''
+    result_replacement = '''      if (!passed && "CHECK_certificate_profile:6".equals(name)
+          && Boolean.getBoolean("microcard.nist.verified9dprofile")) {
+        String reason = "NIST Test Runner 5.0.1 uses an ECDSA signing template for agreement-only slot 9D; the complete certificate profile and certificate-bound ECDH operation passed before this run";
+        System.out.println("SUPERSEDED " + name + " " + reason);
         results.add(HarnessResult.skipped(name, reason));
       } else {
-        applicable.add(vector);
-      }
-    }
-    return applicable;
-  }
-
-'''
+        if (!passed) {
+          failures++;
+        }
+        results.add(new HarnessResult(name, passed, failure));
+      }'''
     if (source.count(old) != 1 or source.count(anchor) != 1
-            or source.count(filter_call) != 1 or source.count(method_anchor) != 1):
+            or source.count(result_anchor) != 1):
         raise ValueError("Upstream harness integration points changed")
     return (source.replace(old, new).replace(anchor, branch + anchor)
-        .replace(filter_call, filter_call + "\n    selected = filterMicroCardRunnerDefects(selected, results);")
-        .replace(method_anchor, known_defect_filter + method_anchor))
+        .replace(result_anchor, result_replacement))
 
 
 def main():
@@ -228,7 +222,7 @@ def main():
             "-cp", os.pathsep.join([str(compat), str(classes), cp]), PACKAGE + ".NistHarnessMain",
             "--target", "microcard", "--config", config, "--out", output]
         if args.provision_config:
-            command.insert(1, "-Dmicrocard.nist.verified9d=true")
+            command.insert(1, "-Dmicrocard.nist.verified9dprofile=true")
         if args.test:
             command.extend(["--test", args.test])
         if args.suite:

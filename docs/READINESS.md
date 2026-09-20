@@ -61,9 +61,11 @@ board's reserved heap.
   until the snapshot exceeded capacity; runtime exception reuse fixes that failure.
   The combined profile reports 61 passed, 0 failed, and 2 not applicable among 63
   contact vectors. One exclusion is unadvertised secure messaging. The other is a
-  Test Runner 5.0.1 defect that asks the agreement-only 9D key to sign; provisioning
-  proves the same certificate binding through ECDH before the exclusion. See the reproducible
-  commands and profile distinctions in [JCVM acceptance](JCVM_PROFILE.md).
+  Test Runner 5.0.1 defect that asks the agreement-only 9D key to sign. The runner still
+  executes all six profile checks; provisioning independently validates the complete 9D
+  certificate profile and proves its key binding through ECDH before that result is
+  superseded. See the reproducible commands and profile distinctions in
+  [JCVM acceptance](JCVM_PROFILE.md).
   Abrupt simulator termination between encrypted certificate fragments preserves
   the prior certificate; a fresh authenticated upload then replaces it and survives
   reboot. This covers command-boundary recovery, not arbitrary torn flash writes.

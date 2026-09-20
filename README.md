@@ -32,9 +32,10 @@ The committed OpenFIPS201 fixture runs from a clean checkout.
 
 The full derived P-256 host profile currently reports **61 passed, 0 failed, and
 2 not applicable among 63 NIST contact vectors**. Secure messaging is not advertised,
-and NIST Test Runner 5.0.1 incorrectly asks the agreement-only 9D key to sign; the
-harness verifies that certificate binding with a real ECDH exchange before excluding
-that assertion. These results are development evidence rather than a conformance claim. The
+and NIST Test Runner 5.0.1 incorrectly asks the agreement-only 9D key to sign. The
+harness still executes all six profile checks, then supersedes that result only after
+independently verifying the complete 9D certificate profile and a certificate-bound
+ECDH exchange. These results are development evidence rather than a conformance claim. The
 [Java Card profile](docs/JCVM_PROFILE.md) records the exact supported API surface,
 test results, and known gaps.
 

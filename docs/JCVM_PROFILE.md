@@ -586,14 +586,16 @@ The combined identity imports all 11 objects and four keys and passes exact read
 after reopening. Its generated CHUID, fingerprint, face, and Security Object share a
 current test-only content signer, and each object is re-signed after the CHUID expiry
 and role-specific certificate policies are issued. The complete contact run reports
-**61 passed, 0 failed, and 2 not applicable** (`work/nist-p256-v15-contact`):
-preparation took 29.075 seconds and vectors 119.068 seconds on the host.
+**61 passed, 0 failed, and 2 not applicable** (`work/nist-p256-v16-contact`):
+preparation took 29.056 seconds and vectors 118.057 seconds on the host.
 
 `CHECK_certificate_profile:6` is not applicable because NIST Test Runner 5.0.1
 checks the certificate's `keyAgreement` usage, then sends an ECDSA signing template
-to slot 9D. OpenFIPS201 correctly rejects that role violation with `6A86`.
-Provisioning first performs a real P-256 ECDH exchange and compares the result with
-the certificate public key, so the exclusion cannot hide a missing or mismatched key.
+to slot 9D. OpenFIPS201 correctly rejects that role violation with `6A86`. The runner
+still executes all six checks, with the other five passing. Provisioning independently
+validates the complete 9D certificate profile, performs a real P-256 ECDH exchange,
+and compares the result with the certificate public key before superseding the runner
+result.
 
 `SecureMessagingErrorHandling:1` is skipped because the SELECT response does not
 advertise secure messaging. This is missing coverage, not a passing result.

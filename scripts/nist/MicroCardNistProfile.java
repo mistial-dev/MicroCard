@@ -25,6 +25,17 @@ import javax.crypto.KeyAgreement;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.x509.AccessDescription;
+import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
+import org.bouncycastle.asn1.x509.CertificatePolicies;
+import org.bouncycastle.asn1.x509.CRLDistPoint;
+import org.bouncycastle.asn1.x509.DistributionPointName;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
 
 /** Loads the published P-256 key fixtures without replacing the NIST expectations. */
 final class MicroCardNistProfile {
@@ -53,11 +64,12 @@ final class MicroCardNistProfile {
 
     private static void verifyKeyManagementEcdh(MicroCardNistTransport card, ConformancePackage profile)
             throws Exception {
-        ECPublicKey cardPublic = null;
+        X509Certificate certificate = null;
         for (var key : profile.keys) {
-            if (key.slot == (byte) 0x9d) cardPublic = (ECPublicKey) key.certificate.getPublicKey();
+            if (key.slot == (byte) 0x9d) certificate = key.certificate;
         }
-        if (cardPublic == null) throw new IllegalArgumentException("P-256 slot 9D is missing");
+        verifyKeyManagementCertificate(certificate);
+        ECPublicKey cardPublic = (ECPublicKey) certificate.getPublicKey();
         var generator = KeyPairGenerator.getInstance("EC");
         generator.initialize(new ECGenParameterSpec("secp256r1"));
         var peer = generator.generateKeyPair();
@@ -79,7 +91,62 @@ final class MicroCardNistProfile {
             if (!Arrays.equals(agreement.generateSecret(), Arrays.copyOfRange(value, 4, 36)))
                 throw new IllegalStateException("P-256 slot 9D private key does not match its certificate");
         }
-        System.out.println("Verified P-256 slot 9D certificate binding with ECDH");
+        System.out.println("Verified SP 800-73/78 slot 9D certificate profile and ECDH binding");
+    }
+
+    private static void verifyKeyManagementCertificate(X509Certificate certificate) throws Exception {
+        if (certificate == null || !(certificate.getPublicKey() instanceof ECPublicKey ec)
+                || ec.getParams().getOrder().bitLength() != 256)
+            throw new IllegalArgumentException("Slot 9D certificate must contain a P-256 key");
+        boolean[] usage = certificate.getKeyUsage();
+        if (usage == null || usage.length <= 4 || !usage[4])
+            throw new IllegalArgumentException("Slot 9D certificate must permit key agreement");
+        for (int i = 0; i < usage.length; i++) {
+            if (i != 4 && usage[i])
+                throw new IllegalArgumentException("Slot 9D certificate has an incompatible key usage");
+        }
+        if (certificate.getBasicConstraints() >= 0)
+            throw new IllegalArgumentException("Slot 9D certificate must not be a CA certificate");
+
+        var policies = CertificatePolicies.getInstance(extension(certificate, Extension.certificatePolicies));
+        if (policies.getPolicyInformation().length != 1
+                || !"2.16.840.1.101.3.2.1.3.6".equals(
+                    policies.getPolicyInformation()[0].getPolicyIdentifier().getId()))
+            throw new IllegalArgumentException("Slot 9D certificate has the wrong PIV policy");
+
+        var crls = CRLDistPoint.getInstance(extension(certificate, Extension.cRLDistributionPoints));
+        boolean validCrl = false;
+        for (var point : crls.getDistributionPoints()) {
+            if (point.getDistributionPoint() == null
+                    || point.getDistributionPoint().getType() != DistributionPointName.FULL_NAME) continue;
+            for (var name : GeneralNames.getInstance(point.getDistributionPoint().getName()).getNames()) {
+                validCrl |= httpUri(name, ".crl");
+            }
+        }
+        if (!validCrl) throw new IllegalArgumentException("Slot 9D certificate lacks an HTTP CRL URI");
+
+        var aia = AuthorityInformationAccess.getInstance(extension(certificate, Extension.authorityInfoAccess));
+        boolean validIssuer = false;
+        for (var description : aia.getAccessDescriptions()) {
+            validIssuer |= description.getAccessMethod().equals(AccessDescription.id_ad_caIssuers)
+                && httpUri(description.getAccessLocation(), ".p7c");
+        }
+        if (!validIssuer)
+            throw new IllegalArgumentException("Slot 9D certificate lacks an HTTP CA Issuers URI");
+    }
+
+    private static ASN1Primitive extension(X509Certificate certificate, ASN1ObjectIdentifier oid)
+            throws Exception {
+        byte[] encoded = certificate.getExtensionValue(oid.getId());
+        if (encoded == null) throw new IllegalArgumentException("Slot 9D certificate lacks " + oid);
+        return ASN1Primitive.fromByteArray(ASN1OctetString.getInstance(encoded).getOctets());
+    }
+
+    private static boolean httpUri(GeneralName name, String suffix) {
+        if (name.getTagNo() != GeneralName.uniformResourceIdentifier) return false;
+        String uri = name.getName().toString().toLowerCase(Locale.ROOT);
+        return (uri.startsWith("http://") || uri.startsWith("https://"))
+            && (suffix == null || uri.endsWith(suffix));
     }
 
     private static byte[] encodePoint(ECPublicKey key) {
