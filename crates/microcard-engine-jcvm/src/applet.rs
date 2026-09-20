@@ -124,7 +124,7 @@ impl Card {
         card.buffer = heap.new_transient_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context, heap::CLEAR_ON_RESET)?;
         let apdu_class = native_class_of(ClassId::APDU)?;
         card.apdu = heap.new_object(apdu_class, 1, card.context)?;
-        natives::reserve_framework_exceptions(&mut heap, card.context)?;
+        natives::reserve_runtime_exceptions(&mut heap, card.context)?;
         card.runtime_bytes = heap.used();
         use crate::cap::{TYPE_BOOLEAN, TYPE_BYTE, TYPE_SHORT, TYPE_INT};
         for (index, array) in statics.array_inits().enumerate() {
@@ -875,8 +875,8 @@ mod tests {
         assert!(matches!(card.retain_volatile(363), Err(Error::Quota)));
         let retained = card.retain_volatile(364).unwrap();
         assert_eq!(retained.bytes(), 364);
-        // Deselection allocated an exception, so the older committed layout is stale.
-        assert_eq!(restored.restore_volatile(&retained), Err(Error::Format));
+        // Runtime exceptions are reserved, so deselection preserves the heap layout.
+        restored.restore_volatile(&retained).unwrap();
         let mut suspended_heap = vec![0; card.persistent_heap_bytes()];
         restored = Card::restore(&file, Sizes::default(), card.save_into(&mut suspended_heap).unwrap()).unwrap();
         restored.restore_volatile(&retained).unwrap();
@@ -1092,7 +1092,13 @@ mod tests {
                 assert_eq!(heap.get_word(restored.instance.unwrap(), 0), Ok(expected));
                 assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
             }
-            if matches!(ending, "allocate-abort" | "throw") {
+            if ending == "throw" {
+                // Throwing a reserved exception must not invalidate applet references.
+                assert!(!card.transaction_aborted);
+                assert_eq!(card.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0], false).unwrap().sw, SW_UNKNOWN);
+                assert!(!card.transaction_aborted);
+            }
+            if ending == "allocate-abort" {
                 assert_eq!(card.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0], false), Err(Error::TransactionAborted));
                 card.reset().unwrap();
                 assert!(!card.transaction_aborted);

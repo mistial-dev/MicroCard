@@ -876,7 +876,7 @@ pub fn run_body(
                 if !wanted {
                     return Err(Error::Type);
                 }
-                let value = machine.heap.array_get(array, bounded_index(index)?)?;
+                let value = machine.heap.array_get(array, bounded_index(index, info.length)?)?;
                 if opcode == op::AALOAD {
                     frame.push_reference(value as u16)?
                 } else {
@@ -886,8 +886,9 @@ pub fn run_body(
             op::IALOAD => {
                 let index = frame.pop_short()?;
                 let array = frame.pop_reference()?;
-                machine.heap.check_access(array, machine.context)?;
-                let value = machine.heap.array_get_int(array, bounded_index(index)?)?;
+                let info = machine.heap.check_access(array, machine.context)?;
+                if info.kind != heap::KIND_INT { return Err(Error::Type); }
+                let value = machine.heap.array_get_int(array, bounded_index(index, info.length)?)?;
                 frame.push_int(value)?
             }
             op::BASTORE | op::SASTORE | op::AASTORE => {
@@ -908,16 +909,17 @@ pub fn run_body(
                     return Err(Error::Type);
                 }
                 if opcode == op::AASTORE { check_reference_store(machine, value as Reference)?; }
-                machine.heap.array_put(array, bounded_index(index)?, value)?
+                machine.heap.array_put(array, bounded_index(index, info.length)?, value)?
             }
             op::IASTORE => {
                 let value = frame.pop_int()?;
                 let index = frame.pop_short()?;
                 let array = frame.pop_reference()?;
-                machine.heap.check_access(array, machine.context)?;
+                let info = machine.heap.check_access(array, machine.context)?;
+                if info.kind != heap::KIND_INT { return Err(Error::Type); }
                 machine
                     .heap
-                    .array_put_int(array, bounded_index(index)?, value)?
+                    .array_put_int(array, bounded_index(index, info.length)?, value)?
             }
 
             op::NEW => {
@@ -1145,6 +1147,15 @@ pub fn run_body(
         Ok(None)
         })();
         let step = match step {
+            Err(error @ (Error::Null | Error::Arithmetic | Error::ArrayBounds)) => {
+                let class = match error {
+                    Error::Null => ClassId::NullPointerException,
+                    Error::Arithmetic => ClassId::ArithmeticException,
+                    _ => ClassId::ArrayIndexOutOfBoundsException,
+                };
+                let exception = natives::new_exception(machine.heap, class, machine.context)?;
+                Ok(Some(Outcome::Thrown(exception)))
+            }
             Err(Error::Quota) if matches!(opcode, op::NEW | op::NEWARRAY | op::ANEWARRAY) => {
                 let exception = natives::new_exception(machine.heap, ClassId::SystemException, machine.context)?;
                 machine.heap.put_word_unconditional(exception, natives::REASON_FIELD, 5)?; // NO_RESOURCE
@@ -1301,9 +1312,9 @@ fn read_static(machine: &mut Machine, frame: &mut Frame, at: usize, kind: u8) ->
 
 /// An array index is a signed short, and a negative one is out of bounds rather than a
 /// large positive index.
-fn bounded_index(index: i16) -> Result<usize> {
-    if index < 0 {
-        return Err(Error::Bounds);
+fn bounded_index(index: i16, length: u16) -> Result<usize> {
+    if index < 0 || index as u16 >= length {
+        return Err(Error::ArrayBounds);
     }
     Ok(index as usize)
 }
@@ -1348,7 +1359,7 @@ mod tests {
         let methods = file.methods()?;
         let mut slab = vec![0u8; 1024];
         let mut heap = Heap::new(&mut slab)?;
-        natives::reserve_framework_exceptions(&mut heap, 1)?;
+        natives::reserve_runtime_exceptions(&mut heap, 1)?;
         let mut statics = vec![0u8; package.static_bytes as usize + 8];
         let mut host = crate::host::NoHost;
         let mut machine = Machine::new(
@@ -1465,6 +1476,27 @@ mod tests {
         );
     }
 
+    fn catch_java_fault(code: &[u8], locals: u8, class: ClassId) -> Result<Outcome> {
+        use crate::cap::CONSTANT_CLASSREF;
+        let api = crate::jcvm_api::PACKAGES.iter()
+            .find(|package| package.classes.iter().any(|entry| entry.id == class)).unwrap();
+        let token = api.classes.iter().find(|entry| entry.id == class).unwrap().token;
+        let mut package = Package {
+            imports: vec![(vec![0xa0, 0, 0, 0, 0x62, 0, 1], 1, 0)],
+            handlers: vec![[0; 8]], nargs: 0, max_stack: 15,
+            ..Package::default()
+        };
+        package.max_locals = locals;
+        package.constants = vec![[CONSTANT_CLASSREF, 0x80, 0, 0],
+            [CONSTANT_CLASSREF, 0x80, token, 0]];
+        let body = package.install_offset() + 2;
+        package.code = code.to_vec();
+        let end = package.code.len() as u16;
+        package.code.extend([op::POP, op::SCONST_1, op::SRETURN]);
+        package.handlers = vec![handler(body, end, body + end, 1, true)];
+        execute_package(&package)
+    }
+
     #[test]
     fn arithmetic_wraps_where_java_card_says_it_does() {
         // 32767 + 1, which is the case that would panic on a checked add.
@@ -1481,11 +1513,16 @@ mod tests {
             short(&[op::SSPUSH, 0x80, 0x00, op::SCONST_M1, op::SREM, op::SRETURN]),
             0
         );
-        // Division by zero is an arithmetic failure rather than a crash.
-        assert_eq!(
-            execute(&[4, 3, op::SDIV, op::SRETURN], 0),
-            Err(Error::Arithmetic)
-        );
+        // Both widths and both division operations report the Java exception.
+        for code in [
+            [op::SCONST_1, op::SCONST_0, op::SDIV, op::SRETURN],
+            [op::SCONST_1, op::SCONST_0, op::SREM, op::SRETURN],
+            [op::ICONST_M1 + 2, op::ICONST_M1 + 1, op::IDIV, op::IRETURN],
+            [op::ICONST_M1 + 2, op::ICONST_M1 + 1, op::IREM, op::IRETURN],
+        ] {
+            assert_eq!(catch_java_fault(&code, 0, ClassId::ArithmeticException),
+                Ok(Outcome::Short(1)));
+        }
     }
 
     #[test]
@@ -1681,10 +1718,10 @@ mod tests {
     }
 
     #[test]
-    fn throwing_null_is_a_null_dereference_rather_than_a_throw() {
+    fn throwing_null_raises_a_catchable_null_pointer_exception() {
         assert_eq!(
-            execute(&[op::ACONST_NULL, op::ATHROW, op::SRETURN], 1),
-            Err(Error::Null)
+            catch_java_fault(&[op::ACONST_NULL, op::ATHROW, op::SRETURN], 1, ClassId::NullPointerException),
+            Ok(Outcome::Short(1))
         );
     }
 
@@ -1708,13 +1745,13 @@ mod tests {
             op::SCONST_1, op::NEWARRAY, 11, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_1, op::BALOAD, op::SRETURN,
         ];
-        assert_eq!(execute(&code, 2), Err(Error::Bounds));
+        assert_eq!(catch_java_fault(&code, 2, ClassId::ArrayIndexOutOfBoundsException), Ok(Outcome::Short(1)));
         // A negative index is out of bounds rather than a large positive one.
         let code = [
             op::SCONST_1, op::NEWARRAY, 11, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_M1, op::BALOAD, op::SRETURN,
         ];
-        assert_eq!(execute(&code, 2), Err(Error::Bounds));
+        assert_eq!(catch_java_fault(&code, 2, ClassId::ArrayIndexOutOfBoundsException), Ok(Outcome::Short(1)));
     }
 
     #[test]
@@ -1748,7 +1785,9 @@ mod tests {
     #[test]
     fn an_array_on_a_null_reference_is_refused_before_it_reads_anything() {
         let code = [op::ACONST_NULL, op::ARRAYLENGTH, op::SRETURN];
-        assert_eq!(execute(&code, 0), Err(Error::Null));
+        assert_eq!(catch_java_fault(&code, 0, ClassId::NullPointerException), Ok(Outcome::Short(1)));
+        // Operand-stack underflow remains a malformed program, not a Java fault.
+        assert_eq!(catch_java_fault(&[op::BALOAD, op::SRETURN], 0, ClassId::ArrayIndexOutOfBoundsException), Err(Error::Bounds));
     }
 
     #[test]

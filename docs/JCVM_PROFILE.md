@@ -214,9 +214,11 @@ can clear reset-scoped arrays across contexts and deselection-scoped arrays for 
 context without reallocating objects or changing references. `JCSystem.isTransient`
 reports the recorded event. Negative factory lengths throw `NegativeArraySizeException`;
 invalid events throw `SystemException.ILLEGAL_VALUE`, and exhausted transient storage
-throws `SystemException.NO_TRANSIENT_SPACE`. Framework exceptions occupy a reserved
-32-byte runtime prefix allocation before applet installation, so these failures and
-utility bounds/null failures remain catchable with a full heap and commit log.
+throws `SystemException.NO_TRANSIENT_SPACE`. VM exceptions and API `throwIt` exceptions occupy a reserved
+120-byte runtime prefix allocation before applet installation. Null dereferences,
+division by zero, array bounds, and allocation failures remain catchable with a full
+heap and commit log. Operand-stack and structural errors remain interpreter failures.
+Snapshots with an incompatible runtime prefix are explicitly rejected.
 These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/JCSystem.html).
 
 CAP static array initializers and non-default primitive values are applied before
@@ -516,8 +518,8 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-allocation-errors-contact`, based on `34ed7ab` with bytecode allocation fixes):
-preparation took 15.605 seconds and vectors 96.666 seconds on the host.
+(`work/nist-runtime-exceptions-contact`, based on `9449537` with runtime exception fixes):
+preparation took 14.592 seconds and vectors 96.361 seconds on the host.
 Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests

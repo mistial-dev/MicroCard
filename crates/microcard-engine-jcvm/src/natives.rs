@@ -498,12 +498,18 @@ pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: h
     Ok(Native::Threw(exception))
 }
 
-/// Reserve framework failure objects before applet allocations can exhaust the heap.
-/// Keeping them in the runtime prefix also keeps them outside applet transactions.
-pub(crate) fn reserve_framework_exceptions(heap: &mut Heap, context: heap::Context) -> Result<()> {
-    for class in [ClassId::SystemException, ClassId::NegativeArraySizeException,
-        ClassId::NullPointerException, ClassId::ArrayIndexOutOfBoundsException] {
+/// Reserve VM and native API failure objects before applet allocations can exhaust
+/// the heap. The runtime prefix keeps them outside applet transactions.
+pub(crate) fn reserve_runtime_exceptions(heap: &mut Heap, context: heap::Context) -> Result<()> {
+    for class in [ClassId::ArithmeticException, ClassId::ArrayIndexOutOfBoundsException,
+        ClassId::ClassCastException, ClassId::NegativeArraySizeException,
+        ClassId::NullPointerException, ClassId::SecurityException] {
         new_exception(heap, class, context)?;
+    }
+    for class in PACKAGES.iter().flat_map(|package| package.classes) {
+        if is_exception_class(class) && class.methods.iter().any(|method| method.id == MethodId::throwIt) {
+            new_exception(heap, class.id, context)?;
+        }
     }
     Ok(())
 }
@@ -666,7 +672,10 @@ mod tests {
             ClassId::CardException, ClassId::UserException] {
             let (mut slab, mut words, mut tags) = setup(0);
             let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+            let capacity = slab.len();
             let mut heap = Heap::new(&mut slab).unwrap();
+            reserve_runtime_exceptions(&mut heap, 1).unwrap();
+            reserve_runtime_exceptions(&mut heap, 2).unwrap();
             let class = framework(name, MethodId::throwIt, true).class;
             let explicit = new_api_object(&mut heap, class, 1).unwrap();
             frame.push_reference(explicit).unwrap();
@@ -683,6 +692,9 @@ mod tests {
             assert!(matches!(call(framework(name, MethodId::getReason, false), &mut heap,
                 &mut crate::host::NoHost, &mut frame, 1, &mut idle()), Ok(Native::Returned)));
             assert_eq!(frame.pop_short(), Ok(0x6a82));
+            let remaining = capacity - heap.used() - heap::HEADER;
+            heap.new_array(heap::KIND_BYTE, remaining as u16, 1).unwrap();
+            assert_eq!(heap.used(), capacity);
             let mut used = heap.used();
             let mut references = [0; 2];
             for context in [1, 2] {
@@ -951,7 +963,7 @@ mod tests {
             let (mut slab, mut words, mut tags) = setup(0);
             let capacity = slab.len();
             let mut heap = Heap::new(&mut slab).unwrap();
-            reserve_framework_exceptions(&mut heap, 1).unwrap();
+            reserve_runtime_exceptions(&mut heap, 1).unwrap();
             let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
             for (length, event) in [(0, 1), (2, 1), (2, 2), (2, 0), (2, 3)] {
                 frame.push_short(length).unwrap();

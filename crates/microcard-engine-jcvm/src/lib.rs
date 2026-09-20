@@ -30,6 +30,8 @@ mod test_support;
 pub enum Error {
     /// A length, offset or index reached outside the bytes it was given.
     Bounds,
+    /// A Java array access used a negative or out-of-range element index.
+    ArrayBounds,
     /// A field held a value the format does not allow.
     Format,
     /// Two fields that describe the same thing disagreed.
