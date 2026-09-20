@@ -1,6 +1,6 @@
-# First nRF52840 DK test build
+# Preparing nRF52840 test builds
 
-The requested stopping point is **before flashing**. No command in `prepare_first_flash.py` contacts a probe or writes a device. Passing its gates prepares a development test image. It does not establish hardware correctness or production security.
+Preparation stops **before flashing**. No command in `prepare_first_flash.py` contacts a probe or writes a device. Passing its gates prepares a development test image. It does not establish hardware correctness or production security.
 
 ## Prepare and verify
 
@@ -8,9 +8,14 @@ Complete the [pinned compiler and vendor setup](CRYPTO_PROVIDERS.md#reproducible
 
 ```sh
 python3 scripts/prepare_first_flash.py --engine mc04
+python3 scripts/prepare_first_flash.py --engine jcvm
 ```
 
-Outputs under ignored `artifacts/first-flash/mc04/dk/`: ELF, Intel HEX, binary, both sample micro images/metadata/maps, and a SHA-256 manifest. The script runs host acceptance, Clippy, the release cross-build, flash-load-range checks, initial stack/reset-vector checks and a minimum static stack-margin check.
+Each engine has its own ignored `artifacts/first-flash/<engine>/dk/` directory containing
+ELF, Intel HEX, binary, and a SHA-256 manifest. MC04 also includes both sample micro
+images, metadata, and maps. The script runs host acceptance, Clippy, the release
+cross-build, flash-load-range checks, initial stack/reset-vector checks and a minimum
+static stack-margin check.
 
 The host gate includes .NET differential execution, deterministic preprocessing/signing, incremental MSBuild/pin checks, first-load failure injection, independent SCP03, persistent key operations, binary UART framing, and the real serial adapter through a fragmented pseudo-terminal. See `scripts/check.py --checkpoint` and the keystore documentation for the scenarios.
 
@@ -25,11 +30,14 @@ cargo run -p microcard-sim -- keygen .keys/first-test-management.key
 cargo run -p microcard-sim -- keygen .keys/first-test-signing.seed
 ```
 
-The keygen command refuses to overwrite existing files. Use development credentials only. The current framework journal is not encrypted at rest.
+The keygen command refuses to overwrite existing files. Use development credentials only. MJ03 journals use AES-CCM authenticated encryption. Development key provisioning
+and debug access do not provide production key protection.
 
 ## Commands for the later flashing step
 
-These commands are documented, **not executed**. First confirm a dedicated nRF52840 DK and preserve any firmware/data you need. Identify the intended probe with `probe-rs list`. Add `--probe` if more than one is connected. Do not use erase-all/recovery or chip-erase as an automatic fallback.
+These **MC04 DK** commands are documented, **not executed**. JCVM uses a different
+flash layout and key page; never reuse the MC04 provisioning address for it. See
+[board layouts](BOARD.md#flash-layout). First confirm a dedicated nRF52840 DK and preserve any firmware/data you need. Identify the intended probe with `probe-rs list`. Add `--probe` if more than one is connected. Do not use erase-all/recovery or chip-erase as an automatic fallback.
 
 ```sh
 probe-rs download --chip nRF52840_xxAA --connect-under-reset --verify artifacts/first-flash/mc04/dk/microcard.elf

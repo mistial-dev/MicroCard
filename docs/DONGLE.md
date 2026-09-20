@@ -1,6 +1,8 @@
 # Flashing a dongle
 
-The quickest way to get a MicroCard you can talk to. A Makerdiary nRF52840 MDK USB Dongle needs no debug probe and no serial port, because it carries a UF2 bootloader and MicroCard reaches the host over USB CCID.
+Build separate MC04 or JCVM firmware for the Makerdiary nRF52840 MDK USB Dongle.
+Its UF2 bootloader accepts images without a debug probe; MicroCard communicates
+with the host over USB CCID.
 
 Read [the security note](#what-you-are-agreeing-to) before using one for anything you care about.
 
@@ -8,15 +10,21 @@ Read [the security note](#what-you-are-agreeing-to) before using one for anythin
 
 ```sh
 python3 scripts/prepare_first_flash.py --engine mc04 --features dongle
+python3 scripts/prepare_first_flash.py --engine jcvm --features dongle
 ```
 
-That runs the checkpoint gate first, so expect it to take a while. It writes `artifacts/first-flash/mc04/dongle/microcard.uf2` along with the ELF, the hex and a manifest recording the revision, the flash window and a digest of every artifact. It never touches a device.
+That runs the checkpoint gate first, so expect it to take a while. It writes `artifacts/first-flash/<engine>/dongle/microcard.uf2` along with the ELF, the hex and a manifest recording the revision, the flash window and a digest of every artifact. It never touches a device.
 
 ## Put the dongle in bootloader mode
 
 Hold the button while inserting the dongle, or press reset twice quickly if it is already inserted. A volume named `UF2BOOT` appears.
 
 ## Copy the image
+
+The example below selects MC04. For JCVM use its separate `jcvm/dongle` artifact.
+Verify the selected engine and addresses in the generated manifest first. Current
+[size-budget failures](READINESS.md) prevent preparation from completing; do not
+treat older artifacts as a validated build of the current tree.
 
 ```sh
 cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
@@ -46,7 +54,8 @@ Two features make this explicit. `dongle-layout` is the flash map alone. `gp-tes
 
 ## Where the flash goes
 
-This board keeps a UF2 bootloader above `0xEA000` and an S140 SoftDevice below `0x27000`. MicroCard may overwrite neither, so the image links at `0x27000` and divides the 780 KiB between them. [The board guide](BOARD.md) has the region table, and `board/nrf52840/memory-dongle.x` is the file the linker actually reads.
+This board keeps a UF2 bootloader above `0xEA000` and an S140 SoftDevice below `0x27000`. MicroCard may overwrite neither, so the image links at `0x27000` and divides the 780 KiB between them. [The board guide](BOARD.md) has the region table, and the linker reads `board/nrf52840/memory-dongle.x` for MC04 or
+`board/nrf52840/memory-dongle-jcvm.x` for JCVM. Their persistent regions differ.
 
 Those addresses were read from the bootloader's own `CURRENT.UF2` readback rather than from documentation. Confirm them against the board in front of you before trusting them, because a different bootloader version moves them.
 
