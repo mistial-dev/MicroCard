@@ -61,13 +61,20 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     *budget = budget.checked_sub(97).ok_or(Error::Quota)?;
     let mut allocations = [(heap::KIND_BYTE, 0); 2];
     let mut count = 0;
-    for (key, bytes) in [(public, 66), (private, 33)] {
-        if heap.get_word(key, MATERIAL)? == NULL {
+    let mut writes = [(0, 0, 0); 2];
+    for (index, (key, bytes)) in [(public, 66), (private, 33)].into_iter().enumerate() {
+        let material = heap.get_word(key, MATERIAL)?;
+        if material == NULL {
             allocations[count] = (heap::KIND_BYTE, bytes);
             count += 1;
+            writes[index] = (key, MATERIAL * 2, 2);
+        } else {
+            heap.byte_slice(material, 0, bytes as usize)?;
+            writes[index] = (material, 0, bytes as usize);
         }
     }
     heap.check_allocations(&allocations[..count])?;
+    heap.prepare_payload_writes(&writes)?;
     let public_material = ec::material(heap, public, context)?;
     let private_material = ec::material(heap, private, context)?;
     // Validate both destinations before the provider runs or any key value changes.
@@ -76,7 +83,6 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     let mut scalar = Zeroizing::new([0; 32]);
     let mut point = Zeroizing::new([0; 65]);
     host.p256_generate(&mut scalar, &mut point)?;
-    heap.prepare_payload_writes(&[(public_material, 0, 66), (private_material, 0, 33)])?;
     heap.byte_slice_mut(public_material, 1, 65)?.copy_from_slice(&point[..]);
     heap.byte_slice_mut(private_material, 1, 32)?.copy_from_slice(&scalar[..]);
     // Every accepted parameter set is the same fixed curve, including default K=1.
@@ -170,6 +176,14 @@ mod tests {
             &mut host, &mut frame, 1, &mut 100), Ok(Native::Returned)));
         assert_eq!(heap.get_word(alias, MATERIAL), Ok(public));
         assert_eq!(heap.get_word(alias, PENDING), Ok(private));
+        let before = heap.image().to_vec();
+        heap.begin_transaction(8).unwrap();
+        frame.push_reference(alias).unwrap();
+        assert!(matches!(call(MethodId::genKeyPair, signature(false), &mut heap,
+            &mut host, &mut frame, 1, &mut 97), Err(Error::TransactionFull)));
+        assert_eq!(heap.transaction_remaining(), Some(8));
+        heap.commit_transaction().unwrap();
+        assert_eq!(heap.image(), before, "first generation must reserve both material references");
         for fail in [false, true] {
             host.fail = fail;
             frame.push_reference(alias).unwrap();

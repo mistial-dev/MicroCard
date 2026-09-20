@@ -264,6 +264,9 @@ reference/readiness update before allocating material. An undo-capacity failure 
 the heap unchanged, including when the applet catches the error and commits.
 Initial EC material creation uses the same ordering: reserve the persistent material
 reference before allocating its array, for both persistent and transient key types.
+Key-pair generation reserves both component updates together before allocating either
+material array or calling the provider; the same reservation covers existing material
+during regeneration.
 
 Restoration rejects the former layout that placed transient key material in persistent
 arrays. This storage support does not enable unsupported cipher or signature algorithms.
