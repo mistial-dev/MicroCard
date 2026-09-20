@@ -34,6 +34,9 @@ MC04 still owns runtime package buffers in RAM. Both board layouts reserve separ
 JCVM heap banks. MJ03 reserves a durable nonce before every encryption attempt,
 independently of the committed generation, including failed attempts.
 
+MC04 domain management separates state/recovery, authenticated commands, execution,
+native services, application staging, lifecycle changes, metadata, snapshots and
+linking into focused modules; its regression suite is separate from production code.
 MC04 no longer copies the whole runtime state for transactions. It stages affected
 application records, keys, and credentials, and uses small undo records for metadata.
 Credential retry floors survive failed lifecycle callbacks. The compact MC04 slab
@@ -103,8 +106,7 @@ board's reserved heap.
   record the current MC04 DK comparison: 185,708 software text bytes versus 211,608
   with all hardware providers. Vendor dispatch also links non-profile ChaCha20/Poly1305
   symbols despite the absence of RustCrypto. Remeasure the final tree; this is not an achieved optimization.
-- Remove remaining MC04 runtime image ownership, finish domain modularization, and
-  reduce affected-application staging where bounded undo improves measured cost
+- Remove remaining MC04 runtime image ownership and reduce affected-application staging where bounded undo improves measured cost
   while preserving rollback, cancellation, quota, and persistence invariants.
 - Finish native utility integration and the dead-code/dependency review. Preserve
   useful generated references and provenance; avoid a maintenance fork solely to

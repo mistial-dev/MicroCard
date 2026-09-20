@@ -127,7 +127,8 @@ execution of the current JCVM firmware remains a separate acceptance gate.
 MC04 domain internals separate application staging, lifecycle execution, metadata
 mutations, snapshot encoding, and linking. `domains/linking.rs` owns dependency
 resolution, executable-unit assembly, and whole-program call-graph validation;
-`domains.rs` coordinates domain management. `domains/execution.rs` owns selection,
+`domains.rs` owns domain state, storage and recovery. `domains/management.rs` handles
+authenticated management commands. `domains/execution.rs` owns selection,
 invocation and execution transaction boundaries; `domains/native.rs` owns native
 service dispatch, authorization and bounded output handling.
 
