@@ -136,6 +136,10 @@ board's reserved heap.
   provisioning, then verifies the original certificate, reboot, replacement, signing,
   and key agreement. This checks preservation of existing data, not reclamation of
   unreachable allocations left by a failed applet constructor.
+  The default-capacity workload including this failure peaks at **236,188 host
+  allocation bytes** at clean revision `c8fcd77`
+  (`work/jcvm-failed-object-clean-heap.json`); failure paths must be included when
+  establishing the board heap bound.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
