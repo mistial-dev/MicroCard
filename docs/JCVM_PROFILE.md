@@ -259,6 +259,10 @@ Symmetric key objects keep transient initialization flags beside their key bytes
 reset and deselection clear both together. Persistent keys retain both. This follows
 [KeyBuilder's lifetime contract](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacard/security/KeyBuilder.html).
 Snapshots sanitize transient key data; RAM suspension retains reset-scoped keys only.
+The first symmetric-key import checks array capacity and reserves the persistent
+reference/readiness update before allocating material. An undo-capacity failure leaves
+the heap unchanged, including when the applet catches the error and commits.
+
 Restoration rejects the former layout that placed transient key material in persistent
 arrays. This storage support does not enable unsupported cipher or signature algorithms.
 

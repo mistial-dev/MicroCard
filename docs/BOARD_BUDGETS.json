@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 212224,
+      "text_bytes": 212320,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 222360,
+      "text_bytes": 222456,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -80,7 +80,7 @@
     "development_debug text_bytes 212604 exceeds 212000",
     "usb_ccid text_bytes 224144 exceeds 224000",
     "dongle text_bytes 224100 exceeds 224000",
-    "jcvm_development_debug text_bytes 212224 exceeds 168000",
-    "jcvm_dongle text_bytes 222360 exceeds 178000"
+    "jcvm_development_debug text_bytes 212320 exceeds 168000",
+    "jcvm_dongle text_bytes 222456 exceeds 178000"
   ]
 }

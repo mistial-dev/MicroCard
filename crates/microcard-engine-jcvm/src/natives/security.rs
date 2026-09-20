@@ -242,6 +242,8 @@ pub fn call(
             let prefix = usize::from(event != 0);
             let material = match heap.get_word(this, MATERIAL)? {
                 NULL => {
+                    heap.check_allocations(&[(heap::KIND_BYTE, (bytes + prefix) as u16)])?;
+                    heap.prepare_payload_writes(&[(this, MATERIAL * 2, if event == 0 { 4 } else { 2 })])?;
                     let array = if event == 0 {
                         heap.new_array(heap::KIND_BYTE, bytes as u16, context)?
                     } else {

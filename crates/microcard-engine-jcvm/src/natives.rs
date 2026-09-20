@@ -1085,6 +1085,16 @@ mod tests {
                 let key = frame.pop_reference().unwrap();
                 let input = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
                 let output = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+                if class == ClassId::AESKey {
+                    let before = heap.image().to_vec();
+                    heap.begin_transaction(0).unwrap();
+                    let result = invoke_security(class, MethodId::setKey,
+                        &[(true, key), (true, input), (false, 0)],
+                        &mut heap, &mut frame, &mut crate::host::NoHost);
+                    assert!(matches!(result, Err(Error::TransactionFull)));
+                    heap.commit_transaction().unwrap();
+                    assert_eq!(heap.image(), before, "failed first import must not consume heap storage");
+                }
                 // Include a zero-valued key: readiness cannot be inferred from its bytes.
                 for event in [heap::CLEAR_ON_DESELECT, heap::CLEAR_ON_RESET] {
                     let value = if event == heap::CLEAR_ON_DESELECT { 0x42 } else { 0 };
