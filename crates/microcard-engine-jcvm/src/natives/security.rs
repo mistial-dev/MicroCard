@@ -312,10 +312,13 @@ pub fn call(
                 heap.put_word_unconditional(exception, super::REASON_FIELD, 3)?; // NO_SUCH_ALGORITHM
                 return Ok(Native::Threw(exception));
             }
+            let pending_bytes = (class == ClassId::Cipher).then_some(if algorithm == 13 { 32 } else { 16 });
+            if let Some(bytes) = pending_bytes {
+                heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS), (heap::KIND_BYTE, bytes)])?;
+            }
             let instance = new_native(heap, class, STATE_WORDS, context)?;
             heap.put_word(instance, KIND, algorithm as u16)?;
-            if class == ClassId::Cipher {
-                let bytes = if algorithm == 13 { 32 } else { 16 };
+            if let Some(bytes) = pending_bytes {
                 let pending = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
                 heap.put_word(instance, PENDING, pending)?;
             }

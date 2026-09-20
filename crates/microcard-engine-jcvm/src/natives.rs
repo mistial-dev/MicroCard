@@ -1313,6 +1313,7 @@ mod tests {
     fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         struct Capabilities;
         impl crate::host::Host for Capabilities {
+            fn supports_cipher(&self, algorithm: u8) -> bool { matches!(algorithm, 13 | 14) }
             fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
             fn supports_random(&self, algorithm: u8) -> bool { algorithm == 2 }
             fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
@@ -1333,6 +1334,8 @@ mod tests {
             (ClassId::KeyAgreement, 3, true, false),
             (ClassId::KeyAgreement, 4, false, false),
             (ClassId::Cipher, 1, false, false),
+            (ClassId::Cipher, 13, false, true),
+            (ClassId::Cipher, 14, false, true),
         ] {
             let (mut slab, mut words, mut tags) = setup(0);
             let mut heap = Heap::new(&mut slab).unwrap();
@@ -1349,6 +1352,21 @@ mod tests {
                 assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, ClassId::CryptoException);
                 assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 3);
             }
+        }
+        for algorithm in [13, 14] {
+            let mut slab = [0; 32]; // Holder fits, its streaming-state array does not.
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let mut words = [0; 16];
+            let mut tags = [0; 8];
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+            frame.push_short(algorithm).unwrap();
+            frame.push_short(0).unwrap();
+            let before = heap.image().to_vec();
+            let result = security::call(ClassId::Cipher, MethodId::getInstance,
+                framework(ClassId::Cipher, MethodId::getInstance, true).method.signature,
+                &mut heap, &mut Capabilities, &mut frame, 1, &mut idle(), &mut 100, &[]);
+            assert!(matches!(result, Err(Error::Quota)));
+            assert!(heap.image() == before, "failed cipher creation must not leave an incomplete holder");
         }
     }
 

@@ -397,6 +397,9 @@ Bulk copy, fill and comparison charge one work unit per requested byte before th
 operation. Insufficient work leaves fill/copy destinations unchanged; atomic fills
 participate in rollback and non-atomic fills do not.
 
+Cipher creation preflights its holder and streaming-state array together. If the heap
+cannot fit both, it leaves no incomplete holder or consumed allocation tail.
+
 `RandomData.generateData` returns no value; `nextBytes` returns the ending offset.
 Both reject empty requests with `CryptoException.ILLEGAL_VALUE` before calling the
 entropy provider, as required by the 3.0.5 API. Both charge one work unit per output
