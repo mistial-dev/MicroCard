@@ -64,6 +64,9 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         mut staging: S,
         mut scratch: Vec<u8>,
     ) -> Result<Self> {
+        // Until renewal recovery completes, staging belongs to the authenticated
+        // descriptor, not to uploads. Never reset or open applets in this state.
+        if storage.registry.pending_renewal()?.is_some() { return Err(Error::Busy); }
         staging.reset();
         for load in storage
             .registry

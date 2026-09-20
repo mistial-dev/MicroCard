@@ -8,6 +8,9 @@ use crate::{
 };
 use alloc::vec::Vec;
 
+mod renewal;
+pub use renewal::Renewal;
+
 pub const MAX_DOMAINS: usize = 4;
 pub const MAX_PACKAGES: usize = 8;
 pub const MAX_INSTANCES: usize = 8;
@@ -47,6 +50,7 @@ pub struct Registry {
     loads: [Option<Load>; MAX_PACKAGES],
     instances: [Option<Instance>; MAX_INSTANCES],
     sequence: u32,
+    renewal: Option<Renewal>,
 }
 
 impl Registry {
@@ -62,6 +66,7 @@ impl Registry {
             loads: [None; MAX_PACKAGES],
             instances: [None; MAX_INSTANCES],
             sequence: 0,
+            renewal: None,
         }
     }
 
@@ -305,8 +310,8 @@ impl Registry {
     pub fn encode(&self) -> Result<Vec<u8>> {
         self.validate()?;
         let mut e = Encoder::new(MAX_SNAPSHOT_BYTES);
-        e.array(6)?;
-        e.unsigned(1)?;
+        e.array(7)?;
+        e.unsigned(2)?;
         e.unsigned(1)?;
         e.unsigned(u64::from(self.sequence))?;
         e.array(MAX_DOMAINS)?;
@@ -356,6 +361,8 @@ impl Registry {
             e.bytes(&i.identity)?;
             e.unsigned(u64::from(i.heap_bank))?;
         }
+        if let Some(renewal) = self.renewal { renewal.encode(&mut e)?; }
+        else { e.null()?; }
         Ok(e.finish())
     }
 
@@ -364,8 +371,8 @@ impl Registry {
             return Err(Error::Format);
         }
         let mut d = Decoder::new(bytes);
-        d.record(6).map_err(|_| Error::IncompatibleState)?;
-        if d.unsigned()? != 1 || d.unsigned()? != 1 {
+        d.record(7).map_err(|_| Error::IncompatibleState)?;
+        if d.unsigned()? != 2 || d.unsigned()? != 1 {
             return Err(Error::IncompatibleState);
         }
         let mut state = Self::new([0; 16], None);
@@ -424,6 +431,7 @@ impl Registry {
                 heap_bank: d.number()?,
             });
         }
+        state.renewal = if d.null() { None } else { Some(Renewal::decode(&mut d)?) };
         d.finish()?;
         state.validate()?;
         Ok(state)
@@ -494,6 +502,7 @@ impl Registry {
                 return Err(Error::Format);
             }
         }
+        if let Some(renewal) = self.renewal { renewal.validate(self)?; }
         Ok(())
     }
 }
@@ -531,7 +540,14 @@ impl<F: crate::journal::Flash> Store<F> {
         if self.recovery_required {
             return Err(Error::Storage);
         }
+        if self.state.renewal.is_some() { return Err(Error::Busy); }
         Ok(&self.state)
+    }
+
+    /// Recovery may inspect the authenticated owner while ordinary operations are blocked.
+    pub fn pending_renewal(&self) -> Result<Option<&Renewal>> {
+        if self.recovery_required { return Err(Error::Storage); }
+        Ok(self.state.renewal.as_ref())
     }
 
     /// Authenticate and authorize before erasing, then activate only verified writes.

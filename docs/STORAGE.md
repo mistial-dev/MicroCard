@@ -67,6 +67,12 @@ anchor. Moving to a spare heap bank is insufficient: both supported board banks
 may contain installed applets. Both JCVM layouts already reserve a separate 64 KiB
 upload staging region, large enough for one complete encrypted heap record.
 
+Registry v2 now encodes the pending owner and rejects inconsistent instance, bank,
+identity, package, and record-length bindings. Ordinary operations and applet opening
+fail closed while ownership is pending. Interrupted metadata publication retains the
+old registry or the complete pending descriptor, verified by host fault tests.
+The renewal writer and automatic recovery below are not yet implemented.
+
 Renewal will use that region as a recovery copy and the registry's existing durable
 identity reservation as the root of a new heap-key epoch. It must preserve both
 installed applets and their code, persistent state, and live volatile state.
@@ -80,7 +86,7 @@ The transition is serialized with uploads and management changes:
    new key. Authenticate and validate the staged record before publishing metadata.
    A failed attempt abandons the identity; a later attempt reserves another one.
 3. Commit a versioned pending-renewal descriptor in the registry. It binds the
-   instance AID, bank, old/new identities, image digest, staged-record length and
+   instance AID, bank, old/new identities, package digest, staged-record length and
    digest. This commit authorizes replacement of this bank and protects staging
    against upload, reset, deletion, or other reuse.
 4. Authenticate the protected recovery copy before erasing any bank bytes. Erase

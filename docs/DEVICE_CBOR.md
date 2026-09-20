@@ -125,15 +125,17 @@ metadata commit keeps its candidate slots protected until ownership is resolved.
 
 ## JCVM registry journal
 
-The metadata store uses its own journal key and this six-field record:
+The metadata store uses its own journal key and this seven-field v2 record:
 
 ```
-[1, 1, reserved_scp03_sequence, domains[4], loads[8], instances[8]]
+[2, 1, reserved_scp03_sequence, domains[4], loads[8], instances[8], renewal_or_null]
 domain   = [aid, incarnation_bytes16, signer_hash_bytes32_or_null]
 load     = [domain_aid, package_aid, rollback_version, image_or_null]
 image    = [slot, length, package_sha256_bytes32]
 instance = [domain_aid, package_aid, module_aid, instance_aid,
             installation_bytes16, heap_bank]
+renewal  = [instance_aid, heap_bank, old_identity_bytes16, new_identity_bytes16,
+            package_sha256_bytes32, record_length, record_sha256_bytes32]
 ```
 
 Unused slots are null. Slot zero in `domains` is the ISD. AIDs are 5–16 bytes;
@@ -147,6 +149,19 @@ activation must advance that version. Child domains inherit the ISD signer; fres
 domain and installation identities come from the platform, not the package author.
 Physical storage may impose lower quotas than these registry limits.
 
+A pending renewal names an existing instance and its current bank, identity, and
+package digest. The new identity must differ from every live installation identity.
+The encrypted record length is 41–65,533 bytes, bounded by a 64 KiB slot minus its
+three trailer bytes; recovery must also authenticate its contents and enforce the
+actual snapshot quota before bank preparation. The staged record digest binds exact
+ciphertext. Unknown versions, trailing data, malformed fields, and inconsistent
+bindings are rejected. Registry v1 has no migration path.
+
+While renewal is pending, ordinary registry operations and applet opening return
+`Busy`; only authenticated ownership inspection is available. Staging must remain
+untouched. Automatic renewal recovery is not yet implemented, so this state currently
+fails closed. See [the renewal transition](STORAGE.md#jcvm-counter-renewal-design-not-implemented).
+
 Installation identities are a durably reserved registry nonce counter value (eight
 little-endian bytes) followed by `JCVMv1\0\0`. Failed installations consume their
 reservation. The registry counter must never reset during service. Installation
@@ -156,7 +171,7 @@ failure leaves an orphan that a later installation may explicitly reclaim.
 The store resolves uncertain commits with the reboot scan and disables state access
 if recovery fails. Its caller must verify referenced image and heap storage before
 execution, and must not reclaim formerly referenced storage before metadata commits.
-The [registry vector](../format/jcvm-registry-cbor-v1.json) is checked by Rust and Python.
+The [registry vector](../format/jcvm-registry-cbor-v2.json) is checked by Rust and Python.
 
 ### JCVM domain discovery
 

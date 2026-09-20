@@ -1,4 +1,0 @@
-{
-  "description": "Fresh JCVM metadata registry; ISD incarnation is sixteen 0x01 bytes, no owner or packages.",
-  "hex": "86010100848348a0000001510000005001010101010101010101010101010101f6f6f6f688f6f6f6f6f6f6f6f688f6f6f6f6f6f6f6f6"
-}

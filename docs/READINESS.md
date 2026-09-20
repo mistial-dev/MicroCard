@@ -81,7 +81,9 @@ board's reserved heap.
   instructions now checkpoint ordinary writes before advancing or returning; native
   internal failure boundaries still require audit. The 32,768-value board nonce and
   generation counters remain a service-life blocker. The [renewal design](STORAGE.md#jcvm-counter-renewal-design-not-implemented)
-  uses protected upload staging and a registry-authorized key change; it is not yet implemented.
+  uses protected upload staging and a registry-authorized key change. Registry v2
+  records pending ownership and blocks ordinary use; writing and recovering the
+  renewed heap are not yet implemented.
   Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
   allocation-abort session termination, key updates, crypto initialization and persistence
   failure. PIN presentation checkpoints consume retries outside transactions, including
@@ -92,7 +94,7 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 209,408 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 210,960 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the

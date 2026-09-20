@@ -68,7 +68,7 @@ fn heap_publication_failures_preserve_existing_instances_and_never_reuse_identit
 fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
     let initial = Registry::new([1; 16], None);
     let vector: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../format/jcvm-registry-cbor-v1.json"))
+        serde_json::from_str(include_str!("../../../../format/jcvm-registry-cbor-v2.json"))
             .unwrap();
     let hex = vector["hex"].as_str().unwrap();
     let expected: Vec<_> = (0..hex.len())
@@ -357,4 +357,67 @@ fn registry_authority_rollback_and_uncertain_activation_survive_recovery() {
     let mut trailing = expected;
     trailing.push(0);
     assert_eq!(Registry::decode(&trailing), Err(Error::Format));
+}
+
+#[test]
+fn pending_renewal_binds_staging_and_blocks_ordinary_use_after_reboot() {
+    let aid = Aid::new(&[0xf0, 1, 2, 3, 4]).unwrap();
+    let load = Aid::new(&[0xf0, 1, 2, 3, 5]).unwrap();
+    let mut initial = Registry::new([1; 16], Some([2; 32]));
+    initial.loads[0] = Some(Load { domain: Aid::isd(), aid: load, version: 1,
+        image: Some(Descriptor { slot: 0, length: 512, digest: [3; 32] }) });
+    initial.instances[0] = Some(Instance { domain: Aid::isd(), load, module: aid,
+        aid, identity: [4; 16], heap_bank: 0 });
+    let renewal = Renewal { aid, bank: 0, old_identity: [4; 16], new_identity: [5; 16],
+        package_digest: [3; 32], record_length: 1024, record_digest: [6; 32] };
+    let mut pending = initial;
+    pending.renewal = Some(renewal);
+    let encoded = pending.encode().unwrap();
+    let vector: serde_json::Value = serde_json::from_str(include_str!("../../../../format/jcvm-registry-cbor-v2.json")).unwrap();
+    let hex = vector["pending_hex"].as_str().unwrap();
+    let expected: Vec<_> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+    assert_eq!(encoded, expected);
+    assert_eq!(Registry::decode(&encoded), Ok(pending));
+    for case in 0..7 {
+        let mut broken = pending;
+        let descriptor = broken.renewal.as_mut().unwrap();
+        match case {
+            0 => descriptor.aid = load,
+            1 => descriptor.bank = 1,
+            2 => descriptor.old_identity = [7; 16],
+            3 => descriptor.new_identity = descriptor.old_identity,
+            4 => descriptor.package_digest = [7; 32],
+            5 => descriptor.record_length = 40,
+            _ => descriptor.record_length = 65534,
+        }
+        assert_eq!(broken.encode(), Err(Error::Format), "case {case}");
+    }
+    for end in 0..encoded.len() { assert!(Registry::decode(&encoded[..end]).is_err()); }
+    let mut trailing = encoded.clone(); trailing.push(0);
+    assert!(Registry::decode(&trailing).is_err());
+    let mut legacy = initial.encode().unwrap();
+    legacy[0] = 0x86; legacy[1] = 1; legacy.pop();
+    assert_eq!(Registry::decode(&legacy), Err(Error::IncompatibleState));
+
+    let mut store = Store::open(MemoryFlash::new(4096), [3; 16], initial, &mut SoftwareCrypto).unwrap();
+    let base = store.journal.flash_mut().clone();
+    store.journal.flash_mut().fail_after = Some(usize::MAX);
+    store.commit(pending, &mut SoftwareCrypto).unwrap();
+    let mutations = usize::MAX - store.journal.flash_mut().fail_after.unwrap();
+    for cut in [0, 4, 5, mutations / 2, mutations - 5, mutations - 4, mutations - 1, mutations] {
+        let mut store = Store::open(base.clone(), [3; 16], initial, &mut SoftwareCrypto).unwrap();
+        store.journal.flash_mut().fail_after = Some(cut);
+        let published = store.commit(pending, &mut SoftwareCrypto).is_ok();
+        let mut flash = store.into_flash(); flash.fail_after = None;
+        let mut rebooted = Store::open(flash, [3; 16], initial, &mut SoftwareCrypto).unwrap();
+        if rebooted.pending_renewal().unwrap().is_some() {
+            assert_eq!(rebooted.pending_renewal().unwrap(), Some(&renewal));
+            assert_eq!(rebooted.state(), Err(Error::Busy));
+            assert_eq!(rebooted.commit(initial, &mut SoftwareCrypto), Err(Error::Busy));
+            assert_eq!(rebooted.pending_renewal().unwrap(), Some(&renewal));
+        } else {
+            assert!(!published, "published ownership lost at cut {cut}");
+            assert_eq!(rebooted.state(), Ok(&initial));
+        }
+    }
 }

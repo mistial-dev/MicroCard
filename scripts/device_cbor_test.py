@@ -51,12 +51,20 @@ assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
 print("PASS: internal snapshot CBOR Rust/Python golden vector")
 
-state = [1, 1, 0, [[bytes.fromhex("a000000151000000"), bytes([1] * 16), None], None, None, None],
-         [None] * 8, [None] * 8]
-vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-registry-cbor-v1.json").read_text())
+state = [2, 1, 0, [[bytes.fromhex("a000000151000000"), bytes([1] * 16), None], None, None, None],
+         [None] * 8, [None] * 8, None]
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-registry-cbor-v2.json").read_text())
 assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
-print("PASS: JCVM registry CBOR Rust/Python golden vector")
+isd = bytes.fromhex("a000000151000000")
+aid, load = bytes([0xf0, 1, 2, 3, 4]), bytes([0xf0, 1, 2, 3, 5])
+pending = [2, 1, 0, [[isd, bytes([1] * 16), bytes([2] * 32)]] + [None] * 3,
+           [[isd, load, 1, [0, 512, bytes([3] * 32)]]] + [None] * 7,
+           [[isd, load, aid, aid, bytes([4] * 16), 0]] + [None] * 7,
+           [aid, 0, bytes([4] * 16), bytes([5] * 16), bytes([3] * 32), 1024, bytes([6] * 32)]]
+assert encode(pending).hex() == vector["pending_hex"]
+assert decode(bytes.fromhex(vector["pending_hex"])) == pending
+print("PASS: JCVM registry CBOR Rust/Python fresh and renewal vectors")
 
 state = [2, 1, 1, 0, bytes.fromhex("a000000151000000"), bytes([1] * 16), None, 0, 0]
 vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-domain-cbor-v2.json").read_text())
