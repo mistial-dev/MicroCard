@@ -1981,6 +1981,139 @@
           "host_microseconds": 101685
         }
       }
+    },
+    "jcvm_oversized_object_deferred_recovery": {
+      "format": 1,
+      "source_revision": "10dee9662895939572a2b50d5be76ab2cca1dfc8",
+      "working_tree_dirty": false,
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "command": [
+        "python3",
+        "scripts/jcvm_transport_acceptance.py"
+      ],
+      "exit_code": 0,
+      "measurement": "host requested allocation bytes",
+      "excludes": [
+        "allocator metadata",
+        "stack",
+        "device latency"
+      ],
+      "note": "Host file reads and pointer sizes differ from memory-mapped board flash.",
+      "peak_bytes": 236188,
+      "stages": {
+        "open": {
+          "samples": 5,
+          "peak_bytes": 178955,
+          "live_bytes": 18086,
+          "allocated_bytes": 1647730,
+          "host_microseconds": 265790
+        },
+        "apdu_a4": {
+          "samples": 29,
+          "peak_bytes": 236188,
+          "live_bytes": 110967,
+          "allocated_bytes": 8691097,
+          "host_microseconds": 2448288
+        },
+        "apdu_50": {
+          "samples": 24,
+          "peak_bytes": 213564,
+          "live_bytes": 110824,
+          "allocated_bytes": 2603477,
+          "host_microseconds": 664999
+        },
+        "apdu_82": {
+          "samples": 12,
+          "peak_bytes": 110791,
+          "live_bytes": 110791,
+          "allocated_bytes": 24,
+          "host_microseconds": 291
+        },
+        "apdu_e2": {
+          "samples": 3,
+          "peak_bytes": 110789,
+          "live_bytes": 27725,
+          "allocated_bytes": 708,
+          "host_microseconds": 1525
+        },
+        "apdu_e6": {
+          "samples": 4,
+          "peak_bytes": 156067,
+          "live_bytes": 27757,
+          "allocated_bytes": 1072063,
+          "host_microseconds": 330547
+        },
+        "apdu_e8": {
+          "samples": 206,
+          "peak_bytes": 118197,
+          "live_bytes": 27709,
+          "allocated_bytes": 232258,
+          "host_microseconds": 1753421
+        },
+        "apdu_db": {
+          "samples": 13,
+          "peak_bytes": 211624,
+          "live_bytes": 110903,
+          "allocated_bytes": 1918194,
+          "host_microseconds": 3563302
+        },
+        "apdu_25": {
+          "samples": 1,
+          "peak_bytes": 169481,
+          "live_bytes": 110743,
+          "allocated_bytes": 86407,
+          "host_microseconds": 144049
+        },
+        "apdu_24": {
+          "samples": 1,
+          "peak_bytes": 156203,
+          "live_bytes": 110727,
+          "allocated_bytes": 65099,
+          "host_microseconds": 84364
+        },
+        "apdu_47": {
+          "samples": 2,
+          "peak_bytes": 156521,
+          "live_bytes": 110808,
+          "allocated_bytes": 354784,
+          "host_microseconds": 889676
+        },
+        "apdu_87": {
+          "samples": 13,
+          "peak_bytes": 161966,
+          "live_bytes": 110874,
+          "allocated_bytes": 1213468,
+          "host_microseconds": 1897131
+        },
+        "apdu_20": {
+          "samples": 16,
+          "peak_bytes": 157903,
+          "live_bytes": 110807,
+          "allocated_bytes": 1576739,
+          "host_microseconds": 1245034
+        },
+        "apdu_cb": {
+          "samples": 11,
+          "peak_bytes": 158035,
+          "live_bytes": 110941,
+          "allocated_bytes": 1043192,
+          "host_microseconds": 833610
+        },
+        "apdu_c0": {
+          "samples": 5,
+          "peak_bytes": 157960,
+          "live_bytes": 110872,
+          "allocated_bytes": 472479,
+          "host_microseconds": 332013
+        },
+        "apdu_e4": {
+          "samples": 2,
+          "peak_bytes": 157828,
+          "live_bytes": 110711,
+          "allocated_bytes": 103515,
+          "host_microseconds": 99815
+        }
+      }
     }
   },
   "jcvm_previous_peak": {

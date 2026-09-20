@@ -140,6 +140,10 @@ board's reserved heap.
   allocation bytes** at clean revision `c8fcd77`
   (`work/jcvm-failed-object-clean-heap.json`); failure paths must be included when
   establishing the board heap bound.
+  Deferring execution frames until the restored snapshot is released reduces open's
+  peak from 196,363 to **178,955 bytes** at clean revision `10dee96`
+  (`work/jcvm-deferred-restore-clean-heap.json`). The overall SELECT peak remains
+  236,188 bytes; recovery improvement alone does not qualify the board heap.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
