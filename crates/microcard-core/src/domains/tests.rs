@@ -2362,7 +2362,7 @@ fn execution_units_borrow_persisted_packages_and_link_tables() {
     )
     .unwrap();
     let domain = &card.state.domains["borrowed"];
-    let raw = &domain.assemblies["library"];
+    let raw = Rc::clone(&domain.assemblies["library"]);
     let calls = &domain.imports["library"];
     let units = execution_units(&card.state, "borrowed", "library").unwrap();
     assert_eq!(units.len(), 1);
@@ -2387,6 +2387,12 @@ fn execution_units_borrow_persisted_packages_and_link_tables() {
     assert_eq!(card.invoke("F04D430001", &[]).unwrap(), [0x90, 0x00]);
     crate::image_store::ImageFlash::program(card.journal.flash_mut(), usize::from(descriptor.slot), 0, &[0]).unwrap();
     assert_eq!(card.invoke("F04D430001", &[]), Err(Error::Authentication));
+    // Activation validates its verified candidate before staging, independent of
+    // the old root slot. Dependency slots still use authenticated reads.
+    let images = linking::BorrowedExecution::with_candidate(&card.state, card.journal.flash(),
+        &mut card.platform, "borrowed", "library", &raw).unwrap();
+    let units = images.units().unwrap();
+    assert_eq!(units[0].package.raw.as_ptr(), raw.as_ptr());
 }
 
 #[test]

@@ -1438,7 +1438,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                         .any(|(binding, dependency)| {
                             resolve_dependency(&state, id, dependency, &p).as_ref() != Some(binding)
                         })
-                    || imports != &resolve_calls(&state, &p, bindings)?
+                    || imports != &resolve_calls(&state, &p, bindings, journal.flash(), &mut platform)?
                     || p.manifest.domain != id
                     || p.manifest.assembly.as_str() != name.as_ref()
                     || p.manifest.incarnation != d.incarnation

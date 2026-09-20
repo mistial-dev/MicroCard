@@ -132,7 +132,9 @@ The provider borrow ends after verification. MC04 invocation and lifecycle callb
 borrow verified dependency images, validate the linked program before execution,
 and release image guards before committing application state. Loading and recovery
 validation still retain runtime image buffers; removing that ownership remains
-release work.
+release work. Import resolution borrows each referenced provider once per pass.
+Activation validates the already-verified candidate with flash-backed dependencies
+before staging writes; its new root does not require an existing image descriptor.
 
 MC04 domain internals separate application staging, lifecycle execution, metadata
 mutations, snapshot encoding, and linking. `domains/linking.rs` owns dependency

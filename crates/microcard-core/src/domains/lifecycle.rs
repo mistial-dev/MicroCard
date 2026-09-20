@@ -169,7 +169,11 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let key = domain.key.replace(metadata.signer);
         let schema = core::mem::replace(&mut domain.storage_schema, schema);
         let result = (|| {
-            execution_units(&self.state, id, &name)?;
+            {
+                let images = linking::BorrowedExecution::with_candidate(&self.state,
+                    self.journal.flash(), &mut self.platform, id, &name, &raw)?;
+                images.units()?;
+            }
             if cancel() {
                 return Err(Error::Cancelled);
             }

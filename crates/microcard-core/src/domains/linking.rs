@@ -29,10 +29,12 @@ pub(super) enum CallTarget {
     },
 }
 
-pub(super) fn resolve_calls(
+pub(super) fn resolve_calls<F: crate::image_store::ImageFlash>(
     state: &State,
     package: &impl PackageData,
     bindings: &[ResolvedDependency],
+    flash: &F,
+    crypto: &mut impl crate::crypto::CryptoProvider,
 ) -> Result<Vec<ResolvedCall>> {
     if !package.image().starts_with(b"MC04") {
         return Ok(Vec::new());
@@ -43,6 +45,9 @@ pub(super) fn resolve_calls(
     calls
         .try_reserve_exact(uses.len())
         .map_err(|_| Error::Quota)?;
+    // Several imports can target the same provider; authenticate and borrow it once.
+    let mut providers = Vec::new();
+    providers.try_reserve_exact(bindings.len()).map_err(|_| Error::Quota)?;
     for (member_index, opcode) in uses {
         let target = if let Some(import) = crate::mc04_imports::resolve(&consumer, member_index)? {
             match import {
@@ -75,7 +80,17 @@ pub(super) fn resolve_calls(
             let (dependency, binding) = binding.ok_or(Error::Missing)?;
             let (_, provider_name, provider) =
                 state.assembly_by_digest(&binding.digest)?;
-            let provider = provider.package(provider_name)?;
+            let metadata = provider.package_metadata(provider_name)?;
+            let index = match providers.iter().position(|(index, _)| *index == dependency) {
+                Some(index) => index,
+                None => {
+                    let descriptor = provider.image_refs.get(provider_name).ok_or(Error::Storage)?;
+                    let raw = descriptor.read_verified(flash, crypto)?;
+                    providers.push((dependency, raw));
+                    providers.len() - 1
+                }
+            };
+            let provider = metadata.view(&providers[index].1)?;
             if provider.digest != binding.digest
                 || reference.name != provider.manifest.assembly
                 || reference.version != provider.manifest.assembly_version
@@ -168,9 +183,20 @@ pub(super) fn execution_units<'a>(state: &'a State, domain: &str, assembly: &str
     Ok(units)
 }
 
+enum PackageBytes<'a, F: crate::image_store::ImageFlash + 'a> {
+    Stored(F::Image<'a>),
+    Candidate(&'a [u8]),
+}
+impl<F: crate::image_store::ImageFlash> core::ops::Deref for PackageBytes<'_, F> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self { Self::Stored(bytes) => bytes, Self::Candidate(bytes) => bytes }
+    }
+}
+
 struct BorrowedPackage<'a, F: crate::image_store::ImageFlash + 'a> {
     metadata: &'a StoredPackage,
-    raw: F::Image<'a>,
+    raw: PackageBytes<'a, F>,
     bindings: &'a [ResolvedDependency],
     calls: &'a [ResolvedCall],
 }
@@ -182,14 +208,32 @@ pub(super) struct BorrowedExecution<'a, F: crate::image_store::ImageFlash + 'a> 
 impl<'a, F: crate::image_store::ImageFlash + 'a> BorrowedExecution<'a, F> {
     pub(super) fn new(state: &'a State, flash: &'a F, provider: &mut impl crate::crypto::CryptoProvider,
         domain: &str, assembly: &str) -> Result<Self> {
+        Self::load(state, flash, provider, domain, assembly, None)
+    }
+
+    /// The candidate has already passed package verification, but has not been staged.
+    pub(super) fn with_candidate(state: &'a State, flash: &'a F,
+        provider: &mut impl crate::crypto::CryptoProvider, domain: &str, assembly: &str,
+        candidate: &'a [u8]) -> Result<Self> {
+        Self::load(state, flash, provider, domain, assembly, Some(candidate))
+    }
+
+    fn load(state: &'a State, flash: &'a F, provider: &mut impl crate::crypto::CryptoProvider,
+        domain: &str, assembly: &str, candidate: Option<&'a [u8]>) -> Result<Self> {
         let sources = execution_sources(state, domain, assembly)?;
         let mut packages = Vec::new();
         packages.try_reserve_exact(sources.len()).map_err(|_| Error::Quota)?;
         for (_, name, source) in sources {
-            let descriptor = source.image_refs.get(name).ok_or(Error::Storage)?;
+            let raw = match (packages.is_empty(), candidate) {
+                (true, Some(candidate)) => PackageBytes::Candidate(candidate),
+                _ => {
+                    let descriptor = source.image_refs.get(name).ok_or(Error::Storage)?;
+                    PackageBytes::Stored(descriptor.read_verified(flash, provider)?)
+                }
+            };
             packages.push(BorrowedPackage {
                 metadata: source.package_metadata(name)?,
-                raw: descriptor.read_verified(flash, provider)?,
+                raw,
                 bindings: source.bindings.get(name).ok_or(Error::Storage)?,
                 calls: source.imports.get(name).ok_or(Error::Storage)?,
             });

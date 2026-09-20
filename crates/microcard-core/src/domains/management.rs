@@ -577,7 +577,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                             .ok_or(Error::Missing)?,
                     );
                 }
-                let imports = resolve_calls(&self.state, &p, &bindings)?;
+                let imports = resolve_calls(&self.state, &p, &bindings, self.journal.flash(), &mut self.platform)?;
                 if self.state
                     .domain(&p.manifest.domain)
                     .is_some_and(|domain| {

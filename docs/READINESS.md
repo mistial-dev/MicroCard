@@ -97,10 +97,10 @@ board's reserved heap.
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the flash ceilings (75.091 seconds with two workers). All seven
+  stages, then failed the flash ceilings (79.813 seconds with two workers). All seven
   profiles cross-linked. The intermediate borrowed-execution path still coexists with
-  resident validation images: MC04 hardware release text is 213,660 bytes against
-  212,000, and software reference text is 187,372 against 186,000. All seven text
+  resident validation images: MC04 hardware release text is 213,996 bytes against
+  212,000, and software reference text is 187,780 against 186,000. All seven text
   ceilings currently fail; none were raised. Removing the remaining resident-image
   paths and measuring final heap use remain required.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
