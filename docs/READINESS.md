@@ -170,10 +170,10 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The lifecycle checkpoint
-started at clean revision `5a0df50` and took 61.126 seconds with two workers and
-incremental rebuilding (`work/checkpoint-lifecycle.json`); only documentation changed
-during the run. Host, Java wallet, recovery, generated
+reuses outputs with bounded workers and isolated logs/state. The checkpoint after the
+APDU API fixes ran at clean revision `9e89009` and took 60.677 seconds with two workers
+and incremental rebuilding (`work/checkpoint-apdu-audit.json`). The tree remained
+unchanged throughout the run. Host, Java wallet, recovery, generated
 artifacts, and fuzz-target builds passed; workspace Clippy also passed. The workspace
 run includes the JCVM registry, transport lifecycle, and session recovery tests.
 All seven firmware profiles linked with engine/provider isolation checks. The only
