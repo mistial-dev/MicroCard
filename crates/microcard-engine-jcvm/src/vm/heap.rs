@@ -229,6 +229,9 @@ impl<'a> Heap<'a> {
         self.bytes[at + 4] = kind;
         self.bytes[at + 5] = owner;
         self.next = end;
+        // Transient payloads reset, but their headers and stable handles persist.
+        // Transactional allocation tails are published only by commit.
+        if self.transaction.is_none() { self.persistent_dirty = true; }
         Ok(at as Reference)
     }
 
@@ -610,8 +613,15 @@ mod tests {
     fn undo_exhaustion_precedes_mutation_and_aborted_allocations_are_never_reused() {
         let mut bytes = vec![0; 256];
         let mut heap = Heap::new(&mut bytes).unwrap();
+        assert!(!heap.has_uncheckpointed_writes());
         let array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
+        assert!(heap.has_uncheckpointed_writes());
+        heap.mark_checkpointed();
         let transient = heap.new_transient_array(KIND_BYTE, 1, 1, CLEAR_ON_DESELECT).unwrap();
+        assert!(heap.has_uncheckpointed_writes(), "transient allocation headers persist");
+        heap.mark_checkpointed();
+        assert_eq!(heap.new_array(KIND_BYTE, u16::MAX, 1), Err(Error::Quota));
+        assert!(!heap.has_uncheckpointed_writes());
         heap.begin_transaction(24).unwrap();
         heap.byte_slice_mut(array, 0, 4).unwrap().fill(1);
         assert_eq!(heap.prepare_payload_writes(&[(array, 4, 2), (array, 6, 2)]),
@@ -636,6 +646,7 @@ mod tests {
         assert_eq!(heap.image(), before);
         let created = heap.new_object(1, 1, 1).unwrap();
         heap.put_word(created, 0, 0x1234).unwrap();
+        assert!(!heap.has_uncheckpointed_writes(), "an open transaction must not publish allocation tails");
         let created_array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
         heap.copy_bytes(array, 0, created_array, 0, 8).unwrap();
         heap.byte_slice_mut(created_array, 0, 8).unwrap().fill(0x55);

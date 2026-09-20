@@ -419,16 +419,29 @@ Checkpoint failure stops execution; host cancellation tests confirm a consumed a
 survives recovery. Installation still publishes only its completed state.
 
 Cooperative cancellation saves uncheckpointed ordinary persistent writes using the
-same committed-state projection. Successful checkpoints clear the write marker;
-transactional and transient writes alone do not trigger another snapshot. Storage
+same committed-state projection. Successful checkpoints clear the write marker. Allocations outside transactions
+mark their headers for persistence, including transient-array headers; failed
+allocations do not. Transactional writes and transient payload writes alone do not
+trigger another snapshot. Storage
 failure stops execution instead of reporting a successful cancellation checkpoint.
 
 **Durability is still incomplete:** arbitrary power loss between ordinary persistent
-writes and a checkpoint can still lose those writes. Connect these boundaries
-to storage, finish native-API transaction auditing, and
-test interrupted provisioning before
-claiming Java Card transaction guarantees. A passing simulator workflow does not
-establish those guarantees or physical execution.
+writes and a checkpoint can still lose those writes. `vm/heap.rs` records only a
+boolean write marker; `vm/exec.rs` consumes it when cancellation is observed.
+`checkpoint_committed` projects committed heap/static state, and
+`jcvm_storage::commit_view` encodes the entire projection into one journal record.
+The journal erases a destination slot for each commit. Calling this path after every
+ordinary write would therefore turn each write into a full snapshot and slot erase.
+
+Closing this gap requires bounded authenticated write records for heap and static
+changes, ordered before execution proceeds past the persistent operation. Recovery
+must apply committed records to the last snapshot, preserve transaction atomicity,
+and safely compact records without discarding the only recoverable state. Native
+bulk writes and allocations need explicit publication boundaries as well as bytecode
+stores. Validate interruption at record, commit-marker, and compaction boundaries;
+measure programmed bytes and erase counts on the same OpenFIPS201 workload. Finish
+the native-API transaction audit before claiming Java Card transaction guarantees.
+A passing simulator workflow does not establish those guarantees or physical execution.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
