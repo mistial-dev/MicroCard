@@ -827,13 +827,7 @@ pub fn run_body(
                         ClassId::ClassCastException,
                         machine.context,
                     )?;
-                    match find_handler(machine, body, code.len(), pc, exception)? {
-                        Some(target) => {
-                            enter_handler(frame, exception)?;
-                            next = target;
-                        }
-                        None => return Ok(Some(Outcome::Thrown(exception))),
-                    }
+                    return Ok(Some(Outcome::Thrown(exception)));
                 }
             }
             op::ANEWARRAY => {
@@ -844,7 +838,8 @@ pub fn run_body(
                 let _ = index;
                 let length = frame.pop_short()?;
                 if length < 0 {
-                    return Err(Error::Bounds);
+                    let exception = natives::new_exception(machine.heap, ClassId::NegativeArraySizeException, machine.context)?;
+                    return Ok(Some(Outcome::Thrown(exception)));
                 }
                 let array =
                     machine
@@ -859,7 +854,8 @@ pub fn run_body(
                 let kind = array_kind(byte(code, pc + 1)?)?;
                 let length = frame.pop_short()?;
                 if length < 0 {
-                    return Err(Error::Bounds);
+                    let exception = natives::new_exception(machine.heap, ClassId::NegativeArraySizeException, machine.context)?;
+                    return Ok(Some(Outcome::Thrown(exception)));
                 }
                 let array = machine
                     .heap
@@ -1024,13 +1020,7 @@ pub fn run_body(
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
                         Native::Threw(exception) => {
-                            match find_handler(machine, body, code.len(), pc, exception)? {
-                                Some(target) => {
-                                    enter_handler(frame, exception)?;
-                                    next = target;
-                                }
-                                None => return Ok(Some(Outcome::Thrown(exception))),
-                            }
+                            return Ok(Some(Outcome::Thrown(exception)));
                         }
                     }
                     return Ok(None);
@@ -1045,13 +1035,7 @@ pub fn run_body(
                     Err(error) => return Err(error),
                 };
                 if let Some(exception) = invoke(machine, method, frame, arena, budget)? {
-                    match find_handler(machine, body, code.len(), pc, exception)? {
-                        Some(target) => {
-                            enter_handler(frame, exception)?;
-                            next = target;
-                        }
-                        None => return Ok(Some(Outcome::Thrown(exception))),
-                    }
+                    return Ok(Some(Outcome::Thrown(exception)));
                 }
             }
             op::INVOKEVIRTUAL => {
@@ -1075,13 +1059,7 @@ pub fn run_body(
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
                         Native::Threw(exception) => {
-                            match find_handler(machine, body, code.len(), pc, exception)? {
-                                Some(target) => {
-                                    enter_handler(frame, exception)?;
-                                    next = target;
-                                }
-                                None => return Ok(Some(Outcome::Thrown(exception))),
-                            }
+                            return Ok(Some(Outcome::Thrown(exception)));
                         }
                     }
                     return Ok(None);
@@ -1103,13 +1081,7 @@ pub fn run_body(
                 let info = machine.heap.check_access(receiver, machine.context)?;
                 let method = machine.linked.lookup(info.class, token)?;
                 if let Some(exception) = invoke(machine, method, frame, arena, budget)? {
-                    match find_handler(machine, body, code.len(), pc, exception)? {
-                        Some(target) => {
-                            enter_handler(frame, exception)?;
-                            next = target;
-                        }
-                        None => return Ok(Some(Outcome::Thrown(exception))),
-                    }
+                    return Ok(Some(Outcome::Thrown(exception)));
                 }
             }
             op::INVOKEINTERFACE => {
@@ -1144,13 +1116,7 @@ pub fn run_body(
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
                         Native::Threw(exception) => {
-                            match find_handler(machine, body, code.len(), pc, exception)? {
-                                Some(target) => {
-                                    enter_handler(frame, exception)?;
-                                    next = target;
-                                }
-                                None => return Ok(Some(Outcome::Thrown(exception))),
-                            }
+                            return Ok(Some(Outcome::Thrown(exception)));
                         }
                     }
                     return Ok(None);
@@ -1159,26 +1125,14 @@ pub fn run_body(
                     .linked
                     .interface_method(interface, token, info.class)?;
                 if let Some(exception) = invoke(machine, method, frame, arena, budget)? {
-                    match find_handler(machine, body, code.len(), pc, exception)? {
-                        Some(target) => {
-                            enter_handler(frame, exception)?;
-                            next = target;
-                        }
-                        None => return Ok(Some(Outcome::Thrown(exception))),
-                    }
+                    return Ok(Some(Outcome::Thrown(exception)));
                 }
             }
             op::ATHROW => {
                 let exception = frame.pop_reference()?;
                 // Throwing null is itself a null dereference, JCVM §7.5.
                 machine.heap.info(exception)?;
-                match find_handler(machine, body, code.len(), pc, exception)? {
-                    Some(target) => {
-                        enter_handler(frame, exception)?;
-                        next = target;
-                    }
-                    None => return Ok(Some(Outcome::Thrown(exception))),
-                }
+                return Ok(Some(Outcome::Thrown(exception)));
             }
 
             op::RETURN => return Ok(Some(Outcome::Void)),
@@ -1190,9 +1144,12 @@ pub fn run_body(
         }
         Ok(None)
         })();
-        match step {
-            Ok(Some(outcome)) => return Ok(outcome),
-            Ok(None) => {},
+        let step = match step {
+            Err(Error::Quota) if matches!(opcode, op::NEW | op::NEWARRAY | op::ANEWARRAY) => {
+                let exception = natives::new_exception(machine.heap, ClassId::SystemException, machine.context)?;
+                machine.heap.put_word_unconditional(exception, natives::REASON_FIELD, 5)?; // NO_RESOURCE
+                Ok(Some(Outcome::Thrown(exception)))
+            }
             Err(error @ (Error::TransactionFull | Error::Firewall)) => {
                 let exception = if error == Error::Firewall {
                     natives::new_exception(machine.heap, ClassId::SecurityException, machine.context)?
@@ -1202,6 +1159,12 @@ pub fn run_body(
                     )? else { return Err(Error::Inconsistent); };
                     exception
                 };
+                Ok(Some(Outcome::Thrown(exception)))
+            }
+            result => result,
+        };
+        match step {
+            Ok(Some(Outcome::Thrown(exception))) => {
                 match find_handler(machine, body, code.len(), pc, exception)? {
                     Some(target) => {
                         enter_handler(frame, exception)?;
@@ -1210,6 +1173,8 @@ pub fn run_body(
                     None => return Ok(Outcome::Thrown(exception)),
                 }
             }
+            Ok(Some(outcome)) => return Ok(outcome),
+            Ok(None) => {},
             Err(error) => return Err(error),
         }
         pc = next;
@@ -1383,6 +1348,7 @@ mod tests {
         let methods = file.methods()?;
         let mut slab = vec![0u8; 1024];
         let mut heap = Heap::new(&mut slab)?;
+        natives::reserve_framework_exceptions(&mut heap, 1)?;
         let mut statics = vec![0u8; package.static_bytes as usize + 8];
         let mut host = crate::host::NoHost;
         let mut machine = Machine::new(
@@ -1786,9 +1752,47 @@ mod tests {
     }
 
     #[test]
-    fn a_negative_length_array_is_refused() {
-        let code = [op::SCONST_M1, op::NEWARRAY, 11, op::ARETURN];
-        assert_eq!(execute(&code, 0), Err(Error::Bounds));
+    fn allocations_report_catchable_java_failures() {
+        use crate::cap::{CONSTANT_CLASSREF, CONSTANT_VIRTUAL_METHODREF};
+        use crate::test_support::ClassSpec;
+        for allocation in [vec![op::NEWARRAY, 11], vec![op::ANEWARRAY, 0, 0], vec![op::NEW, 0, 0]] {
+            let object = allocation[0] == op::NEW;
+            let mut package = Package {
+                imports: vec![(vec![0xa0, 0, 0, 0, 0x62, 0, 1], 1, 0),
+                    (vec![0xa0, 0, 0, 0, 0x62, 1, 1], 1, 6)],
+                classes: vec![ClassSpec::default()],
+                handlers: vec![[0; 8]], nargs: 0, max_stack: 3,
+                ..Package::default()
+            };
+            let body = package.install_offset() + 2;
+            let class = package.class_offsets()[0];
+            package.constants = vec![
+                [CONSTANT_CLASSREF, (class >> 8) as u8, class as u8, 0],
+                [CONSTANT_CLASSREF, 0x80, 6, 0], // NegativeArraySizeException
+                [CONSTANT_VIRTUAL_METHODREF, 0x81, 13, 1], // SystemException.getReason
+            ];
+            if !object {
+                package.code = vec![op::SCONST_M1];
+                package.code.extend_from_slice(&allocation);
+                package.code.push(op::ARETURN);
+                let end = package.code.len() as u16;
+                package.code.extend([op::POP, op::SCONST_1, op::SRETURN]);
+                package.handlers = vec![handler(body, end, body + end, 1, true)];
+                assert_eq!(execute_package(&package), Ok(Outcome::Short(1)));
+            }
+            // Discard each reference and allocate until the slab is full. The reserved
+            // SystemException must still be usable, without allocating another object.
+            package.code = if object { vec![] } else { vec![op::SCONST_1] };
+            package.code.extend_from_slice(&allocation);
+            package.code.push(op::POP);
+            let back = -(package.code.len() as i8);
+            package.code.extend([op::GOTO, back as u8]);
+            let end = package.code.len() as u16;
+            package.code.extend([op::INVOKEVIRTUAL, 0, 2, op::SRETURN]);
+            package.constants[1] = [CONSTANT_CLASSREF, 0x81, 13, 0]; // SystemException
+            package.handlers = vec![handler(body, end, body + end, 1, true)];
+            assert_eq!(execute_package(&package), Ok(Outcome::Short(5))); // NO_RESOURCE
+        }
     }
 
     #[test]
@@ -2186,7 +2190,11 @@ mod tests {
         // goto to itself, which without a budget would never return.
         let code = [op::GOTO, 0, op::RETURN];
         assert_eq!(execute(&code, 0), Err(Error::Quota));
-        let package = Package { code: code.to_vec(), nargs: 0, ..Package::default() };
+        let mut package = Package { code: code.to_vec(), nargs: 0, handlers: vec![[0; 8]], ..Package::default() };
+        let body = package.install_offset() + 2;
+        package.code.extend([op::POP, op::SCONST_1, op::SRETURN]);
+        package.handlers = vec![handler(body, code.len() as u16, body + code.len() as u16, 0, true)];
+        assert_eq!(execute_package(&package), Err(Error::Quota));
         let mut polls = 0;
         assert_eq!(execute_package_with_cancel(&package, &mut || {
             polls += 1;

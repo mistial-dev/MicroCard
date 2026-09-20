@@ -197,9 +197,9 @@ a safe board heap size.
 
 ## Verification
 
-Structural verification is mandatory and runs in one streaming pass at load. It covers the header magic and flags, directory tiling without gaps or overlaps, import resolution, applet offsets landing on method headers, class consistency through a bounded acyclic superclass walk, constant pool tags and token ranges, per-method stack and local bounds, exception handler ranges on instruction boundaries, and an instruction-boundary bitmap built by linear decode that every branch, switch and handler target is checked against.
+Structural verification is mandatory at load. It covers the header magic and flags, directory tiling without gaps or overlaps, import resolution, applet offsets landing on method headers, class consistency through a bounded acyclic superclass walk, constant pool tags and token ranges, per-method stack and local bounds, exception handler ranges on instruction boundaries, and an instruction-boundary bitmap built by reachability that every branch, switch and handler target is checked against.
 
-The bitmap is built already, by reachability rather than by a linear sweep. Branch offsets are signed and count from the address of their own opcode, and a target that misses a boundary is refused. That single check removes the whole class of attacks where a jump lands on an operand byte and turns a constant into an opcode. Switch tables are measured from their own operands before anything indexes into them, and lookup switch pairs must be sorted, which is what lets a card search them.
+Branch offsets are signed and count from the address of their own opcode, and a target that misses a boundary is refused. That single check removes the whole class of attacks where a jump lands on an operand byte and turns a constant into an opcode. Switch tables are measured from their own operands before anything indexes into them, and lookup switch pairs must be sorted, which is what lets a card search them.
 
 Reachability is a finding rather than a preference. A method in a CAP file records no length, and the offsets that name methods do not name all of them. The class method tables hold virtual methods, the constant pool holds static and constructor references, and the Applet component holds install entry points. All eight test packages still carry at least one method that none of those name, so the byte after a method's last instruction is not reliably the start of anything known. The Descriptor component would say, and a Load File Data Block leaves it behind. Decoding everything between two named offsets therefore decodes an unnamed method's header as though it were bytecode.
 
@@ -381,6 +381,12 @@ Transport acceptance also kills the simulator between encrypted certificate-uplo
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
 
+Bytecode `newarray` and `anewarray` throw `NegativeArraySizeException` for negative
+lengths. Failed `new`, `newarray` and `anewarray` allocations throw
+`SystemException.NO_RESOURCE` through the same handler dispatch as explicit and
+native throws (JCRE §10.1). Work or call-frame budget exhaustion and cancellation
+still end execution; applet handlers cannot intercept them.
+
 `Util.arrayCompare` validates both complete ranges before comparing, including empty
 requests and ranges whose first byte differs. Utility bounds and null errors throw
 catchable `ArrayIndexOutOfBoundsException` and `NullPointerException` objects, as
@@ -510,8 +516,8 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-factory-errors-stable-contact`, based on `33153ae` with the factory API fixes):
-preparation took 13.967 seconds and vectors 95.844 seconds on the host.
+(`work/nist-allocation-errors-contact`, based on `34ed7ab` with bytecode allocation fixes):
+preparation took 15.605 seconds and vectors 96.666 seconds on the host.
 Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
