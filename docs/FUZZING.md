@@ -12,7 +12,7 @@ python3 scripts/fuzz_campaign.py crypto_arguments --seconds 300
 python3 scripts/fuzz_campaign.py domain_sequences --seconds 300
 ```
 
-The required `--seconds` argument prevents an accidental invocation from starting a sustained default run. The runner uses `nightly-2025-08-31` explicitly without changing the default toolchain. Install that toolchain separately if absent. Logs, source/lock hashes, source revision, dirty status, duration, seed hashes and corpus counts go to `artifacts/fuzz/`. Each run passes its `input-corpus` directory explicitly to libFuzzer and writes new discoveries there. An existing `fuzz/corpus/<target>` is retained as an additional input; crashes remain under ignored `fuzz/artifacts/`. Before this wiring correction, runner-created seeds were not supplied to libFuzzer and recorded corpus counts described unused seed directories. Historical execution statistics remain in the actual run logs. Retain minimized crash inputs as regression fixtures if a failure is found. A wall-clock timeout also bounds startup/build hangs.
+The required `--seconds` argument prevents an accidental invocation from starting a sustained default run. The runner uses `nightly-2026-09-19` explicitly without changing the default toolchain. Install that toolchain separately if absent. Logs, source/lock hashes, source revision, dirty status, duration, seed hashes and corpus counts go to `artifacts/fuzz/`. Each run passes its `input-corpus` directory explicitly to libFuzzer and writes new discoveries there. An existing `fuzz/corpus/<target>` is retained as an additional input; crashes remain under ignored `fuzz/artifacts/`. Before this wiring correction, runner-created seeds were not supplied to libFuzzer and recorded corpus counts described unused seed directories. Historical execution statistics remain in the actual run logs. Retain minimized crash inputs as regression fixtures if a failure is found. A wall-clock timeout also bounds startup/build hangs.
 
 ## Targets
 
@@ -52,7 +52,10 @@ On 2026-09-16, all four targets completed bounded 300-second non-sanitized campa
 
 The aggregate is 51,463,622 executions over 1,204 seconds of libFuzzer time. Each `result.json` records the exact command, `nightly-2025-08-31`, target and lock hashes, source revision `edb47e9179808d4316607ac8d02903040f923683`, elapsed time, exit code and corpus count. The first campaign synchronized a missing direct `base64ct` entry into `fuzz/Cargo.lock`. Later records therefore say the tree was dirty, while their recorded target hashes show no target-source change. The lock update is retained with this checkpoint.
 
-These runs satisfy the tracked five-minute host campaign checkpoint. They do not supply AddressSanitizer evidence, and the longer sanitizer-backed production campaign remains blocked on the environment issue below.
+These runs satisfy the tracked five-minute host campaign checkpoint. They predate the
+current binary-format targets and do not supply AddressSanitizer evidence. Current
+sanitizer evidence appears below; a sustained sanitizer-backed production campaign
+remains pending.
 
 ## Expanded stateful crypto checkpoint
 
@@ -64,13 +67,16 @@ The deterministic `crypto-services` seed directly executes commands 0 through 5 
 
 The stateful target now installs Kdf108 in the ISD under the ISD signing identity and Kdf108Consumer in the SSD under its different pinned identity. The `dependency-replacement` seed proves that an active consumer blocks provider unload, then removes the instance and consumer assembly, replaces the provider with package version 2, reloads the exact consumer package, relinks it to the new provider digest and reinstalls the consumer. The consumer removes its SSD-owned AES key during uninstall, allowing an intentional reinstall while preserving the domain's other keys.
 
-A 121-second non-sanitized run completed 2,329 sequences without a crash, added 206 corpus units, and reached 3,910 coverage edges and 19,535 features with 33 MiB peak RSS. Evidence: `artifacts/fuzz/domain_sequences-1789581140550326000`. Two failures found while extending the target were retained as lessons in the harness: SSD recreation must not reload an older ISD provider version, and a rebooted fake entropy stream can legitimately cause duplicate-nonce key creation to fail closed. AddressSanitizer coverage remains open.
+A 121-second non-sanitized run completed 2,329 sequences without a crash, added 206 corpus units, and reached 3,910 coverage edges and 19,535 features with 33 MiB peak RSS. Evidence: `artifacts/fuzz/domain_sequences-1789581140550326000`. Two failures found while extending the target were retained as lessons in the harness: SSD recreation must not reload an older ISD provider version, and a rebooted fake entropy stream can legitimately cause duplicate-nonce key creation to fail closed.
 
-## macOS sanitizer limitation
+## Historical macOS sanitizer limitation
 
-On macOS 26.6.2 with the pinned nightly, AddressSanitizer stalled in its initializer before libFuzzer's input loop. A process sample showed nested AsanInitFromRtl and StaticSpinMutex::LockSlow during dyld/malloc initialization. The stalled processes were terminated. They do not count as completed campaigns.
+On macOS 26.6.2 with `nightly-2025-08-31`, AddressSanitizer stalled in its initializer before libFuzzer's input loop. A process sample showed nested AsanInitFromRtl and StaticSpinMutex::LockSlow during dyld/malloc initialization. The stalled processes were terminated. They do not count as completed campaigns.
 
-For this environment, coverage-guided runs can use `--sanitizer none`. They retain Rust assertions/overflow checks and libFuzzer coverage guidance, but do not provide AddressSanitizer memory-error detection. Resolve the sanitizer/toolchain compatibility problem and run longer campaigns on a supported sanitizer environment before production acceptance. Two-minute runs provide initial campaign evidence. Exhaustive testing and a security audit remain separate work.
+`nightly-2026-09-19` starts correctly on the same host and is now the runner default.
+Non-sanitized runs remain available for high-throughput coverage guidance, but do not
+provide AddressSanitizer memory-error detection. Longer campaigns are still required
+before production acceptance. Exhaustive testing and a security audit remain separate.
 
 ## Corpus wiring verification
 
@@ -80,8 +86,30 @@ without a sanitizer completed 4,303,626 executions in 31 libFuzzer seconds, with
 the two supplied seeds; the recorded paths and count match the actual output.
 Evidence: `artifacts/fuzz/boundaries-1789922912978765000`.
 
-The matching AddressSanitizer attempt compiled but produced no libFuzzer startup
-statistics and hit the runner's 210-second wall-clock limit (exit 124). It is not
-sanitizer coverage. Evidence: `artifacts/fuzz/boundaries-1789922857083664000`.
-Both runs used the working-tree runner correction based on `975f09a`; no fuzz-target
-source changed. Sustained campaigns and working sanitizer execution remain open.
+The matching AddressSanitizer attempt with `nightly-2025-08-31` compiled but produced
+no libFuzzer startup statistics and hit the runner's 210-second wall-clock limit
+(exit 124). A minimal sanitized program also hung before `main`, isolating this to
+the sanitizer runtime on macOS 26 rather than MicroCard. Evidence:
+`artifacts/fuzz/boundaries-1789922857083664000`.
+
+With `nightly-2026-09-19`, the same 30-second AddressSanitizer campaign completed
+2,265,961 executions, added 169 units, and reached 472 MiB peak RSS without a crash.
+Evidence: `artifacts/fuzz/boundaries-1789924031712618000`. The runner now pins that
+working nightly.
+
+The first full target pass exposed stale PoC framing in `signed_packages` and
+`domain_sequences`: both still generated MP04/JSON packages, so one only exercised
+the rejection path and the other failed during bootstrap. Their fixtures now use
+the production MP05 envelope, CBOR manifest, image digest, and CBOR management-name
+contract. The unused fuzz-only `serde_json` dependency was removed.
+
+After that correction, bounded AddressSanitizer campaigns completed without a
+crash: `crypto_arguments` ran 11,389 inputs and added 79 units
+(`artifacts/fuzz/crypto_arguments-1789924157317665000`); `signed_packages` ran
+16,269 inputs and added 50 units
+(`artifacts/fuzz/signed_packages-1789924802085719000`); and `domain_sequences`
+replayed all 1,165 retained inputs
+(`artifacts/fuzz/domain_sequences-1789924640081167000`). The domain corpus alone
+took 87 seconds to initialize, so that run did not reach mutation despite a
+30-second libFuzzer limit. Sustained campaigns remain separate from the ordinary
+validation loop.

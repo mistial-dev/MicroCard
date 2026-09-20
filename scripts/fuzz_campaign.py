@@ -17,7 +17,7 @@ def main():
     p.add_argument("--seconds", type=int, required=True,
                    help="explicit campaign duration; sustained runs are never an implicit default")
     p.add_argument("--sanitizer", choices=["address", "none"], default="address")
-    p.add_argument("--toolchain", default="nightly-2025-08-31")
+    p.add_argument("--toolchain", default="nightly-2026-09-19")
     a = p.parse_args()
     if a.seconds <= 0: p.error("seconds must be positive")
     tool = ROOT / "work/fuzz-tools/bin/cargo-fuzz"
