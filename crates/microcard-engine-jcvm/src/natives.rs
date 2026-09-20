@@ -14,6 +14,7 @@ use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
 mod security;
+pub(crate) use security::checkpoint_committed;
 pub(crate) use security::{symmetric_key_clear_event, ec_key_clear_event, ec_key_kind};
 
 /// A class the card provides, encoded so it cannot collide with a class in a package.
@@ -453,6 +454,7 @@ fn jcsystem(
                     })?;
                 }
                 heap.commit_transaction()?;
+                if !jcre.installing { heap.mark_checkpointed(); }
             }
             else if heap.abort_transaction(statics)? { return Err(Error::TransactionAborted); }
         }

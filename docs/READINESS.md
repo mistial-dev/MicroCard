@@ -68,8 +68,10 @@ board's reserved heap.
   In-command commits now checkpoint flash before releasing undo records; the real
   OpenFIPS201 object-update path survives cancellation after commit and preserves
   prior content on checkpoint failure. PIN checks now durably consume attempts before
-  comparison without publishing conditional transaction changes. Other persistent
-  writes outside explicit transactions still need independent durability. Finish these boundaries,
+  comparison without publishing conditional transaction changes. Cooperative cancellation
+  checkpoints ordinary persistent writes while excluding an open transaction; a failed
+  checkpoint returns a storage error. Arbitrary power loss between ordinary writes
+  and checkpoints still needs independent durability. Finish these boundaries,
   native-API transaction auditing, and interruption tests.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed

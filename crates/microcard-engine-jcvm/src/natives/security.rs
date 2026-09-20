@@ -46,7 +46,7 @@ pub(super) fn reset_pin_validations(heap: &mut Heap) -> Result<()> {
 }
 
 // Persist unconditional PIN changes without publishing conditional heap/static writes.
-fn checkpoint_pin(heap: &Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
+pub(crate) fn checkpoint_committed(heap: &mut Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
         context: heap::Context, statics: &[u8]) -> Result<()> {
     if jcre.installing { return Ok(()); }
     let instance = jcre.instance.ok_or(Error::Missing)?;
@@ -60,7 +60,9 @@ fn checkpoint_pin(heap: &Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
     host.checkpoint(crate::applet::PersistentView {
         heap: heap.image(), statics, instance, buffer: jcre.buffer,
         context, projection: Some(heap),
-    })
+    })?;
+    heap.mark_checkpointed();
+    Ok(())
 }
 
 /// The class a `KeyBuilder` type code builds, JCRE Table 5-1.
@@ -322,7 +324,7 @@ pub fn call(
             // mid check must not give the attempt back.
             heap.put_word_unconditional(this, COUNTER, tries - 1)?;
             heap.put_word_unconditional(this, READY, 0)?;
-            checkpoint_pin(heap, host, jcre, context, statics)?;
+            checkpoint_committed(heap, host, jcre, context, statics)?;
             let material = heap.get_word(this, MATERIAL)?;
             let stored = heap.get_word(this, SIZE)? as usize;
             let matched = if length < 0 || offset < 0 || length as usize != stored {
@@ -341,7 +343,7 @@ pub fn call(
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
                 heap.put_word_unconditional(this, READY, 1)?;
-                checkpoint_pin(heap, host, jcre, context, statics)?;
+                checkpoint_committed(heap, host, jcre, context, statics)?;
             }
             frame.push_short(matched as i16)?;
         }
@@ -359,7 +361,7 @@ pub fn call(
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
                 heap.put_word_unconditional(this, READY, 0)?;
-                checkpoint_pin(heap, host, jcre, context, statics)?;
+                checkpoint_committed(heap, host, jcre, context, statics)?;
             }
         }
         (ClassId::OwnerPIN, MethodId::resetAndUnblock) => {
@@ -367,7 +369,7 @@ pub fn call(
             let limit = heap.get_word(this, KIND)?;
             heap.put_word_unconditional(this, COUNTER, limit)?;
             heap.put_word_unconditional(this, READY, 0)?;
-            checkpoint_pin(heap, host, jcre, context, statics)?;
+            checkpoint_committed(heap, host, jcre, context, statics)?;
         }
 
         // The algorithm holders. Each is an object carrying what it was asked for, and the

@@ -482,6 +482,10 @@ pub fn run_body(
     let mut pc = 0usize;
     loop {
         if machine.cancel.as_mut().is_some_and(|cancel| cancel()) {
+            if machine.heap.has_uncheckpointed_writes() && machine.jcre.instance.is_some() {
+                natives::checkpoint_committed(machine.heap, machine.host, &machine.jcre,
+                    machine.context, machine.statics)?;
+            }
             return Err(Error::Cancelled);
         }
         *budget = budget.checked_sub(1).ok_or(Error::Quota)?;

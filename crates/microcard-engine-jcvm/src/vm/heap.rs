@@ -39,6 +39,7 @@ pub struct Heap<'a> {
     next: usize,
     transaction: Option<(usize, Undo)>,
     aborted_allocations: bool,
+    persistent_dirty: bool,
 }
 
 /// What an object is, read back from its header.
@@ -76,7 +77,7 @@ impl<'a> Heap<'a> {
         if bytes.len() < HEADER + 2 {
             return Err(Error::Quota);
         }
-        Ok(Self { bytes, next: 2, transaction: None, aborted_allocations: false })
+        Ok(Self { bytes, next: 2, transaction: None, aborted_allocations: false, persistent_dirty: false })
     }
 
     /// Take a slab that already holds objects, continuing from where it was left.
@@ -87,7 +88,7 @@ impl<'a> Heap<'a> {
         if used < 2 || used > bytes.len() || used > u16::MAX as usize || !used.is_multiple_of(2) {
             return Err(Error::Bounds);
         }
-        Ok(Self { bytes, next: used, transaction: None, aborted_allocations: false })
+        Ok(Self { bytes, next: used, transaction: None, aborted_allocations: false, persistent_dirty: false })
     }
 
     /// Start one bounded undo log for heap and static fields. The caller must end the
@@ -104,6 +105,12 @@ impl<'a> Heap<'a> {
     }
 
     pub fn allocations_aborted(&self) -> bool { self.aborted_allocations }
+
+    /// Persistent writes not yet acknowledged by a successful storage checkpoint.
+    /// Mutable slice access is conservative: it counts as a possible write.
+    pub fn has_uncheckpointed_writes(&self) -> bool { self.persistent_dirty }
+
+    pub fn mark_checkpointed(&mut self) { self.persistent_dirty = false; }
 
     pub(crate) fn committed_bytes(&self) -> usize {
         self.transaction.as_ref().map_or(self.next, |(start, _)| *start)
@@ -140,6 +147,7 @@ impl<'a> Heap<'a> {
 
     pub fn commit_transaction(&mut self) -> Result<()> {
         self.transaction.take().ok_or(Error::Inconsistent)?;
+        self.persistent_dirty = true;
         Ok(())
     }
 
@@ -168,6 +176,7 @@ impl<'a> Heap<'a> {
 
     pub fn remember_static(&mut self, at: usize, before: &[u8]) -> Result<()> {
         if let Some((_, undo)) = &mut self.transaction { undo.record(at, before, true)?; }
+        else if !before.is_empty() { self.persistent_dirty = true; }
         Ok(())
     }
 
@@ -175,7 +184,7 @@ impl<'a> Heap<'a> {
         if info.clear_event == 0 {
             if let Some((_, undo)) = &mut self.transaction {
                 undo.record(at, &self.bytes[at..at + length], false)?;
-            }
+            } else if length != 0 { self.persistent_dirty = true; }
         }
         Ok(())
     }
@@ -338,7 +347,8 @@ impl<'a> Heap<'a> {
 
     /// Runtime state such as a PIN presentation counter is never undone.
     pub fn put_word_unconditional(&mut self, reference: Reference, index: usize, value: u16) -> Result<()> {
-        let (at, _) = self.slot(reference, index, false)?;
+        let (at, info) = self.slot(reference, index, false)?;
+        if info.clear_event == 0 { self.persistent_dirty = true; }
         let value = value.to_be_bytes();
         if let Some((_, undo)) = &mut self.transaction { undo.preserve(at, &value); }
         self.bytes[at..at + 2].copy_from_slice(&value);
@@ -453,6 +463,7 @@ impl<'a> Heap<'a> {
         if conditional { self.remember(destination, length, info)?; }
         microcard_memory::copy_bytes(self.bytes, source, destination, length).ok_or(Error::Bounds)?;
         if !conditional {
+            if info.clear_event == 0 && length != 0 { self.persistent_dirty = true; }
             if let Some((_, undo)) = &mut self.transaction {
                 undo.preserve(destination, &self.bytes[destination..destination + length]);
             }
@@ -462,6 +473,7 @@ impl<'a> Heap<'a> {
 
     pub fn fill_bytes_unconditional(&mut self, reference: Reference, offset: usize, length: usize, value: u8) -> Result<()> {
         self.byte_slice(reference, offset, length)?;
+        if self.info(reference)?.clear_event == 0 && length != 0 { self.persistent_dirty = true; }
         let at = reference as usize + HEADER + offset;
         self.bytes[at..at + length].fill(value);
         if let Some((_, undo)) = &mut self.transaction { undo.preserve(at, &self.bytes[at..at + length]); }
@@ -506,6 +518,8 @@ mod tests {
         heap.byte_slice_mut(array, 0, 8).unwrap().copy_from_slice(b"abcdefgh");
         heap.put_word(object, 1, 3).unwrap();
         let original = heap.image().to_vec();
+        assert!(heap.has_uncheckpointed_writes());
+        heap.mark_checkpointed();
 
         heap.begin_transaction(128).unwrap();
         assert_eq!(heap.begin_transaction(128), Err(Error::Inconsistent));
@@ -517,7 +531,9 @@ mod tests {
         heap.array_put(short, 1, -20).unwrap();
         heap.array_put_int(integer, 0, -70000).unwrap();
         heap.array_put(transient, 0, 1).unwrap();
+        assert!(!heap.has_uncheckpointed_writes(), "conditional and transient writes do not publish committed state");
         heap.put_word_unconditional(object, 1, 2).unwrap();
+        assert!(heap.has_uncheckpointed_writes());
         // Later conditional writes must restore the unconditional counter, not 3 or 5.
         heap.put_word(object, 1, 8).unwrap();
         let mut statics = [4, 5];
@@ -540,9 +556,12 @@ mod tests {
         assert_eq!(projected, expected);
         assert_eq!(heap.abort_transaction(&mut []), Err(Error::Inconsistent));
 
+        heap.mark_checkpointed();
         heap.begin_transaction(16).unwrap();
         heap.put_word(object, 0, 12).unwrap();
+        assert!(!heap.has_uncheckpointed_writes());
         heap.commit_transaction().unwrap();
+        assert!(heap.has_uncheckpointed_writes());
         assert_eq!(heap.get_word(object, 0), Ok(12));
         assert_eq!(heap.transaction_remaining(), None);
         assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
