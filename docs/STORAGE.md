@@ -85,9 +85,10 @@ publication retains staging until registry recovery decides ownership. The sessi
 raw state with the live committed projection in bounded windows, then replaces only
 the journal. It does not construct a second applet. It retains
 the existing applet object, selection and transient state; mismatch prevents stale
-execution. Seed validation reuses the complete restore validator with no execution
-frames and only the saved heap length after checking the configured quota. It still
-allocates a temporary heap. Before applet callbacks, the card renews a live session when either counter has
+execution. Seed validation and normal restore share a read-only validator. Validation borrows
+the saved heap, allocating only the initial runtime layout and a reference bitmap.
+It checks the configured quota before constructing that layout; no execution frames
+or saved-heap copy are needed. Before applet callbacks, the card renews a live session when either counter has
 1024 or fewer commits remaining. Active uploads, including zero-byte uploads,
 prevent renewal. A maintenance failure drops selection; pending ownership protects
 staging from transport reset. This threshold does not guarantee that every command

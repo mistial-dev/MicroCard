@@ -269,7 +269,7 @@ impl Card {
         }
         // An install that does not register leaves nothing to select, JCRE §3.1.
         let instance = outcome.1.ok_or(Error::Missing)?;
-        check_applet(&linked, &heap, instance)?;
+        check_applet(&linked, heap.info(instance)?)?;
         self.instance = Some(instance);
         Ok(())
     }
@@ -453,9 +453,8 @@ struct Invocation {
     data: Vec<u8>,
 }
 
-fn check_applet(linked: &Linked, heap: &Heap, instance: Reference) -> Result<()> {
+fn check_applet(linked: &Linked, root: heap::Info) -> Result<()> {
     use crate::cap::ClassRef;
-    let root = heap.info(instance)?;
     if root.kind != heap::KIND_OBJECT || natives::is_native_class(root.class) { return Err(Error::Type); }
     linked.lookup(root.class, applet_token(MethodId::process)?)?;
     let mut class = ClassRef::Internal(root.class);

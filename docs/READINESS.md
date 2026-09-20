@@ -98,7 +98,7 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 221,352 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 221,432 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
@@ -110,13 +110,12 @@ board's reserved heap.
   ceilings still fail; none were raised. The matched credential workload reduced host
   heap peak from 43,227 to 35,137 bytes and reopened retained allocations from 13,215
   to 4,989 bytes; [measurement evidence](HEAP_MEASUREMENTS.json) records both binaries.
-  The provisioned JCVM transport workload now forces counter renewal and peaks at
-  197,677 host-requested allocation bytes after removing unused validation frames,
-  spare validation heap and the handoff applet (previously 266,721). This is still
-  1,069 bytes above the 196,608-byte board reservation.
-  Reduce renewal allocation overlap and establish a board-equivalent bound before
-  declaring this path ready for hardware. Host figures exclude allocator metadata
-  and stack and include file-backed image reads.
+  The provisioned JCVM transport workload forces counter renewal and peaks at
+  184,681 host-requested allocation bytes after validating the saved heap by borrowing
+  it (previously 266,721). This is below the 196,608-byte board reservation for this
+  workload, but does not establish device heap safety. Bound supported workloads and
+  board allocations before declaring this path ready for hardware. Host figures
+  exclude allocator metadata and stack and include file-backed image reads.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)

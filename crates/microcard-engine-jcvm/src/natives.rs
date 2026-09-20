@@ -500,17 +500,17 @@ pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: h
 
 /// Reserve VM and native API failure objects before applet allocations can exhaust
 /// the heap. The runtime prefix keeps them outside applet transactions.
-pub(crate) fn reserve_runtime_exceptions(heap: &mut Heap, context: heap::Context) -> Result<()> {
-    for class in [ClassId::ArithmeticException, ClassId::ArrayIndexOutOfBoundsException,
+pub(crate) fn runtime_exception_classes() -> impl Iterator<Item = ClassId> {
+    [ClassId::ArithmeticException, ClassId::ArrayIndexOutOfBoundsException,
         ClassId::ClassCastException, ClassId::NegativeArraySizeException,
-        ClassId::NullPointerException, ClassId::SecurityException] {
-        new_exception(heap, class, context)?;
-    }
-    for class in PACKAGES.iter().flat_map(|package| package.classes) {
-        if is_exception_class(class) && class.methods.iter().any(|method| method.id == MethodId::throwIt) {
-            new_exception(heap, class.id, context)?;
-        }
-    }
+        ClassId::NullPointerException, ClassId::SecurityException].into_iter().chain(
+        PACKAGES.iter().flat_map(|package| package.classes).filter(|class|
+            is_exception_class(class) && class.methods.iter().any(|method| method.id == MethodId::throwIt))
+            .map(|class| class.id))
+}
+
+pub(crate) fn reserve_runtime_exceptions(heap: &mut Heap, context: heap::Context) -> Result<()> {
+    for class in runtime_exception_classes() { new_exception(heap, class, context)?; }
     Ok(())
 }
 

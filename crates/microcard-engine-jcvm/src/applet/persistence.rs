@@ -163,35 +163,48 @@ impl Card {
         }
     }
 
-    /// Check authenticated state without allocating spare heap or execution frames.
+    /// Validate borrowed state with only the load file's initial runtime layout.
     pub fn validate_persistent(file: &LoadFile, mut sizes: Sizes, saved: PersistentState<'_>) -> Result<()> {
         if saved.heap.len() > sizes.heap_bytes { return Err(Error::Bounds); }
-        sizes.heap_bytes = saved.heap.len();
+        // Bound initial objects from the same exception inventory and static arrays
+        // used by new(). No spare heap, execution frames, or saved-heap copy is needed.
+        let mut initial = 2usize + (heap::HEADER + usize::from(sizes.buffer_bytes)).next_multiple_of(2);
+        initial = initial.checked_add((1 + natives::runtime_exception_classes().count()) * (heap::HEADER + 2))
+            .ok_or(Error::Quota)?;
+        for array in file.static_fields()?.array_inits() {
+            initial = initial.checked_add((heap::HEADER + array.values.len()).next_multiple_of(2)).ok_or(Error::Quota)?;
+        }
+        sizes.heap_bytes = initial.min(saved.heap.len());
         sizes.frame_words = 0;
-        Self::restore(file, sizes, saved).map(drop)
+        Self::new(file, sizes)?.validate_saved(file, &saved)
     }
 
     /// Restore already authenticated state for the exact verified load file.
     /// No installation code runs, and no volatile values are reconstructed from storage.
     pub fn restore(file: &LoadFile, sizes: Sizes, saved: PersistentState<'_>) -> Result<Self> {
-        if saved.heap.len() > sizes.heap_bytes
-            || saved.statics.len() != file.static_fields()?.image_size as usize
-        {
-            return Err(Error::Bounds);
-        }
+        if saved.heap.len() > sizes.heap_bytes { return Err(Error::Bounds); }
         let mut card = Self::new(file, sizes)?;
-        // Runtime objects have deterministic handles and a zeroed APDU buffer.
-        if saved.heap.get(..card.runtime_bytes) != Some(&card.heap[..card.runtime_bytes]) {
-            return Err(Error::Format);
-        }
+        card.validate_saved(file, &saved)?;
         card.heap[..saved.heap.len()].copy_from_slice(saved.heap);
         card.heap_used = saved.heap.len();
         card.statics.copy_from_slice(saved.statics);
-        let mut heap = Heap::resume(&mut card.heap, card.heap_used)?;
+        card.instance = Some(saved.instance);
+        Ok(card)
+    }
+
+    fn validate_saved(&self, file: &LoadFile, saved: &PersistentState<'_>) -> Result<()> {
+        if saved.statics.len() != self.statics.len() || saved.heap.len() < 2
+            || saved.heap.len() > u16::MAX as usize || !saved.heap.len().is_multiple_of(2) {
+            return Err(Error::Bounds);
+        }
+        // Runtime objects have deterministic handles and a zeroed APDU buffer.
+        if saved.heap.get(..self.runtime_bytes) != Some(&self.heap[..self.runtime_bytes]) {
+            return Err(Error::Format);
+        }
         let mut starts = Vec::new();
-        reserve(&mut starts, card.heap_used.div_ceil(16))?;
-        heap.visit_objects(|reference, info, payload| {
-            if info.owner != card.context {
+        reserve(&mut starts, saved.heap.len().div_ceil(16))?;
+        visit_saved_objects(saved.heap, |reference, info, payload| {
+            if info.owner != self.context {
                 return Err(Error::Firewall);
             }
             if info.clear_event != 0 && payload.iter().any(|byte| *byte != 0) {
@@ -219,7 +232,7 @@ impl Card {
                 let at = reference as usize;
                 let class = u16::from_be_bytes([saved.heap[at], saved.heap[at + 1]]);
                 let words = u16::from_be_bytes([saved.heap[at + 2], saved.heap[at + 3]]);
-                if reference == card.buffer || natives::is_temporary_native(class, words) {
+                if reference == self.buffer || natives::is_temporary_native(class, words) {
                     return Err(Error::Firewall);
                 }
             }
@@ -231,7 +244,7 @@ impl Card {
         }
         let linked = Linked::new(file)?;
         linked.imports_resolve()?;
-        heap.visit_objects(|_, info, payload| {
+        visit_saved_objects(saved.heap, |_, info, payload| {
             if info.kind == heap::KIND_REFERENCE {
                 for word in payload.chunks_exact(2) {
                     storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
@@ -420,9 +433,9 @@ impl Card {
             }
             Ok(())
         })?;
-        check_applet(&linked, &heap, saved.instance)?;
+        check_applet(&linked, heap::Info::read(saved.heap, saved.heap.len(), saved.instance)?)?;
         let references = file.static_fields()?.reference_count as usize * 2;
-        for word in card
+        for word in saved
             .statics
             .get(..references)
             .ok_or(Error::Bounds)?
@@ -430,7 +443,21 @@ impl Card {
         {
             storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
         }
-        card.instance = Some(saved.instance);
-        Ok(card)
+        Ok(())
     }
+}
+
+fn visit_saved_objects(bytes: &[u8], mut visit: impl FnMut(Reference, heap::Info, &[u8]) -> Result<()>) -> Result<()> {
+    if bytes.len() < 2 || bytes.len() > u16::MAX as usize || !bytes.len().is_multiple_of(2) {
+        return Err(Error::Bounds);
+    }
+    let mut at = 2;
+    while at < bytes.len() {
+        let info = heap::Info::read(bytes, bytes.len(), at as Reference)?;
+        let end = at + heap::HEADER + usize::from(info.length) * info.element_size();
+        visit(at as Reference, info, &bytes[at + heap::HEADER..end])?;
+        at = end.next_multiple_of(2);
+    }
+    if at != bytes.len() { return Err(Error::Format); }
+    Ok(())
 }
