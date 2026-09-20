@@ -741,9 +741,23 @@ mod tests {
         let random = new_native(&mut heap, ClassId::RandomData, 6, 1).unwrap();
         let output = heap.new_array(heap::KIND_BYTE, 6, 1).unwrap();
         for method in [MethodId::generateData, MethodId::nextBytes] {
-            invoke_security(ClassId::RandomData, method,
-                &[(true, random), (true, output), (false, 1), (false, 4)],
-                &mut heap, &mut frame, &mut host).unwrap();
+            for allowance in [3, 4] {
+                let before = heap.image().to_vec();
+                let calls = host.calls;
+                frame.push_reference(random).unwrap();
+                frame.push_reference(output).unwrap();
+                frame.push_short(1).unwrap();
+                frame.push_short(4).unwrap();
+                let mut budget = allowance;
+                let result = call_with_budget(framework(ClassId::RandomData, method, false),
+                    &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &mut []);
+                if allowance == 3 {
+                    assert!(matches!(result, Err(Error::Quota)));
+                    assert_eq!(budget, 3);
+                    assert_eq!(host.calls, calls);
+                    assert!(heap.image() == before);
+                } else { result.unwrap(); assert_eq!(budget, 0); }
+            }
             if method == MethodId::nextBytes { assert_eq!(frame.pop_short(), Ok(5)); }
             assert_eq!(frame.depth(), 0);
             assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0, 0x42, 0x42, 0x42, 0x42, 0]);
@@ -1260,12 +1274,13 @@ mod tests {
                 self.result
             }
         }
-        for (offset, result, succeeds, calls) in [
-            (0, Ok(32), true, 1),
-            (1, Ok(32), false, 0),
-            (0, Ok(65), false, 1),
-            (0, Ok(0), false, 1),
-            (0, Err(Error::Unsupported), false, 1),
+        for (offset, result, allowance, succeeds, calls) in [
+            (0, Ok(32), 32, true, 1),
+            (0, Ok(32), 31, false, 0),
+            (1, Ok(32), 32, false, 0),
+            (0, Ok(65), 32, false, 1),
+            (0, Ok(0), 32, false, 1),
+            (0, Err(Error::Unsupported), 32, false, 1),
         ] {
             let (mut slab, mut words, mut tags) = setup(0);
             let mut heap = Heap::new(&mut slab).unwrap();
@@ -1281,9 +1296,12 @@ mod tests {
             frame.push_short(32).unwrap();
             frame.push_reference(array).unwrap();
             frame.push_short(offset).unwrap();
+            let mut budget = allowance;
             let actual = security::call(ClassId::MessageDigest, MethodId::doFinal,
                 framework(ClassId::MessageDigest, MethodId::doFinal, false).method.signature,
-                &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut { u32::MAX }, &[]);
+                &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &[]);
+            if allowance == 31 { assert!(matches!(actual, Err(Error::Quota))); }
+            assert_eq!(budget, if calls == 0 { allowance } else { 0 });
             assert_eq!(actual.is_ok(), succeeds);
             assert_eq!(host.calls, calls);
             assert_eq!(heap.byte_slice(array, 0, 32).unwrap(), &[if succeeds { 0x99 } else { 0x42 }; 32]);

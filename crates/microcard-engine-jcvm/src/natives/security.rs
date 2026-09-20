@@ -358,12 +358,10 @@ pub fn call(
             // Validate before invoking the provider. Fixed scratch allows overlapping
             // input/output without copying the message or publishing partial results.
             heap.byte_slice(output, out_offset as usize, expected)?;
+            let message = heap.byte_slice(input, offset as usize, length as usize)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             let mut digest = Zeroizing::new([0u8; 64]);
-            let written = host.digest(
-                algorithm,
-                heap.byte_slice(input, offset as usize, length as usize)?,
-                &mut digest[..expected],
-            )?;
+            let written = host.digest(algorithm, message, &mut digest[..expected])?;
             if written != expected {
                 return Err(Error::Format);
             }
@@ -486,6 +484,8 @@ pub fn call(
                 return Err(Error::Bounds);
             }
             if length == 0 { return crypto_exception(heap, context, 1); }
+            heap.byte_slice(array, offset as usize, length as usize)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             // Straight into the applet's array, so the bytes never sit anywhere else.
             host.random(heap.byte_slice_mut(array, offset as usize, length as usize)?)?;
             if method == MethodId::nextBytes {
