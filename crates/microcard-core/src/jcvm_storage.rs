@@ -155,32 +155,29 @@ impl<F: Flash> Store<F> {
         sizes: Sizes,
         provider: &mut impl CryptoProvider,
     ) -> Result<(Self, Option<Card>)> {
-        let maximum = flash
-            .slot_size()
-            .checked_sub(crate::journal::OVERHEAD)
-            .ok_or(Error::Storage)?;
+        let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
+        let (mut store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
+        let card = decode_card(snapshot.as_deref().map(Vec::as_slice), &file, sizes, store.image, installation)?;
+        store.heap_length = card.as_ref().map(Card::persistent_heap_bytes);
+        Ok((store, card))
+    }
+
+    fn open_snapshot(flash: F, key: impl Into<JournalKey>, verified_image: &[u8],
+            installation: [u8; 16], provider: &mut impl CryptoProvider)
+            -> Result<(Self, Option<Zeroizing<Vec<u8>>>)> {
+        let maximum = flash.slot_size().checked_sub(crate::journal::OVERHEAD).ok_or(Error::Storage)?;
         let mut image = [0; 32];
         provider.sha256_into(verified_image, &mut image)?;
-        let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
         let (journal, snapshot) = Journal::open_with_replay(flash, key, provider,
             |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, maximum))?;
-        let card = decode_card(
-            snapshot.as_deref().map(Vec::as_slice),
-            &file,
-            sizes,
-            image,
-            installation,
-        )?;
-        Ok((
-            Self {
-                journal,
-                image,
-                installation,
-                maximum,
-                heap_length: card.as_ref().map(Card::persistent_heap_bytes),
-            },
-            card,
-        ))
+        Ok((Self { journal, image, installation, maximum, heap_length: None }, snapshot))
+    }
+
+    pub(crate) fn validate_journal(flash: F, key: impl Into<JournalKey>, verified_image: &[u8],
+            installation: [u8; 16], sizes: Sizes, provider: &mut impl CryptoProvider) -> Result<()> {
+        let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
+        let (store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
+        validate_seed_snapshot(snapshot.as_ref().ok_or(Error::Storage)?, &file, sizes, store.image, installation)
     }
 
     /// Rebuild volatile state from the newest authenticated committed record.

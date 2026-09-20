@@ -81,8 +81,9 @@ final publication; the recovery provider refuses heap-key encryption. The writer
 now stages a live committed heap under a fresh reserved identity, verifies the
 written record, and publishes pending ownership. It leaves the old bank and live
 selection untouched. Encryption failure consumes its identity; an uncertain
-publication retains staging until registry recovery decides ownership. The session handoff primitive compares the authenticated restored state with the
-live committed state in bounded windows, then replaces only the journal. It retains
+publication retains staging until registry recovery decides ownership. The session handoff primitive reopens the authenticated journal and compares its
+raw state with the live committed projection in bounded windows, then replaces only
+the journal. It does not construct a second applet. It retains
 the existing applet object, selection and transient state; mismatch prevents stale
 execution. Seed validation reuses the complete restore validator with no execution
 frames; it still allocates a temporary heap. Before applet callbacks, the card renews a live session when either counter has

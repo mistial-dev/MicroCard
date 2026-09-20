@@ -119,9 +119,8 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         // Cancellation must not expose the old session against a replaced bank.
         self.storage.registry.recover_renewal(&self.storage.images, &mut self.storage.heaps,
             &self.storage.heap_key, &self.staging, &mut self.scratch, &mut self.provider)?;
-        let renewed = self.storage.registry.open_session(aid, &self.storage.images,
+        self.storage.registry.handoff_renewed_session(aid, session, &self.storage.images,
             &mut self.storage.heaps, &self.storage.heap_key, &mut self.scratch, &mut self.provider)?;
-        session.adopt_renewed_store(renewed)?;
         self.staging.reset();
         if cancel() { return Err(Error::Cancelled); }
         Ok(())

@@ -97,6 +97,18 @@ impl<F: crate::journal::Flash> Store<F> {
         Ok(renewal)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn handoff_renewed_session<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks>(
+        &self, aid: Aid, session: &mut crate::jcvm_storage::Session<H::Bank, PinnedImage<I>>,
+        images: &crate::image_store::Images<I>, heaps: &mut H, root: &crate::journal::JournalKey,
+        scratch: &mut [u8], provider: &mut impl crate::crypto::CryptoProvider,
+    ) -> Result<()> {
+        let instance = *self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Missing)?;
+        let (_, _, digest) = self.session_image(instance.load, images, scratch, provider, |_| Ok(()))?;
+        let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &instance.identity, &digest)?;
+        session.adopt_renewed_store(heaps.open(instance.heap_bank)?, key, instance.identity, provider)
+    }
+
     /// Resolve authenticated staging ownership before uploads or applet execution.
     /// Failure retains the pending descriptor; no command is replayed.
     #[allow(clippy::too_many_arguments)]
@@ -138,9 +150,9 @@ impl<F: crate::journal::Flash> Store<F> {
         let mut flash = heaps.prepare(renewal.bank)?;
         seed.install_empty_bank(&mut flash)?;
         drop(record);
-        let session = crate::jcvm_storage::Session::open(flash, key, image, renewal.new_identity, sizes, provider)?;
-        if !session.installed()? { return Err(Error::Storage); }
-        drop(session);
+        image.with_bytes(provider, |bytes, provider| {
+            crate::jcvm_storage::Store::validate_journal(flash, key, bytes, renewal.new_identity, sizes, provider)
+        })?;
         // Copying the heap does not authorize execution. Publication does.
         self.commit_snapshot(next, provider)
     }
