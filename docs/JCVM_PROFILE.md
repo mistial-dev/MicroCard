@@ -4,7 +4,7 @@ This document describes the supported Java Card subset and its current limitatio
 Complete Java Card conformance and every OpenFIPS201 variant are outside this release
 cleanup. [Release readiness](READINESS.md) tracks the remaining delivery blockers.
 
-Implemented so far, in `crates/microcard-engine-jcvm`:
+Supported by `crates/microcard-engine-jcvm`:
 
 | Part | State |
 | --- | --- |
@@ -15,23 +15,23 @@ Implemented so far, in `crates/microcard-engine-jcvm`:
 | Linking | constant pool entries resolved to field offsets and method bodies as each instruction runs |
 | Interpreter | arithmetic, locals, the stack, control flow, arrays, fields, statics, invocation, casts, throw and catch |
 | API tokens | the six imported packages, read out of their export files into a committed table |
-| Native classes | Util, ISOException, APDU, JCSystem, Applet, OwnerPIN, and the key and algorithm objects |
-| Applet lifecycle | install, register, select and process, driven from outside the engine |
+| Native classes | Util, card exceptions, APDU, JCSystem, Applet, OwnerPIN, and supported key/algorithm objects |
+| Applet lifecycle | install, register, select/reselect, process, deselect and reset |
 
 The committed OpenFIPS201 standard-cs2 fixture installs, registers, accepts selection,
 and answers the checked PIV commands through `microcard-sim serve-jcvm`. PIN retries
 persist between commands. Other variants require separate evidence; unsupported cipher,
-signature, and key-agreement requests now fail at their factories.
+signature, and key-agreement requests fail at their factories.
 
-The shared core now connects authenticated GlobalPlatform loading and installation to
+The shared core connects authenticated GlobalPlatform loading and installation to
 JCVM through `jcvm_card::Card` and `transport::Endpoint`. The host lifecycle test sends
 real SCP03 messages, installs the committed PIV applet, selects it, checks PIN retries
 across reboot, and deletes it. `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` uses this
 path with persistent files; `serve-jcvm-managed-binary` uses the shared framed transport.
-The separate `engine-jcvm` board build now uses the same adapter with NVMC storage.
+The separate `engine-jcvm` board build uses the same adapter with NVMC storage.
 Both DK and dongle layouts cross-link; physical execution remains unverified.
 
-The shared C4 receiver now enforces container identity, an engine-specific size limit,
+The shared C4 receiver enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
 staging. Both core adapters use the receiver. JCVM checks that the signed manifest
 matches the requested load AID, security domain, and optional package hash before
@@ -43,8 +43,9 @@ with a 60 KiB package limit. Raw CAP input remains a simulator convenience, not 
 Installation, selection, and processing expose cancellation callbacks, checked before
 execution and at each instruction boundary. Cancellation escapes as an engine error;
 an applet cannot catch it or turn it into a successful response. Native calls finish
-before the next poll. The durable applet session checks cancellation again before
-committing and reloads authenticated state after an execution or persistence error.
+before the next poll. After a callback succeeds, the durable session commits its state before the final
+cancellation check. Late cancellation suppresses the response while preserving that
+commit. Execution or persistence errors reload authenticated state.
 If recovery fails, commands remain disabled until explicit recovery succeeds. Reloading
 clears volatile state, so the transport adapter must discard selection on errors.
 The session uses the reboot journal scan to resolve uncertain writes; a failed reply
@@ -56,10 +57,10 @@ AID, and frames instance AID, privileges, and C9 application data for the applet
 Explicit `Applet.register` calls must use the requested instance AID. Empty or short
 registration AIDs and repeated registration are rejected. The bounded registry journal
 now persists ownership, rollback history, image references, and installation identities.
-The registry loader now authorizes signed packages before erasing, stages images in
+The registry loader authorizes signed packages before erasing, stages images in
 unreferenced slots, verifies readback, and commits activation metadata. It protects
 the old image through write failures and cancellation. Package reads verify both flash
-and the current registry binding. Installation now commits a dedicated heap before
+and the current registry binding. Installation commits a dedicated heap before
 publishing its instance, using a fresh derived key even after an interrupted attempt.
 Reopening verifies every committed image and heap without reinstalling. The adapter
 serves GP status records, domain discovery, and authenticated applet APDUs with their
@@ -85,13 +86,11 @@ below; deselection-scoped data is cleared. A missing selection target leaves the
 current selection intact. An applet secure-channel reset drops transport keys before
 response protection; clients must establish a new SCP03 session for further management.
 
-## What holds this claim up
+## Acceptance evidence
 
 One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, with its MIT notice, the applet revision it was built from and the digests of both the CAP and the block. Twelve PIV commands and their expected status words are committed beside it. `scripts/piv_vector_acceptance.py` replays them with no argument, and the checkpoint gate and CI both run it.
 
 Half of those commands are authentic encodings taken from NIST Special Database 33 contact captures. The captured responses are deliberately absent, because that card was personalised and the card under test is blank, so a captured response would disagree for a correct reason. What carries over is the command encoding. Every entry is the case 4 form a real host sends, carrying a trailing expected-length byte.
-
-That form is worth the trouble. Reading the expected-length byte as a further byte of command data made the applet answer 6A80 to a GET DATA it should answer 6A82 to, and only the authentic encoding exposed it. A hand-written case 3 command passed throughout.
 
 ## Version and container
 
@@ -99,7 +98,7 @@ That form is worth the trouble. Reading the expected-length byte as a further by
 | --- | --- |
 | Java Card | Classic 3.0.5 as the first target version |
 | CAP format | 2.1, compact |
-| Instruction set | all 185 opcodes of JCVM section 8.1, including the 32-bit integer family |
+| Instruction decoding | all 185 JCVM opcodes; execution excludes `jsr`/`ret` and requires `ACC_INT` for integer operations |
 
 Export file version 1.6 is the marker for 3.0.5. A card exporting 1.5 is a 3.0.4 card and rejects an applet built for 3.0.5 at link time, so the imported version numbers are the part of the profile that decides whether the target version is real.
 
@@ -120,22 +119,20 @@ Six, and no others.
 
 An import resolves when its major version matches and its minor version is at least the one requested.
 
-## Order of work
+## Unsupported features
 
-Nothing here is a permanent exclusion. Each row says what the engine does today and what has to happen before it does more.
+These features are outside the current executable profile. Full Java Card conformance
+is outside this cleanup; [release readiness](READINESS.md) owns the delivery blockers.
 
-| Feature | Today | To finish |
-| --- | --- | --- |
-| The 32-bit integer family | decoded, and refused in a package whose `ACC_INT` is clear | interpreter arms |
-| `jsr` and `ret` | decoded, and refused by policy | subroutine dataflow analysis in the verifier |
-| The reserved opcodes | refused everywhere | nothing. They cannot appear in a CAP file, JCVM section 7.2 |
-| Logical channels | absent | channel state in the secure channel and in selection |
-| Shareable interfaces | absent | cross-context invocation through the firewall |
-| `MultiSelectable` | absent | per-channel applet state |
-| Java Card RMI | absent | the remote object layer above shareable interfaces |
-| Garbage collection | absent | a compacting or mark-sweep pass over the object heap |
+| Feature | Current behavior |
+| --- | --- |
+| `jsr` and `ret` | decoded and rejected; subroutine dataflow verification is absent |
+| Logical channels and `MultiSelectable` | basic channel only |
+| Shareable interfaces and Java Card RMI | cross-context invocation is unsupported |
+| Garbage collection | bounded bump allocation; no reclamation of individual live objects |
 
-Until shareable interfaces and multiple channels exist, exactly two firewall contexts are reachable, so multi-applet isolation stays unproven until a second applet exists. That limitation is recorded here rather than discovered later.
+Reserved opcodes are always rejected. Each managed instance has separate heap state;
+this does not establish support for Java Card shareable-object firewall semantics.
 
 ## Components
 
@@ -160,7 +157,7 @@ One detail that only real packages show. The Directory records a size for the De
 
 ## Memory placement
 
-MC04 now journals image descriptors and stores code in dedicated flash slots. JCVM
+MC04 journals image descriptors and stores code in dedicated flash slots. JCVM
 has an authenticated applet-state journal bound to its image and installation.
 Its image and heap regions are allocated separately in both board layouts.
 
@@ -174,7 +171,7 @@ lock prevents simultaneous simulator writers. `scripts/jcvm_transport_acceptance
 exercises this path with the independent Python signer and SCP03 client; checkpoint
 and CI run it. Set `MICROCARD_BINARY=1` to replay the same cases over framed transport.
 
-JCVM sessions now retain checked image handles instead of owning a second code
+JCVM sessions retain checked image handles instead of owning a second code
 buffer. A retained handle prevents its slot from being reclaimed, and every borrow
 checks the complete signed package's descriptor hash before exposing its code range.
 Overlapping reads and writes return an error. Board reads borrow memory-mapped flash;
@@ -220,17 +217,25 @@ These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E5993
 
 CAP static array initializers and non-default primitive values are applied before
 installation. Recovery restores the saved values rather than overwriting them with
-their initial values. SELECT processing now returns the PIV application template and
+their initial values. SELECT processing returns the PIV application template and
 applies its configured six-attempt contact PIN limit; the first two failed PIN checks
 therefore return `63C5` and `63C4`.
 
 `Card.reset()` clears both transient array kinds, the APDU buffer, execution words and
-tags, and native OwnerPIN validation flags. It retains installed objects, persistent
-array values, and PIN retry counts. `Card.save_into()` writes used heap bytes to a
+tags, native OwnerPIN validation flags, and runtime exception reasons. It retains
+installed objects, persistent array values, PIN retry counts, and explicit applet
+exception reasons. `Card.save_into()` writes used heap bytes to a
 caller-owned buffer and removes volatile values from that copy. `Card.restore()`
 checks object boundaries, typed references, roots, ownership, and native PIN state
 without running installation again. The committed PIV applet test verifies that PIN
 retry counts survive restoration; saving does not clear the live session.
+
+Card exception constructors, `throwIt`, `getReason`, and `setReason` share one native
+implementation. Reason updates do not roll back. Runtime exceptions are reused per
+class and context, separately from explicit applet-created exceptions. Applets may
+hold runtime exceptions, the APDU object, and the shared APDU buffer in local variables;
+field/static/array stores raise `SecurityException`. Recovery rejects saved applet
+references to those temporary objects and nonzero saved runtime exception reasons.
 
 The shared core's `jcvm_storage::Store` wraps those APIs in an authenticated journal,
 binding the snapshot to the exact code image and installation identity using the
@@ -252,7 +257,7 @@ Restoration rejects the former layout that placed transient key material in pers
 arrays. This storage support does not enable unsupported cipher or signature algorithms.
 
 The generated bindings describe Java Card API names; they do not establish algorithm support.
-The simulator's default JCVM host now uses the shared platform provider for SHA-256
+The simulator's default JCVM host uses the shared platform provider for SHA-256
 and entropy. The same adapter builds without MC04 or software crypto for the separate board
 integration. Provider failures clear output and return an error without a software retry.
 SHA-384 remains only in the engine's explicit test-reference host.
@@ -291,7 +296,7 @@ failure publishes neither output nor changed intermediate state. Each input byte
 one work unit. Other signature algorithms and external access are rejected.
 ### OpenFIPS201 provisioning
 
-The managed acceptance now defines and imports an AES-128 management key through
+The managed acceptance defines and imports an AES-128 management key through
 OpenFIPS201's administrative APDUs. After reboot it completes PIV challenge-response
 using that key and an independent host AES implementation. A MAC-only management-key
 definition and an incorrect challenge response are rejected. The same flow provisions
@@ -338,11 +343,14 @@ transport. Physical Makerdiary execution and interrupted provisioning remain unv
 
 ## Transactions and remaining durability work
 
-JCVM transaction natives now share an 8 KiB before-image log for heap payloads and
+JCVM transaction natives share an 8 KiB before-image log for heap payloads and
 static fields, including record overhead. Space is reserved before begin and wiped
 on commit or abort. Writes are admitted before mutation; exhaustion throws
 `TransactionException.BUFFER_FULL`. Nested begin and unmatched commit/abort report
 `IN_PROGRESS` and `NOT_IN_PROGRESS`. Commit-capacity queries include metadata cost.
+New allocations need no before-images: abort wipes the allocation tail, and committed
+projections exclude it. Key updates and algorithm initialization reserve complete
+metadata before publishing values or changing active streaming state.
 
 Explicit abort restores conditional writes. Returning or throwing from an applet
 callback with an unfinished transaction aborts it; process answers `6F00`. PIN
@@ -355,7 +363,7 @@ session-termination behavior in [JCSystem.abortTransaction](https://docs.oracle.
 Older snapshots with a persistent APDU-buffer header are explicitly rejected by
 runtime-layout validation; there is no automatic erase or conversion.
 
-An in-command `commitTransaction()` now saves an authenticated snapshot before
+An in-command `commitTransaction()` saves an authenticated snapshot before
 discarding its undo log. Cancellation or failure afterward recovers that committed
 state. A failed checkpoint stops execution and recovers the last valid journal record.
 Installation publishes only after its complete callback succeeds. Storage serializes
@@ -416,7 +424,7 @@ this inventory use upstream revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
 
 The bridge lifecycle check passes against the pinned upstream interface: installed
 applet selection, PIN retry persistence across reset, independent vector state, and
-contactless rejection. The installed NIST PIV Test Runner 5.0.1 now executes through this binding.
+contactless rejection. The installed NIST PIV Test Runner 5.0.1 executes through this binding.
 `SelectCommand:1` exposed a missing partial-AID selection path and passes after that
 runtime fix, with unchanged upstream expectations. Selection chooses the bytewise
 lowest matching installed AID, with exact matches preceding their extensions, and
@@ -470,12 +478,12 @@ python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
   --provision-config --suite card-contact --out work/p256-identity-contact
 ```
 
-The combined identity now imports all 11 objects and four keys and passes exact
+The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-exceptions-contact`, using the same derived identity): preparation took
-14.343 seconds and vectors 96.830 seconds on the host. Remaining failures concern the original CHUID’s
+(`work/nist-temporary-references-contact`, using the same derived identity): preparation took
+14.707 seconds and vectors 96.800 seconds on the host. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain
