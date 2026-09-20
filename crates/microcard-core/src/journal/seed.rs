@@ -8,6 +8,18 @@ pub struct SeedRecord<'a> { bytes: &'a [u8] }
 impl<'a> SeedRecord<'a> {
     pub const MIN_BYTES: usize = HEADER_BYTES + 16 + 1;
     pub const MAX_BYTES: usize = 65536 - 3;
+    /// The caller must durably reserve a unique registry identity for this key.
+    /// Failure consumes the key; a retry must reserve another identity first.
+    pub(crate) fn seal_new_epoch(snapshot: Zeroizing<Vec<u8>>, key: JournalKey,
+            provider: &mut impl CryptoProvider) -> Result<Zeroizing<Vec<u8>>> {
+        let length = snapshot.len().checked_add(HEADER_BYTES + 16).ok_or(Error::Quota)?;
+        if !(Self::MIN_BYTES..=Self::MAX_BYTES).contains(&length) { return Err(Error::Quota); }
+        let (record, payload_length) = prepare_record(snapshot)?;
+        encrypt_record(record, &key, RecordHeader {
+            append_enabled: true, generation: 1, attempt: 1, payload_length,
+        }, provider)
+    }
+
     pub fn authenticate(bytes: &'a [u8], key: &JournalKey, provider: &mut impl CryptoProvider,
             validate: impl FnOnce(&[u8]) -> Result<()>) -> Result<Self> {
         if !(Self::MIN_BYTES..=Self::MAX_BYTES).contains(&bytes.len()) { return Err(Error::Format); }
@@ -66,12 +78,9 @@ mod tests {
     #[test]
     fn seed_authenticates_before_copy_and_recovers_each_publication_cut() {
         let key = JournalKey::from([3; 16]);
-        let (mut journal, _) = Journal::open_with_replay(MemoryFlash::new(1024), [3; 16],
-            &mut SoftwareCrypto, |_, _, _| Err(Error::Format)).unwrap();
-        journal.commit(b"committed state").unwrap();
-        let source = journal.into_flash();
-        let length = HEADER_BYTES + b"committed state".len() + 16;
-        let record = &source.slots[0][..length];
+        let sealed = SeedRecord::seal_new_epoch(Zeroizing::new(b"committed state".to_vec()),
+            JournalKey::from([3; 16]), &mut SoftwareCrypto).unwrap();
+        let record = sealed.as_slice();
         let validate = |bytes: &[u8]| if bytes == b"committed state" { Ok(()) } else { Err(Error::Format) };
         let seed = SeedRecord::authenticate(record, &key, &mut SoftwareCrypto, validate).unwrap();
         assert!(SeedRecord::authenticate(record, &JournalKey::from([4; 16]), &mut SoftwareCrypto, validate).is_err());
@@ -85,6 +94,8 @@ mod tests {
             let mut changed = record.to_vec(); changed[at] ^= 1;
             assert!(SeedRecord::authenticate(&changed, &key, &mut SoftwareCrypto, validate).is_err());
         }
+        let mut source = MemoryFlash::new(1024);
+        seed.install_empty_bank(&mut source).unwrap();
         let mut used = source.clone();
         assert_eq!(seed.install_empty_bank(&mut used), Err(Error::Storage));
         assert_eq!(used.slots, source.slots);

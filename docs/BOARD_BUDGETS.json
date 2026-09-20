@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 186412,
+      "text_bytes": 186464,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 212524,
+      "text_bytes": 212580,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 212548,
+      "text_bytes": 212604,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 224088,
+      "text_bytes": 224144,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 224044,
+      "text_bytes": 224100,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 201224,
+      "text_bytes": 201464,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 211464,
+      "text_bytes": 211704,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -75,12 +75,12 @@
   },
   "budgets_passed": false,
   "budget_failures": [
-    "software_reference text_bytes 186412 exceeds 186000",
-    "hardware_release text_bytes 212524 exceeds 212000",
-    "development_debug text_bytes 212548 exceeds 212000",
-    "usb_ccid text_bytes 224088 exceeds 224000",
-    "dongle text_bytes 224044 exceeds 224000",
-    "jcvm_development_debug text_bytes 201224 exceeds 168000",
-    "jcvm_dongle text_bytes 211464 exceeds 178000"
+    "software_reference text_bytes 186464 exceeds 186000",
+    "hardware_release text_bytes 212580 exceeds 212000",
+    "development_debug text_bytes 212604 exceeds 212000",
+    "usb_ccid text_bytes 224144 exceeds 224000",
+    "dongle text_bytes 224100 exceeds 224000",
+    "jcvm_development_debug text_bytes 201464 exceeds 168000",
+    "jcvm_dongle text_bytes 211704 exceeds 178000"
   ]
 }

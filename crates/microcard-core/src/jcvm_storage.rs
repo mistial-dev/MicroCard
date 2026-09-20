@@ -238,28 +238,7 @@ impl<F: Flash> Store<F> {
                 }
             }
         }
-        // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
-        // appending statics cannot double a buffer already holding the heap. Keep
-        // journal header/tag headroom so encryption can consume this allocation.
-        let capacity = view
-            .heap_bytes()
-            .checked_add(statics.len())
-            .and_then(|length| length.checked_add(80 + crate::journal::OVERHEAD))
-            .ok_or(Error::Quota)?;
-        let mut encoder = Encoder::with_capacity(self.maximum, capacity)?;
-        encoder.array(7)?;
-        encoder.unsigned(1)?;
-        encoder.unsigned(1)?;
-        encoder.bytes(&self.image)?;
-        encoder.bytes(&self.installation)?;
-        encoder.unsigned(u64::from(instance))?;
-        encoder.bytes_with(view.heap_bytes(), |output| {
-            view.save_into(output)
-                .map(|_| ())
-                .map_err(|_| Error::Format)
-        })?;
-        encoder.bytes(statics)?;
-        let snapshot = Zeroizing::new(encoder.finish());
+        let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
         self.journal.commit_owned_with(snapshot, provider)?;
         self.heap_length = Some(view.heap_bytes());
         Ok(())
@@ -268,6 +247,34 @@ impl<F: Flash> Store<F> {
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }
+}
+
+fn encode_snapshot(view: PersistentView<'_>, image: [u8; 32], installation: [u8; 16],
+        maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
+    let (instance, statics) = view.metadata();
+    if snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())? > maximum { return Err(Error::Quota); }
+    // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
+    // appending statics cannot double a buffer already holding the heap. Keep
+    // journal header/tag headroom so encryption can consume this allocation.
+    let capacity = view
+        .heap_bytes()
+        .checked_add(statics.len())
+        .and_then(|length| length.checked_add(80 + crate::journal::OVERHEAD))
+        .ok_or(Error::Quota)?;
+    let mut encoder = Encoder::with_capacity(maximum, capacity)?;
+    encoder.array(7)?;
+    encoder.unsigned(1)?;
+    encoder.unsigned(1)?;
+    encoder.bytes(&image)?;
+    encoder.bytes(&installation)?;
+    encoder.unsigned(u64::from(instance))?;
+    encoder.bytes_with(view.heap_bytes(), |output| {
+        view.save_into(output)
+            .map(|_| ())
+            .map_err(|_| Error::Format)
+    })?;
+    encoder.bytes(statics)?;
+    Ok(Zeroizing::new(encoder.finish()))
 }
 
 fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {

@@ -45,6 +45,58 @@ impl Renewal {
 }
 
 impl<F: crate::journal::Flash> Store<F> {
+    /// Stage a live committed heap under a newly reserved identity. The old bank is
+    /// untouched; after publication, only renewal recovery may prepare that bank.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
+            S: crate::staging::PackageStaging>(
+        &mut self, aid: Aid, session: &crate::jcvm_storage::Session<H::Bank, PinnedImage<I>>,
+        images: &crate::image_store::Images<I>, heaps: &H, root: &crate::journal::JournalKey,
+        staging: &mut S, scratch: &mut [u8], provider: &mut impl crate::crypto::CryptoProvider,
+    ) -> Result<Renewal> {
+        use crate::image_store::CodeImage;
+        let instance = *self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Missing)?;
+        if !staging.is_empty() { return Err(Error::Busy); }
+        if staging.persistent_capacity() == 0 { return Err(Error::Unsupported); }
+        if self.journal.remaining_commits()? < 3 { return Err(Error::Quota); }
+        let size = heaps.slot_size(instance.heap_bank)?;
+        if size < crate::journal::OVERHEAD { return Err(Error::Bounds); }
+        let prepared = (|| {
+            let (image, sizes, digest) = Self::session_image_from(self.state()?, instance.load, images, scratch, provider, |_| Ok(()))?;
+            let identity = self.reserve_heap_identity()?;
+            let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &identity, &digest)?;
+            let snapshot = session.renewal_snapshot(instance.identity, digest, identity)?;
+            let record = crate::journal::SeedRecord::seal_new_epoch(snapshot, key, provider)?;
+            if record.len() > size - 3 || record.len() > staging.persistent_capacity() { return Err(Error::Quota); }
+            staging.append(&record)?;
+            if !staging.matches(0, &record)? { return Err(Error::Authentication); }
+            let mut hash = [0; 32]; provider.sha256_into(&record, &mut hash)?;
+            let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &identity, &digest)?;
+            image.with_bytes(provider, |bytes, provider| {
+                let file = microcard_engine_jcvm::cap::LoadFile::parse(bytes).map_err(|_| Error::Format)?;
+                crate::journal::SeedRecord::authenticate(&record, &key, provider, |snapshot| {
+                    crate::jcvm_storage::validate_seed_snapshot(snapshot, &file, sizes, digest, identity)
+                }).map(|_| ())
+            })?;
+            let package_digest = self.state()?.loads().find(|load| load.aid == instance.load)
+                .and_then(|load| load.image).ok_or(Error::Storage)?.digest;
+            let renewal = Renewal { aid, bank: instance.heap_bank, old_identity: instance.identity,
+                new_identity: identity, package_digest, record_length: record.len() as u32, record_digest: hash };
+            let mut next = *self.state()?; next.renewal = Some(renewal); next.validate()?;
+            Ok((renewal, next))
+        })();
+        let (renewal, next) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => { staging.reset(); return Err(error); }
+        };
+        if let Err(error) = self.commit(next, provider) {
+            // Publication can succeed even when its acknowledgment fails.
+            if matches!(self.pending_renewal(), Ok(None)) { staging.reset(); }
+            return Err(error);
+        }
+        Ok(renewal)
+    }
+
     /// Resolve authenticated staging ownership before uploads or applet execution.
     /// Failure retains the pending descriptor; no command is replayed.
     #[allow(clippy::too_many_arguments)]

@@ -630,6 +630,14 @@ impl<F: crate::journal::Flash> Store<F> {
         Ok(())
     }
 
+    fn reserve_heap_identity(&mut self) -> Result<[u8; 16]> {
+        self.state()?;
+        let nonce = self.journal.reserve_identity_nonce()?;
+        let mut identity = *b"\0\0\0\0\0\0\0\0JCVMv1\0\0";
+        identity[..8].copy_from_slice(&nonce.to_le_bytes());
+        Ok(identity)
+    }
+
     /// Prepare and commit an unreferenced heap before publishing the instance.
     #[allow(clippy::too_many_arguments)]
     pub fn install<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks>(
@@ -651,9 +659,7 @@ impl<F: crate::journal::Flash> Store<F> {
         if next.in_use(aid) { return Err(Error::Busy); }
         if !(1..=MAX_INSTANCES).contains(&heaps.bank_count()) { return Err(Error::Storage); }
         let bank = (0..heaps.bank_count() as u8).find(|bank| !next.instances().any(|i| i.heap_bank == *bank)).ok_or(Error::Quota)?;
-        let nonce = self.journal.reserve_identity_nonce()?;
-        let mut identity = *b"\0\0\0\0\0\0\0\0JCVMv1\0\0";
-        identity[..8].copy_from_slice(&nonce.to_le_bytes());
+        let identity = self.reserve_heap_identity()?;
         let (image, sizes, digest) = self.session_image(load, images, scratch, provider, |package| {
             next.register(package, module, aid, identity, bank).map(|_| ())
         })?;

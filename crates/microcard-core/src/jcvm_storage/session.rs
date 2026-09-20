@@ -35,6 +35,14 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         })
     }
 
+    pub(crate) fn renewal_snapshot(&self, old_identity: [u8; 16], image: [u8; 32],
+            new_identity: [u8; 16]) -> Result<zeroize::Zeroizing<Vec<u8>>> {
+        self.installed()?;
+        if self.store.installation != old_identity || self.store.image != image { return Err(Error::KeyMismatch); }
+        let view = self.card.as_ref().ok_or(Error::Missing)?.persistent_view().map_err(engine_error)?;
+        encode_snapshot(view, image, new_identity, self.store.maximum)
+    }
+
     pub(crate) fn take_security_reset(&mut self) -> bool {
         core::mem::take(&mut self.reset_requested)
     }

@@ -363,49 +363,13 @@ impl<F: Flash> Journal<F> {
         Ok(())
     }
     /// Reserve the nonce only after staging succeeds, then authenticate the exact header.
-    fn seal_record(&mut self, mut data: Zeroizing<Vec<u8>>, generation: u64,
+    fn seal_record(&mut self, data: Zeroizing<Vec<u8>>, generation: u64,
             provider: &mut impl CryptoProvider) -> Result<Zeroizing<Vec<u8>>> {
-        let payload_length = data.len().checked_add(16).ok_or(Error::Quota)?;
-        let encoded_payload_length = u32::try_from(payload_length).map_err(|_| Error::Quota)?;
-        let record_length = HEADER_BYTES
-            .checked_add(payload_length)
-            .ok_or(Error::Quota)?;
-        // Never realloc a buffer holding plaintext: an allocator could retain the
-        // freed secret copy. Undersized callers get a new buffer and the old one wipes.
-        if data.capacity() < record_length {
-            let mut replacement = Zeroizing::new(Vec::new());
-            replacement.try_reserve_exact(record_length).map_err(|_| Error::Quota)?;
-            replacement.extend_from_slice(&data);
-            data = replacement;
-        }
-        let plaintext_length = data.len();
-        data.resize(record_length, 0);
-        data.copy_within(..plaintext_length, HEADER_BYTES);
-        let mut record = data;
-        // Burn a distinct attempt number before any encryption, even if later I/O fails.
+        let (record, payload_length) = prepare_record(data)?;
         let attempt = self.flash.reserve_nonce()?;
-        record[..HEADER_BYTES].copy_from_slice(&RecordHeader {
-            append_enabled: self.append_enabled, generation, attempt, payload_length: encoded_payload_length,
-        }.encode());
-        let (aad, ciphertext) = record.split_at_mut(HEADER_BYTES);
-        let written =
-            match provider.aes_ccm_encrypt_in_place(
-                self.key.as_ref(),
-                &nonce(attempt),
-                aad,
-                ciphertext,
-            ) {
-                Ok(written) => written,
-                Err(error) => {
-                    ciphertext.zeroize();
-                    return Err(error);
-                }
-            };
-        if written != ciphertext.len() {
-            ciphertext.zeroize();
-            return Err(Error::Storage);
-        }
-        Ok(record)
+        encrypt_record(record, &self.key, RecordHeader {
+            append_enabled: self.append_enabled, generation, attempt, payload_length,
+        }, provider)
     }
 
     pub fn into_flash(self) -> F {
@@ -420,6 +384,50 @@ impl<F: Flash> Journal<F> {
     pub(crate) fn flash(&self) -> &F { &self.flash }
     #[cfg(all(test, feature = "mc04"))]
     pub(crate) fn flash_for_test(&self) -> &F { &self.flash }
+}
+
+fn prepare_record(mut data: Zeroizing<Vec<u8>>) -> Result<(Zeroizing<Vec<u8>>, u32)> {
+    let payload_length = data.len().checked_add(16).ok_or(Error::Quota)?;
+    let encoded_payload_length = u32::try_from(payload_length).map_err(|_| Error::Quota)?;
+    let record_length = HEADER_BYTES
+        .checked_add(payload_length)
+        .ok_or(Error::Quota)?;
+    // Never realloc a buffer holding plaintext: an allocator could retain the
+    // freed secret copy. Undersized callers get a new buffer and the old one wipes.
+    if data.capacity() < record_length {
+        let mut replacement = Zeroizing::new(Vec::new());
+        replacement.try_reserve_exact(record_length).map_err(|_| Error::Quota)?;
+        replacement.extend_from_slice(&data);
+        data = replacement;
+    }
+    let plaintext_length = data.len();
+    data.resize(record_length, 0);
+    data.copy_within(..plaintext_length, HEADER_BYTES);
+    Ok((data, encoded_payload_length))
+}
+
+fn encrypt_record(mut record: Zeroizing<Vec<u8>>, key: &JournalKey, header: RecordHeader,
+    provider: &mut impl CryptoProvider) -> Result<Zeroizing<Vec<u8>>> {
+    record[..HEADER_BYTES].copy_from_slice(&header.encode());
+    let (aad, ciphertext) = record.split_at_mut(HEADER_BYTES);
+    let written =
+        match provider.aes_ccm_encrypt_in_place(
+            key.as_ref(),
+            &nonce(header.attempt),
+            aad,
+            ciphertext,
+        ) {
+            Ok(written) => written,
+            Err(error) => {
+                ciphertext.zeroize();
+                return Err(error);
+            }
+        };
+    if written != ciphertext.len() {
+        ciphertext.zeroize();
+        return Err(Error::Storage);
+    }
+    Ok(record)
 }
 
 /// Apply only after selecting and validating the complete recoverable state.

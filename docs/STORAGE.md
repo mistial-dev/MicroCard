@@ -78,7 +78,11 @@ new identity before allowing execution or upload reset. Failures retain protecte
 pending ownership or recover a completed final publication. Host tests cover two
 occupied banks, corrupted staging, wrong keys, partial bank copies, and interrupted
 final publication; the recovery provider refuses heap-key encryption. The writer
-that initiates renewal from live state is not yet implemented.
+now stages a live committed heap under a fresh reserved identity, verifies the
+written record, and publishes pending ownership. It leaves the old bank and live
+selection untouched. Encryption failure consumes its identity; an uncertain
+publication retains staging until registry recovery decides ownership. Automatic
+triggering and switching the live session to the new journal remain incomplete.
 `SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,
@@ -89,7 +93,7 @@ This primitive does not itself authorize bank preparation: registry recovery mus
 validate the pending descriptor, staged digest, applet state, and target geometry
 before erasing anything.
 
-Renewal will use that region as a recovery copy and the registry's existing durable
+Renewal uses that region as a recovery copy and the registry's existing durable
 identity reservation as the root of a new heap-key epoch. It must preserve both
 installed applets and their code, persistent state, and live volatile state.
 The transition is serialized with uploads and management changes:
@@ -126,7 +130,9 @@ before choosing either phase.
 
 Startup reads staging using the authenticated record length, independently of the
 volatile upload length, and resolves ownership before resetting upload state.
-The API that stages and publishes a new renewal remains to be implemented. The JCVM simulator now uses a fixed 64 KiB `staging.bin`
+The registry writer requires idle durable staging and capacity for identity
+reservation plus both metadata commits. It releases unowned staging on preparation
+failure, and retains it whenever publication ownership is pending or uncertain. The JCVM simulator now uses a fixed 64 KiB `staging.bin`
 with synced writes and the same clear-bits-only programming rule as flash. Layout
 v2 requires this file; v1 layouts and missing/truncated staging fail without repair.
 Card opening preserves its bytes, although it discards incomplete upload lengths.

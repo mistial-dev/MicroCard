@@ -83,8 +83,9 @@ board's reserved heap.
   generation counters remain a service-life blocker. The [renewal design](STORAGE.md#jcvm-counter-renewal)
   uses protected upload staging and a registry-authorized key change. Registry v2
   records pending ownership and blocks ordinary use. Startup now authenticates and
-  restores the protected copy before publishing its new identity. Initiating renewal
-  from live state and retaining volatile state across it remain incomplete.
+  restores the protected copy before publishing its new identity. The writer stages
+  live committed state without changing the old bank or selection. Automatic
+  triggering and preserving the live session through journal handoff remain incomplete.
   Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
   allocation-abort session termination, key updates, crypto initialization and persistence
   failure. PIN presentation checkpoints consume retries outside transactions, including
@@ -95,15 +96,15 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 211,464 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 211,704 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   All seven profiles cross-linked in the consolidated checkpoint described below. MC04 no
   longer retains package image buffers in runtime state; recovery reads verified
-  flash guards and retains metadata. MC04 hardware release text is 212,524 bytes
-  against 212,000, and software reference text is 186,412 against 186,000. Seven text
+  flash guards and retains metadata. MC04 hardware release text is 212,580 bytes
+  against 212,000, and software reference text is 186,464 against 186,000. Seven text
   ceilings still fail; none were raised. The matched credential workload reduced host
   heap peak from 43,227 to 35,137 bytes and reopened retained allocations from 13,215
   to 4,989 bytes; [measurement evidence](HEAP_MEASUREMENTS.json) records both binaries.
