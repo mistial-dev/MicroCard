@@ -109,6 +109,8 @@ def install_openfips(client, discovery):
     client.command(0xe6, install, p1=0x0c)
     selected = client.command(0xa4, instance, p1=4, cla=0x04)
     assert selected[:3] == bytes.fromhex("618192") and len(selected) == 149
+    # PIV hosts also select the nine-byte application prefix, not only the full AID.
+    assert piv(client, 0xa4, package, p1=4, le=256) == selected
     return instance, install, selected
 
 

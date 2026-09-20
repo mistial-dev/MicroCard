@@ -136,6 +136,10 @@ def main():
             env=env, check=True)
         manifest = dict(upstream_revision=revision, engine="MicroCard JCVM host",
             microcard_revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+            microcard_dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
+            upstream_harness_sha256=hashlib.sha256(committed.encode()).hexdigest(),
+            adapter_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistTransport.java").read_bytes()).hexdigest(),
+            nist_modules_sha256=hashlib.sha256((jars / "PIV_TestRunner_modules-5.0.1.jar").read_bytes()).hexdigest(),
             config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
             simulator_sha256=hashlib.sha256(SIM.read_bytes()).hexdigest(),
             test=args.test, suite=args.suite, list_only=args.list_tests, blank_seed=args.seed is None,

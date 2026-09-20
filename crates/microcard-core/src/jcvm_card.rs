@@ -142,23 +142,19 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         if !matches!(request.p1, 0 | 4) || !matches!(request.p2, 0 | 0x0c) {
             return Err(Error::Format);
         }
-        let aid = Aid::new(&request.data)?;
-        // A missing target does not deselect the currently selected applet.
-        if !self
-            .storage
-            .registry
-            .state()?
-            .instances()
-            .any(|instance| instance.aid == aid)
-        {
-            return Err(Error::Missing);
-        }
+        let requested = Aid::new(&request.data)?;
+        // First occurrence uses bytewise AID order, so an exact match precedes its
+        // extensions. A missing prefix must not deselect the current applet.
+        let aid = self.storage.registry.state()?.instances()
+            .filter(|instance| instance.aid.as_slice().starts_with(requested.as_slice()))
+            .min_by(|left, right| left.aid.as_slice().cmp(right.aid.as_slice()))
+            .map(|instance| instance.aid).ok_or(Error::Missing)?;
         let command = Command {
             cla: 0,
             ins: 0xa4,
             p1: 4,
             p2: request.p2,
-            data: aid.as_slice().into(),
+            data: requested.as_slice().into(),
             le: request.le.or(Some(256)),
         }
         .encode()?;

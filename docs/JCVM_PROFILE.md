@@ -410,9 +410,20 @@ this inventory use upstream revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
 
 The bridge lifecycle check passes against the pinned upstream interface: installed
 applet selection, PIN retry persistence across reset, independent vector state, and
-contactless rejection. The full NIST harness is **not yet verified**: its separately
-installed jars and compiled upstream tools are still required. No NIST vector pass is
-claimed from this bridge check.
+contactless rejection. The installed NIST PIV Test Runner 5.0.1 now executes through this binding.
+`SelectCommand:1` exposed a missing partial-AID selection path and passes after that
+runtime fix, with unchanged upstream expectations. Selection chooses the bytewise
+lowest matching installed AID, with exact matches preceding their extensions, and
+passes the original requested AID bytes to the applet. Missing targets retain the
+current selection. Next-occurrence selection remains unsupported.
+
+The 2026-09-20 `card-contact` run with upstream `OpenFIPS201-ECC256.xml` and a
+blank seed reports **63 vectors: 26 passed, 36 failed, 1 skipped**. The configuration
+expects personalized PINs, keys, and objects; this is a diagnostic baseline, not a
+passing applicable suite. For example, `SelectCommand:2` requires a valid PIN and a
+fingerprint object. Those failures remain failures until matching personalization is
+supplied and the vectors pass. The SELECT-prefix fix accounts for one additional
+pass compared with the initial run.
 
 After building the simulator and wallet, check the binding without NIST jars:
 
@@ -421,8 +432,8 @@ python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
   --check-transport --out work/nist-transport
 ```
 
-With the upstream NIST package installed and upstream tools compiled, the intended
-first runner check is:
+With the upstream NIST package installed and upstream tools compiled, run the
+verified selection vector:
 
 ```sh
 python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
@@ -436,7 +447,7 @@ its objects and keys must match the supplied configuration. Upstream automatic
 personalization is not connected. The run retains logs, JUnit results, and a manifest
 with vector selection and configuration/simulator hashes. Skips are counted separately
 from passes. Do not count upstream JVM results or altered expectations as interpreter
-passes. Complete NIST execution and matched P-256 personalization remain open.
+passes. Matched P-256 personalization and a passing applicable NIST suite remain open.
 
 ## Authorization
 

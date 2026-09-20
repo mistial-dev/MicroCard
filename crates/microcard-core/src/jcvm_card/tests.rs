@@ -129,7 +129,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
         crate::jcvm_package::Package::verify(&raw, &mut Provider, &mut [0; 16384]).unwrap();
     let file = LoadFile::parse(package.envelope.image).unwrap();
     let module = file.applets().unwrap().iter().next().unwrap().aid;
-    let aid = [0xf0, 1, 2, 3, 4];
+    let aid = [0xf0, 1, 2, 3, 4, 2];
     let install = lv(&[
         package.manifest.package,
         module,
@@ -210,7 +210,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
         host.send(&mut endpoint, 0xe6, 0x0c, 0, &install),
         [0, 0x90, 0]
     );
-    let other_aid = [0xf0, 1, 2, 3, 5];
+    let other_aid = [0xf0, 1, 2, 3, 4, 1];
     let other_install = lv(&[package.manifest.package, module, &other_aid, &[0], &[0xc9, 0], &[]]);
     assert_eq!(host.send(&mut endpoint, 0xe6, 0x0c, 0, &other_install), [0, 0x90, 0]);
     let modules = host.send(&mut endpoint, 0xf2, 0x10, 2, &[0x4f, 0]);
@@ -226,7 +226,12 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let response = host.send(&mut endpoint, 0x20, 0, 0x80, &pin[5..]);
     let before = u16::from_be_bytes(response.try_into().unwrap());
     assert_eq!(before & 0xfff0, 0x63c0);
+    // A shared prefix chooses bytewise AID order, not installation order.
+    assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &aid[..5]), select_response);
+    let remaining = endpoint.exchange(&[0, 0x20, 0, 0x80]);
+    assert_eq!(u16::from_be_bytes(remaining.try_into().unwrap()), before + 1);
     // Switching heaps preserves each installation's independent state.
+    let mut host = Host::connect(&mut endpoint, 1);
     assert_eq!(host.send(&mut endpoint, 0xa4, 4, 0, &other_aid), select_response);
     let response = endpoint.exchange(&pin);
     assert_eq!(u16::from_be_bytes(response.try_into().unwrap()), before);
