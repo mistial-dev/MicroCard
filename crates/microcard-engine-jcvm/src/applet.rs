@@ -63,6 +63,7 @@ pub struct Card {
     instance: Option<Reference>,
     selected: bool,
     reselecting: bool,
+    transaction_aborted: bool,
     context: heap::Context,
     sizes: Sizes,
 }
@@ -108,6 +109,7 @@ impl Card {
             instance: None,
             selected: false,
             reselecting: false,
+            transaction_aborted: false,
             context: 1,
             sizes,
         };
@@ -119,7 +121,7 @@ impl Card {
         let mut heap = Heap::new(&mut card.heap)?;
         // The buffer and the APDU object outlive every command, because an applet is
         // allowed to keep the reference it was handed, JCRE §4.
-        card.buffer = heap.new_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context)?;
+        card.buffer = heap.new_transient_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context, heap::CLEAR_ON_RESET)?;
         let apdu_class = native_class_of(ClassId::APDU)?;
         card.apdu = heap.new_object(apdu_class, 1, card.context)?;
         card.runtime_bytes = heap.used();
@@ -248,7 +250,9 @@ impl Card {
             outer.push_reference(array)?;
             outer.push_short(0)?;
             outer.push_short(i16::from(parameters.len() as u8 as i8))?;
-            let thrown = invoke(&mut machine, install, &mut outer, &mut arena, &mut budget)?;
+            let result = invoke(&mut machine, install, &mut outer, &mut arena, &mut budget);
+            if machine.abort_unfinished_transaction()? { return Err(Error::Unauthorized); }
+            let thrown = result?;
             (thrown, machine.jcre.instance, machine.jcre.aid, machine.jcre.aid_length)
         };
         self.heap_used = heap.used();
@@ -273,6 +277,7 @@ impl Card {
 
     /// Clear reset-scoped data while retaining the installed instance and persistent state.
     pub fn reset(&mut self) -> Result<()> {
+        self.transaction_aborted = false;
         self.selected = false;
         self.words.fill(0);
         self.tags.fill(0);
@@ -305,6 +310,7 @@ impl Card {
     ) -> Result<Response> {
         if cancel() { return Err(Error::Cancelled); }
         self.instance.ok_or(Error::Missing)?;
+        if self.transaction_aborted { return Err(Error::TransactionAborted); }
         self.reselecting = selecting && self.selected;
         if self.reselecting { self.deselect_inner(file, host, cancel, true)?; }
         if selecting { self.selected = false; }
@@ -321,7 +327,7 @@ impl Card {
         let mut budget = self.sizes.budget;
         if selecting {
             let answer = self.callback(file, host, Callback::Select, (incoming, expected), &mut budget, cancel)?;
-            if answer.exception.is_some() || answer.returned == 0 {
+            if answer.aborted || answer.exception.is_some() || answer.returned == 0 {
                 return Ok(Response { data: Vec::new(), sw: 0x6999 });
             }
             self.selected = true;
@@ -329,7 +335,7 @@ impl Card {
         // Selection is decided by select(), not by the status that process() returns.
         let answer = self.callback(file, host, Callback::Process { selecting }, (incoming, expected), &mut budget, cancel)?;
         let heap = Heap::resume(&mut self.heap, self.heap_used)?;
-        let sw = answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception));
+        let sw = if answer.aborted { SW_UNKNOWN } else { answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception)) };
         Ok(Response { data: answer.data, sw })
     }
 
@@ -364,6 +370,7 @@ impl Card {
         &mut self, file: &LoadFile, host: &mut dyn Host, callback: Callback,
         lengths: (u16, u16), budget: &mut u32, cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Invocation> {
+        if self.transaction_aborted { return Err(Error::TransactionAborted); }
         if cancel() { return Err(Error::Cancelled); }
         let instance = self.instance.ok_or(Error::Missing)?;
         let linked = Linked::new(file)?;
@@ -373,7 +380,7 @@ impl Card {
             Ok(method) => method,
             // Applet's inherited select accepts, and its inherited deselect is a no-op.
             Err(Error::Missing) if !matches!(callback, Callback::Process { .. }) => {
-                return Ok(Invocation { exception: None, returned: 1, data: Vec::new() });
+                return Ok(Invocation { exception: None, returned: 1, data: Vec::new(), aborted: false });
             }
             Err(error) => return Err(error),
         };
@@ -394,8 +401,17 @@ impl Card {
             let mut outer = Frame::new(&mut outer_words, &mut outer_tags, 0, 8)?;
             outer.push_reference(instance)?;
             if matches!(callback, Callback::Process { .. }) { outer.push_reference(self.apdu)?; }
-            let exception = invoke(&mut machine, method, &mut outer, &mut arena, budget)?;
-            let returned = if exception.is_none() && matches!(callback, Callback::Select) {
+            let result = invoke(&mut machine, method, &mut outer, &mut arena, budget);
+            let unfinished = machine.abort_unfinished_transaction()?;
+            self.transaction_aborted |= machine.heap.allocations_aborted();
+            let (exception, aborted) = match result {
+                Ok(exception) => (exception, unfinished),
+                Err(Error::TransactionAborted) => (None, true),
+                Err(error) => return Err(error),
+            };
+            // An aborted transaction may have discarded the exception object itself.
+            let exception = if aborted { None } else { exception };
+            let returned = if !aborted && exception.is_none() && matches!(callback, Callback::Select) {
                 outer.pop_short()? as u16
             } else { 0 };
             let mut data = Vec::new();
@@ -404,12 +420,12 @@ impl Card {
             let iso_status = exception.is_some_and(|reference| machine.heap.info(reference).ok()
                 .and_then(|info| natives::api_class(info.class))
                 .is_some_and(|class| class.id == ClassId::ISOException));
-            if exception.is_none() || iso_status {
+            if !aborted && (exception.is_none() || iso_status) {
                 let response = machine.jcre.response_data()?;
                 data.try_reserve_exact(response.len()).map_err(|_| Error::Quota)?;
                 data.extend_from_slice(response);
             }
-            Invocation { exception, returned, data }
+            Invocation { exception, returned, data, aborted }
         };
         self.heap_used = heap.used();
         Ok(answer)
@@ -424,7 +440,12 @@ impl Callback {
         match self { Self::Select => MethodId::select, Self::Process { .. } => MethodId::process, Self::Deselect => MethodId::deselect }
     }
 }
-struct Invocation { exception: Option<Reference>, returned: u16, data: Vec<u8> }
+struct Invocation {
+    aborted: bool,
+    exception: Option<Reference>,
+    returned: u16,
+    data: Vec<u8>,
+}
 
 fn check_applet(linked: &Linked, heap: &Heap, instance: Reference) -> Result<()> {
     use crate::cap::ClassRef;
@@ -904,6 +925,102 @@ mod tests {
             polls == 3
         }), Err(Error::Cancelled));
         assert_eq!(polls, 3);
+    }
+
+    #[test]
+    fn transactions_restore_fields_and_statics_at_real_callback_boundaries() {
+        for ending in ["commit", "abort", "return", "throw", "allocate-abort", "cancel", "full", "full-caught"] {
+            // Constants 6..12: begin, commit, abort, static field, instance field,
+            // ISOException.throwIt, Util.arrayCopy.
+            let mut process = vec![
+                op::SSPUSH, 0, 9, 0x81, 0, 9,
+                op::ALOAD_0, op::SSPUSH, 0, 9, 0x89, 10,
+            ];
+            if ending.starts_with("full") {
+                process.extend_from_slice(&[op::SSPUSH, 0x20, 0, 144, 11, op::ASTORE_0 + 2]);
+            }
+            process.extend_from_slice(&[
+                op::INVOKESTATIC, 0, 6,
+                op::SSPUSH, 0, 12, 0x81, 0, 9,
+                op::ALOAD_0, op::SSPUSH, 0, 12, 0x89, 10,
+                op::ALOAD_0 + 1, op::INVOKEVIRTUAL, 0, 13,
+                op::SCONST_0, op::SSPUSH, 0, 42, 56,
+            ]);
+            match ending {
+                "commit" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 7]),
+                "abort" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 8]),
+                "throw" => process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]),
+                "allocate-abort" => process.extend_from_slice(&[op::NEW, 0, 3, op::ASTORE_0 + 2, op::INVOKESTATIC, 0, 8]),
+                "cancel" => process.extend_from_slice(&[112, 0]), // goto itself until cancellation
+                "full" | "full-caught" => process.extend_from_slice(&[
+                    op::ALOAD_0 + 2, op::SCONST_0, op::ALOAD_0 + 2, op::SCONST_0,
+                    op::SSPUSH, 0x20, 0, op::INVOKESTATIC, 0, 12,
+                ]),
+                _ => {},
+            }
+            process.push(op::RETURN);
+            let handler_offset = process.len() as u16;
+            if ending == "full-caught" {
+                process.extend_from_slice(&[op::INVOKEVIRTUAL, 0, 14, op::INVOKESTATIC, 0, 8, 0x81, 0, 9, op::RETURN]);
+            }
+            let mut package = applet(process, 8);
+            package.static_bytes = 2;
+            package.classes[0].declared_size = 1;
+            package.constants.extend_from_slice(&[
+                [CONSTANT_STATIC_METHODREF, 0x81, 8, 1],
+                [CONSTANT_STATIC_METHODREF, 0x81, 8, 2],
+                [CONSTANT_STATIC_METHODREF, 0x81, 8, 0],
+                [CONSTANT_STATIC_FIELDREF, 0, 0, 0],
+                [crate::cap::CONSTANT_INSTANCE_FIELDREF, 0, 0, 0],
+                [CONSTANT_STATIC_METHODREF, 0x81, 7, 1],
+                [CONSTANT_STATIC_METHODREF, 0x81, 16, 1],
+                [CONSTANT_VIRTUAL_METHODREF, 0x81, 10, 1],
+                [CONSTANT_VIRTUAL_METHODREF, 0x81, 14, 1],
+            ]);
+            if ending == "full-caught" {
+                package.handlers.push([0; 8]);
+                let bodies = package.extra_offsets();
+                package.constants[4] = [CONSTANT_STATIC_METHODREF, 0, (bodies[0] >> 8) as u8, bodies[0] as u8];
+                package.classes[0].public[applet_token(MethodId::select).unwrap() as usize] = bodies[1];
+                package.classes[0].public[applet_token(MethodId::process).unwrap() as usize] = bodies[2];
+                let start = bodies[2] + 2;
+                let target = start + handler_offset;
+                let length = handler_offset | 0x8000;
+                package.handlers[0] = [(start >> 8) as u8, start as u8, (length >> 8) as u8, length as u8,
+                    (target >> 8) as u8, target as u8, 0, 0];
+            }
+            let bytes = package.build();
+            let file = LoadFile::parse(&bytes).unwrap();
+            let mut card = Card::new(&file, Sizes { heap_bytes: 16384, ..Sizes::default() }).unwrap();
+            card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
+            let mut polls = 0;
+            let result = card.process_with_cancel(&file, &mut crate::host::NoHost, &[0, 1, 0, 0], false, &mut || {
+                polls += 1;
+                ending == "cancel" && polls == 100
+            });
+            if ending == "cancel" { assert_eq!(result, Err(Error::Cancelled)); }
+            else {
+                assert_eq!(result.unwrap().sw, if matches!(ending, "commit" | "abort" | "full-caught") { SW_SUCCESS } else { SW_UNKNOWN }, "{ending}");
+            }
+            let expected: u16 = if ending == "commit" { 12 } else { 9 };
+            assert_eq!(card.statics, if ending == "full-caught" { 3u16 } else { expected }.to_be_bytes(), "{ending}");
+            let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+            assert_eq!(heap.get_word(card.instance.unwrap(), 0).unwrap(), expected, "{ending}");
+            assert_eq!(heap.array_get(card.buffer, 0), Ok(42), "APDU bytes are transient: {ending}");
+            if ending != "cancel" {
+                let mut saved = vec![0; card.persistent_heap_bytes()];
+                let mut restored = Card::restore(&file, card.sizes, card.save_into(&mut saved).unwrap()).unwrap();
+                assert_eq!(restored.statics, card.statics);
+                let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+                assert_eq!(heap.get_word(restored.instance.unwrap(), 0), Ok(expected));
+                assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
+            }
+            if matches!(ending, "allocate-abort" | "throw") {
+                assert_eq!(card.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0], false), Err(Error::TransactionAborted));
+                card.reset().unwrap();
+                assert!(!card.transaction_aborted);
+            }
+        }
     }
 
     #[test]

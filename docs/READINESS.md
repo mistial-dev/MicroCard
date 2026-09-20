@@ -50,22 +50,22 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
-- Prove a personalized OpenFIPS201 workflow on the Makerdiary JCVM build. P-256 keys,
-  generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Remaining work includes
-  interrupted provisioning and physical acceptance. Ordinary PIV access, reselect,
+- Complete host interruption coverage for personalized OpenFIPS201 provisioning.
+  P-256 keys, generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Ordinary PIV access, reselect,
   secure-channel reset, chained certificate upload, and certificate retrieval now pass
   through the managed simulator path.
   Management-key creation/import, PIV challenge-response, PIN provisioning, P-256
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
   reboot does not preserve PIN validation. These do not establish hardware execution.
-- Connect JCVM transaction rollback. Bounded heap undo primitives are tested, but native
-  transaction methods still track nesting only. Static-field undo, callback-end abort,
-  new-reference handling, and native API exceptions remain required. Per-APDU journal
-  atomicity does not replace this guarantee.
-- Validate the current Makerdiary JCVM image and actual memory use. A connected board
+- Complete JCVM transaction durability. Heap/static rollback, callback-end abort,
+  commit-buffer exceptions, and allocation-abort session termination are implemented.
+  Flash still commits at successful APDU completion, so an in-command commit and PIN
+  retry updates are not yet independently durable. Integrate these boundaries with
+  storage and finish native-API transaction auditing and interruption tests.
+- Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 192,408 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 196,404 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded
@@ -134,7 +134,8 @@ they do not validate this cleanup. The [dongle guide](DONGLE.md) records its unr
 revision-unknown USB/APDU observation. Neither that observation nor host tests validate
 this JCVM build's physical behavior.
 
-Physical acceptance must cover both engine builds, CC310 independent vectors and
+Hardware access is deferred. Physical acceptance must prove the personalized OpenFIPS201
+workflow on Makerdiary and cover both engine builds, CC310 independent vectors and
 forced failures, buffer aliasing, stack/heap peaks, latency and sustained throughput,
 USB abort/disconnect/suspend, and power interruption during ownership, activation,
 commit, credential retries, sequence reservation, and deletion. Complete a bounded

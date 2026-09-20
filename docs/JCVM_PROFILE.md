@@ -330,21 +330,32 @@ The fixture is pinned to OpenFIPS201 `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
 Upstream tests mock the secure channel; this acceptance exercises the actual shared
 transport. Physical Makerdiary execution and interrupted provisioning remain unverified.
 
-## Transaction limitation
+## Transactions and remaining durability work
 
-JCVM `beginTransaction`, `commitTransaction`, and `abortTransaction` currently validate
-nesting through a callback-local depth flag. They do not yet journal and undo heap or
-static-field writes. Java Card transactions must end when control returns from an
-applet callback; an unfinished transaction must be aborted, not carried across APDUs
-([JCRE 3.1, section 7](https://docs.oracle.com/en/java/javacard/3.1/jc-re-spec/F12651_05.pdf)).
-The heap now has bounded before-image primitives covering fields, arrays, mutable
-slices, and overlapping copies. They exclude transient contents, preserve unconditional
-runtime writes, and report allocations made during an aborted transaction without
-reusing their storage. These primitives are not yet connected to the native transaction
-methods. Static-field undo, callback cleanup, new-reference handling, native API
-semantics, and interrupted-operation acceptance remain required. The persistent session's
-atomic journal commit is a separate guarantee; it does not implement Java Card
-transaction semantics.
+JCVM transaction natives now share an 8 KiB before-image log for heap payloads and
+static fields, including record overhead. Space is reserved before begin and wiped
+on commit or abort. Writes are admitted before mutation; exhaustion throws
+`TransactionException.BUFFER_FULL`. Nested begin and unmatched commit/abort report
+`IN_PROGRESS` and `NOT_IN_PROGRESS`. Commit-capacity queries include metadata cost.
+
+Explicit abort restores conditional writes. Returning or throwing from an applet
+callback with an unfinished transaction aborts it; process answers `6F00`. PIN
+presentation counters and validation, transient arrays (including the APDU buffer),
+and non-atomic copy/fill operations are excluded from rollback. PIN updates remain
+conditional. An abort that allocated objects clears their storage and transient
+references and ends the session before any stale frame references can execute;
+reset or reopening the recovered session is required. This follows the allowed
+session-termination behavior in [JCSystem.abortTransaction](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacard/framework/JCSystem.html).
+Older snapshots with a persistent APDU-buffer header are explicitly rejected by
+runtime-layout validation; there is no automatic erase or conversion.
+
+**Durability is still incomplete:** the storage layer commits on successful APDU
+completion. An in-command `commitTransaction()` is not yet a durable flash boundary,
+and cancellation or an engine failure still recovers the previous APDU snapshot.
+Connect durable transaction boundaries and unconditional PIN retry updates to storage,
+finish native-API transaction auditing, and test interrupted provisioning before
+claiming Java Card transaction guarantees. A passing simulator workflow does not
+establish those guarantees or physical execution.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 

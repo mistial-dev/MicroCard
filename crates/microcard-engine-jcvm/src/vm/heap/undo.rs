@@ -13,14 +13,22 @@ impl Drop for Undo {
 }
 
 impl Undo {
-    pub(super) fn new(limit: usize) -> Self { Self { records: Vec::new(), limit } }
+    pub(super) fn new(limit: usize) -> Result<Self> {
+        // Reserve once, before any secrets enter the log. Growing a populated Vec
+        // would free copies of before-images without wiping those old allocations.
+        let mut records = Vec::new();
+        records.try_reserve_exact(limit).map_err(|_| Error::TransactionFull)?;
+        Ok(Self { records, limit })
+    }
 
     pub(super) fn remaining(&self) -> usize { self.limit - self.records.len() }
 
-    pub(super) fn record(&mut self, at: usize, before: &[u8]) -> Result<()> {
+    pub(super) fn record(&mut self, at: usize, before: &[u8], statics: bool) -> Result<()> {
         if before.is_empty() { return Ok(()); }
         let end = at.checked_add(before.len()).ok_or(Error::Bounds)?;
         if end > u16::MAX as usize { return Err(Error::Bounds); }
+        let at = at | (usize::from(statics) << 16);
+        let end = end | (usize::from(statics) << 16);
         let mut cursor = self.records.len();
         while cursor != 0 {
             let (start, offset, length) = self.entry(cursor);
@@ -28,11 +36,10 @@ impl Undo {
             if offset <= at && end <= offset + length { return Ok(()); }
             cursor = start;
         }
-        let cost = before.len().checked_add(4).ok_or(Error::Quota)?;
-        if cost > self.remaining() { return Err(Error::Quota); }
-        self.records.try_reserve_exact(cost).map_err(|_| Error::Quota)?;
+        let cost = before.len().checked_add(6).ok_or(Error::TransactionFull)?;
+        if cost > self.remaining() { return Err(Error::TransactionFull); }
         self.records.extend_from_slice(before);
-        self.records.extend_from_slice(&(at as u16).to_be_bytes());
+        self.records.extend_from_slice(&(at as u32).to_be_bytes());
         self.records.extend_from_slice(&(before.len() as u16).to_be_bytes());
         Ok(())
     }
@@ -54,18 +61,20 @@ impl Undo {
         }
     }
 
-    pub(super) fn restore(&self, bytes: &mut [u8]) {
+    pub(super) fn restore(&self, heap: &mut [u8], statics: &mut [u8]) {
         let mut cursor = self.records.len();
         while cursor != 0 {
             let (start, offset, length) = self.entry(cursor);
+            let bytes = if offset >> 16 == 0 { &mut *heap } else { &mut *statics };
+            let offset = offset & 0xffff;
             bytes[offset..offset + length].copy_from_slice(&self.records[start..start + length]);
             cursor = start;
         }
     }
 
     fn entry(&self, end: usize) -> (usize, usize, usize) {
-        let offset = u16::from_be_bytes([self.records[end - 4], self.records[end - 3]]) as usize;
+        let offset = u32::from_be_bytes(self.records[end - 6..end - 2].try_into().unwrap()) as usize;
         let length = u16::from_be_bytes([self.records[end - 2], self.records[end - 1]]) as usize;
-        (end - 4 - length, offset, length)
+        (end - 6 - length, offset, length)
     }
 }

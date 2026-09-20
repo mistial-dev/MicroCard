@@ -87,8 +87,8 @@ pub struct Jcre {
     /// Whether this command is the one that selected the applet.
     pub selecting: bool,
     pub reselecting: bool,
-    /// Transactions are counted rather than nested. A second begin is an error, JCRE §7.
-    pub transaction_depth: u8,
+    /// Allocated before begin so a full undo log can still report its exception.
+    transaction_exception: Option<Reference>,
     /// The applet's lifecycle byte, which GlobalPlatform keeps rather than the applet.
     pub lifecycle: u8,
     /// The AID the applet registered under, if it chose one.
@@ -118,7 +118,7 @@ impl Jcre {
             data_offset: 5,
             selecting: false,
             reselecting: false,
-            transaction_depth: 0,
+            transaction_exception: None,
             // Selectable, GP 2.3 Table 11-4. An applet moves itself on from here.
             lifecycle: 0x07,
             aid: [0; 16],
@@ -151,13 +151,14 @@ pub fn call(
     frame: &mut Frame, context: heap::Context, jcre: &mut Jcre,
 ) -> Result<Native> {
     let mut budget = u32::MAX;
-    call_with_budget(target, heap, host, frame, context, jcre, &mut budget)
+    call_with_budget(target, heap, host, frame, context, jcre, &mut budget, &mut [])
 }
 
 /// Call an API method.
 ///
 /// Arguments are on the frame's stack, receiver first as in any instance call, and a
 /// result is left there the same way.
+#[allow(clippy::too_many_arguments)]
 pub fn call_with_budget(
     target: ApiTarget,
     heap: &mut Heap,
@@ -166,6 +167,7 @@ pub fn call_with_budget(
     context: heap::Context,
     jcre: &mut Jcre,
     budget: &mut u32,
+    statics: &mut [u8],
 ) -> Result<Native> {
     let package = target.package.id;
     let class = target.class.id;
@@ -189,7 +191,7 @@ pub fn call_with_budget(
             heap.put_word(this, REASON_FIELD, reason as u16)?;
             Ok(Native::Returned)
         }
-        (PackageId::javacard_framework, ClassId::ISOException, MethodId::getReason) => {
+        (PackageId::javacard_framework, ClassId::ISOException | ClassId::CardRuntimeException | ClassId::TransactionException, MethodId::getReason) => {
             let this = frame.pop_reference()?;
             let reason = heap.get_word(this, REASON_FIELD)?;
             frame.push_short(reason as i16)?;
@@ -200,7 +202,7 @@ pub fn call_with_budget(
             apdu(name, heap, frame, jcre, context)
         }
         (PackageId::javacard_framework, ClassId::JCSystem, name) => {
-            jcsystem(name, heap, frame, context, jcre)
+            jcsystem(name, heap, frame, context, jcre, statics)
         }
         (PackageId::javacard_framework, ClassId::Applet, MethodId::register) => {
             if jcre.instance.is_some() { return Err(Error::Unauthorized); }
@@ -385,6 +387,7 @@ fn jcsystem(
     frame: &mut Frame,
     context: heap::Context,
     jcre: &mut Jcre,
+    statics: &mut [u8],
 ) -> Result<Native> {
     match name {
         MethodId::makeTransientByteArray | MethodId::makeTransientBooleanArray | MethodId::makeTransientShortArray
@@ -420,40 +423,61 @@ fn jcsystem(
         MethodId::requestObjectDeletion => {
             // Legal to do nothing, JCRE §7.4. An applet that depends on it asks first.
         }
-        MethodId::getTransactionDepth => frame.push_short(jcre.transaction_depth as i16)?,
+        MethodId::getTransactionDepth => frame.push_short(i16::from(heap.transaction_remaining().is_some()))?,
+        MethodId::getMaxCommitCapacity => frame.push_short(TRANSACTION_CAPACITY as i16)?,
+        MethodId::getUnusedCommitCapacity => frame.push_short(heap.transaction_remaining().unwrap_or(TRANSACTION_CAPACITY) as i16)?,
         MethodId::beginTransaction => {
-            // Transactions do not nest, JCRE §7.6, so a second begin is an error rather
-            // than a deeper level.
-            if jcre.transaction_depth != 0 {
-                return Ok(Native::Threw(new_exception(
-                    heap,
-                    ClassId::TransactionException,
-                    context,
-                )?));
+            if heap.transaction_remaining().is_some() {
+                return transaction_exception(heap, jcre, context, 1); // IN_PROGRESS
             }
-            jcre.transaction_depth = 1;
+            if jcre.transaction_exception.is_none() {
+                jcre.transaction_exception = Some(new_exception(heap, ClassId::TransactionException, context)?);
+            }
+            heap.begin_transaction(TRANSACTION_CAPACITY)?;
         }
         MethodId::commitTransaction | MethodId::abortTransaction => {
-            if jcre.transaction_depth == 0 {
-                return Ok(Native::Threw(new_exception(
-                    heap,
-                    ClassId::TransactionException,
-                    context,
-                )?));
+            if heap.transaction_remaining().is_none() {
+                return transaction_exception(heap, jcre, context, 2); // NOT_IN_PROGRESS
             }
-            jcre.transaction_depth = 0;
+            if name == MethodId::commitTransaction { heap.commit_transaction()?; }
+            else if heap.abort_transaction(statics)? { return Err(Error::TransactionAborted); }
         }
         _ => return Ok(Native::Unimplemented),
     }
     Ok(Native::Returned)
 }
 
+/// Shared logical bound for payload before-images and their metadata.
+pub const TRANSACTION_CAPACITY: usize = 8192;
+
+pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: heap::Context, reason: u16) -> Result<Native> {
+    let exception = match jcre.transaction_exception {
+        Some(reference) => reference,
+        None => {
+            let reference = new_exception(heap, ClassId::TransactionException, context)?;
+            jcre.transaction_exception = Some(reference);
+            reference
+        }
+    };
+    heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
+    Ok(Native::Threw(exception))
+}
+
 /// Allocate an instance of a class the card provides.
 pub fn new_exception(heap: &mut Heap, name: ClassId, context: heap::Context) -> Result<Reference> {
     for (index, package) in PACKAGES.iter().enumerate() {
         if let Some(class) = package.classes.iter().find(|entry| entry.id == name) {
+            let native = native_class(index, class.token);
+            if name == ClassId::TransactionException {
+                let mut at = 2;
+                while at < heap.used() {
+                    let info = heap.info(at as Reference)?;
+                    if info.class == native && info.owner == context { return Ok(at as Reference); }
+                    at = (at + heap::HEADER + info.length as usize * info.element_size()).next_multiple_of(2);
+                }
+            }
             // One word, which every exception uses for its reason.
-            return heap.new_object(native_class(index, class.token), 1, context);
+            return heap.new_object(native, 1, context);
         }
     }
     Err(Error::Missing)
@@ -497,9 +521,11 @@ fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Conte
             heap.byte_slice(source, index(source_offset)?, length)?;
             heap.byte_slice(destination, index(destination_offset)?, length)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            heap.copy_bytes(
-                source, index(source_offset)?, destination, index(destination_offset)?, length,
-            )?;
+            if name == MethodId::arrayCopy {
+                heap.copy_bytes(source, index(source_offset)?, destination, index(destination_offset)?, length)?;
+            } else {
+                heap.copy_bytes_unconditional(source, index(source_offset)?, destination, index(destination_offset)?, length)?;
+            }
             frame.push_short(destination_offset.wrapping_add(length as i16))?;
         }
         MethodId::arrayFill | MethodId::arrayFillNonAtomic => {
@@ -508,8 +534,11 @@ fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Conte
             let offset = frame.pop_short()?;
             let array = frame.pop_reference()?;
             heap.check_access(array, context)?;
-            heap.byte_slice_mut(array, index(offset)?, index(length)?)?
-                .fill(value as u8);
+            if name == MethodId::arrayFill {
+                heap.byte_slice_mut(array, index(offset)?, index(length)?)?.fill(value as u8);
+            } else {
+                heap.fill_bytes_unconditional(array, index(offset)?, index(length)?, value as u8)?;
+            }
             frame.push_short(offset.wrapping_add(length))?;
         }
         MethodId::arrayCompare => {
@@ -584,6 +613,64 @@ mod tests {
     }
 
     #[test]
+    fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+        let mut host = crate::host::NoHost;
+        let pin = new_native(&mut heap, ClassId::OwnerPIN, 6, 1).unwrap();
+        let original = heap.new_array(heap::KIND_BYTE, 4, 1).unwrap();
+        let replacement = heap.new_array(heap::KIND_BYTE, 4, 1).unwrap();
+        let destination = heap.new_array(heap::KIND_BYTE, 4, 1).unwrap();
+        heap.byte_slice_mut(original, 0, 4).unwrap().copy_from_slice(b"1234");
+        heap.byte_slice_mut(replacement, 0, 4).unwrap().copy_from_slice(b"9999");
+        invoke_security(ClassId::OwnerPIN, MethodId::Constructor,
+            &[(true, pin), (false, 3), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::OwnerPIN, MethodId::update,
+            &[(true, pin), (true, original), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+        for _ in 0..2 {
+            invoke_security(ClassId::OwnerPIN, MethodId::check,
+                &[(true, pin), (true, replacement), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), 0);
+        }
+        assert_eq!(heap.get_word(pin, 4), Ok(1));
+        let mut jcre = idle();
+        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        let Native::Threw(exception) = jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap()
+            else { panic!("nested transaction accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+        invoke_security(ClassId::OwnerPIN, MethodId::update,
+            &[(true, pin), (true, replacement), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::OwnerPIN, MethodId::check,
+            &[(true, pin), (true, original), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 0);
+        // Save a conditional image first, then overwrite it through the non-atomic API.
+        heap.byte_slice_mut(destination, 0, 4).unwrap().fill(7);
+        for (reference, value) in [(true, replacement), (false, 0), (true, destination), (false, 0), (false, 4)] {
+            frame.push_raw((value, reference)).unwrap();
+        }
+        util(MethodId::arrayCopyNonAtomic, &mut heap, &mut frame, 1, &mut 100).unwrap();
+        assert_eq!(frame.pop_short(), Ok(4));
+        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        let material = heap.get_word(pin, 2).unwrap();
+        assert_eq!(heap.byte_slice(material, 0, 4).unwrap(), b"1234");
+        assert_eq!(heap.get_word(pin, 4), Ok(2), "PIN presentation must survive aborting its update");
+        assert_eq!(heap.byte_slice(destination, 0, 4).unwrap(), b"9999");
+        let used = heap.used();
+        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        invoke_security(ClassId::OwnerPIN, MethodId::check,
+            &[(true, pin), (true, original), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short(), Ok(1));
+        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap();
+        assert_eq!(heap.get_word(pin, 3), Ok(1));
+        assert_eq!(heap.get_word(pin, 4), Ok(3));
+        assert_eq!(heap.used(), used, "transaction exceptions are reused");
+        let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut []).unwrap()
+            else { panic!("commit without begin accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
+    }
+
+    #[test]
     fn apdu_sends_capture_bytes_before_buffer_reuse_and_enforce_the_declared_length() {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
@@ -622,10 +709,10 @@ mod tests {
             for event in [1, 2, 0, 3] {
                 frame.push_short(2).unwrap();
                 frame.push_short(event).unwrap();
-                let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle()).unwrap();
+                let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle(), &mut []).unwrap();
                 if matches!(event, 1 | 2) {
                     assert!(matches!(result, Native::Returned));
-                    jcsystem(MethodId::isTransient, &mut heap, &mut frame, 1, &mut idle()).unwrap();
+                    jcsystem(MethodId::isTransient, &mut heap, &mut frame, 1, &mut idle(), &mut []).unwrap();
                     assert_eq!(frame.pop_short().unwrap(), event);
                 } else {
                     let Native::Threw(exception) = result else { panic!("invalid clear event accepted"); };
@@ -703,7 +790,7 @@ mod tests {
             for &(reference, value) in args {
                 if reference { frame.push_reference(value)?; } else { frame.push_short(value as i16)?; }
             }
-            let target = framework(class, method, method == MethodId::getInstance);
+            let target = framework(class, method, matches!(method, MethodId::getInstance | MethodId::Constructor));
             let signature = if method == MethodId::init {
                 target.class.methods.iter().find(|entry| entry.id == method && entry.signature.init_vector() == (args.len() == 6)).unwrap().signature
             } else { target.method.signature };
@@ -750,7 +837,7 @@ mod tests {
         }
         let mut budget = 31;
         assert!(matches!(call_with_budget(framework(ClassId::Cipher, MethodId::doFinal, false),
-            &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget), Err(Error::Quota)));
+            &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &mut []), Err(Error::Quota)));
         assert_eq!(host.calls, 2);
         assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
         host.fail_at = 4;
@@ -1024,7 +1111,7 @@ mod tests {
             let mut budget = length as u32;
             call_with_budget(
                 framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
-                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget,
+                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut [],
             ).unwrap();
             assert_eq!(budget, 0);
             assert_eq!(frame.pop_short().unwrap(), destination + length);
@@ -1041,7 +1128,7 @@ mod tests {
         let mut budget = 598;
         assert!(matches!(call_with_budget(
             framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
-            &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget,
+            &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut [],
         ), Err(Error::Quota)));
         assert_eq!(budget, 598);
         assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), before);

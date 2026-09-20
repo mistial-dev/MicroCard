@@ -1,8 +1,6 @@
 //! The instruction dispatch loop.
 //!
-//! One match over the opcode, each arm doing as little as possible. Everything that needs
-//! the object heap is refused for now, so what runs here is the arithmetic, the local
-//! variables, the operand stack and the control flow.
+//! One match dispatches arithmetic, control flow, fields, arrays, and native calls.
 //!
 //! Java Card arithmetic wraps rather than trapping, JCVM §3.3, so every operation below is
 //! a wrapping one. Two of them are worth naming: a shift distance is masked before use, and
@@ -82,6 +80,13 @@ impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
             depth: 0,
             cancel: None,
         }
+    }
+
+    /// Every applet callback ends its transaction, including exceptional returns.
+    pub fn abort_unfinished_transaction(&mut self) -> Result<bool> {
+        if self.heap.transaction_remaining().is_none() { return Ok(false); }
+        self.heap.abort_transaction(self.statics)?;
+        Ok(true)
     }
 
     pub fn with_cancel(mut self, cancel: &'a mut dyn FnMut() -> bool) -> Self {
@@ -484,6 +489,9 @@ pub fn run_body(
         machine.limits.allows(opcode)?;
         let length = instruction_length(code, pc)?;
         let mut next = pc + length;
+        // Convert commit-buffer exhaustion into a catchable Java exception at the
+        // failing instruction. Other engine errors retain their fail-closed path.
+        let step = (|| -> Result<Option<Outcome>> {
         match opcode {
             op::NOP => {}
             op::ACONST_NULL => frame.push_reference(NULL)?,
@@ -820,7 +828,7 @@ pub fn run_body(
                             enter_handler(frame, exception)?;
                             next = target;
                         }
-                        None => return Ok(Outcome::Thrown(exception)),
+                        None => return Ok(Some(Outcome::Thrown(exception))),
                     }
                 }
             }
@@ -1001,6 +1009,7 @@ pub fn run_body(
                             machine.context,
                             &mut machine.jcre,
                             budget,
+                            machine.statics,
                         )?)
                     }
                     _ => None,
@@ -1015,12 +1024,11 @@ pub fn run_body(
                                     enter_handler(frame, exception)?;
                                     next = target;
                                 }
-                                None => return Ok(Outcome::Thrown(exception)),
+                                None => return Ok(Some(Outcome::Thrown(exception))),
                             }
                         }
                     }
-                    pc = next;
-                    continue;
+                    return Ok(None);
                 }
                 // invokespecial reaches a constructor or a private method through the same
                 // constant type as invokestatic, and a superclass method through its own.
@@ -1037,7 +1045,7 @@ pub fn run_body(
                             enter_handler(frame, exception)?;
                             next = target;
                         }
-                        None => return Ok(Outcome::Thrown(exception)),
+                        None => return Ok(Some(Outcome::Thrown(exception))),
                     }
                 }
             }
@@ -1057,6 +1065,7 @@ pub fn run_body(
                         machine.context,
                         &mut machine.jcre,
                         budget,
+                        machine.statics,
                     )? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
@@ -1066,12 +1075,11 @@ pub fn run_body(
                                     enter_handler(frame, exception)?;
                                     next = target;
                                 }
-                                None => return Ok(Outcome::Thrown(exception)),
+                                None => return Ok(Some(Outcome::Thrown(exception))),
                             }
                         }
                     }
-                    pc = next;
-                    continue;
+                    return Ok(None);
                 }
                 // The receiver sits under the arguments, and its class decides which body
                 // runs, which is the whole of dynamic dispatch.
@@ -1095,7 +1103,7 @@ pub fn run_body(
                             enter_handler(frame, exception)?;
                             next = target;
                         }
-                        None => return Ok(Outcome::Thrown(exception)),
+                        None => return Ok(Some(Outcome::Thrown(exception))),
                     }
                 }
             }
@@ -1126,6 +1134,7 @@ pub fn run_body(
                         machine.context,
                         &mut machine.jcre,
                         budget,
+                        machine.statics,
                     )? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
@@ -1135,12 +1144,11 @@ pub fn run_body(
                                     enter_handler(frame, exception)?;
                                     next = target;
                                 }
-                                None => return Ok(Outcome::Thrown(exception)),
+                                None => return Ok(Some(Outcome::Thrown(exception))),
                             }
                         }
                     }
-                    pc = next;
-                    continue;
+                    return Ok(None);
                 }
                 let method = machine
                     .linked
@@ -1151,7 +1159,7 @@ pub fn run_body(
                             enter_handler(frame, exception)?;
                             next = target;
                         }
-                        None => return Ok(Outcome::Thrown(exception)),
+                        None => return Ok(Some(Outcome::Thrown(exception))),
                     }
                 }
             }
@@ -1164,18 +1172,35 @@ pub fn run_body(
                         enter_handler(frame, exception)?;
                         next = target;
                     }
-                    None => return Ok(Outcome::Thrown(exception)),
+                    None => return Ok(Some(Outcome::Thrown(exception))),
                 }
             }
 
-            op::RETURN => return Ok(Outcome::Void),
-            op::SRETURN => return Ok(Outcome::Short(frame.pop_short()?)),
-            op::IRETURN => return Ok(Outcome::Int(frame.pop_int()?)),
-            op::ARETURN => return Ok(Outcome::Reference(frame.pop_reference()?)),
+            op::RETURN => return Ok(Some(Outcome::Void)),
+            op::SRETURN => return Ok(Some(Outcome::Short(frame.pop_short()?))),
+            op::IRETURN => return Ok(Some(Outcome::Int(frame.pop_int()?))),
+            op::ARETURN => return Ok(Some(Outcome::Reference(frame.pop_reference()?))),
 
-            // Fields, arrays, objects and invocation all need the heap, which is the next
-            // thing to build. Refusing by name keeps the failure legible.
             _ => return Err(Error::Unsupported),
+        }
+        Ok(None)
+        })();
+        match step {
+            Ok(Some(outcome)) => return Ok(outcome),
+            Ok(None) => {},
+            Err(Error::TransactionFull) => {
+                let Native::Threw(exception) = natives::transaction_exception(
+                    machine.heap, &mut machine.jcre, machine.context, 3,
+                )? else { return Err(Error::Inconsistent); };
+                match find_handler(machine, body, code.len(), pc, exception)? {
+                    Some(target) => {
+                        enter_handler(frame, exception)?;
+                        next = target;
+                    }
+                    None => return Ok(Outcome::Thrown(exception)),
+                }
+            }
+            Err(error) => return Err(error),
         }
         pc = next;
     }
@@ -1257,18 +1282,14 @@ fn put_field_value(
             .heap
             .put_word(object, index as usize, value as i8 as i16 as u16),
         KIND_REF | KIND_SHORT => machine.heap.put_word(object, index as usize, value as u16),
-        _ => {
-            machine
-                .heap
-                .put_word(object, index as usize, (value >> 16) as u16)?;
-            machine.heap.put_word(object, index as usize + 1, value as u16)
-        }
+        _ => machine.heap.put_int(object, index as usize, value),
     }
 }
 
 fn write_static(machine: &mut Machine, at: usize, kind: u8, value: i32) -> Result<()> {
     let width = if kind == 3 { 4 } else { 2 };
     let bytes = machine.statics.get_mut(at..at + width).ok_or(Error::Bounds)?;
+    machine.heap.remember_static(at, bytes)?;
     match kind {
         // A byte field keeps only the low byte, so reading it back sign extends.
         KIND_BYTE => bytes.copy_from_slice(&(value as i8 as i16).to_be_bytes()),

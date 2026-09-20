@@ -279,13 +279,15 @@ pub fn call(
                 return Err(Error::Bounds);
             }
             staging[..length].copy_from_slice(heap.byte_slice(source, offset as usize, length)?);
+            // Admit the whole update before changing PIN bytes or metadata.
+            heap.remember_object(this)?;
             heap.byte_slice_mut(material, 0, length)?
                 .copy_from_slice(&staging[..length]);
             heap.put_word(this, SIZE, length as u16)?;
             // Updating resets the counter and clears the validated flag, JCRE §5.1.
             let tries = heap.get_word(this, KIND)?;
             heap.put_word(this, COUNTER, tries)?;
-            heap.put_word(this, READY, 0)?;
+            heap.put_word_unconditional(this, READY, 0)?;
         }
         (ClassId::OwnerPIN, MethodId::check) => {
             let length = frame.pop_short()?;
@@ -299,8 +301,8 @@ pub fn call(
             }
             // The counter is decremented before the comparison, JCRE §5.1. A card cut off
             // mid check must not give the attempt back.
-            heap.put_word(this, COUNTER, tries - 1)?;
-            heap.put_word(this, READY, 0)?;
+            heap.put_word_unconditional(this, COUNTER, tries - 1)?;
+            heap.put_word_unconditional(this, READY, 0)?;
             let material = heap.get_word(this, MATERIAL)?;
             let stored = heap.get_word(this, SIZE)? as usize;
             let matched = if length < 0 || offset < 0 || length as usize != stored {
@@ -317,8 +319,8 @@ pub fn call(
             };
             if matched {
                 let limit = heap.get_word(this, KIND)?;
-                heap.put_word(this, COUNTER, limit)?;
-                heap.put_word(this, READY, 1)?;
+                heap.put_word_unconditional(this, COUNTER, limit)?;
+                heap.put_word_unconditional(this, READY, 1)?;
             }
             frame.push_short(matched as i16)?;
         }
@@ -332,15 +334,17 @@ pub fn call(
         }
         (ClassId::OwnerPIN, MethodId::reset) => {
             let this = frame.pop_reference()?;
-            // Only the validated flag, JCRE §5.1. The counter survives, which is what
-            // makes a PIN retry limit mean anything across resets.
-            heap.put_word(this, READY, 0)?;
+            if heap.get_word(this, READY)? != 0 {
+                let limit = heap.get_word(this, KIND)?;
+                heap.put_word_unconditional(this, COUNTER, limit)?;
+                heap.put_word_unconditional(this, READY, 0)?;
+            }
         }
         (ClassId::OwnerPIN, MethodId::resetAndUnblock) => {
             let this = frame.pop_reference()?;
             let limit = heap.get_word(this, KIND)?;
-            heap.put_word(this, COUNTER, limit)?;
-            heap.put_word(this, READY, 0)?;
+            heap.put_word_unconditional(this, COUNTER, limit)?;
+            heap.put_word_unconditional(this, READY, 0)?;
         }
 
         // The algorithm holders. Each is an object carrying what it was asked for, and the
