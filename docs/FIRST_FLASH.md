@@ -17,6 +17,12 @@ images, metadata, and maps. The script runs host acceptance, Clippy, the release
 cross-build, flash-load-range checks, initial stack/reset-vector checks and a minimum
 static stack-margin check.
 
+The manifest names the engine and linker layout and hashes the layout and every
+artifact. Builds use separate target directories per engine/layout. Preparation
+stages a fresh bundle, then replaces the previous generated directory, so stale
+files cannot enter its manifest. A failed publication restores the prior bundle;
+if restoration fails, its `.previous-*` backup remains for recovery.
+
 The host gate includes .NET differential execution, deterministic preprocessing/signing, incremental MSBuild/pin checks, first-load failure injection, independent SCP03, persistent key operations, binary UART framing, and the real serial adapter through a fragmented pseudo-terminal. See `scripts/check.py --checkpoint` and the keystore documentation for the scenarios.
 
 ## Development credentials

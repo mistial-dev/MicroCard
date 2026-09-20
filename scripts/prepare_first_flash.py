@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build and verify first-flash artifacts. Never invokes a probe or writes a device."""
-import argparse,hashlib,json,pathlib,shutil,struct,subprocess,sys,os
+import argparse,hashlib,json,pathlib,shutil,struct,subprocess,sys,os,tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def run(*args,cwd=ROOT,**kw):return subprocess.run(args,cwd=cwd,check=True,**kw)
 def flash_region(path):
@@ -28,6 +28,23 @@ def write_uf2(raw,origin,destination):
   image+=struct.pack('<8I',0x0A324655,0x9E5D5157,0x00002000,origin+index*payload,payload,index,blocks,MAKERDIARY_MDK_DONGLE_FAMILY)
   image+=chunk+bytes(476-payload)+struct.pack('<I',0x0AB16F30)
  destination.write_bytes(bytes(image))
+def publish_bundle(staged, destination):
+ """Replace a complete generated bundle; restore the previous one if publication fails."""
+ destination.parent.mkdir(parents=True,exist_ok=True)
+ backup=pathlib.Path(tempfile.mkdtemp(prefix='.previous-',dir=destination.parent))
+ previous=backup/'bundle'
+ try:
+  if destination.exists():destination.rename(previous)
+  try:staged.rename(destination)
+  except BaseException:
+   # If restoration itself fails, keep the backup on disk for manual recovery.
+   if previous.exists():previous.rename(destination)
+   raise
+ except BaseException:
+  if not previous.exists():backup.rmdir()
+  raise
+ else:shutil.rmtree(backup)
+
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--engine',choices=('mc04','jcvm'),required=True)
@@ -42,8 +59,13 @@ def main():
  dongle='dongle' in features or 'dongle-layout' in features
  layout=board/f"memory-{'dongle' if dongle else 'dk'}{'-jcvm' if args.engine=='jcvm' else ''}.x"
  flash_origin,flash_length=flash_region(layout);flash_end=flash_origin+flash_length
- run('cargo','build','--release','--locked',*extra,cwd=board)
- elf=board/'target/thumbv7em-none-eabihf/release/microcard-nrf52840';out=ROOT/'artifacts/first-flash'/args.engine/('dongle' if dongle else 'dk');out.mkdir(parents=True,exist_ok=True)
+ target=board/'target/profiles'/f'first-flash-{args.engine}-{"dongle" if dongle else "dk"}'
+ run('cargo','build','--release','--locked','--target-dir',str(target),*extra,cwd=board)
+ elf=target/'thumbv7em-none-eabihf/release/microcard-nrf52840'
+ destination=ROOT/'artifacts/first-flash'/args.engine/('dongle' if dongle else 'dk')
+ destination.parent.mkdir(parents=True,exist_ok=True)
+ staging=tempfile.TemporaryDirectory(prefix='.preparing-',dir=destination.parent)
+ out=pathlib.Path(staging.name)/'bundle';out.mkdir()
  shutil.copy2(elf,out/'microcard.elf');run('arm-none-eabi-objcopy','-O','ihex',str(elf),str(out/'microcard.hex'))
  # Inspect load addresses rather than trusting the link succeeding.
  headers=run('arm-none-eabi-objdump','-h',str(elf),capture_output=True,text=True).stdout.splitlines()
@@ -61,6 +83,9 @@ def main():
  if bss+data>208896:raise RuntimeError('less than 52 KiB stack margin')
  for stem in (['counter','keys'] if args.engine=='mc04' else []):
   for ext in ['mca','json','map.json']:shutil.copy2(ROOT/f'work/{stem}.{ext}',out/f'{stem}.{ext}')
- result={'git_revision':run('git','rev-parse','HEAD',capture_output=True,text=True).stdout.strip(),'working_tree_dirty':bool(run('git','status','--porcelain',capture_output=True,text=True).stdout),'flash_text':text,'ram_bss':bss,'ram_data':data,'checks':'host corpus, text and binary SCP03/key scenarios, clippy, release cross-build, flash sections','hardware_flashed':False,'board_features':features,'flash_origin':flash_origin,'flash_end':flash_end,'sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='manifest.json'}}
- (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n');print('Prepared',out,'without accessing a device')
+ result={'engine':args.engine,'layout':layout.name,'layout_sha256':hashlib.sha256(layout.read_bytes()).hexdigest(),'git_revision':run('git','rev-parse','HEAD',capture_output=True,text=True).stdout.strip(),'working_tree_dirty':bool(run('git','status','--porcelain',capture_output=True,text=True).stdout),'flash_text':text,'ram_bss':bss,'ram_data':data,'checks':'host corpus, text and binary SCP03/key scenarios, clippy, release cross-build, flash sections','hardware_flashed':False,'board_features':features,'flash_origin':flash_origin,'flash_end':flash_end,'sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='manifest.json'}}
+ (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n')
+ publish_bundle(out,destination)
+ staging.cleanup()
+ print('Prepared',destination,'without accessing a device')
 if __name__=='__main__':main()
