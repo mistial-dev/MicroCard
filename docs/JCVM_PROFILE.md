@@ -680,3 +680,18 @@ The 3.0.5 source review covers these implementation boundaries:
 This establishes source provenance and the reviewed rules, not full conformance.
 A complete loader/verifier and native API audit against 3.0.5 remains release work;
 the unsupported features listed above remain outside this profile.
+
+### Larger allocation qualification
+
+Run the same two-instance workload with a larger certificate reservation:
+
+```sh
+cargo build --locked -p microcard-sim --features heap-metrics
+python3 scripts/heap_profile.py --output work/jcvm-large-heap.json -- \
+  python3 scripts/jcvm_transport_acceptance.py --certificate-capacity 20000
+```
+
+The default remains 4,096 bytes. OpenFIPS201 reserves both current and pending
+certificate buffers. The 20,000-byte case passes functional acceptance but reaches
+341,421 requested host bytes at revision `5e3efcc`; it does not fit the board heap
+on that metric. This is a capacity stress workload, not a maximum-allocation proof.

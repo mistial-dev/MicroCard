@@ -110,7 +110,12 @@ board's reserved heap.
   (`work/jcvm-personalized-heap.json`). The two-applet extension at clean
   revision `37a95dd` peaks at 185,913 bytes with both banks occupied and one blank
   applet's reset-scoped arrays retained (`work/jcvm-two-applet-clean-heap.json`).
-  Neither run fills both applets to their maximum supported allocations. Bound supported workloads and
+  Neither run fills both applets to their maximum supported allocations. A larger
+  accepted certificate capacity of 20,000 bytes passes all functional checks but peaks
+  at **341,421 host-requested bytes**, including 341,421 during SELECT and 286,330
+  during open (clean revision `5e3efcc`, `work/jcvm-large-certificate-clean-heap.json`).
+  This exceeds the board heap reservation; investigate recovery/selection allocation
+  overlap and separate host file buffers from board costs before hardware readiness. Bound supported workloads and
   board allocations before declaring this path ready for hardware. Host figures
   exclude allocator metadata and stack and include file-backed image reads.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
