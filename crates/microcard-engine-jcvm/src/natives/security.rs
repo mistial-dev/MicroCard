@@ -123,7 +123,7 @@ pub fn digest_length(algorithm: u8) -> Result<usize> {
 
 fn crypto_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Result<Native> {
     let exception = super::new_exception(heap, ClassId::CryptoException, context)?;
-    heap.put_word(exception, super::REASON_FIELD, reason)?;
+    heap.put_word_unconditional(exception, super::REASON_FIELD, reason)?;
     Ok(Native::Threw(exception))
 }
 
@@ -256,7 +256,7 @@ pub fn call(
             heap.check_access(destination, context)?;
             if !key_initialized(heap, this)? {
                 let exception = super::new_exception(heap, ClassId::CryptoException, context)?;
-                heap.put_word(exception, super::REASON_FIELD, 2)?; // UNINITIALIZED_KEY
+                heap.put_word_unconditional(exception, super::REASON_FIELD, 2)?; // UNINITIALIZED_KEY
                 return Ok(Native::Threw(exception));
             }
             let material = heap.get_word(this, MATERIAL)?;
@@ -400,7 +400,7 @@ pub fn call(
             };
             if !supported {
                 let exception = super::new_exception(heap, ClassId::CryptoException, context)?;
-                heap.put_word(exception, super::REASON_FIELD, 3)?; // NO_SUCH_ALGORITHM
+                heap.put_word_unconditional(exception, super::REASON_FIELD, 3)?; // NO_SUCH_ALGORITHM
                 return Ok(Native::Threw(exception));
             }
             let instance = new_native(heap, class, STATE_WORDS, context)?;

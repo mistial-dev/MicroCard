@@ -176,29 +176,24 @@ pub fn call_with_budget(
     let package = target.package.id;
     let class = target.class.id;
     let method = target.method.id;
+    if matches!(method, MethodId::Constructor | MethodId::throwIt | MethodId::getReason | MethodId::setReason)
+        && (matches!(class, ClassId::CardException | ClassId::CardRuntimeException)
+            || target.class.supers.iter().any(|base| matches!(base, ClassId::CardException | ClassId::CardRuntimeException))) {
+        let reason = if method == MethodId::getReason { None } else { Some(frame.pop_short()? as u16) };
+        let exception = if method == MethodId::throwIt { new_exception(heap, class, context)? }
+            else { frame.pop_reference()? };
+        heap.check_access(exception, context)?;
+        if let Some(reason) = reason {
+            // Java Card exception reasons do not participate in transactions.
+            heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
+        } else { frame.push_short(heap.get_word(exception, REASON_FIELD)? as i16)?; }
+        return Ok(if method == MethodId::throwIt { Native::Threw(exception) } else { Native::Returned });
+    }
     match (package, class, method) {
         // Constructing an Object or any exception does nothing the engine has to model.
         // The allocation already happened, and the fields start zeroed.
         (PackageId::java_lang, _, MethodId::Constructor) => {
             frame.pop_reference()?;
-            Ok(Native::Returned)
-        }
-        (PackageId::javacard_framework, ClassId::ISOException, MethodId::throwIt) => {
-            let reason = frame.pop_short()?;
-            let exception = new_exception(heap, ClassId::ISOException, context)?;
-            heap.put_word(exception, REASON_FIELD, reason as u16)?;
-            Ok(Native::Threw(exception))
-        }
-        (PackageId::javacard_framework, ClassId::ISOException, MethodId::Constructor) => {
-            let reason = frame.pop_short()?;
-            let this = frame.pop_reference()?;
-            heap.put_word(this, REASON_FIELD, reason as u16)?;
-            Ok(Native::Returned)
-        }
-        (PackageId::javacard_framework, ClassId::ISOException | ClassId::CardRuntimeException | ClassId::TransactionException, MethodId::getReason) => {
-            let this = frame.pop_reference()?;
-            let reason = heap.get_word(this, REASON_FIELD)?;
-            frame.push_short(reason as i16)?;
             Ok(Native::Returned)
         }
         (PackageId::javacard_framework, ClassId::Util, name) => util(name, heap, frame, context, budget),
@@ -415,7 +410,7 @@ fn jcsystem(
                 2 => heap::CLEAR_ON_DESELECT,
                 _ => {
                     let exception = new_exception(heap, ClassId::SystemException, context)?;
-                    heap.put_word(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
+                    heap.put_word_unconditional(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
                     return Ok(Native::Threw(exception));
                 }
             };
@@ -479,23 +474,21 @@ pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: h
     Ok(Native::Threw(exception))
 }
 
-/// Obtain a runtime exception. Repeated status/transaction throws must not leak
+/// Obtain a runtime exception. Repeated native errors must not leak
 /// persistent heap; explicit applet-created exception objects remain independent.
 pub fn new_exception(heap: &mut Heap, name: ClassId, context: heap::Context) -> Result<Reference> {
     for (index, package) in PACKAGES.iter().enumerate() {
         if let Some(class) = package.classes.iter().find(|entry| entry.id == name) {
             let native = native_class(index, class.token);
-            if matches!(name, ClassId::ISOException | ClassId::TransactionException) {
-                let mut at = 2;
-                while at < heap.used() {
-                    let info = heap.info(at as Reference)?;
-                    // Runtime exceptions have only the reason word. Explicit `new`
-                    // objects have the larger native state layout and must stay distinct.
-                    if info.class == native && info.owner == context && info.length == 1 {
-                        return Ok(at as Reference);
-                    }
-                    at = (at + heap::HEADER + info.length as usize * info.element_size()).next_multiple_of(2);
+            let mut at = 2;
+            while at < heap.used() {
+                let info = heap.info(at as Reference)?;
+                // Runtime exceptions have only the reason word. Explicit `new`
+                // objects have the larger native state layout and must stay distinct.
+                if info.class == native && info.owner == context && info.length == 1 {
+                    return Ok(at as Reference);
                 }
+                at = (at + heap::HEADER + info.length as usize * info.element_size()).next_multiple_of(2);
             }
             // One word, which every exception uses for its reason.
             return heap.new_object(native, 1, context);
@@ -634,36 +627,55 @@ mod tests {
     }
 
     #[test]
-    fn status_throws_reuse_runtime_objects_across_commands_without_mutating_explicit_exceptions() {
-        let (mut slab, mut words, mut tags) = setup(0);
-        let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
-        let mut heap = Heap::new(&mut slab).unwrap();
-        let class = framework(ClassId::ISOException, MethodId::throwIt, true).class;
-        let explicit = new_api_object(&mut heap, class, 1).unwrap();
-        heap.put_word(explicit, REASON_FIELD, 0x6a81).unwrap();
-        let mut used = heap.used();
-        let mut references = [0; 2];
-        for context in [1, 2] {
-            for reason in [0x6101, 0x9000, 0x6a80] {
-                let mut heap = Heap::resume(&mut slab, used).unwrap();
-                frame.push_short(reason as i16).unwrap();
-                let Native::Threw(reference) = call(
-                    framework(ClassId::ISOException, MethodId::throwIt, true), &mut heap,
-                    &mut crate::host::NoHost, &mut frame, context, &mut idle(),
-                ).unwrap() else { panic!("throwIt returned"); };
-                let previous = &mut references[context as usize - 1];
-                if *previous == 0 { *previous = reference; }
-                else {
-                    assert_eq!(reference, *previous);
-                    assert_eq!(heap.used(), used, "a response must not consume persistent heap");
+    fn exception_calls_reuse_runtime_objects_and_preserve_explicit_reasons() {
+        for name in [ClassId::ISOException, ClassId::CryptoException, ClassId::CardRuntimeException,
+            ClassId::CardException, ClassId::UserException] {
+            let (mut slab, mut words, mut tags) = setup(0);
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let class = framework(name, MethodId::throwIt, true).class;
+            let explicit = new_api_object(&mut heap, class, 1).unwrap();
+            frame.push_reference(explicit).unwrap();
+            frame.push_short(0x6a81).unwrap();
+            assert!(matches!(call(framework(name, MethodId::Constructor, true), &mut heap,
+                &mut crate::host::NoHost, &mut frame, 1, &mut idle()), Ok(Native::Returned)));
+            heap.begin_transaction(0).unwrap();
+            frame.push_reference(explicit).unwrap();
+            frame.push_short(0x6a82).unwrap();
+            assert!(matches!(call(framework(name, MethodId::setReason, false), &mut heap,
+                &mut crate::host::NoHost, &mut frame, 1, &mut idle()), Ok(Native::Returned)));
+            assert!(!heap.abort_transaction(&mut []).unwrap());
+            frame.push_reference(explicit).unwrap();
+            assert!(matches!(call(framework(name, MethodId::getReason, false), &mut heap,
+                &mut crate::host::NoHost, &mut frame, 1, &mut idle()), Ok(Native::Returned)));
+            assert_eq!(frame.pop_short(), Ok(0x6a82));
+            let mut used = heap.used();
+            let mut references = [0; 2];
+            for context in [1, 2] {
+                for reason in [0x6101, 0x9000, 0x6a80] {
+                    let mut heap = Heap::resume(&mut slab, used).unwrap();
+                    let reused = references[context as usize - 1] != 0;
+                    if reused { heap.begin_transaction(0).unwrap(); }
+                    frame.push_short(reason as i16).unwrap();
+                    let Native::Threw(reference) = call(
+                        framework(name, MethodId::throwIt, true), &mut heap,
+                        &mut crate::host::NoHost, &mut frame, context, &mut idle(),
+                    ).unwrap() else { panic!("throwIt returned"); };
+                    let previous = &mut references[context as usize - 1];
+                    if *previous == 0 { *previous = reference; }
+                    else {
+                        assert_eq!(reference, *previous);
+                        assert_eq!(heap.used(), used, "a response must not consume persistent heap");
+                    }
+                    if reused { assert!(!heap.abort_transaction(&mut []).unwrap()); }
+                    assert_eq!(heap.get_word(reference, REASON_FIELD), Ok(reason));
+                    assert_eq!(heap.get_word(explicit, REASON_FIELD), Ok(0x6a82));
+                    assert_ne!(reference, explicit);
+                    used = heap.used();
                 }
-                assert_eq!(heap.get_word(reference, REASON_FIELD), Ok(reason));
-                assert_eq!(heap.get_word(explicit, REASON_FIELD), Ok(0x6a81));
-                assert_ne!(reference, explicit);
-                used = heap.used();
             }
+            assert_ne!(references[0], references[1]);
         }
-        assert_ne!(references[0], references[1]);
     }
 
     #[test]

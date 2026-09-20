@@ -474,8 +474,8 @@ The combined identity now imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-derived-p256-v3-contact`): preparation took 14.539 seconds and vectors
-98.900 seconds on the host. Remaining failures concern the original CHUID’s
+(`work/nist-exceptions-contact`, using the same derived identity): preparation took
+14.343 seconds and vectors 96.830 seconds on the host. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain

@@ -8,7 +8,7 @@ pub(super) fn call(
     if class == ClassId::GPSystem {
         if !host.secure_channel_available() {
             let exception = super::super::new_exception(heap, ClassId::SystemException, context)?;
-            heap.put_word(exception, super::super::REASON_FIELD, 5)?;
+            heap.put_word_unconditional(exception, super::super::REASON_FIELD, 5)?;
             return Ok(Native::Threw(exception));
         }
         // The handle has no mutable fields or authority and can be reused after recovery.
@@ -65,6 +65,6 @@ pub(super) fn call(
 
 fn rejected(heap: &mut Heap, context: heap::Context) -> Result<Native> {
     let exception = super::super::new_exception(heap, ClassId::ISOException, context)?;
-    heap.put_word(exception, super::super::REASON_FIELD, 0x6982)?;
+    heap.put_word_unconditional(exception, super::super::REASON_FIELD, 0x6982)?;
     Ok(Native::Threw(exception))
 }
