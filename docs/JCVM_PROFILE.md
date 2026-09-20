@@ -493,6 +493,23 @@ this failure is neither skipped nor rewritten. Other failures include missing PI
 objects and certificate-profile requirements.
 A passing applicable suite and complete matching personalization are still open.
 
+The original GSA golden identities require RSA private keys and cannot serve as a
+complete P-256 test identity. Keep their object checks separate from the ECC256
+NIST seed rather than combining unrelated CHUIDs and certificates:
+
+```sh
+python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
+  --check-objects /path/to/OpenFIPS201/test-vectors/gsa-icam-card-builder/cards/ICAM_Card_Objects/46_Golden_FIPS_201-2_PIV \
+  --out work/icam-object-recovery
+```
+
+This check passed exact upstream readback of all **11 objects**, including the
+6,326-byte facial image, after closing SCP03 and reopening the simulator. It uses
+original fixture data and the upstream loader/provisioner. It imports **no private
+keys**, runs **no NIST vectors**, and makes no certificate-validity or full-credential
+claim. The separate `object-results.json` records fixture hashes, runtime identity,
+result and host elapsed time. No physical card is accessed.
+
 The run retains preparation logs, runner logs, JUnit results, and a manifest with vector
 selection, source/configuration/simulator hashes, separate preparation/execution timings,
 and a dirty-tree marker. Skips are counted separately from passes. Do not count upstream

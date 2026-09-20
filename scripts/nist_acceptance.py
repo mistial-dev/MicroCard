@@ -23,6 +23,13 @@ REVISION = "9f3b99bd0f2600beea7e5c053613d8baef2b7716"
 PACKAGE = "dev.mistial.tools.openfips201.nist"
 
 
+def runtime_identity():
+    return dict(engine="MicroCard JCVM host",
+        microcard_revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        microcard_dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
+        physical_execution=False, simulator_sha256=hashlib.sha256(SIM.read_bytes()).hexdigest())
+
+
 def prepare_blank_seed(directory):
     keys = directory / "keys"
     keys.write_bytes(bytes(range(32)))
@@ -63,14 +70,17 @@ def main():
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--test", help="One upstream vector identifier")
     selection.add_argument("--suite", help="Upstream suite selector, e.g. card-contact")
+    selection.add_argument("--check-objects", type=pathlib.Path, help="Verify an original ICAM folder through object write/reboot/readback only; no private-key or NIST conformance claim")
     parser.add_argument("--list-tests", action="store_true")
     parser.add_argument("--check-transport", action="store_true", help="Check the bridge without NIST jars, using a blank applet")
     args = parser.parse_args()
-    if not args.test and not args.suite and not args.list_tests and not args.check_transport:
-        parser.error("select --test identifiers, --list-tests, or --check-transport")
-    if args.check_transport and (args.test or args.suite or args.list_tests or args.seed or args.provision_config):
+    if not args.test and not args.suite and not args.list_tests and not args.check_transport and not args.check_objects:
+        parser.error("select --test, --suite, --list-tests, --check-transport, or --check-objects")
+    if args.check_transport and (args.test or args.suite or args.list_tests or args.seed or args.provision_config or args.check_objects):
         parser.error("--check-transport uses an isolated blank applet")
-    if not args.check_transport and args.config is None:
+    if args.check_objects and (args.list_tests or args.provision_config or args.seed or args.config):
+        parser.error("--check-objects uses an isolated blank applet")
+    if not args.check_transport and not args.check_objects and args.config is None:
         parser.error("--config is required for NIST vectors")
     upstream, output = args.upstream.resolve(), args.out.resolve()
     config = args.config.resolve() if args.config else None
@@ -81,7 +91,7 @@ def main():
     harness = upstream / "src/dev/mistial/tools/openfips201/nist"
     required = [SIM, ROOT / "wallet/target/classes/dev/mistial/microcard/wallet/SimulatorTransport.class"]
     if not args.check_transport:
-        required.extend([config, jars / "PIV_TestRunner_modules-5.0.1.jar", upstream / "tools/jcard-v26.08.10.jar"])
+        required.extend(([config] if config else []) + [jars / "PIV_TestRunner_modules-5.0.1.jar", upstream / "tools/jcard-v26.08.10.jar"])
     for path in required:
         if not path.is_file():
             parser.error(f"missing prerequisite: {path}")
@@ -131,25 +141,39 @@ def main():
         sources = sorted(p for p in harness.glob("*.java") if p.name != source.name)
         subprocess.run(["javac", "--release", "21", "-encoding", "UTF-8", "-cp", compile_cp,
             "-d", classes, *sources, patched, ROOT / "scripts/nist/MicroCardNistTransport.java",
-            ROOT / "scripts/nist/MicroCardNistProfile.java"],
+            ROOT / "scripts/nist/MicroCardNistProfile.java", ROOT / "scripts/nist/MicroCardNistObjects.java"],
             env=env, check=True)
+        if args.check_objects:
+            fixture = args.check_objects.resolve()
+            evidence = dict(**runtime_identity(), mode="ICAM object write/reboot/readback",
+                upstream_revision=revision, fixture=str(fixture),
+                private_keys_exercised=False, nist_vectors_run=False,
+                source_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistObjects.java").read_bytes()).hexdigest(),
+                fixture_sha256={str(p.relative_to(fixture)): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in sorted(fixture.rglob("*")) if p.is_file()})
+            started = time.perf_counter()
+            with (output / "objects.log").open("w") as log:
+                result = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
+                    "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".MicroCardNistObjects", fixture],
+                    env=env, stdout=log, stderr=subprocess.STDOUT)
+            evidence.update(exit_code=result.returncode, elapsed_seconds=round(time.perf_counter() - started, 3))
+            (output / "object-results.json").write_text(json.dumps(evidence, indent=2) + "\n")
+            print(f"ICAM object check exited {result.returncode}; results: {output}")
+            raise SystemExit(result.returncode)
         compat = staging / "nist-bc-compat.jar"
         subprocess.run(["java", "-cp", str(classes) + os.pathsep + cp,
             PACKAGE + ".NistCompatibilityPatcher", jars / "PIV_TestRunner_modules-5.0.1.jar", compat],
             env=env, check=True)
-        manifest = dict(upstream_revision=revision, engine="MicroCard JCVM host",
-            microcard_revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-            microcard_dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
+        manifest = dict(**runtime_identity(), upstream_revision=revision,
             upstream_harness_sha256=hashlib.sha256(committed.encode()).hexdigest(),
             adapter_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistTransport.java").read_bytes()).hexdigest(),
             profile_loader_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistProfile.java").read_bytes()).hexdigest(),
             nist_modules_sha256=hashlib.sha256((jars / "PIV_TestRunner_modules-5.0.1.jar").read_bytes()).hexdigest(),
             config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
-            simulator_sha256=hashlib.sha256(SIM.read_bytes()).hexdigest(),
             test=args.test, suite=args.suite, list_only=args.list_tests, blank_seed=args.seed is None,
             provision_config=args.provision_config,
-            physical_execution=False, synthetic_atr=True,
-            unsupported=["contactless transport", "GSA ICAM object provisioning", "VCI suites"],
+            synthetic_atr=True,
+            unsupported=["contactless transport", "full GSA ICAM credential provisioning (RSA)", "VCI suites"],
             status="running")
         report = output / "microcard-run.json"
         report.write_text(json.dumps(manifest, indent=2) + "\n")
