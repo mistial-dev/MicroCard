@@ -563,10 +563,10 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-native-audit-contact`, clean revision `0258030`):
-preparation took 29.494 seconds and vectors 125.272 seconds on the host. All 63
-individual outcomes match the preceding automatic-renewal run (29.329 / 131.769
-seconds). This run includes the native allocation and byte-work fixes but does not
+(`work/nist-lifecycle-memory-contact`, clean revision `e7deab9`):
+preparation took 29.434 seconds and vectors 124.308 seconds on the host. All 63
+individual outcomes match the preceding native-audit run (29.494 / 125.272
+seconds). This run includes persistent lifecycle and recovery-memory changes but does not
 deliberately exhaust counters; transport acceptance covers renewal separately. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
