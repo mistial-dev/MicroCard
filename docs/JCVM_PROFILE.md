@@ -376,6 +376,10 @@ Transport acceptance also kills the simulator between encrypted certificate-uplo
 fragments, then checks the old certificate, a fresh replacement, and reboot recovery.
 This does not simulate interruption inside an individual flash write.
 
+PIN replacement honors the configured maximum without a separate 32-byte staging
+limit. It reserves the complete conditional update before changing PIN bytes or
+metadata; invalid constructor limits and oversized replacements report
+`PINException.ILLEGAL_VALUE`.
 Invalid PIN presentations throw the API-specified null or bounds exception while
 retaining the consumed retry across transaction abort (3.0.5 `OwnerPIN.check`).
 PIN checks checkpoint their retry decrement before comparison and checkpoint a

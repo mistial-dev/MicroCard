@@ -690,6 +690,44 @@ mod tests {
     }
 
     #[test]
+    fn pin_replacement_honors_configured_capacity_and_reserves_the_complete_update() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+        let mut host = crate::host::NoHost;
+        let pin = new_native(&mut heap, ClassId::OwnerPIN, 6, 1).unwrap();
+        for (tries, size) in [(0, 126), (3, 0)] {
+            let Native::Threw(exception) = invoke_security(ClassId::OwnerPIN, MethodId::Constructor,
+                &[(true, pin), (false, tries), (false, size)], &mut heap, &mut frame, &mut host).unwrap()
+                else { panic!("invalid PIN limits accepted"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+        }
+        invoke_security(ClassId::OwnerPIN, MethodId::Constructor,
+            &[(true, pin), (false, 3), (false, 126)], &mut heap, &mut frame, &mut host).unwrap();
+        let source = heap.new_array(heap::KIND_BYTE, 127, 1).unwrap();
+        heap.byte_slice_mut(source, 0, 127).unwrap().fill(0x42);
+        let material = heap.get_word(pin, 2).unwrap();
+        let args = |length| [(true, pin), (true, source), (false, 0), (false, length)];
+        let Native::Threw(exception) = invoke_security(ClassId::OwnerPIN, MethodId::update,
+            &args(127), &mut heap, &mut frame, &mut host).unwrap()
+            else { panic!("oversized PIN accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+        heap.begin_transaction(32).unwrap();
+        assert!(matches!(invoke_security(ClassId::OwnerPIN, MethodId::update,
+            &args(126), &mut heap, &mut frame, &mut host), Err(Error::TransactionFull)));
+        assert_eq!(heap.get_word(pin, 1), Ok(0));
+        assert!(heap.byte_slice(material, 0, 126).unwrap().iter().all(|byte| *byte == 0));
+        heap.abort_transaction(&mut []).unwrap();
+        heap.begin_transaction(256).unwrap();
+        invoke_security(ClassId::OwnerPIN, MethodId::update,
+            &args(126), &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(heap.byte_slice(material, 0, 126).unwrap(), &[0x42; 126]);
+        heap.abort_transaction(&mut []).unwrap();
+        assert_eq!(heap.get_word(pin, 1), Ok(0));
+        assert!(heap.byte_slice(material, 0, 126).unwrap().iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
     fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();

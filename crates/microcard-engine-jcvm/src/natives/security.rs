@@ -279,11 +279,9 @@ pub fn call(
             let tries = frame.pop_short()?;
             let this = frame.pop_reference()?;
             if tries < 1 || max_size < 1 {
-                return Ok(Native::Threw(super::new_exception(
-                    heap,
-                    ClassId::PINException,
-                    context,
-                )?));
+                let exception = super::new_exception(heap, ClassId::PINException, context)?;
+                heap.put_word_unconditional(exception, super::REASON_FIELD, 1)?;
+                return Ok(Native::Threw(exception));
             }
             let material = heap.new_array(heap::KIND_BYTE, max_size as u16, context)?;
             heap.put_word(this, KIND, tries as u16)?;
@@ -299,19 +297,17 @@ pub fn call(
             let this = frame.pop_reference()?;
             heap.check_access(source, context)?;
             let material = heap.get_word(this, MATERIAL)?;
-            if length < 0 || offset < 0 || length as u16 > heap.info(material)?.length {
-                return Err(Error::Bounds);
+            if length >= 0 && length as u16 > heap.info(material)?.length {
+                let exception = super::new_exception(heap, ClassId::PINException, context)?;
+                heap.put_word_unconditional(exception, super::REASON_FIELD, 1)?;
+                return Ok(Native::Threw(exception));
             }
-            let mut staging = [0u8; 32];
+            if length < 0 || offset < 0 { return Err(Error::Bounds); }
             let length = length as usize;
-            if length > staging.len() {
-                return Err(Error::Bounds);
-            }
-            staging[..length].copy_from_slice(heap.byte_slice(source, offset as usize, length)?);
-            // Admit the whole update before changing PIN bytes or metadata.
-            heap.remember_object(this)?;
-            heap.byte_slice_mut(material, 0, length)?
-                .copy_from_slice(&staging[..length]);
+            // Validate and reserve all conditional writes before publishing the new PIN.
+            heap.byte_slice(source, offset as usize, length)?;
+            heap.prepare_payload_writes(&[(this, SIZE * 2, 2), (this, COUNTER * 2, 2), (material, 0, length)])?;
+            heap.copy_bytes(source, offset as usize, material, 0, length)?;
             heap.put_word(this, SIZE, length as u16)?;
             // Updating resets the counter and clears the validated flag, JCRE §5.1.
             let tries = heap.get_word(this, KIND)?;
