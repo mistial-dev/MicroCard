@@ -2,15 +2,15 @@
 
 use libfuzzer_sys::fuzz_target;
 use microcard_core::{
+    Error, Result,
     apdu::Command,
     domains::Card,
     hal::{Entropy, LogicalGpio},
     journal::MemoryFlash,
     package::{
         AssemblyEntry, Dependency, DependencyExport, Limits, Manifest, StorageDeclaration,
-        VersionRange, CONTEXT,
+        VersionRange,
     },
-    Error, Result,
 };
 
 const DOMAIN: &str = "fuzz";
@@ -50,6 +50,31 @@ fn command(ins: u8, data: Vec<u8>) -> Command<'static> {
         data: data.into(),
         le: None,
     }
+}
+
+fn signed_package(manifest: &Manifest, image: &[u8], private: &[u8; 32]) -> Vec<u8> {
+    let metadata = manifest.encode_cbor_unchecked().unwrap();
+    let public = microcard_core::crypto::p256_public_key(private).unwrap();
+    let mut raw = microcard_core::package::envelope::signing_prefix(
+        &metadata,
+        image.len(),
+        &microcard_core::crypto::sha256(image),
+        &public,
+    )
+    .unwrap();
+    let signature = microcard_core::crypto::p256_ecdsa_sign_package(private, &raw).unwrap();
+    raw.extend(signature);
+    raw.extend(image);
+    raw
+}
+
+fn management_names(first: &str, second: &str) -> Vec<u8> {
+    let mut encoder = microcard_core::cbor::Encoder::new(134);
+    encoder.array(3).unwrap();
+    encoder.unsigned(1).unwrap();
+    encoder.text(first).unwrap();
+    encoder.text(second).unwrap();
+    encoder.finish()
 }
 
 fn package(incarnation: [u8; 16]) -> Vec<u8> {
@@ -103,20 +128,9 @@ fn package(incarnation: [u8; 16]) -> Vec<u8> {
             instructions: 100000,
         },
     };
-    let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/counter.mca");
     let private = [0x53; 32]; // public, test-only seed
-    let mut raw = b"MP04".to_vec();
-    raw.extend(CONTEXT);
-    raw.extend((metadata.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(metadata);
-    raw.extend(image);
-    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
-    let signature =
-        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
-    raw
+    signed_package(&manifest, image, &private)
 }
 
 fn core_package(incarnation: [u8; 16]) -> Vec<u8> {
@@ -132,7 +146,7 @@ fn core_package(incarnation: [u8; 16]) -> Vec<u8> {
         },
         entry_points: Vec::new(),
         dependencies: Vec::new(),
-        capabilities: Vec::new(),
+        capabilities: vec![53],
         storage: Vec::new(),
         limits: Limits {
             arena: 16384,
@@ -141,20 +155,9 @@ fn core_package(incarnation: [u8; 16]) -> Vec<u8> {
             instructions: 100000,
         },
     };
-    let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/mscorlib.mca");
     let private = [0x11; 32];
-    let mut raw = b"MP04".to_vec();
-    raw.extend(CONTEXT);
-    raw.extend((metadata.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(metadata);
-    raw.extend(image);
-    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
-    let signature =
-        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
-    raw
+    signed_package(&manifest, image, &private)
 }
 
 fn key_operations_package(incarnation: [u8; 16]) -> Vec<u8> {
@@ -235,20 +238,9 @@ fn key_operations_package(incarnation: [u8; 16]) -> Vec<u8> {
             instructions: 100000,
         },
     };
-    let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/key_operations.mca");
     let private = [0x53; 32];
-    let mut raw = b"MP04".to_vec();
-    raw.extend(CONTEXT);
-    raw.extend((metadata.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(metadata);
-    raw.extend(image);
-    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
-    let signature =
-        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
-    raw
+    signed_package(&manifest, image, &private)
 }
 
 fn provider_package(incarnation: [u8; 16], version: u32) -> Vec<u8> {
@@ -273,24 +265,15 @@ fn provider_package(incarnation: [u8; 16], version: u32) -> Vec<u8> {
             instructions: 100000,
         },
     };
-    let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/kdf108.mca");
     let private = [0x11; 32];
-    let mut raw = b"MP04".to_vec();
-    raw.extend(CONTEXT);
-    raw.extend((metadata.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(metadata);
-    raw.extend(image);
-    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
-    let signature =
-        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
-    raw
+    signed_package(&manifest, image, &private)
 }
 
 fn consumer_package(incarnation: [u8; 16]) -> Vec<u8> {
-    let provider_key = microcard_core::crypto::signer_identity(&microcard_core::crypto::p256_public_key(&[0x11; 32]).unwrap());
+    let provider_key = microcard_core::crypto::signer_identity(
+        &microcard_core::crypto::p256_public_key(&[0x11; 32]).unwrap(),
+    );
     let manifest = Manifest {
         domain: DOMAIN.into(),
         incarnation,
@@ -331,20 +314,9 @@ fn consumer_package(incarnation: [u8; 16]) -> Vec<u8> {
             instructions: 100000,
         },
     };
-    let metadata = serde_json::to_vec(&manifest).unwrap();
     let image = include_bytes!("../fixtures/kdf108_consumer.mca");
     let private = [0x53; 32];
-    let mut raw = b"MP04".to_vec();
-    raw.extend(CONTEXT);
-    raw.extend((metadata.len() as u32).to_le_bytes());
-    raw.extend((image.len() as u32).to_le_bytes());
-    raw.extend(metadata);
-    raw.extend(image);
-    raw.extend(microcard_core::crypto::p256_public_key(&private).unwrap());
-    let signature =
-        microcard_core::crypto::p256_ecdsa_sign_package(&private, &raw).unwrap();
-    raw.extend(signature);
-    raw
+    signed_package(&manifest, image, &private)
 }
 
 fn manage(card: &mut Card<MemoryFlash, FuzzPlatform>, ins: u8, data: Vec<u8>) -> Result<Vec<u8>> {
@@ -369,7 +341,7 @@ fn create_domain(card: &mut Card<MemoryFlash, FuzzPlatform>) -> Result<()> {
     load(card, &key_operations_package(inc))?;
     load(card, &consumer_package(inc))?;
     for aid in AIDS {
-        manage(card, 0xec, serde_json::to_vec(&(DOMAIN, aid)).unwrap())?;
+        manage(card, 0xec, management_names(DOMAIN, aid))?;
     }
     Ok(())
 }
@@ -408,10 +380,10 @@ fuzz_target!(|data: &[u8]| {
                 let _ = card.invoke(aid, &args);
             }
             1 => {
-                let _ = manage(&mut card, 0xee, serde_json::to_vec(&(DOMAIN, aid)).unwrap());
+                let _ = manage(&mut card, 0xee, management_names(DOMAIN, aid));
             }
             2 => {
-                let _ = manage(&mut card, 0xec, serde_json::to_vec(&(DOMAIN, aid)).unwrap());
+                let _ = manage(&mut card, 0xec, management_names(DOMAIN, aid));
             }
             3 => {
                 let _ = card.select(aid);
@@ -450,33 +422,13 @@ fuzz_target!(|data: &[u8]| {
                 let _ = manage(&mut card, 0xea, Vec::new());
             }
             10 => {
-                let result = manage(
-                    &mut card,
-                    0xf0,
-                    serde_json::to_vec(&("ISD", "Kdf108")).unwrap(),
-                );
+                let result = manage(&mut card, 0xf0, management_names("ISD", "Kdf108"));
                 assert_eq!(result, Err(Error::Busy));
             }
             _ => {
-                if manage(
-                    &mut card,
-                    0xee,
-                    serde_json::to_vec(&(DOMAIN, AIDS[7])).unwrap(),
-                )
-                .is_ok()
-                {
-                    manage(
-                        &mut card,
-                        0xf0,
-                        serde_json::to_vec(&(DOMAIN, "Kdf108Consumer")).unwrap(),
-                    )
-                    .unwrap();
-                    manage(
-                        &mut card,
-                        0xf0,
-                        serde_json::to_vec(&("ISD", "Kdf108")).unwrap(),
-                    )
-                    .unwrap();
+                if manage(&mut card, 0xee, management_names(DOMAIN, AIDS[7])).is_ok() {
+                    manage(&mut card, 0xf0, management_names(DOMAIN, "Kdf108Consumer")).unwrap();
+                    manage(&mut card, 0xf0, management_names("ISD", "Kdf108")).unwrap();
                     let record = manage(&mut card, 0xe2, vec![0]).unwrap();
                     let offset = 4 + usize::from(record[3]);
                     let incarnation = record[offset..offset + 16].try_into().unwrap();
@@ -485,11 +437,7 @@ fuzz_target!(|data: &[u8]| {
                     let offset = 4 + usize::from(record[3]);
                     let incarnation = record[offset..offset + 16].try_into().unwrap();
                     load(&mut card, &consumer_package(incarnation)).unwrap();
-                    let _ = manage(
-                        &mut card,
-                        0xec,
-                        serde_json::to_vec(&(DOMAIN, AIDS[7])).unwrap(),
-                    );
+                    let _ = manage(&mut card, 0xec, management_names(DOMAIN, AIDS[7]));
                 }
             }
         }

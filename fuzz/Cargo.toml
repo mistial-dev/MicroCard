@@ -7,7 +7,6 @@ publish=false
 cargo-fuzz=true
 [dependencies]
 libfuzzer-sys="0.4"
-serde_json="1"
 microcard-core={path="../crates/microcard-core",features=["fuzzing"]}
 [[bin]]
 name="boundaries"
