@@ -381,8 +381,12 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
         MethodId::isCommandChainingCLA | MethodId::isSecureMessagingCLA => {
             frame.pop_reference()?;
             let cla = heap.byte_slice(jcre.buffer, 0, 1)?[0];
-            let bit = if name == MethodId::isCommandChainingCLA { 0x10 } else { 0x0c };
-            frame.push_short((cla & bit != 0) as i16)?;
+            // Further-channel encoding uses b6 for secure messaging; b4/b3
+            // are channel bits. Reserved and invalid CLA values report neither flag.
+            let valid = cla & 0xe0 != 0x20 && cla != 0xff;
+            let bit = if name == MethodId::isCommandChainingCLA { 0x10 }
+                else if cla & 0x40 != 0 { 0x20 } else { 0x0c };
+            frame.push_short((valid && cla & bit != 0) as i16)?;
         }
         MethodId::getProtocol => {
             // A contacted card. An applet that refuses contactless selection reads this,
@@ -986,6 +990,33 @@ mod tests {
             &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]), Err(Error::Storage)));
         assert_eq!(heap.get_word(pin, 4), Ok(2), "failure must stop before a matching PIN resets retries");
         assert_eq!(heap.get_word(pin, 3), Ok(0));
+    }
+
+    #[test]
+    fn apdu_cla_flags_follow_channel_encoding_and_reject_reserved_values() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let buffer = heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut jcre = Jcre::new(0, buffer);
+        // Java Card 3.0.5 APDU: first/further channel encodings, proprietary
+        // classes, the reserved 001 range, and the invalid FF class.
+        for (cla, chaining, secure) in [
+            (0x00, false, false), (0x03, false, false), (0x04, false, true),
+            (0x08, false, true), (0x1c, true, true), (0x10, true, false),
+            (0x40, false, false), (0x4c, false, false), (0x60, false, true),
+            (0x5f, true, false), (0x7f, true, true), (0x84, false, true),
+            (0xcc, false, false), (0xe0, false, true), (0x20, false, false),
+            (0x3c, false, false), (0xff, false, false),
+        ] {
+            heap.byte_slice_mut(buffer, 0, 1).unwrap()[0] = cla;
+            for (method, expected) in [(MethodId::isCommandChainingCLA, chaining),
+                (MethodId::isSecureMessagingCLA, secure)] {
+                frame.push_reference(0).unwrap();
+                assert!(matches!(apdu(method, &mut heap, &mut frame, &mut jcre, 1), Ok(Native::Returned)));
+                assert_eq!(frame.pop_short(), Ok(i16::from(expected)), "CLA {cla:02x}");
+            }
+        }
     }
 
     #[test]

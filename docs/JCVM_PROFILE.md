@@ -70,6 +70,10 @@ unprotected CLA. GP management commands are dispatched only in class `80` after
 transport verification. Basic-channel plain `00`/`10` APDUs can select and invoke
 applets without inheriting SCP03 authority; the applet enforces its own access policy.
 Protected command chaining uses `14`/`94` with the complete CLA covered by C-MAC.
+Native APDU CLA queries follow the [Java Card 3.0.5 encoding rules](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/APDU.html):
+secure messaging uses bits 4/3 for channels 0–3 and bit 6 for channels 4–19;
+chaining uses bit 5. Both queries return false for reserved `20`–`3F` and invalid
+`FF` classes. Decoding these flags does not authorize additional transport channels.
 MC04 continues to require SCP03. The former JCVM INS 10 tunnel is no longer decoded.
 SELECT calls `select()` and then `process()` with the
 selection flag, returning the applet's data and status. A refusal leaves no selection;
