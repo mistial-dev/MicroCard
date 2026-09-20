@@ -224,6 +224,20 @@ pub trait CryptoProvider {
 
     software_method!(
         "software-aes",
+        fn aes_ccm_encrypt_in_place(
+            &mut self,
+            key: &[u8; 16],
+            nonce: &[u8; 13],
+            aad: &[u8],
+            plaintext_and_tag: &mut [u8],
+        ) -> Result<usize> {
+            let result = ccm_encrypt_in_place(key, nonce, aad, plaintext_and_tag);
+            clear_output_on_error(plaintext_and_tag, result)
+        }
+    );
+
+    software_method!(
+        "software-aes",
         fn aes_ccm_decrypt(
             &mut self,
             key: &[u8; 16],
@@ -519,26 +533,30 @@ pub fn ccm_encrypt_into(
     plaintext: &[u8],
     output: &mut [u8],
 ) -> Result<usize> {
-    use ccm::{
-        aead::AeadInPlace,
-        consts::{U13, U16},
-    };
     let required = plaintext.len().checked_add(16).ok_or(Error::Bounds)?;
-    if output.len() < required {
-        return Err(Error::Bounds);
-    }
-    let c = ccm::Ccm::<Aes128, U16, U13>::new(key.into());
+    if output.len() < required { return Err(Error::Bounds); }
     output[..plaintext.len()].copy_from_slice(plaintext);
-    let tag = match c.encrypt_in_place_detached(nonce.into(), aad, &mut output[..plaintext.len()]) {
-        Ok(tag) => tag,
-        Err(_) => {
-            output[..required].zeroize();
-            return Err(Error::Native);
-        }
-    };
-    output[plaintext.len()..required].copy_from_slice(&tag);
-    Ok(required)
+    ccm_encrypt_in_place(key, nonce, aad, &mut output[..required])
 }
+
+/// Encrypt the message followed by exactly sixteen writable tag bytes.
+#[cfg(feature = "software-aes")]
+pub fn ccm_encrypt_in_place(
+    key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], buffer: &mut [u8],
+) -> Result<usize> {
+    use ccm::{aead::AeadInPlace, consts::{U13, U16}};
+    let result = (|| {
+        let length = buffer.len().checked_sub(16).ok_or(Error::Bounds)?;
+        let (message, output_tag) = buffer.split_at_mut(length);
+        let cipher = ccm::Ccm::<Aes128, U16, U13>::new(key.into());
+        let tag = cipher.encrypt_in_place_detached(nonce.into(), aad, message)
+            .map_err(|_| Error::Native)?;
+        output_tag.copy_from_slice(&tag);
+        Ok(length + 16)
+    })();
+    clear_output_on_error(buffer, result)
+}
+
 #[cfg(feature = "software-aes")]
 pub fn ccm_decrypt(
     key: &[u8; 16],
@@ -950,11 +968,20 @@ mod p256_tests {
     }
 
     #[test]
-    fn ccm_decryption_reuses_and_clears_the_input_buffer() {
+    fn ccm_reuses_and_clears_the_input_buffer() {
         let key = [0x11; 16];
         let nonce = [0x22; 13];
         let plaintext = b"authenticated journal state";
         let ciphertext = ccm_encrypt(&key, &nonce, b"header", plaintext).unwrap();
+        let mut encrypted = plaintext.to_vec();
+        encrypted.resize(plaintext.len() + 16, 0);
+        let original_buffer = encrypted.as_ptr();
+        assert_eq!(SoftwareCrypto.aes_ccm_encrypt_in_place(&key, &nonce, b"header", &mut encrypted), Ok(ciphertext.len()));
+        assert_eq!(encrypted.as_ptr(), original_buffer);
+        assert_eq!(encrypted, ciphertext);
+        let mut short = [0x55; 15];
+        assert_eq!(SoftwareCrypto.aes_ccm_encrypt_in_place(&key, &nonce, b"header", &mut short), Err(Error::Bounds));
+        assert_eq!(short, [0; 15]);
         let mut recovered = ciphertext.clone();
         let buffer = recovered.as_ptr();
 

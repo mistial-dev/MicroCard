@@ -328,6 +328,8 @@ pub mod conformance {
         let mut in_place = ccm;
         require(provider.aes_ccm_decrypt_in_place(&ccm_key, &nonce, &[], &mut in_place)? == 24)?;
         require(in_place[..24] == payload && in_place[24..] == [0; 16])?;
+        require(provider.aes_ccm_encrypt_in_place(&ccm_key, &nonce, &[], &mut in_place)? == 40)?;
+        require(in_place == expected_ccm)?;
         ccm[39] ^= 1;
         let mut in_place = ccm;
         require(
@@ -340,6 +342,9 @@ pub mod conformance {
             provider.aes_ccm_decrypt_in_place(&ccm_key, &nonce, &[], &mut truncated)
                 == Err(Error::Authentication),
         )?;
+        require(truncated == [0; 15])?;
+        truncated.fill(0xa5);
+        require(provider.aes_ccm_encrypt_in_place(&ccm_key, &nonce, &[], &mut truncated) == Err(Error::Bounds))?;
         require(truncated == [0; 15])?;
         opened.fill(0xa5);
         require(

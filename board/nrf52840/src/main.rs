@@ -493,6 +493,21 @@ mod cc310 {
     }
 
     #[cfg(feature = "cc310-ccm")]
+    pub(super) fn aes128_ccm_encrypt_in_place(
+        key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], buffer: &mut [u8],
+    ) -> i32 {
+        let Some(length) = buffer.len().checked_sub(16) else { return -1; };
+        // Pass raw pointers through FFI, never overlapping Rust references.
+        let pointer = buffer.as_mut_ptr();
+        unsafe {
+            microcard_cc310_aes128_ccm_encrypt(
+                key.as_ptr(), key.len(), nonce.as_ptr(), nonce.len(),
+                aad.as_ptr(), aad.len(), pointer, length, pointer, buffer.len(),
+            )
+        }
+    }
+
+    #[cfg(feature = "cc310-ccm")]
     pub(super) fn aes128_ccm_decrypt(
         key: &[u8; 16],
         nonce: &[u8; 13],
@@ -1112,6 +1127,20 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
                 Err(Error::Native)
             };
         microcard_core::crypto::clear_output_on_error(output, result)
+    }
+
+    #[cfg(feature = "cc310-ccm")]
+    fn aes_ccm_encrypt_in_place(
+        &mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], buffer: &mut [u8],
+    ) -> Result<usize> {
+        let result = (|| {
+            self.ensure_cc310()?;
+            if buffer.len() < 16 { return Err(Error::Bounds); }
+            if cc310::aes128_ccm_encrypt_in_place(key, nonce, aad, buffer) == 0 {
+                Ok(buffer.len())
+            } else { Err(Error::Native) }
+        })();
+        microcard_core::crypto::clear_output_on_error(buffer, result)
     }
 
     #[cfg(feature = "cc310-ccm")]

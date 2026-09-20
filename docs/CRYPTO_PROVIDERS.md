@@ -29,6 +29,11 @@ The same verified projection supports `System.Security.Cryptography.RandomNumber
 Focused pointer-identity coverage fixes the host boundary at zero input copies and one output allocation: the provider observes the stored key address and the original managed-heap message address, its output address becomes the returned key-service vector, and VM heap adoption preserves that vector's address. Fixed provider scratch remains stack-owned and zeroized where it can contain secret-derived bytes. Physical CC310 bridge and vendor-internal copy costs remain a separate device measurement.
 
 CBC and CCM providers also borrow their inputs and write into caller-owned output buffers.
+CCM additionally exposes in-place encryption of a message followed by sixteen tag
+bytes. It clears the whole buffer on failure. The shared known-answer runner checks
+this contract for software and board providers; physical CC310 aliasing validation
+remains required. Journal commits still use separate snapshot and ciphertext buffers
+until the ownership transfer is integrated.
 Unpadded CBC transforms complete blocks in place through the same provider boundary;
 empty or partial-block input is rejected and cleared. The board sends the complete
 buffer to CC310 in one operation. Padded CBC shares this path. The Rust fallback performs both operations in place within that buffer and clears recovered plaintext when padding or authentication fails. The domain key service allocates one bounded result buffer and rejects a provider-reported length outside it. `Heap::allocate_bytes` then moves that same vector allocation into the VM object table. A pointer-identity test proves the transfer does not copy the result buffer.
