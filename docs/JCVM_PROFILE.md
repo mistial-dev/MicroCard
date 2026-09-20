@@ -437,6 +437,20 @@ per commit/encryption attempt, limiting each to 32,768 values. Incremental recor
 must account for this lifetime limit while preserving nonce uniqueness and rollback
 protection; changing only the payload encoding cannot close the gap.
 
+For a reproducible host write-traffic baseline, build `microcard-sim` with
+`--features heap-metrics`, set `MICROCARD_FLASH_REPORT` to a fresh JSONL path, and
+run `scripts/jcvm_transport_acceptance.py`. Each completed journal-slot erase,
+program, nonce reservation, and generation advance emits its operation, requested
+byte count, and slot size. Records contain no state contents. Reporting is optional
+and does not change storage errors; a missing report must not be treated as zero I/O.
+This counts successful operations, not partially completed writes, physical NVMC
+word traffic, image writes, or counter-page initialization.
+
+The host lifecycle baseline at `95c5c37` with instrumentation recorded 114 slot
+erases (6,897,664 bytes), 426 program calls (1,179,061 bytes), 110 nonce reservations,
+and 108 generation advances. The acceptance run passed. Counts aggregate setup and
+all simulator sessions in the workload; they are not a single-card lifetime estimate.
+
 Closing this gap requires bounded authenticated write records for heap and static
 changes, ordered before execution proceeds past the persistent operation. Recovery
 must apply committed records to the last snapshot, preserve transaction atomicity,

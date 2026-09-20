@@ -10,6 +10,19 @@ use std::{
 const MONOTONIC_BYTES: usize = 65536;
 const IO_CHUNK_BYTES: usize = 4096;
 
+// Optional host diagnostics contain geometry and counts, never flash contents.
+fn record_flash(operation: &str, bytes: usize, slot_bytes: usize) {
+    #[cfg(feature = "heap-metrics")]
+    if let Some(path) = std::env::var_os("MICROCARD_FLASH_REPORT") {
+        if let Ok(mut file) = private_open_options().create(true).append(true).open(path) {
+            let _ = writeln!(file,
+                "{{\"operation\":\"{operation}\",\"bytes\":{bytes},\"slot_bytes\":{slot_bytes}}}");
+        }
+    }
+    #[cfg(not(feature = "heap-metrics"))]
+    let _ = (operation, bytes, slot_bytes);
+}
+
 pub(crate) type FileFlash = Region<65536, 16384, 64>;
 
 pub(crate) struct Region<const SLOT: usize, const IMAGE: usize, const COUNT: usize> {
@@ -241,7 +254,9 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Flash
         Self::read_counter_file(&self.monotonic_path())
     }
     fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
-        Self::advance_counter_file(&self.monotonic_path(), generation)
+        Self::advance_counter_file(&self.monotonic_path(), generation)?;
+        record_flash("generation", 4, SLOT);
+        Ok(())
     }
     fn nonce_generation(&self) -> Result<u64> {
         Self::read_counter_file(&self.dir.join("nonces.bin"))
@@ -252,6 +267,7 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Flash
             .checked_add(1)
             .ok_or(Error::Quota)?;
         Self::advance_counter_file(&self.dir.join("nonces.bin"), next)?;
+        record_flash("nonce", 4, SLOT);
         Ok(next)
     }
     fn is_erased(&self, s: usize) -> Result<bool> {
@@ -286,9 +302,13 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Flash
         file.read_exact(output).map_err(|_| Error::Storage)
     }
     fn erase(&mut self, s: usize) -> Result<()> {
-        Self::erase_file(&self.path(s), self.slot_size())
+        Self::erase_file(&self.path(s), self.slot_size())?;
+        record_flash("erase", self.slot_size(), SLOT);
+        Ok(())
     }
     fn program(&mut self, s: usize, o: usize, b: &[u8]) -> Result<()> {
-        Self::program_file(&self.path(s), self.slot_size(), o, b)
+        Self::program_file(&self.path(s), self.slot_size(), o, b)?;
+        record_flash("program", b.len(), SLOT);
+        Ok(())
     }
 }
