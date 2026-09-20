@@ -124,6 +124,14 @@ board's reserved heap.
   borrows mapped staging ciphertext; its physical peak remains unmeasured. Bound supported workloads and
   board allocations before declaring this path ready for hardware. Host figures
   exclude allocator metadata and stack and include file-backed image reads.
+  At clean revision `a18c7b9`, a 24,000-byte certificate capacity completes the same
+  lifecycle at **250,609 host-requested bytes** (`work/jcvm-24k-certificate-heap.json`).
+  A 32,767-byte capacity fails object creation with `6F00`; the applet allocates two
+  such arrays, which cannot fit the configured 64 KiB VM heap with their headers.
+  Its 194,804-byte failed-run peak is not a qualification result
+  (`work/jcvm-max-certificate-heap.json`). The acceptance runner's argument range is
+  an allocation probe, not a promise that every capacity is supported. A supported
+  personalization profile must budget all current and replacement buffers together.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
