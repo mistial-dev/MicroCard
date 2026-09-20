@@ -80,3 +80,9 @@ Board size checks use persistent per-profile target directories under
 `board/nrf52840/target/profiles/`. Separate gate invocations cannot substitute another
 profile's ELF or link map between the build and inspection. The first run fills each
 profile's cache; later runs reuse it.
+
+The gate reports every exceeded ceiling and writes revision/dirty-tree evidence to
+`work/board-budget-latest.json` after all profiles link and pass isolation checks.
+Running `python3 scripts/board_budgets.py` refreshes the documented measurements even
+when budgets fail; its exit status remains nonzero. `--check` leaves the documented
+report untouched and also rejects stale measurements. Neither mode changes ceilings.

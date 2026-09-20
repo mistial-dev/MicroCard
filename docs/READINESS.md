@@ -76,8 +76,8 @@ board's reserved heap.
   revision and engine are unknown. The current JCVM dongle links at 197,224 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
-  optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded
-  passing budget report predates EC integration and must be refreshed for final release.
+  optimization. The unchanged 178,000-byte optimization ceiling still fails; the
+  refreshed budget report records current failures rather than historical passing sizes.
   The 2026-09-20 checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build stages,
   then failed the board budget gate. After shared snapshot ownership changes, MC04
   hardware release text is 212,316 bytes against 212,000, and software reference text

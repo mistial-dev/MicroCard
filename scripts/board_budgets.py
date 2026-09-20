@@ -102,22 +102,31 @@ def main():
         "dongle": 224_000, "jcvm_development_debug": 168_000,
         "jcvm_dongle": 178_000,
     }
+    failures = []
     for name, result in variants.items():
         result["ceilings"] = {"text_bytes": text_limits[name],
             "data_bytes": 0 if name == "software_reference" else 160,
             "bss_bytes": 199_000}
         for field, ceiling in result["ceilings"].items():
             if result[field] > ceiling:
-                raise SystemExit(f"{name} {field} {result[field]} exceeds {ceiling}")
-    output = json.dumps(
-        {"format": 1, "target": "thumbv7em-none-eabihf", "variants": variants},
-        indent=2,
-    ) + "\n"
+                failures.append(f"{name} {field} {result[field]} exceeds {ceiling}")
+    report = {"format": 1, "target": "thumbv7em-none-eabihf", "variants": variants,
+              "budgets_passed": not failures, "budget_failures": failures}
+    output = json.dumps(report, indent=2) + "\n"
+    evidence = ROOT / "work/board-budget-latest.json"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
+    evidence.write_text(json.dumps({**report, "source_revision": revision,
+                                    "working_tree_dirty": dirty}, indent=2) + "\n")
+    print(f"Board measurements: {evidence.relative_to(ROOT)}", flush=True)
     if args.check:
-        if DESTINATION.read_text() != output:
-            raise SystemExit("docs/BOARD_BUDGETS.json is stale")
+        if not DESTINATION.exists() or DESTINATION.read_text() != output:
+            failures = [*failures, "docs/BOARD_BUDGETS.json is stale"]
     else:
         DESTINATION.write_text(output)
+    if failures:
+        raise SystemExit("Board budget gate failed:\n  " + "\n  ".join(failures))
     print(
         "PASS: MC04 and JCVM engine isolation, configuration, and flash/RAM budgets "
         f"({variants['development_debug']['text_bytes']} text bytes development, "
