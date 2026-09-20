@@ -121,8 +121,9 @@ pub(super) fn call(class: ClassId, method: MethodId, heap: &mut Heap,
             staged[bytes - length as usize..bytes].copy_from_slice(heap.byte_slice(array, offset as usize, length as usize)?);
             if !host.p256_key_valid(private, &staged[..bytes])? { return crypto_exception(heap, context, 1).map(Some); }
             let material = material(heap, key, context)?;
-            heap.byte_slice_mut(material, 1, bytes)?.copy_from_slice(&staged[..bytes]);
-            heap.byte_slice_mut(material, 0, 1)?[0] |= 0x40;
+            let destination = heap.byte_slice_mut(material, 0, bytes + 1)?;
+            destination[1..].copy_from_slice(&staged[..bytes]);
+            destination[0] |= 0x40;
         }
         MethodId::getS | MethodId::getW => {
             let offset = frame.pop_short()?;
@@ -322,6 +323,27 @@ mod tests {
             assert!(value[..31].iter().all(|byte| *byte == 0));
             assert_eq!(value[31], 7);
             assert!(!initialized(&heap, key).unwrap());
+        }
+        host.fail = false;
+        heap.array_put(array, 3, 9).unwrap();
+        let before = heap.image().to_vec();
+        for capacity in [38, 39] {
+            heap.begin_transaction(capacity).unwrap();
+            frame.push_reference(key).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(3).unwrap();
+            frame.push_short(1).unwrap();
+            let result = call(ClassId::ECPrivateKey, MethodId::setS,
+                &mut heap, &mut host, &mut frame, 1);
+            if capacity == 38 {
+                assert!(matches!(result, Err(Error::TransactionFull)));
+                heap.commit_transaction().unwrap();
+            } else {
+                assert!(matches!(result, Ok(Some(Native::Returned))));
+                assert_ne!(heap.image(), before);
+                assert!(!heap.abort_transaction(&mut []).unwrap());
+            }
+            assert_eq!(heap.image(), before);
         }
         frame.push_reference(key).unwrap();
         frame.push_reference(array).unwrap();

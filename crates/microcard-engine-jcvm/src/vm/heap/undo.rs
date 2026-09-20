@@ -23,6 +23,12 @@ impl Undo {
 
     pub(super) fn remaining(&self) -> usize { self.limit - self.records.len() }
 
+    pub(super) fn rewind(&mut self, remaining: usize) {
+        let length = self.limit - remaining;
+        self.records[length..].zeroize();
+        self.records.truncate(length);
+    }
+
     pub(super) fn record(&mut self, at: usize, before: &[u8], statics: bool) -> Result<()> {
         if before.is_empty() { return Ok(()); }
         let end = at.checked_add(before.len()).ok_or(Error::Bounds)?;

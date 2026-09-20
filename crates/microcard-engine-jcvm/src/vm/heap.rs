@@ -480,6 +480,23 @@ impl<'a> Heap<'a> {
         Ok(())
     }
 
+    /// Reserve before-images for a compound write before publishing any component.
+    /// Failure releases only these reservations, preserving earlier transaction writes.
+    pub(crate) fn prepare_byte_writes(&mut self, spans: &[(Reference, usize, usize)]) -> Result<()> {
+        for &(reference, offset, length) in spans {
+            self.byte_slice(reference, offset, length)?;
+        }
+        let Some(remaining) = self.transaction_remaining() else { return Ok(()); };
+        for &(reference, offset, length) in spans {
+            let info = self.info(reference)?;
+            if let Err(error) = self.remember(reference as usize + HEADER + offset, length, info) {
+                if let Some((_, undo)) = &mut self.transaction { undo.rewind(remaining); }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
     pub fn byte_slice_mut(
         &mut self,
         reference: Reference,
@@ -578,6 +595,19 @@ mod tests {
         let mut heap = Heap::new(&mut bytes).unwrap();
         let array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
         let transient = heap.new_transient_array(KIND_BYTE, 1, 1, CLEAR_ON_DESELECT).unwrap();
+        heap.begin_transaction(24).unwrap();
+        heap.byte_slice_mut(array, 0, 4).unwrap().fill(1);
+        assert_eq!(heap.prepare_byte_writes(&[(array, 4, 2), (array, 6, 2)]),
+            Err(Error::TransactionFull));
+        assert_eq!(heap.transaction_remaining(), Some(14));
+        assert_eq!(heap.prepare_byte_writes(&[(array, 4, 2), (array, 8, 1)]), Err(Error::Bounds));
+        assert_eq!(heap.transaction_remaining(), Some(14));
+        heap.prepare_byte_writes(&[(array, 0, 4), (transient, 0, 1)]).unwrap();
+        assert_eq!(heap.transaction_remaining(), Some(14));
+        heap.array_put(transient, 0, 3).unwrap();
+        assert!(!heap.abort_transaction(&mut []).unwrap());
+        assert_eq!(heap.byte_slice(array, 0, 8).unwrap(), &[0; 8]);
+        assert_eq!(heap.array_get(transient, 0), Ok(3));
         heap.begin_transaction(10).unwrap(); // Four payload bytes and six metadata bytes.
         heap.byte_slice_mut(array, 0, 4).unwrap().fill(1);
         assert_eq!(heap.transaction_remaining(), Some(0));

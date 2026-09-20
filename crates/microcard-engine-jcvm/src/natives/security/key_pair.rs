@@ -75,6 +75,7 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     let mut scalar = Zeroizing::new([0; 32]);
     let mut point = Zeroizing::new([0; 65]);
     host.p256_generate(&mut scalar, &mut point)?;
+    heap.prepare_byte_writes(&[(public_material, 0, 66), (private_material, 0, 33)])?;
     heap.byte_slice_mut(public_material, 1, 65)?.copy_from_slice(&point[..]);
     heap.byte_slice_mut(private_material, 1, 32)?.copy_from_slice(&scalar[..]);
     // Every accepted parameter set is the same fixed curve, including default K=1.
@@ -159,5 +160,27 @@ mod tests {
                 assert!(bytes[usize::from(key == public)..].iter().all(|byte| *byte == expected));
             }
         }
+        // A caller may catch TransactionFull and commit; neither component may change.
+        host.fail = false;
+        for key in [public, private] {
+            let array = heap.get_word(key, MATERIAL).unwrap();
+            heap.byte_slice_mut(array, 2, 1).unwrap()[0] = 3;
+        }
+        let before = heap.image().to_vec();
+        heap.begin_transaction(80).unwrap();
+        frame.push_reference(alias).unwrap();
+        assert!(matches!(call(MethodId::genKeyPair, signature(false), &mut heap,
+            &mut host, &mut frame, 1, &mut 97), Err(Error::TransactionFull)));
+        assert_eq!(heap.transaction_remaining(), Some(80));
+        heap.commit_transaction().unwrap();
+        assert_eq!(heap.image(), before);
+        heap.begin_transaction(111).unwrap();
+        frame.push_reference(alias).unwrap();
+        assert!(matches!(call(MethodId::genKeyPair, signature(false), &mut heap,
+            &mut host, &mut frame, 1, &mut 97), Ok(Native::Returned)));
+        assert_eq!(heap.transaction_remaining(), Some(0));
+        assert_ne!(heap.image(), before);
+        assert!(!heap.abort_transaction(&mut []).unwrap());
+        assert_eq!(heap.image(), before);
     }
 }
