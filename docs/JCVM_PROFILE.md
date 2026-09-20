@@ -370,14 +370,47 @@ live transaction. PIN validation and transient buffers remain absent from snapsh
 Checkpoint failure stops execution; host cancellation tests confirm a consumed attempt
 survives recovery. Installation still publishes only its completed state.
 
-**Durability is still incomplete:** other persistent writes outside explicit
-transactions still rely on successful APDU completion. Connect these boundaries
+Cooperative cancellation saves uncheckpointed ordinary persistent writes using the
+same committed-state projection. Successful checkpoints clear the write marker;
+transactional and transient writes alone do not trigger another snapshot. Storage
+failure stops execution instead of reporting a successful cancellation checkpoint.
+
+**Durability is still incomplete:** arbitrary power loss between ordinary persistent
+writes and a checkpoint can still lose those writes. Connect these boundaries
 to storage, finish native-API transaction auditing, and
 test interrupted provisioning before
 claiming Java Card transaction guarantees. A passing simulator workflow does not
 establish those guarantees or physical execution.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
+
+## Upstream test coverage
+
+Our acceptance scripts do not run the complete OpenPhysical suite. The fixture and
+this inventory use upstream revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
+
+- **Applet unit tests:** upstream `ant test` and `test-all` execute Java classes in
+  its JVM emulator. The eight variants cover standard/FIPS, CS2/CS7, and attestation
+  on/off. Passing these upstream does not prove that our CAP interpreter works.
+- **NIST command vectors:** the [upstream runner](https://github.com/OpenPhysical/OpenFIPS201/blob/9f3b99bd0f2600beea7e5c053613d8baef2b7716/tools/piv_test_runner/README.md)
+  requires a separately installed NIST PIV Test Runner 5.0.1 package. Its harness
+  accepts `emulator` or `pcsc`; neither currently connects to MicroCard. Its
+  `NistCardTransport` interface supplies transmit, reset, ATR, and close operations.
+  A MicroCard adapter must preserve reset and persistent state semantics and identify
+  unsupported contactless behavior rather than impersonating a contactless reader.
+- **Personalized data and VCI:** upstream wrappers provision GSA ICAM objects and
+  run SP 800-85B or CS2/CS7 matrices. These require matching credentials, objects,
+  profiles, and crypto support. RSA, P-384, SHA-384, and 3DES gaps prevent claiming
+  all-profile coverage; unsupported cases must remain explicit in results.
+- **Current MicroCard evidence:** `piv_vector_acceptance.py` checks selected blank-card
+  command status words, not captured personalized responses. `jcvm_transport_acceptance.py`
+  exercises signed loading, authentication, PIN-gated P-256 signing, certificate
+  replacement, and recovery using the standard CS2, attestation-disabled fixture.
+
+To extend coverage, first connect the upstream transport to the persistent managed
+simulator and retain vector identifiers, configuration and applet hashes, and separate
+pass/fail/unsupported results. Start with the supported P-256 profile. Do not count
+upstream JVM results, skipped vectors, or altered expectations as interpreter passes.
 
 ## Authorization
 

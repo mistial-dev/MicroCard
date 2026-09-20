@@ -59,8 +59,8 @@ further byte of command data.
 
 A blank card answering that an object is absent is still the applet's own answer. It reaches
 that answer through its own dispatch, its own data model and its own PIN state, so a wrong
-status word means the engine mis-ran the applet. What this fixture cannot prove is anything
-about personalised data or cryptographic operations, because the engine has no cipher,
-signature or key agreement operations yet.
+status word means the engine mis-ran the applet. This fixture does not exercise personalised data or cryptographic operations.
+Those paths are covered separately by `scripts/jcvm_transport_acceptance.py`; neither
+script runs the complete upstream suite. See the [coverage boundary](../../../../docs/JCVM_PROFILE.md#upstream-test-coverage).
 
 Replay it with `python3 scripts/piv_vector_acceptance.py`, which takes no arguments.
