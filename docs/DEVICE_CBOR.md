@@ -230,7 +230,8 @@ receive a fresh installation identity and derived key before reuse.
 failure. The registry coordinator verifies code, commits installation before metadata,
 and reopens only the committed heap. Missing or incompatible committed state fails
 without reinstalling. The core transport adapter connects this coordinator to
-authenticated GlobalPlatform management. Board partitioning remains incomplete.
+authenticated GlobalPlatform management. Both supported board layouts reserve dedicated registry and applet heap regions;
+see [the board layout](BOARD.md).
 
 ## Migration status
 

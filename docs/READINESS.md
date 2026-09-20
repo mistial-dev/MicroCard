@@ -77,34 +77,17 @@ board's reserved heap.
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
   reboot does not preserve PIN validation. These do not establish hardware execution.
-- Complete JCVM transaction durability and the remaining native API audit against
-  Java Card 3.0.5. In-command commits checkpoint before releasing undo; cancellation
-  checkpoints ordinary writes while excluding open transactions. Completed callbacks
-  persist before late cancellation suppresses the response. Completed bytecode
-  instructions now checkpoint ordinary writes before advancing or returning; native
-  internal failure boundaries still require audit. The 32,768-value board nonce and
-  generation counters require renewal before exhaustion. The [renewal design](STORAGE.md#jcvm-counter-renewal)
-  uses protected upload staging and a registry-authorized key change. Registry v2
-  records pending ownership and blocks ordinary use. Startup now authenticates and
-  restores the protected copy before publishing its new identity. The writer stages
-  live committed state without changing the old bank or selection. Command-boundary
-  maintenance renews low counters and retains the live applet through journal handoff.
-  Root registry counters remain finite; renewal peak memory and board service life
-  still need qualification.
-  Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
-  allocation-abort session termination, key updates, crypto initialization and persistence
-  failure. PIN presentation checkpoints consume retries outside transactions, including
-  invalid inputs; PIN construction reserves allocation and undo capacity before changing
-  fields, so a caught capacity error cannot commit partial initialization. Both
-  KeyPair constructors reserve their complete container update before publishing
-  references; the allocating form preflights both component objects. Recovery accepts
-  the exact zero KeyPair state between NEW and construction, while rejecting partial
-  initialization. PIN
-  replacement reserves its complete conditional update and honors
-  the configured capacity. Runtime exception reasons clear on reset; recovery and
-  reference stores enforce temporary-object restrictions. Installation parameters use
-  the protected global buffer. See [JCVM semantics and source clauses](JCVM_PROFILE.md)
-  for the supported behavior and remaining exclusions.
+- Complete the remaining JCVM native API audit against Java Card 3.0.5, including
+  internal failure boundaries. Instruction, transaction, PIN, and lifecycle changes
+  checkpoint committed state while excluding open applet transactions. Existing tests
+  cover rollback, allocation and undo exhaustion, partial construction, cancellation,
+  failed providers, and failed persistence. [JCVM semantics](JCVM_PROFILE.md) records
+  the exact supported behavior and source clauses.
+- Qualify journal renewal capacity and memory for all supported workloads. Automatic
+  command-boundary renewal preserves the live applet and uses authenticated staging
+  to recover interrupted bank replacement. Root registry counters remain finite;
+  host memory bounds remain required, with physical service-life testing later.
+  See [renewal and recovery invariants](STORAGE.md#jcvm-counter-renewal).
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
   revision and engine are unknown. The current JCVM dongle links at 222,184 text bytes,
@@ -171,9 +154,10 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The renewal checkpoint
-at clean revision `8601fde` took 57.646 seconds with two workers and incremental
-rebuilding (`work/checkpoint-renewal.json`). Host, Java wallet, recovery, generated
+reuses outputs with bounded workers and isolated logs/state. The lifecycle checkpoint
+started at clean revision `5a0df50` and took 61.126 seconds with two workers and
+incremental rebuilding (`work/checkpoint-lifecycle.json`); only documentation changed
+during the run. Host, Java wallet, recovery, generated
 artifacts, and fuzz-target builds passed; workspace Clippy also passed. The workspace
 run includes the JCVM registry, transport lifecycle, and session recovery tests.
 All seven firmware profiles linked with engine/provider isolation checks. The only
