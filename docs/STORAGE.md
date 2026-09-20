@@ -102,9 +102,14 @@ Thus restart may repeat bank preparation without losing newer applet writes or
 reusing a nonce for different plaintext. Registry commit uncertainty must be resolved
 before choosing either phase.
 
-The implementation needs explicit durable staging ownership and reopening; the
-current upload API's volatile length and unconditional reset are insufficient.
-Simulator staging must survive process restart, just as board staging does.
+The implementation still needs explicit durable staging ownership and reopening
+from authenticated metadata; the upload API's volatile length and unconditional
+reset are insufficient. The JCVM simulator now uses a fixed 64 KiB `staging.bin`
+with synced writes and the same clear-bits-only programming rule as flash. Layout
+v2 requires this file; v1 layouts and missing/truncated staging fail without repair.
+Card opening preserves its bytes, although it discards incomplete upload lengths.
+An integration test covers reopening, bounds, forbidden bit restoration, and
+incompatible/incomplete storage sets. Protected renewal ownership is not yet wired.
 Counter renewal happens between commands. A command that exhausts its remaining
 budget fails normally, with committed ordinary writes retained and an open
 transaction rolled back; renewal must not silently replay the command.

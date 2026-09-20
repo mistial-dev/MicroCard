@@ -115,6 +115,13 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Region<SLOT, IMA
             .map_err(|_| Error::Storage)?;
         Ok(())
     }
+    fn read_file(path: &Path, size: usize, offset: usize, output: &mut [u8]) -> Result<()> {
+        if offset.checked_add(output.len()).ok_or(Error::Bounds)? > size { return Err(Error::Bounds); }
+        let mut file = fs::File::open(path).map_err(|_| Error::Storage)?;
+        if file.metadata().map_err(|_| Error::Storage)?.len() != size as u64 { return Err(Error::Storage); }
+        file.seek(SeekFrom::Start(offset as u64)).map_err(|_| Error::Storage)?;
+        file.read_exact(output).map_err(|_| Error::Storage)
+    }
     fn program_file(path: &Path, size: usize, o: usize, b: &[u8]) -> Result<()> {
         let end = o.checked_add(b.len()).ok_or(Error::Bounds)?;
         if end > size {
@@ -168,18 +175,12 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
         if range.start > range.end || range.end > IMAGE {
             return Err(Error::Bounds);
         }
-        let mut file = fs::File::open(self.image_path(index)?).map_err(|_| Error::Storage)?;
-        if file.metadata().map_err(|_| Error::Storage)?.len() != IMAGE as u64 {
-            return Err(Error::Storage);
-        }
-        file.seek(SeekFrom::Start(range.start as u64))
-            .map_err(|_| Error::Storage)?;
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(range.len())
             .map_err(|_| Error::Quota)?;
         bytes.resize(range.len(), 0);
-        file.read_exact(&mut bytes).map_err(|_| Error::Storage)?;
+        Self::read_file(&self.image_path(index)?, IMAGE, range.start, &mut bytes)?;
         Ok(bytes)
     }
     fn erase(&mut self, index: usize) -> Result<()> {
@@ -289,17 +290,7 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Flash
         Ok(true)
     }
     fn read(&self, s: usize, o: usize, output: &mut [u8]) -> Result<()> {
-        let end = o.checked_add(output.len()).ok_or(Error::Bounds)?;
-        if end > self.slot_size() {
-            return Err(Error::Bounds);
-        }
-        let mut file = fs::File::open(self.path(s)).map_err(|_| Error::Storage)?;
-        if file.metadata().map_err(|_| Error::Storage)?.len() != self.slot_size() as u64 {
-            return Err(Error::Storage);
-        }
-        file.seek(SeekFrom::Start(o as u64))
-            .map_err(|_| Error::Storage)?;
-        file.read_exact(output).map_err(|_| Error::Storage)
+        Self::read_file(&self.path(s), self.slot_size(), o, output)
     }
     fn erase(&mut self, s: usize) -> Result<()> {
         Self::erase_file(&self.path(s), self.slot_size())?;
@@ -310,5 +301,41 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Flash
         Self::program_file(&self.path(s), self.slot_size(), o, b)?;
         record_flash("program", b.len(), SLOT);
         Ok(())
+    }
+}
+
+/// One durable scratch region, matching the JCVM board's upload geometry.
+/// Opening never creates or erases bytes; fresh provisioning owns initialization.
+pub(crate) struct Staging {
+    path: std::path::PathBuf,
+}
+impl Staging {
+    pub(crate) const BYTES: usize = 65536;
+    pub(crate) fn open(path: std::path::PathBuf) -> Result<Self> {
+        if fs::metadata(&path).map_err(|_| Error::Storage)?.len() != Self::BYTES as u64 {
+            return Err(Error::Storage);
+        }
+        Ok(Self { path })
+    }
+    pub(crate) fn initialize(path: &Path) -> Result<()> {
+        let mut file = private_open_options().create_new(true).open(path).map_err(|_| Error::Storage)?;
+        FileFlash::write_erased(&mut file, Self::BYTES)?;
+        file.sync_all().map_err(|_| Error::Storage)?;
+        #[cfg(unix)]
+        fs::File::open(path.parent().ok_or(Error::Storage)?)
+            .and_then(|directory| directory.sync_all()).map_err(|_| Error::Storage)?;
+        Ok(())
+    }
+}
+impl microcard_core::hal::StagingFlash for Staging {
+    fn capacity(&self) -> usize { Self::BYTES }
+    fn read(&self, offset: usize, output: &mut [u8]) -> Result<()> {
+        FileFlash::read_file(&self.path, Self::BYTES, offset, output)
+    }
+    fn erase(&mut self) -> Result<()> {
+        FileFlash::erase_file(&self.path, Self::BYTES)
+    }
+    fn program(&mut self, offset: usize, bytes: &[u8]) -> Result<()> {
+        FileFlash::program_file(&self.path, Self::BYTES, offset, bytes)
     }
 }
