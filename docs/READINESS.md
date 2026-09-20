@@ -94,9 +94,7 @@ board's reserved heap.
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
-  The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the flash ceilings (57.071 seconds with two workers). All seven
-  profiles cross-linked. MC04 no
+  All seven profiles cross-linked in the consolidated checkpoint described below. MC04 no
   longer retains package image buffers in runtime state; recovery reads verified
   flash guards and retains metadata. MC04 hardware release text is 212,220 bytes
   against 212,000, and software reference text is 186,084 against 186,000. Five text
@@ -150,10 +148,11 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 78.728 seconds with two workers and incremental
-rebuilding (`work/checkpoint-late-cancel.json`). All stages before the final board
-budget comparison passed; the checkpoint overall fails because the unchanged
-optimization ceilings are exceeded. This is not a cold-build measurement. Historical
+reuses outputs with bounded workers and isolated logs/state. The checkpoint at
+`5210b30` took 49.821 seconds with two workers and incremental rebuilding
+(`work/checkpoint-runtime-and-allocation.json`). Host, wallet, recovery,
+generated-artifact, and fuzz-build stages passed. All seven firmware profiles linked;
+the checkpoint overall fails on the five unchanged flash optimization ceilings. This is not a cold-build measurement. Historical
 comparisons remain in Git; reproducible cold/warm final-tree measurements are still
 required.
 
