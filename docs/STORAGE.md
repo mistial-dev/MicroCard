@@ -84,8 +84,11 @@ selection untouched. Encryption failure consumes its identity; an uncertain
 publication retains staging until registry recovery decides ownership. The session handoff primitive compares the authenticated restored state with the
 live committed state in bounded windows, then replaces only the journal. It retains
 the existing applet object, selection and transient state; mismatch prevents stale
-execution. Automatic triggering and wiring this handoff into registry renewal remain
-incomplete.
+execution. Before applet callbacks, the card renews a live session when either counter has
+1024 or fewer commits remaining. Active uploads, including zero-byte uploads,
+prevent renewal. A maintenance failure drops selection; pending ownership protects
+staging from transport reset. This threshold does not guarantee that every command
+fits the remaining counter space.
 `SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,

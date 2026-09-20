@@ -105,7 +105,38 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         })
     }
 
+    fn maintain_session(&mut self, aid: Aid, session: &mut StoredSession<H::Bank, I>,
+            cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        if cancel() { return Err(Error::Cancelled); }
+        // Renew between callbacks. This reserve is a maintenance threshold, not a
+        // promise that an arbitrary applet command fits the remaining counter space.
+        if session.remaining_commits()? > 1024 { return Ok(()); }
+        if self.upload.is_some() { return Err(Error::Busy); }
+        self.storage.registry.begin_renewal(aid, session, &self.storage.images,
+            &self.storage.heaps, &self.storage.heap_key, &mut self.staging,
+            &mut self.scratch, &mut self.provider)?;
+        // Once ownership is published, finish or retain the protected recovery copy.
+        // Cancellation must not expose the old session against a replaced bank.
+        self.storage.registry.recover_renewal(&self.storage.images, &mut self.storage.heaps,
+            &self.storage.heap_key, &self.staging, &mut self.scratch, &mut self.provider)?;
+        let renewed = self.storage.registry.open_session(aid, &self.storage.images,
+            &mut self.storage.heaps, &self.storage.heap_key, &mut self.scratch, &mut self.provider)?;
+        session.adopt_renewed_store(renewed)?;
+        self.staging.reset();
+        if cancel() { return Err(Error::Cancelled); }
+        Ok(())
+    }
+
+    fn maintain_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
+        // Any maintenance error drops the old journal handle before returning.
+        self.maintain_session(aid, &mut session, cancel)?;
+        self.selected = Some((aid, session));
+        Ok(())
+    }
+
     fn park_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        self.maintain_selected(cancel)?;
         let Some((aid, session)) = self.selected.as_mut() else { return Ok(()); };
         let instance = *self.storage.registry.state()?.instances()
             .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;
@@ -160,6 +191,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             le: request.le.or(Some(256)),
         }
         .encode()?;
+        self.maintain_selected(cancel)?;
         if self.selected.as_ref().is_some_and(|(selected, _)| *selected == aid) {
             let (_, session) = self.selected.as_mut().unwrap();
             let response = session.process(&command, true, &mut self.provider, cancel)?;
@@ -183,6 +215,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             session.restore_volatile(&cached.state)?;
             self.retained.remove(index);
         }
+        self.maintain_session(aid, &mut session, cancel)?;
         let response = session.process(&command, true, &mut self.provider, cancel)?;
         let selected = session.selected()?;
         self.selected = Some((aid, session));
@@ -330,7 +363,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             .ok_or(Error::Storage)
     }
     fn abort_staging(&mut self) {
-        self.staging.reset();
+        if matches!(self.storage.registry.pending_renewal(), Ok(None)) { self.staging.reset(); }
         self.upload = None;
     }
     fn abort_transaction(&mut self) {
@@ -451,6 +484,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     }
 
     fn process_plain_with_cancel(&mut self, command: &Command<'_>, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        self.maintain_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
         let result = session.process(&command.encode()?, false, &mut self.provider, cancel);
         if session.take_security_reset() && self.storage.registry.state()?.instances()
@@ -531,6 +565,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
+        self.maintain_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
         let instance = self.storage.registry.state()?.instances()
             .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;

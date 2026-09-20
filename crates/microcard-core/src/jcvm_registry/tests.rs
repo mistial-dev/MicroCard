@@ -424,20 +424,7 @@ fn pending_renewal_binds_staging_and_blocks_ordinary_use_after_reboot() {
 
 #[test]
 fn renewal_recovery_authenticates_before_reclaim_and_never_reencrypts_the_heap() {
-    use crate::{crypto::CryptoProvider, hal::StagingFlash, staging::{BoundedFlashStaging, PackageStaging}};
-    struct Scratch(Vec<u8>);
-    impl StagingFlash for Scratch {
-        fn capacity(&self) -> usize { self.0.len() }
-        fn read(&self, at: usize, out: &mut [u8]) -> Result<()> {
-            out.copy_from_slice(self.0.get(at..at.checked_add(out.len()).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?); Ok(())
-        }
-        fn erase(&mut self) -> Result<()> { self.0.fill(0xff); Ok(()) }
-        fn program(&mut self, at: usize, bytes: &[u8]) -> Result<()> {
-            let out = self.0.get_mut(at..at.checked_add(bytes.len()).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?;
-            if out.iter().zip(bytes).any(|(old, new)| old & new != *new) { return Err(Error::Storage); }
-            out.copy_from_slice(bytes); Ok(())
-        }
-    }
+    use crate::{crypto::CryptoProvider, jcvm_test::Scratch, staging::{BoundedFlashStaging, PackageStaging}};
     struct RecoveryProvider([u8; 16]);
     impl CryptoProvider for RecoveryProvider {
         fn aes_ccm_encrypt_in_place(&mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], output: &mut [u8]) -> Result<usize> {

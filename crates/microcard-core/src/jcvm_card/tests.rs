@@ -1,10 +1,10 @@
 use super::*;
 use crate::{
     crypto,
-    jcvm_test::{signed, Heaps, Provider},
+    jcvm_test::{signed, Heaps, Provider, Scratch},
     journal::MemoryFlash,
     scp03::{Keys, CHALLENGE_BYTES, CRYPTOGRAM_BITS, MAC_BYTES},
-    staging::BoundedRamStaging,
+    staging::BoundedFlashStaging,
     transport::Endpoint,
 };
 use alloc::{rc::Rc, vec};
@@ -12,7 +12,7 @@ use core::cell::RefCell;
 use microcard_engine_jcvm::cap::LoadFile;
 
 type TestCard =
-    Card<MemoryFlash, MemoryFlash, Heaps, Provider, BoundedRamStaging<MAX_PACKAGE_BYTES>>;
+    Card<MemoryFlash, MemoryFlash, Heaps, Provider, BoundedFlashStaging<Scratch, MAX_PACKAGE_BYTES>>;
 
 struct Host {
     key: [u8; 16],
@@ -114,7 +114,7 @@ fn endpoint(storage: Storage<MemoryFlash, MemoryFlash, Heaps>) -> Endpoint<TestC
         Card::open(
             storage,
             Provider,
-            BoundedRamStaging::default(),
+            BoundedFlashStaging::new(Scratch(vec![0xff; MAX_PACKAGE_BYTES])),
             vec![0; 16384],
         )
         .unwrap(),
@@ -245,7 +245,39 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let previous_session_key = host.key;
 
     // Reopen the registry too, so this exercises persisted references rather than RAM.
-    let mut storage = endpoint.into_card().into_storage();
+    let mut card = endpoint.into_card();
+    assert_eq!(card.select_plain_with_cancel(&Command::parse(&select).unwrap(), &mut || false).unwrap(), select_response);
+    let old = *card.storage.registry.state().unwrap().instances()
+        .find(|instance| instance.aid.as_slice() == aid).unwrap();
+    let preparations = card.storage.heaps.preparations;
+    {
+        let mut bank = card.storage.heaps.banks[usize::from(old.heap_bank)].borrow_mut();
+        while bank.nonce_generation().unwrap() < bank.nonce_capacity() - 1024 {
+            bank.reserve_nonce().unwrap();
+        }
+    }
+    let (selected_aid, mut live) = card.selected.take().unwrap();
+    card.upload = Some(Upload { load: old.load, domain: old.domain, hash: None,
+        receiver: LoadReceiver::new(Payload::SignedPackage, MAX_PACKAGE_BYTES) });
+    assert!(card.staging.is_empty());
+    assert_eq!(card.maintain_session(selected_aid, &mut live, &mut || false), Err(Error::Busy));
+    card.upload = None;
+    assert_eq!(card.maintain_session(selected_aid, &mut live, &mut || true), Err(Error::Cancelled));
+    assert_eq!(card.storage.heaps.preparations, preparations);
+    card.selected = Some((selected_aid, live));
+    let status = Command::parse(&[0, 0x20, 0, 0x80]).unwrap();
+    let reply = card.process_plain_with_cancel(&status, &mut || false).unwrap();
+    assert_eq!(u16::from_be_bytes(reply.try_into().unwrap()), before);
+    let current = card.storage.registry.state().unwrap().instances()
+        .find(|instance| instance.aid == old.aid).unwrap();
+    assert_ne!(current.identity, old.identity);
+    assert_eq!(card.selected.as_ref().unwrap().1.selected(), Ok(true));
+    assert!(card.storage.registry.pending_renewal().unwrap().is_none());
+    assert!(card.staging.is_empty());
+    for (bank, previous) in preparations.into_iter().enumerate() {
+        assert_eq!(card.storage.heaps.preparations[bank], previous + usize::from(bank == usize::from(old.heap_bank)));
+    }
+    let mut storage = card.into_storage();
     storage.registry = Store::open(
         storage.registry.into_flash(),
         [3; 16],

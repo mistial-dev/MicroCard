@@ -113,3 +113,17 @@ pub(crate) fn signed(version: u32, incarnation: u8, private: u8) -> Vec<u8> {
     raw.extend(image);
     raw
 }
+
+pub(crate) struct Scratch(pub Vec<u8>);
+impl crate::hal::StagingFlash for Scratch {
+    fn capacity(&self) -> usize { self.0.len() }
+    fn read(&self, at: usize, out: &mut [u8]) -> Result<()> {
+        out.copy_from_slice(self.0.get(at..at.checked_add(out.len()).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?); Ok(())
+    }
+    fn erase(&mut self) -> Result<()> { self.0.fill(0xff); Ok(()) }
+    fn program(&mut self, at: usize, bytes: &[u8]) -> Result<()> {
+        let out = self.0.get_mut(at..at.checked_add(bytes.len()).ok_or(Error::Bounds)?).ok_or(Error::Bounds)?;
+        if out.iter().zip(bytes).any(|(old, new)| old & new != *new) { return Err(Error::Storage); }
+        out.copy_from_slice(bytes); Ok(())
+    }
+}

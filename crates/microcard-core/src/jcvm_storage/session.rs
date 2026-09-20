@@ -63,6 +63,11 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         Ok(())
     }
 
+    pub(crate) fn remaining_commits(&self) -> Result<u64> {
+        self.installed()?;
+        self.store.journal.remaining_commits()
+    }
+
     pub(crate) fn renewal_snapshot(&self, old_identity: [u8; 16], image: [u8; 32],
             new_identity: [u8; 16]) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         self.installed()?;

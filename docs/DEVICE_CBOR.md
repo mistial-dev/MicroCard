@@ -162,8 +162,8 @@ resolves renewal before opening applets or resetting upload state. Recovery auth
 the staged record and its applet binding before bank preparation, copies it without
 re-encryption, and publishes the new identity only after normal journal recovery
 succeeds. Missing or changed recovery data fails closed. The registry writer stages
-live state and publishes ownership; automatic triggering and live-session handoff
-remain incomplete. See [the renewal transition](STORAGE.md#jcvm-counter-renewal).
+live state and publishes ownership. Command-boundary maintenance invokes recovery
+and hands the renewed journal to the existing live applet. See [the renewal transition](STORAGE.md#jcvm-counter-renewal).
 
 Installation identities are a durably reserved registry nonce counter value (eight
 little-endian bytes) followed by `JCVMv1\0\0`. Failed installations consume their
