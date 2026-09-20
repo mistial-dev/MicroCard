@@ -8,7 +8,7 @@ This document explains responsibilities and trust boundaries. Start with the [RE
 
 The .NET build pipeline, reduced CIL interpreter, signed loading, security domains, native services, simulator, and Java release wallet are implemented. The nRF52840 backend has development hardware evidence, with additional acceptance work outstanding.
 
-**The Java Card VM is implemented in `crates/microcard-engine-jcvm` and runs a real applet in the simulator.** It reads a CAP container, verifies a whole package structurally at load, and interprets Java Card bytecode against an object heap with firewall checks. OpenFIPS201 installs, registers, accepts a SELECT and answers PIV commands. This is a working engine with named gaps rather than a compliant Java Card implementation, and it makes no Java Card compliance claim. [The Java Card profile](JCVM_PROFILE.md) records what each part does, what the target is, and what is still missing. The engine is absent from the device image so far, so device execution currently supports MC04 assemblies.
+**The Java Card VM is implemented in `crates/microcard-engine-jcvm` and runs a real applet in the simulator.** It reads a CAP container, verifies a whole package structurally at load, and interprets Java Card bytecode against an object heap with firewall checks. OpenFIPS201 installs, registers, accepts a SELECT and answers PIV commands. This is a working engine with named gaps rather than a compliant Java Card implementation, and it makes no Java Card compliance claim. [The Java Card profile](JCVM_PROFILE.md) records what each part does, what the target is, and what is still missing. Separate MC04 and JCVM board profiles cross-link; the current JCVM build has not yet been validated on physical hardware.
 
 ## Four responsibilities
 
@@ -107,15 +107,27 @@ The common services are transport, authenticated management, cryptographic provi
 ```mermaid
 flowchart TB
     Management[Shared Rust management] --> CIL[Implemented: MC04 verifier + CIL interpreter]
-    Management -.-> JCVM[Implemented in the simulator: Java Card loader, verifier + bytecode interpreter]
+    Management --> JCVM[Separate JCVM build: loader, verifier + bytecode interpreter]
     CIL --> Services[Native services with trusted execution identity]
-    JCVM -.-> Services
+    JCVM --> Services
     Services --> HAL[Simulator or device HAL]
 ```
 
-[The Java Card profile](JCVM_PROFILE.md) records the chosen Java Card version and CAP profile, the runtime and API subset, and the verification strategy. Three things it leaves open are the object persistence model on flash, the mapping between Java Card contexts and MicroCard domains, and transaction compatibility between `JCSystem.beginTransaction` and MicroCard's cross-command journal. Those are settled when the engine reaches the device. Direct managed references or calls across the two engines are not part of the current design.
+[The Java Card profile](JCVM_PROFILE.md) defines the supported CAP and API subset.
+Authenticated GlobalPlatform loading, installation, selection, and recovery reach the
+engine through shared management. Immutable images and authenticated applet heap
+snapshots use separate flash storage. Explicit transaction commits and PIN retry
+changes checkpoint storage during execution; remaining durability gaps are tracked
+in [release readiness](READINESS.md). Direct calls between engines are unsupported.
 
-Two paths remain unbuilt. A GlobalPlatform LOAD does not yet deliver a CAP to the engine, so a load file reaches it only as a file path given to `microcard-sim serve-jcvm`. The engine is also not compiled into the board image.
+Board profiles select exactly one engine. The raw `serve-jcvm` host runner is volatile;
+`serve-jcvm-managed` exercises authenticated loading and persistent recovery. Physical
+execution of the current JCVM firmware remains a separate acceptance gate.
+
+MC04 domain internals separate application staging, lifecycle execution, metadata
+mutations, snapshot encoding, and linking. `domains/linking.rs` owns dependency
+resolution, executable-unit assembly, and whole-program call-graph validation;
+`domains.rs` coordinates domain management and native execution services.
 
 ## Design references
 

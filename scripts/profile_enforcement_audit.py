@@ -64,8 +64,8 @@ def main() -> None:
         "MAX_METHODDEF_ROWS: u16 = 256",
         "MAX_CUSTOMATTRIBUTE_ROWS: u16 = 256",
     ))
+    require("crates/microcard-core/src/domains/linking.rs", ("validate_linked_program(&units)?",))
     require("crates/microcard-core/src/domains.rs", (
-        "validate_linked_program(&units)?",
         "merged_storage_schema",
         "authorize_storage",
         "domain_schema",
