@@ -18,7 +18,7 @@ region provides 32,768 attempts; neither counter is erased in service. Exhaustin
 counter refuses further commits, while the last committed snapshot remains readable.
 MJ01/MJ02 records are rejected rather than migrated. See [the wire contract](PROTOCOL.md#durable-activation).
 
-The nRF52840 rotates complete snapshots through three 64 KiB slots. Before reusing a slot, the active record receives a reclaim-start marker. The target slot is erased and programmed, its commit marker is written last, and the prior active record then receives a reclaim-complete marker. Recovery accepts the prior record during an interrupted target erase or program and otherwise selects the highest authenticated generation. Host fault injection covers every byte mutation while recycling the three-slot ring. Earlier two-slot board layouts and word-per-generation anchors have no conversion path.
+MC04 rotates complete snapshots through three 64 KiB slots. JCVM uses two 8 KiB registry slots and two 64 KiB slots per heap bank. Before reusing a slot, the active record receives a reclaim-start marker. The target slot is erased and programmed, its commit marker is written last, and the prior active record then receives a reclaim-complete marker. Recovery accepts the prior record during an interrupted target erase or program and otherwise selects the highest authenticated generation. Host fault injection covers every byte mutation while recycling the three-slot ring. Earlier two-slot board layouts and word-per-generation anchors have no conversion path.
 
 The simulator requires `monotonic.bin`, `nonces.bin`, and both slot files to appear as one storage set. Existing state without the nonce counter has no upgrade route. Removing the whole state directory represents fresh provisioning. On nRF52840, a one-way ownership word shares the management-key erase page. Firmware programs it before the first journal commit and rejects both markerless existing state and a programmed marker paired with completely erased journals and anchor. Because flash cannot restore a programmed bit without erasing the page and its keys, ordinary out-of-band persistent-state erasure requires fresh management keys. A debugger that can erase and rewrite the key page can still defeat this policy. Production debug lock and verified firmware boot remain required. Runtime management has no reset or anchor-erase command.
 
@@ -58,3 +58,62 @@ then advance in 1,024-byte steps without overlapping the slot's three trailer by
 Their marker is at frame offset 1,020. Unused padding stays erased. The frame's
 header, ciphertext, and tag use the existing 24-byte header, AES-CCM provider, and
 `MCJN3 || attempt_le64` nonce construction; MJ04 is authenticated in the header.
+
+## JCVM counter renewal design (not implemented)
+
+Instruction checkpoints make the 32,768-attempt heap counters a service-life limit.
+Resetting them under the existing key would reuse nonces and remove the rollback
+anchor. Moving to a spare heap bank is insufficient: both supported board banks
+may contain installed applets. Both JCVM layouts already reserve a separate 64 KiB
+upload staging region, large enough for one complete encrypted heap record.
+
+Renewal will use that region as a recovery copy and the registry's existing durable
+identity reservation as the root of a new heap-key epoch. It must preserve both
+installed applets and their code, persistent state, and live volatile state.
+The transition is serialized with uploads and management changes:
+
+1. At a command boundary with no active transaction or upload, reserve a fresh
+   identity from the registry nonce counter. Derive the new heap key from the root,
+   bank, identity, and image digest using the existing heap-key derivation.
+2. Serialize the committed heap with the new identity, encrypt its initial MJ04
+   record exactly once, and write it to staging. Use generation/attempt 1 for this
+   new key. Authenticate and validate the staged record before publishing metadata.
+   A failed attempt abandons the identity; a later attempt reserves another one.
+3. Commit a versioned pending-renewal descriptor in the registry. It binds the
+   instance AID, bank, old/new identities, image digest, staged-record length and
+   digest. This commit authorizes replacement of this bank and protects staging
+   against upload, reset, deletion, or other reuse.
+4. Authenticate the protected recovery copy before erasing any bank bytes. Erase
+   the bank and its local counters, copy the exact encrypted record into its first
+   slot, publish its marker, initialize nonce/generation counters to 1, and verify
+   normal journal recovery. Retrying this phase copies the same ciphertext; it
+   must never invoke encryption again under that identity.
+5. Commit normal registry metadata pointing to the renewed bank and identity,
+   retaining the same logical applet. Only then release staging. Rebind the live
+   volatile cache through this trusted transition; do not treat renewal as deletion
+   or replay initialization callbacks.
+
+Recovery resolves pending renewal before opening applet sessions or accepting new
+uploads. Before the pending registry commit, the old bank remains authoritative.
+After that commit, the authenticated staging copy is authoritative until normal
+metadata is published. Missing or changed staging data fails closed, without erase.
+A completed bank copy is not exposed for execution while metadata is still pending.
+Thus restart may repeat bank preparation without losing newer applet writes or
+reusing a nonce for different plaintext. Registry commit uncertainty must be resolved
+before choosing either phase.
+
+The implementation needs explicit durable staging ownership and reopening; the
+current upload API's volatile length and unconditional reset are insufficient.
+Simulator staging must survive process restart, just as board staging does.
+Counter renewal happens between commands. A command that exhausts its remaining
+budget fails normally, with committed ordinary writes retained and an open
+transaction rolled back; renewal must not silently replay the command.
+
+Acceptance must cover both occupied banks, interrupted staging, both registry
+commits, bank erase/copy/counter initialization, repeated recovery, stale staged
+records, provider failure, and resumed applet behavior with retained volatile state.
+Combine fault cuts around distinct publication phases rather than duplicating
+low-level journal byte sweeps. Verify that resumed copying performs no encryption.
+The registry's own counters remain finite and must retain capacity for both metadata
+commits and uncertain attempts. This design does not establish an unlimited service
+life or prove flash endurance; those limits still need measured budgets.

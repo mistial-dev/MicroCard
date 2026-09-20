@@ -80,7 +80,8 @@ board's reserved heap.
   persist before late cancellation suppresses the response. Completed bytecode
   instructions now checkpoint ordinary writes before advancing or returning; native
   internal failure boundaries still require audit. The 32,768-value board nonce and
-  generation counters remain a service-life blocker.
+  generation counters remain a service-life blocker. The [renewal design](STORAGE.md#jcvm-counter-renewal-design-not-implemented)
+  uses protected upload staging and a registry-authorized key change; it is not yet implemented.
   Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
   allocation-abort session termination, key updates, crypto initialization and persistence
   failure. PIN presentation checkpoints consume retries outside transactions, including
