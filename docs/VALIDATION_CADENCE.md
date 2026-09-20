@@ -68,7 +68,10 @@ The report groups startup and APDU operations by instruction. It records live an
 requested allocation bytes, allocation traffic, and host execution time. It does not
 include allocator metadata or stack use. Host file reads and pointer sizes differ from
 the board, so these figures are optimization evidence, not a safe device heap bound.
-The ordinary simulator and firmware builds omit the counters. No new applet behavior
+The JCVM workload also consumes nonce reservations in a closed simulator fixture
+to exercise automatic renewal with provisioned keys and a certificate. This is host
+fixture preparation, not a device operation. The ordinary simulator and firmware
+builds omit the allocation counters. No new applet behavior
 suite is needed for profiling; the existing workload must still pass.
 
 [Recorded heap measurements](HEAP_MEASUREMENTS.json) bind the latest retained runs to

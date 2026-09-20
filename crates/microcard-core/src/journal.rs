@@ -505,6 +505,14 @@ pub struct MemoryFlash {
     pub fail_after: Option<usize>,
 }
 impl MemoryFlash {
+    #[cfg(all(test, feature = "jcvm", feature = "software-crypto"))]
+    pub(crate) fn leave_nonce_reservations_for_test(&mut self, remaining: usize) {
+        let end = self.nonces.len().checked_sub(remaining.checked_mul(4).unwrap()).unwrap();
+        assert!(self.nonces[end..].iter().all(|byte| *byte == 0xff));
+        // Model already consumed reservations without replaying thousands of full
+        // counter scans. Only clear bits; committed records and generations stay put.
+        self.nonces[..end].fill(0);
+    }
     pub fn new(size: usize) -> Self {
         Self::with_slots(size, 2)
     }

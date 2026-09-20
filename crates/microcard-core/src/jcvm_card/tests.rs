@@ -252,9 +252,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let preparations = card.storage.heaps.preparations;
     {
         let mut bank = card.storage.heaps.banks[usize::from(old.heap_bank)].borrow_mut();
-        while bank.nonce_generation().unwrap() < bank.nonce_capacity() - 1024 {
-            bank.reserve_nonce().unwrap();
-        }
+        bank.leave_nonce_reservations_for_test(1024);
     }
     let (selected_aid, mut live) = card.selected.take().unwrap();
     card.upload = Some(Upload { load: old.load, domain: old.domain, hash: None,

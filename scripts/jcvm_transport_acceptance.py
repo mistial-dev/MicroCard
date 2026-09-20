@@ -205,9 +205,20 @@ def main():
         client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c5)
         client.close()
 
+        # Consume only nonce reservations in the closed host fixture. The committed
+        # heap remains intact; selecting it must renew before the next callback.
+        nonces = state / "heap0/nonces.bin"
+        counter = nonces.read_bytes()
+        reserve = len(counter) - 1024 * 4
+        assert reserve > 0 and counter[reserve:] == b"\xff" * (1024 * 4)
+        nonces.write_bytes(b"\0" * reserve + counter[reserve:])
+        registry_before = files(state / "registry")
+
         client = Client(keys, state, mode)
         # A normal PIV client can select and read after boot without ever opening SCP03.
         assert piv(client, 0xa4, instance, p1=4, le=256) == selected
+        assert nonces.read_bytes()[reserve - 4:] == b"\xff" * (len(counter) - reserve + 4)
+        assert files(state / "registry") != registry_before, "renewal must publish its new identity"
         read_certificate(client, certificate_object)
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]
@@ -275,7 +286,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing/ECDH, interrupted certificate replacement/reboot, reclaim and fail-closed storage")
+    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing/ECDH, interrupted certificate replacement/reboot, counter renewal, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":

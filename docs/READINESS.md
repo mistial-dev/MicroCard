@@ -110,7 +110,11 @@ board's reserved heap.
   ceilings still fail; none were raised. The matched credential workload reduced host
   heap peak from 43,227 to 35,137 bytes and reopened retained allocations from 13,215
   to 4,989 bytes; [measurement evidence](HEAP_MEASUREMENTS.json) records both binaries.
-  Final board-equivalent heap measurements remain required.
+  The provisioned JCVM transport workload now forces counter renewal and peaks at
+  266,721 host-requested allocation bytes, above the 196,608-byte board reservation.
+  Reduce renewal allocation overlap and establish a board-equivalent bound before
+  declaring this path ready for hardware. Host figures exclude allocator metadata
+  and stack and include file-backed image reads.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
