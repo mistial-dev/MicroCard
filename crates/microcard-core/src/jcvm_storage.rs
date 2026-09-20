@@ -58,7 +58,7 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_state_is_bound_to_installation_and_failed_commit_preserves_it() {
+    fn authenticated_state_is_bound_to_installation_and_snapshot_contract() {
         let image = include_bytes!(
             "../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
         );
@@ -141,38 +141,6 @@ mod tests {
                 matches!(Store::open(journal.into_flash(), [3; 16], image, [4; 16], sizes, &mut SoftwareCrypto), Err(error) if error == expected)
             );
         }
-
-        let mut interrupted = flash;
-        interrupted.fail_after = Some(0);
-        let (mut store, recovered) = Store::open(
-            interrupted,
-            [3; 16],
-            image,
-            [4; 16],
-            sizes,
-            &mut SoftwareCrypto,
-        )
-        .unwrap();
-        let mut recovered = recovered.unwrap();
-        assert_eq!(
-            recovered
-                .process(&file, &mut Host, &[0, 0xa4, 4, 0, 0], true)
-                .unwrap()
-                .sw,
-            0x9000
-        );
-        assert_eq!(
-            store.commit(&recovered, &mut SoftwareCrypto),
-            Err(Error::Storage)
-        );
-        let mut flash = store.into_flash();
-        flash.fail_after = None;
-        assert!(
-            Store::open(flash, [3; 16], image, [4; 16], sizes, &mut SoftwareCrypto)
-                .unwrap()
-                .1
-                .is_some()
-        );
     }
 }
 

@@ -42,8 +42,8 @@ without erasing them. MC04 retains MJ03 and does not include the append scanner.
 
 Appending reserves a fresh nonce and advances the generation counter just as a full
 snapshot does. It avoids a slot erase but does not extend counter lifetime. These
-records currently serve existing JCVM checkpoints; persistence after each ordinary
-operation remains unfinished. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
+records serve JCVM checkpoints, including completed bytecode instructions. Native
+internal failure boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
 
 The MJ04 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
 is a CBOR byte string encoding `[1, base_generation, before_length, after_length,

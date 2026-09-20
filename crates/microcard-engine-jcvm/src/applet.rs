@@ -982,18 +982,18 @@ mod tests {
     #[test]
     fn transactions_restore_fields_and_statics_at_real_callback_boundaries() {
         #[derive(Default)]
-        struct CheckpointHost { saved: Option<(Vec<u8>, Vec<u8>, Reference)>, fail: bool, calls: usize }
+        struct CheckpointHost { saved: Vec<(Vec<u8>, Vec<u8>, Reference)>, fail_at: Option<usize>, calls: usize }
         impl Host for CheckpointHost {
             fn checkpoint(&mut self, state: PersistentView<'_>) -> Result<()> {
                 self.calls += 1;
-                if self.fail { return Err(Error::Storage); }
+                if self.fail_at == Some(self.calls) { return Err(Error::Storage); }
                 let mut heap = vec![0; state.heap_bytes()];
                 let saved = state.save_into(&mut heap)?;
-                self.saved = Some((saved.heap.to_vec(), saved.statics.to_vec(), saved.instance));
+                self.saved.push((saved.heap.to_vec(), saved.statics.to_vec(), saved.instance));
                 Ok(())
             }
         }
-        for ending in ["commit", "commit-throw", "commit-cancel", "commit-fail", "abort", "return", "throw", "allocate-abort", "cancel", "plain-cancel", "plain-fail-cancel", "full", "full-caught"] {
+        for ending in ["commit", "commit-throw", "commit-cancel", "commit-fail", "abort", "return", "throw", "allocate-abort", "cancel", "plain-cancel", "plain-store-fail", "full", "full-caught"] {
             // Constants 6..12: begin, commit, abort, static field, instance field,
             // ISOException.throwIt, Util.arrayCopy.
             let mut process = vec![
@@ -1025,7 +1025,7 @@ mod tests {
                 "abort" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 8]),
                 "throw" => process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]),
                 "allocate-abort" => process.extend_from_slice(&[op::NEW, 0, 3, op::ASTORE_0 + 2, op::INVOKESTATIC, 0, 8]),
-                "cancel" | "plain-cancel" | "plain-fail-cancel" => process.extend_from_slice(&[112, 0]), // goto itself until cancellation
+                "cancel" | "plain-cancel" | "plain-store-fail" => process.extend_from_slice(&[112, 0]), // goto itself until cancellation
                 "full" | "full-caught" => process.extend_from_slice(&[
                     op::ALOAD_0 + 2, op::SCONST_0, op::ALOAD_0 + 2, op::SCONST_0,
                     op::SSPUSH, 0x20, 0, op::INVOKESTATIC, 0, 12,
@@ -1068,12 +1068,12 @@ mod tests {
             let mut card = Card::new(&file, Sizes { heap_bytes: 16384, ..Sizes::default() }).unwrap();
             card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
             let mut polls = 0;
-            let mut host = CheckpointHost { fail: matches!(ending, "commit-fail" | "plain-fail-cancel"), ..Default::default() };
+            let mut host = CheckpointHost { fail_at: match ending { "commit-fail" => Some(3), "plain-store-fail" => Some(4), _ => None }, ..Default::default() };
             let result = card.process_with_cancel(&file, &mut host, &[0, 1, 0, 0], false, &mut || {
                 polls += 1;
                 ending.ends_with("cancel") && polls == 100
             });
-            if matches!(ending, "commit-fail" | "plain-fail-cancel") { assert_eq!(result, Err(Error::Storage)); }
+            if matches!(ending, "commit-fail" | "plain-store-fail") { assert_eq!(result, Err(Error::Storage)); }
             else if ending.ends_with("cancel") { assert_eq!(result, Err(Error::Cancelled)); }
             else {
                 assert_eq!(result.unwrap().sw, if matches!(ending, "commit" | "abort" | "full-caught") { SW_SUCCESS } else { SW_UNKNOWN }, "{ending}");
@@ -1082,15 +1082,25 @@ mod tests {
             assert_eq!(card.statics, if ending == "full-caught" { 3u16 } else { expected }.to_be_bytes(), "{ending}");
             let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
             assert_eq!(heap.get_word(card.instance.unwrap(), 0).unwrap(), expected, "{ending}");
-            assert_eq!(heap.array_get(card.buffer, 0), Ok(42), "APDU bytes are transient: {ending}");
-            assert_eq!(host.calls, usize::from(ending.starts_with("commit") || ending.ends_with("cancel")));
-            if let Some((heap, statics, instance)) = host.saved {
-                let mut restored = Card::restore(&file, card.sizes, PersistentState { heap: &heap, statics: &statics, instance }).unwrap();
-                assert_eq!(restored.statics, expected.to_be_bytes());
+            assert_eq!(heap.array_get(card.buffer, 0), Ok(if ending == "plain-store-fail" { 0 } else { 42 }), "APDU bytes are transient: {ending}");
+            // The first two stores must survive independently, before beginTransaction.
+            assert!(host.saved.len() >= 2, "{ending}");
+            for (index, (heap, statics, instance)) in host.saved.iter().enumerate() {
+                let mut restored = Card::restore(&file, card.sizes, PersistentState { heap, statics, instance: *instance }).unwrap();
                 let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
-                assert_eq!(heap.get_word(instance, 0), Ok(expected), "{ending}: durable boundary");
+                if index < 2 {
+                    assert_eq!(statics, &9u16.to_be_bytes(), "{ending}: store {index}");
+                    assert_eq!(heap.get_word(*instance, 0), Ok(if index == 0 { 0 } else { 9 }));
+                }
                 assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
             }
+            let (heap, statics, instance) = host.saved.last().unwrap();
+            let durable_field = if ending == "plain-store-fail" { 9 } else { expected };
+            let durable_static = if ending == "full-caught" { 3u16 } else { expected };
+            assert_eq!(statics, &durable_static.to_be_bytes(), "{ending}: durable static");
+            let mut restored = Card::restore(&file, card.sizes, PersistentState { heap, statics, instance: *instance }).unwrap();
+            assert_eq!(Heap::resume(&mut restored.heap, restored.heap_used).unwrap().get_word(*instance, 0), Ok(durable_field), "{ending}: durable field");
+            if let Some(failed) = host.fail_at { assert_eq!(host.calls, failed, "failed checkpoint must not retry"); }
             if !ending.ends_with("cancel") && ending != "commit-fail" {
                 let mut saved = vec![0; card.persistent_heap_bytes()];
                 let mut restored = Card::restore(&file, card.sizes, card.save_into(&mut saved).unwrap()).unwrap();

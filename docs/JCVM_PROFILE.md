@@ -418,16 +418,19 @@ live transaction. PIN validation and transient buffers remain absent from snapsh
 Checkpoint failure stops execution; host cancellation tests confirm a consumed attempt
 survives recovery. Installation still publishes only its completed state.
 
-Cooperative cancellation saves uncheckpointed ordinary persistent writes using the
-same committed-state projection. Successful checkpoints clear the write marker. Allocations outside transactions
+Each completed bytecode instruction checkpoints ordinary persistent writes before
+execution advances, returns, or enters an exception handler. Native calls checkpoint
+on return, with earlier PIN and transaction publication boundaries retained.
+Cooperative cancellation saves any remaining writes using the same committed-state
+projection. Successful checkpoints clear the write marker. Allocations outside transactions
 mark their headers for persistence, including transient-array headers; failed
 allocations do not. Transactional writes and transient payload writes alone do not
 trigger another snapshot. Storage
 failure stops execution instead of reporting a successful cancellation checkpoint.
 
-**Durability is still incomplete:** arbitrary power loss between ordinary persistent
-writes and a checkpoint can still lose those writes. Checkpoints now append small
-heap/static changes in authenticated 1,024-byte frames. Larger changes, transaction
+A completed instruction cannot advance past a failed checkpoint. Power loss during
+publication recovers the preceding committed state or the complete new record.
+Checkpoints append small heap/static changes in authenticated 1,024-byte frames. Larger changes, transaction
 commits, and exhausted append space use a full snapshot in the next journal slot.
 Recovery replays complete frames, checks generation continuity and the rollback
 anchor, and refuses to reuse partial tails. Interrupted rotation preserves the
@@ -443,9 +446,9 @@ and records use the same providers, with no software retry.
 
 The board still consumes one bit from separate 4 KiB generation and nonce counters
 per commit/encryption attempt, limiting each to 32,768 values. Append records reduce
-erases but do not extend these counters. Remaining work includes publication before
-execution proceeds past ordinary persistent operations, native bulk-write/allocation
-boundaries, counter lifetime, and the remaining native-API transaction audit.
+erases but do not extend these counters. Remaining work includes auditing internal
+native bulk-write/allocation failure boundaries, counter lifetime, and the remaining
+native-API transaction semantics.
 A passing host workflow does not establish Java Card guarantees or physical execution.
 
 To measure host flash traffic, build `microcard-sim` with `--features heap-metrics`,
@@ -460,7 +463,11 @@ The matched lifecycle run passed with checkpoint appends: 97 slot erases
 (6,897,664 bytes) and 426 program calls (1,179,061 bytes) at baseline `95c5c37`.
 Both used 110 nonce reservations and 108 generation advances. Raw reports are
 `work/jcvm-mj04-checkpoints.jsonl` and `work/jcvm-flash-baseline-95c5c37.jsonl`.
-These are workload totals, not a single-card lifetime estimate.
+With instruction-level publication, the same lifecycle passes with 102 erases
+(6,111,232 bytes), 830 program calls (1,043,490 bytes), 324 nonce reservations and
+322 generation advances (`work/jcvm-instruction-checkpoints.jsonl`, based on
+`8caa8cb` with instruction checkpoints). This is the durability cost, not a space
+optimization. These are workload totals, not a single-card lifetime estimate.
 
 Additional software implementations of SHA-384, P-384, RSA, or 3DES are outside this release cleanup.
 
@@ -550,9 +557,10 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-mj04-checkpoints-contact`, based on `3894f97` with checkpoint append records):
-preparation took 15.277 seconds and vectors 93.153 seconds on the host.
-Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
+(`work/nist-instruction-checkpoints-contact`, based on `8caa8cb` with instruction checkpoints):
+preparation took 29.634 seconds and vectors 124.225 seconds on the host, compared with
+15.277 / 93.153 seconds before instruction-level publication. Every vector retained
+its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain

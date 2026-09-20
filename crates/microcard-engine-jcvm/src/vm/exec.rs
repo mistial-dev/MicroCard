@@ -1174,6 +1174,12 @@ pub fn run_body(
             }
             result => result,
         };
+        // Publish completed ordinary writes before another instruction or a return.
+        // Storage errors leave execution immediately; never retry a failed checkpoint.
+        if step.is_ok() && machine.heap.has_uncheckpointed_writes() && machine.jcre.instance.is_some() {
+            natives::checkpoint_committed(machine.heap, machine.host, &machine.jcre,
+                machine.context, machine.statics)?;
+        }
         match step {
             Ok(Some(Outcome::Thrown(exception))) => {
                 match find_handler(machine, body, code.len(), pc, exception)? {

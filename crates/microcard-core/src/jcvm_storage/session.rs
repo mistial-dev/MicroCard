@@ -367,7 +367,7 @@ mod tests {
             match failure {
                 None => {
                     assert_eq!(result.unwrap().sw, 0x9000);
-                    assert_eq!(provider.encryptions.get(), before + 1, "only the final boundary commits");
+                    assert!(provider.encryptions.get() > before + 1, "ordinary writes publish before the final boundary");
                     last_poll = Some(polls);
                 }
                 Some(false) => assert_eq!(result, Err(Error::Cancelled)),
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn openfips_object_commit_survives_cancellation_before_apdu_completion() {
+    fn openfips_object_update_survives_interrupted_checkpoint_writes() {
         let mut cuts = alloc::vec![usize::MAX];
         let mut measured = None;
         while let Some(cut) = cuts.pop() {
@@ -399,26 +399,20 @@ mod tests {
             let write = [0x04, 0xdb, 0x3f, 0xff, 0x0c, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00];
             let read = [0x00, 0xcb, 0x3f, 0xff, 0x05, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x00];
             let previous = session.process(&read, false, &mut provider, &mut || false).unwrap();
-            let encryptions = provider.encryptions.clone();
-            let before = encryptions.get();
-            let slot_size = session.store.journal.flash_mut().slot_size();
             session.store.journal.flash_mut().fail_after = Some(cut);
-            let result = session.process_command(&write, false, Some(3), &mut provider,
-                &mut || encryptions.get() > before);
+            let result = session.process_command(&write, false, Some(3), &mut provider, &mut || false);
             let remaining = session.store.journal.flash_mut().fail_after.unwrap();
             if cut == usize::MAX {
                 let mutations = cut - remaining;
                 measured = Some(mutations);
-                // Nonce reservation, reclamation/erase, payload, commit marker,
-                // and monotonic anchor each have a distinct recovery invariant.
-                cuts.extend([0, 2, 4, 5 + slot_size / 2,
-                    5 + slot_size + (mutations - 5 - slot_size) / 2,
+                // Journal tests cover each frame/rotation boundary. Here sample the
+                // complete applet update, which now spans several checkpoints.
+                cuts.extend([0, 2, 4, mutations / 4, mutations / 2, 3 * mutations / 4,
                     mutations - 6, mutations - 5, mutations - 1, mutations]);
             }
             let complete = cut >= measured.unwrap();
-            assert_eq!(result, Err(if complete { Error::Cancelled } else { Error::Storage }), "cut {cut}");
-            assert_eq!(encryptions.get(), before + usize::from(cut >= 4),
-                "only the in-command checkpoint may encrypt at cut {cut}");
+            if complete { assert_eq!(result.unwrap().sw, 0x9000, "cut {cut}"); }
+            else { assert_eq!(result, Err(Error::Storage), "cut {cut}"); }
             let sizes = session.sizes;
             let image = session.image.clone();
             let mut flash = session.into_flash();

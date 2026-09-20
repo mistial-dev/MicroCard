@@ -77,8 +77,10 @@ board's reserved heap.
 - Complete JCVM transaction durability and the remaining native API audit against
   Java Card 3.0.5. In-command commits checkpoint before releasing undo; cancellation
   checkpoints ordinary writes while excluding open transactions. Completed callbacks
-  persist before late cancellation suppresses the response. **Arbitrary power loss
-  between ordinary writes and checkpoints remains unresolved.**
+  persist before late cancellation suppresses the response. Completed bytecode
+  instructions now checkpoint ordinary writes before advancing or returning; native
+  internal failure boundaries still require audit. The 32,768-value board nonce and
+  generation counters remain a service-life blocker.
   Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
   allocation-abort session termination, key updates, crypto initialization and persistence
   failure. PIN presentation checkpoints consume retries outside transactions, including
@@ -89,7 +91,7 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 209,336 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 209,408 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
