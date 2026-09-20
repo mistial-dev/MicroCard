@@ -11,6 +11,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 from device_cbor import decode
@@ -57,6 +58,7 @@ def main():
     parser.add_argument("--upstream", required=True, type=pathlib.Path)
     parser.add_argument("--config", type=pathlib.Path)
     parser.add_argument("--out", required=True, type=pathlib.Path, help="New result directory")
+    parser.add_argument("--provision-config", action="store_true", help="Provision the upstream P-256 test keys, certificates, PIN/PUK and AES management key")
     parser.add_argument("--seed", type=pathlib.Path, help="Closed simulator seed directory containing keys and state; default: blank applet")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--test", help="One upstream vector identifier")
@@ -66,7 +68,7 @@ def main():
     args = parser.parse_args()
     if not args.test and not args.suite and not args.list_tests and not args.check_transport:
         parser.error("select --test identifiers, --list-tests, or --check-transport")
-    if args.check_transport and (args.test or args.suite or args.list_tests or args.seed):
+    if args.check_transport and (args.test or args.suite or args.list_tests or args.seed or args.provision_config):
         parser.error("--check-transport uses an isolated blank applet")
     if not args.check_transport and args.config is None:
         parser.error("--config is required for NIST vectors")
@@ -128,7 +130,8 @@ def main():
         compile_cp = cp + os.pathsep + str(upstream / "tools/sdk/jc310/lib/api_classic-3.0.5.jar")
         sources = sorted(p for p in harness.glob("*.java") if p.name != source.name)
         subprocess.run(["javac", "--release", "21", "-encoding", "UTF-8", "-cp", compile_cp,
-            "-d", classes, *sources, patched, ROOT / "scripts/nist/MicroCardNistTransport.java"],
+            "-d", classes, *sources, patched, ROOT / "scripts/nist/MicroCardNistTransport.java",
+            ROOT / "scripts/nist/MicroCardNistProfile.java"],
             env=env, check=True)
         compat = staging / "nist-bc-compat.jar"
         subprocess.run(["java", "-cp", str(classes) + os.pathsep + cp,
@@ -139,15 +142,30 @@ def main():
             microcard_dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
             upstream_harness_sha256=hashlib.sha256(committed.encode()).hexdigest(),
             adapter_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistTransport.java").read_bytes()).hexdigest(),
+            profile_loader_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistProfile.java").read_bytes()).hexdigest(),
             nist_modules_sha256=hashlib.sha256((jars / "PIV_TestRunner_modules-5.0.1.jar").read_bytes()).hexdigest(),
             config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
             simulator_sha256=hashlib.sha256(SIM.read_bytes()).hexdigest(),
             test=args.test, suite=args.suite, list_only=args.list_tests, blank_seed=args.seed is None,
+            provision_config=args.provision_config,
             physical_execution=False, synthetic_atr=True,
-            unsupported=["contactless transport", "upstream automatic provisioning", "VCI suites"],
+            unsupported=["contactless transport", "GSA ICAM object provisioning", "VCI suites"],
             status="running")
         report = output / "microcard-run.json"
         report.write_text(json.dumps(manifest, indent=2) + "\n")
+        if args.provision_config and not args.list_tests:
+            started = time.perf_counter()
+            personalized = staging / "personalized-seed"
+            with (output / "provision.log").open("w") as log:
+                provision = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
+                    "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".MicroCardNistProfile",
+                    config, upstream, personalized], env=env, stdout=log, stderr=subprocess.STDOUT)
+            manifest["provision_seconds"] = round(time.perf_counter() - started, 3)
+            if provision.returncode:
+                manifest.update(status="provision_failed", exit_code=provision.returncode)
+                report.write_text(json.dumps(manifest, indent=2) + "\n")
+                raise SystemExit(f"Personalization failed; see {output / 'provision.log'}")
+            seed = personalized
         command = ["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
             "-cp", os.pathsep.join([str(compat), str(classes), cp]), PACKAGE + ".NistHarnessMain",
             "--target", "microcard", "--config", config, "--out", output]
@@ -157,8 +175,10 @@ def main():
             command.extend(["--suite", args.suite])
         if args.list_tests:
             command.append("--list-tests")
+        started = time.perf_counter()
         with (output / "runner.log").open("w") as log:
             result = subprocess.run(command, cwd=upstream, env=env, stdout=log, stderr=subprocess.STDOUT)
+        manifest["vector_seconds"] = round(time.perf_counter() - started, 3)
         exit_code = result.returncode
         if not args.list_tests:
             try:

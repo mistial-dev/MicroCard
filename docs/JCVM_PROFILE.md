@@ -449,11 +449,37 @@ python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
 
 Output directories must be new. The default seed is a blank installed applet. Use
 `--seed DIR` containing `keys` and `state` for a closed, pre-personalized simulator;
-its objects and keys must match the supplied configuration. Upstream automatic
-personalization is not connected. The run retains logs, JUnit results, and a manifest
-with vector selection and configuration/simulator hashes. Skips are counted separately
-from passes. Do not count upstream JVM results or altered expectations as interpreter
-passes. Matched P-256 personalization and a passing applicable NIST suite remain open.
+its objects and keys must match the supplied configuration.
+
+`--provision-config` reads the configured PIN/PUK, AES-128 management key, and four
+P-256 certificates. It validates that the published upstream private-key fixtures match
+those certificates, then uses the upstream `ConformanceProvisioner` over real SCP03 to
+import the keys and write the certificate objects. Exact readback must succeed before
+a closed personalized seed is copied for individual vectors. It does not modify NIST
+expectations or manufacture missing identity/biometric objects.
+
+```sh
+python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
+  --config /path/to/OpenFIPS201/tools/piv_test_runner/config/OpenFIPS201-ECC256.xml \
+  --provision-config --suite card-contact --out work/nist-p256-contact
+```
+
+This profile reports **36 passed, 26 failed, 1 skipped** across the same 63 vectors.
+`ChangeReferenceDataCommand:1` passes all 21 requirements and
+`ResetRetryCounterCommand:1` all 16. Preparing one seed instead of provisioning each
+vector preserves every pass/fail/skip outcome; the sampled seed preparation took 4.952
+seconds and vector execution 40.950 seconds, excluding compilation. These are host
+measurements, not device latency.
+
+Remaining profile gaps include absent CCC, CHUID, fingerprint, facial-image, Security
+Object and Discovery objects. The upstream provisioner enables external authentication
+for 9B but its NIST vectors also request mutual authentication. These failures remain
+visible; a passing applicable suite and complete matching personalization are still open.
+
+The run retains preparation logs, runner logs, JUnit results, and a manifest with vector
+selection, source/configuration/simulator hashes, separate preparation/execution timings,
+and a dirty-tree marker. Skips are counted separately from passes. Do not count upstream
+JVM results or altered expectations as interpreter passes.
 
 ## Authorization
 
