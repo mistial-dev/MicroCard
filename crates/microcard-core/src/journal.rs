@@ -416,10 +416,11 @@ impl MemoryFlash {
 impl crate::image_store::ImageFlash for MemoryFlash {
     fn slot_count(&self) -> usize { self.images.len() }
     fn slot_size(&self) -> usize { self.image_size }
-    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+    type Image<'a> = &'a [u8];
+    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
         let image = self.images.get(index).ok_or(Error::Bounds)?;
         if image.is_empty() { return Err(Error::Storage); }
-        read(image)
+        image.get(range).ok_or(Error::Bounds)
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         let image = self.images.get_mut(index).ok_or(Error::Bounds)?;

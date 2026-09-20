@@ -1599,9 +1599,12 @@ impl microcard_core::image_store::ImageFlash for Nvm {
     fn slot_size(&self) -> usize {
         Self::IMAGE_SLOT_BYTES
     }
-    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+    type Image<'a> = &'a [u8];
+    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
         let base = Self::image_base(index)?;
-        read(unsafe { core::slice::from_raw_parts(base as *const u8, Self::IMAGE_SLOT_BYTES) })
+        if range.start > range.end || range.end > Self::IMAGE_SLOT_BYTES { return Err(Error::Bounds); }
+        // The borrow prevents programming or erasing through this Nvm handle.
+        Ok(unsafe { core::slice::from_raw_parts((base + range.start) as *const u8, range.len()) })
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         Nvm::erase_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES)

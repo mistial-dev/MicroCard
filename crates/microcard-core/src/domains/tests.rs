@@ -89,8 +89,11 @@ struct SharedJournalFlash(Rc<RefCell<MemoryFlash>>);
 impl crate::image_store::ImageFlash for SharedJournalFlash {
     fn slot_count(&self) -> usize { crate::image_store::ImageFlash::slot_count(&*self.0.borrow()) }
     fn slot_size(&self) -> usize { crate::image_store::ImageFlash::slot_size(&*self.0.borrow()) }
-    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
-        crate::image_store::ImageFlash::with_slot(&*self.0.borrow(), index, read)
+    type Image<'a> = core::cell::Ref<'a, [u8]>;
+    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
+        let flash = self.0.try_borrow().map_err(|_| Error::Busy)?;
+        flash.read_range(index, range.clone())?;
+        Ok(core::cell::Ref::map(flash, |flash| flash.read_range(index, range).expect("validated image range")))
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         crate::image_store::ImageFlash::erase(&mut *self.0.borrow_mut(), index)

@@ -9,16 +9,23 @@ use core::ops::Range;
 /// A stable set of independently erasable, memory-mapped slots owned by the image store.
 /// Reads must reflect completed writes; programming only clears bits and reports failure.
 pub trait ImageFlash {
+    /// Scoped image storage: a mapped slice, owned file buffer, or shared read guard.
+    type Image<'a>: core::ops::Deref<Target = [u8]> where Self: 'a;
+    /// Raw bytes only. Executable consumers must authenticate the image descriptor.
+    fn read_range(&self, index: usize, range: Range<usize>) -> Result<Self::Image<'_>>;
     fn slot_count(&self) -> usize;
     fn slot_size(&self) -> usize;
-    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T>;
+    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+        self.with_range(index, 0..self.slot_size(), read)
+    }
     fn with_range<T>(
         &self,
         index: usize,
         range: Range<usize>,
         read: impl FnOnce(&[u8]) -> Result<T>,
     ) -> Result<T> {
-        self.with_slot(index, |bytes| read(bytes.get(range).ok_or(Error::Bounds)?))
+        let bytes = self.read_range(index, range)?;
+        read(&bytes)
     }
     fn erase(&mut self, index: usize) -> Result<()>;
     fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()>;
@@ -53,8 +60,9 @@ mod tests {
         fn slot_size(&self) -> usize {
             32
         }
-        fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
-            read(self.slots.get(index).ok_or(Error::Bounds)?)
+        type Image<'a> = &'a [u8];
+        fn read_range(&self, index: usize, range: Range<usize>) -> Result<Self::Image<'_>> {
+            self.slots.get(index).and_then(|slot| slot.get(range)).ok_or(Error::Bounds)
         }
         fn erase(&mut self, index: usize) -> Result<()> {
             for byte in &mut self.slots[index] {
@@ -85,6 +93,16 @@ mod tests {
         .unwrap();
         let committed = images.stage(b"old", &[], &mut SoftwareCrypto).unwrap();
         let baseline = images.into_flash().unwrap();
+        // Multiple scoped views borrow their slots rather than copying image bytes.
+        let first = baseline.read_range(0, 0..3).unwrap();
+        let second = baseline.read_range(1, 4..8).unwrap();
+        assert_eq!(first.as_ptr(), baseline.slots[0].as_ptr());
+        assert_eq!(second.as_ptr(), baseline.slots[1][4..].as_ptr());
+        assert_eq!(first, b"old");
+        assert_eq!(second, &[255; 4]);
+        for (slot, start, end) in [(2, 0, 1), (0, 31, 33), (0, 5, 4)] {
+            assert_eq!(baseline.read_range(slot, start..end), Err(Error::Bounds));
+        }
         for interruption in 0..=38 {
             let mut flash = baseline.clone();
             flash.remaining = Some(interruption);
@@ -535,16 +553,9 @@ impl<F: ImageFlash> ImageFlash for &mut F {
     fn slot_size(&self) -> usize {
         F::slot_size(self)
     }
-    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
-        F::with_slot(self, index, read)
-    }
-    fn with_range<T>(
-        &self,
-        index: usize,
-        range: Range<usize>,
-        read: impl FnOnce(&[u8]) -> Result<T>,
-    ) -> Result<T> {
-        F::with_range(self, index, range, read)
+    type Image<'a> = F::Image<'a> where Self: 'a;
+    fn read_range(&self, index: usize, range: Range<usize>) -> Result<Self::Image<'_>> {
+        F::read_range(self, index, range)
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         F::erase(self, index)

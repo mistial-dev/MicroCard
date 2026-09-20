@@ -95,11 +95,11 @@ board's reserved heap.
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the board budget gate (78.728 seconds with two workers). All
-  seven profiles cross-linked after the native API fixes and domain module extraction. After shared snapshot ownership changes, MC04
-  hardware release text is 212,356 bytes against 212,000, and software reference text
-  is 186,084 against 186,000. All seven profile artifacts linked before budget comparison; optimization
-  ceilings remain unchanged.
+  stages, then failed only the two JCVM flash ceilings (77.521 seconds with two workers).
+  All seven profiles cross-linked after the metadata and scoped-image-read changes.
+  All MC04 profiles now meet their unchanged ceilings: hardware release text is
+  211,916 bytes against 212,000, and software reference text is 185,636 against
+  186,000. This does not establish a smaller safe runtime heap.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)

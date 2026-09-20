@@ -150,15 +150,8 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
     fn slot_size(&self) -> usize {
         IMAGE
     }
-    fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
-        self.with_range(index, 0..IMAGE, read)
-    }
-    fn with_range<T>(
-        &self,
-        index: usize,
-        range: std::ops::Range<usize>,
-        read: impl FnOnce(&[u8]) -> Result<T>,
-    ) -> Result<T> {
+    type Image<'a> = Vec<u8>;
+    fn read_range(&self, index: usize, range: std::ops::Range<usize>) -> Result<Self::Image<'_>> {
         if range.start > range.end || range.end > IMAGE {
             return Err(Error::Bounds);
         }
@@ -174,7 +167,7 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
             .map_err(|_| Error::Quota)?;
         bytes.resize(range.len(), 0);
         file.read_exact(&mut bytes).map_err(|_| Error::Storage)?;
-        read(&bytes)
+        Ok(bytes)
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         Self::erase_file(&self.image_path(index)?, IMAGE)
