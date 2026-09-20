@@ -495,12 +495,19 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-temporary-references-contact`, using the same derived identity): preparation took
-14.707 seconds and vectors 96.800 seconds on the host. Remaining failures concern the original CHUID’s
+(`work/nist-current-contact`, clean revision `c44ea59723c1af62250ad541ef5a07fdb2dd0fb9`,
+using the same derived identity): preparation took 14.221 seconds and vectors
+96.526 seconds on the host. Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain
 failures, not exclusions, and the key role is not relaxed for the test.
+
+The failing cases are `CHECK_BER_TLV_conformance:2` and
+`CHECK_certificate_profile:4`, `:6`, and `:8`. The skipped case is
+`SecureMessagingErrorHandling:1`; its skip does not establish secure-messaging coverage.
+The complete contact-suite run does not cover the separate upstream RSA-2048,
+P-384, contactless, or VCI profiles.
 
 This is a **derived test identity**, not an original golden image or production
 credential. The manifest records source/output hashes and the public PKCS#12 password.
