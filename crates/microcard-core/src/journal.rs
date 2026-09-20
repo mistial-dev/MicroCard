@@ -210,6 +210,17 @@ impl<F: Flash> Journal<F> {
     }
 
     pub fn commit_with(&mut self, data: &[u8], provider: &mut impl CryptoProvider) -> Result<()> {
+        if self.poisoned { return Err(Error::Storage); }
+        let size = self.flash.slot_size();
+        if size < OVERHEAD || data.len() > size - OVERHEAD { return Err(Error::Quota); }
+        let mut owned = Zeroizing::new(Vec::new());
+        owned.try_reserve_exact(data.len() + HEADER_BYTES + 16).map_err(|_| Error::Quota)?;
+        owned.extend_from_slice(data);
+        self.commit_owned_with(owned, provider)
+    }
+
+    /// Consume a zeroizing snapshot, reusing its allocation for the encrypted record.
+    pub fn commit_owned_with(&mut self, mut data: Zeroizing<Vec<u8>>, provider: &mut impl CryptoProvider) -> Result<()> {
         if self.poisoned {
             return Err(Error::Storage);
         }
@@ -229,25 +240,30 @@ impl<F: Flash> Journal<F> {
         let record_length = HEADER_BYTES
             .checked_add(payload_length)
             .ok_or(Error::Quota)?;
-        let mut record = Vec::new();
-        record
-            .try_reserve_exact(record_length)
-            .map_err(|_| Error::Quota)?;
+        // Never realloc a buffer holding plaintext: an allocator could retain the
+        // freed secret copy. Undersized callers get a new buffer and the old one wipes.
+        if data.capacity() < record_length {
+            let mut replacement = Zeroizing::new(Vec::new());
+            replacement.try_reserve_exact(record_length).map_err(|_| Error::Quota)?;
+            replacement.extend_from_slice(&data);
+            data = replacement;
+        }
+        let plaintext_length = data.len();
+        data.resize(record_length, 0);
+        data.copy_within(..plaintext_length, HEADER_BYTES);
+        let mut record = data;
         // Burn a distinct attempt number before any encryption, even if later I/O fails.
         let attempt = self.flash.reserve_nonce()?;
-        record.extend_from_slice(b"MJ03");
-        record.extend_from_slice(&generation.to_le_bytes());
-        record.extend_from_slice(&attempt.to_le_bytes());
-        record.extend_from_slice(&encoded_payload_length.to_le_bytes());
-        let header = record.len();
-        record.resize(record_length, 0);
-        let (aad, ciphertext) = record.split_at_mut(header);
+        record[..4].copy_from_slice(b"MJ03");
+        record[4..12].copy_from_slice(&generation.to_le_bytes());
+        record[12..20].copy_from_slice(&attempt.to_le_bytes());
+        record[20..24].copy_from_slice(&encoded_payload_length.to_le_bytes());
+        let (aad, ciphertext) = record.split_at_mut(HEADER_BYTES);
         let written =
-            match provider.aes_ccm_encrypt(
+            match provider.aes_ccm_encrypt_in_place(
                 self.key.as_ref(),
                 &nonce(attempt),
                 aad,
-                data,
                 ciphertext,
             ) {
                 Ok(written) => written,
@@ -829,21 +845,22 @@ mod tests {
         decrypts: usize,
         nonces: Vec<[u8; 13]>,
         fail_encrypt: bool,
+        encryption_buffer: usize,
     }
     impl CryptoProvider for RecordingProvider {
-        fn aes_ccm_encrypt(
+        fn aes_ccm_encrypt_in_place(
             &mut self,
             key: &[u8; 16],
             nonce: &[u8; 13],
             aad: &[u8],
-            plaintext: &[u8],
             output: &mut [u8],
         ) -> Result<usize> {
             assert!(!self.nonces.contains(nonce), "encryption nonce reused");
             self.nonces.push(*nonce);
             self.encrypts += 1;
+            self.encryption_buffer = output.as_ptr() as usize;
             if self.fail_encrypt { return Err(Error::Native); }
-            crate::crypto::ccm_encrypt_into(key, nonce, aad, plaintext, output)
+            crate::crypto::ccm_encrypt_in_place(key, nonce, aad, output)
         }
 
         fn aes_ccm_decrypt_in_place(
@@ -864,9 +881,12 @@ mod tests {
         let mut provider = RecordingProvider::default();
         let (mut journal, _) =
             Journal::open_with(MemoryFlash::new(128), KEY, &mut provider).unwrap();
-        journal
-            .commit_with(b"provider-backed journal", &mut provider)
-            .unwrap();
+        let mut snapshot = Zeroizing::new(Vec::with_capacity(128));
+        snapshot.extend_from_slice(b"provider-backed journal");
+        let payload_address = snapshot.as_ptr() as usize + HEADER_BYTES;
+        journal.commit_owned_with(snapshot, &mut provider).unwrap();
+        assert_eq!(provider.encryption_buffer, payload_address,
+            "owned snapshots must reach encryption without another allocation");
         assert_eq!((provider.encrypts, provider.decrypts), (1, 0));
         let flash = journal.into_flash();
         let (_, recovered) = Journal::open_with(flash.clone(), KEY, &mut provider).unwrap();
@@ -878,11 +898,10 @@ mod tests {
 
         struct FailingProvider;
         impl CryptoProvider for FailingProvider {
-            fn aes_ccm_encrypt(
+            fn aes_ccm_encrypt_in_place(
                 &mut self,
                 _: &[u8; 16],
                 _: &[u8; 13],
-                _: &[u8],
                 _: &[u8],
                 _: &mut [u8],
             ) -> Result<usize> {

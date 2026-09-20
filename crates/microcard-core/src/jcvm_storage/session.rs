@@ -278,8 +278,8 @@ mod tests {
         encryptions: alloc::rc::Rc<core::cell::Cell<usize>>,
     }
     impl CryptoProvider for Provider {
-        fn aes_ccm_encrypt(&mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], plaintext: &[u8], output: &mut [u8]) -> Result<usize> {
-            let written = SoftwareCrypto.aes_ccm_encrypt(key, nonce, aad, plaintext, output)?;
+        fn aes_ccm_encrypt_in_place(&mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], output: &mut [u8]) -> Result<usize> {
+            let written = SoftwareCrypto.aes_ccm_encrypt_in_place(key, nonce, aad, output)?;
             self.encryptions.set(self.encryptions.get() + 1);
             Ok(written)
         }

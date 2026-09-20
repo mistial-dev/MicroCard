@@ -228,11 +228,12 @@ impl<F: Flash> Store<F> {
         }
         let (instance, statics) = view.metadata();
         // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
-        // appending statics cannot double a buffer already holding the heap.
+        // appending statics cannot double a buffer already holding the heap. Keep
+        // journal header/tag headroom so encryption can consume this allocation.
         let capacity = view
             .heap_bytes()
             .checked_add(statics.len())
-            .and_then(|length| length.checked_add(80))
+            .and_then(|length| length.checked_add(80 + crate::journal::OVERHEAD))
             .ok_or(Error::Quota)?;
         let mut encoder = Encoder::with_capacity(self.maximum, capacity)?;
         encoder.array(7)?;
@@ -248,7 +249,7 @@ impl<F: Flash> Store<F> {
         })?;
         encoder.bytes(statics)?;
         let snapshot = Zeroizing::new(encoder.finish());
-        self.journal.commit_with(&snapshot, provider)
+        self.journal.commit_owned_with(snapshot, provider)
     }
 
     pub fn into_flash(self) -> F {
