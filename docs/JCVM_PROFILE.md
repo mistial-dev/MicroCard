@@ -615,7 +615,11 @@ semantics ([API mapping guidelines, section 7](https://globalplatform.org/wp-con
 
 Native tests cover callback recreation, abort, committed projection, and failed storage;
 engine recovery covers preserved lifecycle and rejected old or invalid headers.
-End-to-end OpenFIPS201 personalization-transition coverage remains outstanding.
+The existing transport workload now personalizes OpenFIPS201 after provisioning.
+Its own status command reports `07` before personalization and `0F` on subsequent
+callbacks, after abrupt simulator termination/reboot, and after journal renewal.
+The same workload continues certificate replacement, signing, and ECDH afterward.
+This covers completed personalization recovery, not interruption inside its setter.
 
 ### Original ICAM object recovery
 

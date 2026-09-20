@@ -53,11 +53,6 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
-- Complete end-to-end OpenFIPS201 personalization-transition coverage. JCVM lifecycle
-  now lives in the authenticated heap header, checkpoints before reporting success,
-  and survives callback recreation, recovery, and Java Card transaction abort.
-  Native tests cover failed storage and invalid states; the real applet personalization
-  path still needs explicit acceptance before this blocker can be closed.
 - Complete host interruption coverage for personalized OpenFIPS201 provisioning.
   The original ICAM object-only workflow passes exact readback of 11 objects after
   reopening, and the separate P-256 NIST profile passes 37 of 63 contact vectors.
@@ -75,6 +70,9 @@ board's reserved heap.
   P-256 keys, generation, ECDH, ECDSA/SHA-256, and AES-128 ECB/CBC are connected. Ordinary PIV access, reselect,
   secure-channel reset, chained certificate upload, and certificate retrieval now pass
   through the managed simulator path.
+  The same workload personalizes the real applet and reads its lifecycle through the
+  applet status command: `07` before personalization and `0F` across subsequent
+  callbacks, abrupt process termination/reboot, and heap-counter renewal.
   Management-key creation/import, PIV challenge-response, PIN provisioning, P-256
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;

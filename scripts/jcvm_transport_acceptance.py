@@ -41,6 +41,12 @@ def tlv(tag, value):
     return bytes([tag]) + encoded + value
 
 
+def check_lifecycle(client, expected):
+    response = client.command(0xcb, bytes.fromhex("5C032F4753"), p1=0xff, p2=0xff, le=256)
+    assert len(response) >= 5 and response[0] == 0x53 and response[1] == len(response) - 2
+    assert response[2:5] == bytes([0x80, 1, expected]), response.hex()
+
+
 def certificate_for(public_key, serial=1):
     issuer_key = ec.derive_private_key(9, ec.SECP256R1())
     issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "MicroCard acceptance CA")])
@@ -179,6 +185,9 @@ def main():
                        p1=0xff, p2=0xff)
         write_certificate(client, certificate_object)
         read_certificate(client, certificate_object)
+        check_lifecycle(client, 0x07)
+        client.command(0xdb, bytes.fromhex("6900"), p1=0xff, p2=0xff)
+        check_lifecycle(client, 0x0f)
         # Stop between encrypted chain fragments, without graceful session cleanup.
         replacement = tlv(0x53, tlv(0x70, certificate_for(public_key, serial=2))
                           + bytes.fromhex("710100FE00"))
@@ -195,6 +204,7 @@ def main():
         # A fresh authenticated upload must replace the object, not resume stale chaining.
         client.connect()
         assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        check_lifecycle(client, 0x0f)
         write_certificate(client, replacement)
         certificate_object = replacement
         read_certificate(client, certificate_object)
@@ -223,6 +233,7 @@ def main():
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]
         assert client.command(0xa4, instance, p1=4) == selected
+        check_lifecycle(client, 0x0f)
         # MAC-only transport supplies no applet administrative grant. Prove that
         # the imported persistent key itself answers the PIV authentication flow.
         client.connect(level=1)
@@ -286,7 +297,7 @@ def main():
                                   capture_output=True, timeout=10)
         assert rejected.returncode and "IncompatibleState" in rejected.stderr
         assert files(legacy) == before
-    print("PASS: JCVM load, management-key authentication and PIN-gated P-256 signing/ECDH, interrupted certificate replacement/reboot, counter renewal, reclaim and fail-closed storage")
+    print("PASS: JCVM load, durable personalization, management-key authentication and PIN-gated P-256 signing/ECDH, interrupted certificate replacement/reboot, counter renewal, reclaim and fail-closed storage")
 
 
 if __name__ == "__main__":
