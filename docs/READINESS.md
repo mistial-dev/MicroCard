@@ -89,13 +89,13 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 198,356 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 198,564 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the flash ceilings (71.717 seconds with two workers). All seven
+  stages, then failed the flash ceilings (57.071 seconds with two workers). All seven
   profiles cross-linked. MC04 no
   longer retains package image buffers in runtime state; recovery reads verified
   flash guards and retains metadata. MC04 hardware release text is 212,220 bytes

@@ -414,7 +414,7 @@ fn jcsystem(
             let event = frame.pop_short()?;
             let length = frame.pop_short()?;
             if length < 0 {
-                return Err(Error::Bounds);
+                return Ok(Native::Threw(new_exception(heap, ClassId::NegativeArraySizeException, context)?));
             }
             let kind = match name {
                 MethodId::makeTransientByteArray => heap::KIND_BYTE,
@@ -431,8 +431,15 @@ fn jcsystem(
                     return Ok(Native::Threw(exception));
                 }
             };
-            let array = heap.new_transient_array(kind, length as u16, context, event)?;
-            frame.push_reference(array)?;
+            match heap.new_transient_array(kind, length as u16, context, event) {
+                Ok(array) => frame.push_reference(array)?,
+                Err(Error::Quota) => {
+                    let exception = new_exception(heap, ClassId::SystemException, context)?;
+                    heap.put_word_unconditional(exception, REASON_FIELD, 2)?; // NO_TRANSIENT_SPACE
+                    return Ok(Native::Threw(exception));
+                }
+                Err(error) => return Err(error),
+            }
         }
         MethodId::isTransient => {
             let reference = frame.pop_reference()?;
@@ -489,6 +496,16 @@ pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: h
     };
     heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
     Ok(Native::Threw(exception))
+}
+
+/// Reserve framework failure objects before applet allocations can exhaust the heap.
+/// Keeping them in the runtime prefix also keeps them outside applet transactions.
+pub(crate) fn reserve_framework_exceptions(heap: &mut Heap, context: heap::Context) -> Result<()> {
+    for class in [ClassId::SystemException, ClassId::NegativeArraySizeException,
+        ClassId::NullPointerException, ClassId::ArrayIndexOutOfBoundsException] {
+        new_exception(heap, class, context)?;
+    }
+    Ok(())
 }
 
 /// Obtain a runtime exception. Repeated native errors must not leak
@@ -929,13 +946,15 @@ mod tests {
     }
 
     #[test]
-    fn transient_factories_report_lifetimes_and_reject_invalid_events() {
+    fn transient_factories_report_lifetimes_and_recoverable_failures() {
         for factory in [MethodId::makeTransientByteArray, MethodId::makeTransientBooleanArray, MethodId::makeTransientShortArray, MethodId::makeTransientObjectArray] {
             let (mut slab, mut words, mut tags) = setup(0);
+            let capacity = slab.len();
             let mut heap = Heap::new(&mut slab).unwrap();
+            reserve_framework_exceptions(&mut heap, 1).unwrap();
             let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
-            for event in [1, 2, 0, 3] {
-                frame.push_short(2).unwrap();
+            for (length, event) in [(0, 1), (2, 1), (2, 2), (2, 0), (2, 3)] {
+                frame.push_short(length).unwrap();
                 frame.push_short(event).unwrap();
                 let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
                 if matches!(event, 1 | 2) {
@@ -948,6 +967,30 @@ mod tests {
                     assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 1);
                 }
             }
+            // Even a completely full heap and undo log must deliver the API error.
+            let remaining = capacity - heap.used() - heap::HEADER;
+            heap.new_array(heap::KIND_BYTE, remaining as u16, 1).unwrap();
+            assert_eq!(heap.used(), capacity);
+            heap.begin_transaction(0).unwrap();
+            for (length, event, expected, reason) in [
+                (-1, 1, ClassId::NegativeArraySizeException, 0),
+                (i16::MIN, 2, ClassId::NegativeArraySizeException, 0),
+                (0, 1, ClassId::SystemException, 2),
+                (1, 2, ClassId::SystemException, 2),
+                (i16::MAX, 1, ClassId::SystemException, 2),
+                (0, 3, ClassId::SystemException, 1),
+            ] {
+                frame.push_short(length).unwrap();
+                frame.push_short(event).unwrap();
+                let Native::Threw(exception) = jcsystem(factory, &mut heap, &mut frame, 1,
+                    &mut idle(), &mut [], &mut crate::host::NoHost).unwrap()
+                    else { panic!("invalid transient allocation accepted"); };
+                assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, expected);
+                assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), reason);
+                assert_eq!(heap.used(), capacity);
+                assert_eq!(heap.transaction_remaining(), Some(0));
+            }
+            assert!(!heap.abort_transaction(&mut []).unwrap());
         }
     }
 

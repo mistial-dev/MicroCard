@@ -124,6 +124,7 @@ impl Card {
         card.buffer = heap.new_transient_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context, heap::CLEAR_ON_RESET)?;
         let apdu_class = native_class_of(ClassId::APDU)?;
         card.apdu = heap.new_object(apdu_class, 1, card.context)?;
+        natives::reserve_framework_exceptions(&mut heap, card.context)?;
         card.runtime_bytes = heap.used();
         use crate::cap::{TYPE_BOOLEAN, TYPE_BYTE, TYPE_SHORT, TYPE_INT};
         for (index, array) in statics.array_inits().enumerate() {
@@ -789,6 +790,8 @@ mod tests {
         heap.put_word(signature, 3, 1).unwrap();
         heap.put_word(signature, 4, 1).unwrap();
         heap.put_word(signature, 5, hash_state).unwrap();
+        let reserved_exception = natives::new_exception(&mut heap, ClassId::SystemException, 1).unwrap();
+        heap.put_word_unconditional(reserved_exception, natives::REASON_FIELD, 2).unwrap();
         let runtime_exception = natives::new_exception(&mut heap, ClassId::CryptoException, 1).unwrap();
         let explicit_exception = heap.new_object(native_class_of(ClassId::CryptoException).unwrap(), 6, 1).unwrap();
         heap.put_word_unconditional(runtime_exception, natives::REASON_FIELD, 3).unwrap();
@@ -807,6 +810,7 @@ mod tests {
         assert_eq!(recovered.array_get(persistent, 0), Ok(9));
         assert_eq!(recovered.get_word(pin, 3), Ok(0));
         assert_eq!(recovered.get_word(pin, 4), Ok(2));
+        assert_eq!(recovered.get_word(reserved_exception, natives::REASON_FIELD), Ok(0));
         assert_eq!(recovered.get_word(runtime_exception, natives::REASON_FIELD), Ok(0));
         assert_eq!(recovered.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
         assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
@@ -826,6 +830,7 @@ mod tests {
         let live = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert_eq!(live.array_get(transient, 0), Ok(7));
         assert_eq!(live.get_word(pin, 3), Ok(1));
+        assert_eq!(live.get_word(reserved_exception, natives::REASON_FIELD), Ok(2));
         assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
         assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
         for case in 0..24 {

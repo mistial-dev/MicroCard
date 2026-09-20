@@ -2142,17 +2142,20 @@ mod tests {
             Outcome::Short(0x6a80u16 as i16)
         );
 
-        // Util.getShort must enter the typed Java handler for either invalid input.
+        // Invalid framework arguments must enter the matching typed Java handler.
         package.imports.push((vec![0xa0, 0x00, 0x00, 0x00, 0x62, 0x00, 0x01], 1, 0));
-        for (input, exception_token) in [(vec![op::ACONST_NULL], 7),
-            (vec![op::SCONST_0, op::NEWARRAY, 11], 5)] {
+        for (input, argument, class, method, return_op, exception_token) in [
+            (vec![op::ACONST_NULL], op::SCONST_0, 16, 4, op::SRETURN, 7), // Util.getShort
+            (vec![op::SCONST_0, op::NEWARRAY, 11], op::SCONST_0, 16, 4, op::SRETURN, 5),
+            (vec![op::BSPUSH, 0xff], op::SCONST_1, 8, 13, op::ARETURN, 6), // makeTransientByteArray
+        ] {
             package.code = input;
-            package.code.extend([op::SCONST_0, 0x8d, 0, 0, op::SRETURN]);
+            package.code.extend([argument, 0x8d, 0, 0, return_op]);
             let end = package.code.len() as u16;
             package.code.extend([op::POP, op::BSPUSH, 7, op::SRETURN]);
             package.handlers = vec![handler(body, end, body + end, 1, true)];
             package.constants = vec![
-                [CONSTANT_STATIC_METHODREF, 0x80, 16, 4], // Util.getShort
+                [CONSTANT_STATIC_METHODREF, 0x80, class, method],
                 [CONSTANT_CLASSREF, 0x81, exception_token, 0],
             ];
             assert_eq!(execute_package(&package).unwrap(), Outcome::Short(7));

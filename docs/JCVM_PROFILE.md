@@ -212,7 +212,11 @@ Full type and dataflow verification is deferred. In its place the operand stack 
 Array clear events occupy spare bits in the existing six-byte object header. The heap
 can clear reset-scoped arrays across contexts and deselection-scoped arrays for one
 context without reallocating objects or changing references. `JCSystem.isTransient`
-reports the recorded event; invalid factory events raise `SystemException.ILLEGAL_VALUE`.
+reports the recorded event. Negative factory lengths throw `NegativeArraySizeException`;
+invalid events throw `SystemException.ILLEGAL_VALUE`, and exhausted transient storage
+throws `SystemException.NO_TRANSIENT_SPACE`. Framework exceptions occupy a reserved
+32-byte runtime prefix allocation before applet installation, so these failures and
+utility bounds/null failures remain catchable with a full heap and commit log.
 These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/JCSystem.html).
 
 CAP static array initializers and non-default primitive values are applied before
@@ -360,8 +364,9 @@ conditional. An abort that allocated objects clears their storage and transient
 references and ends the session before any stale frame references can execute;
 reset or reopening the recovered session is required. This follows the allowed
 session-termination behavior in [JCSystem.abortTransaction](https://docs.oracle.com/en/java/javacard/3.1/jc_api_srvc/api_classic/javacard/framework/JCSystem.html).
-Older snapshots with a persistent APDU-buffer header are explicitly rejected by
-runtime-layout validation; there is no automatic erase or conversion.
+Snapshots with a persistent APDU-buffer header or without the reserved framework
+exception prefix are explicitly rejected by runtime-layout validation; there is no
+automatic erase or conversion.
 
 An in-command `commitTransaction()` saves an authenticated snapshot before
 discarding its undo log. Cancellation or failure afterward recovers that committed
@@ -503,8 +508,8 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-util-exceptions-contact`, based on `19295c8` with the utility API fixes):
-preparation took 14.371 seconds and vectors 95.135 seconds on the host.
+(`work/nist-factory-errors-stable-contact`, based on `33153ae` with the factory API fixes):
+preparation took 13.967 seconds and vectors 95.844 seconds on the host.
 Every vector retained its previous outcome. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
