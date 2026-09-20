@@ -144,6 +144,12 @@ board's reserved heap.
   peak from 196,363 to **178,955 bytes** at clean revision `10dee96`
   (`work/jcvm-deferred-restore-clean-heap.json`). The overall SELECT peak remains
   236,188 bytes; recovery improvement alone does not qualify the board heap.
+  Phase measurements at clean revision `db8ed2d` identify forced renewal as that
+  peak; two-applet selection reaches 188,321 bytes and post-renewal operations
+  213,603 bytes (`work/jcvm-phased-clean-heap.json`). Renewal retains authenticated
+  ciphertext for exact installation while validating separate plaintext. The board
+  borrows mapped staging ciphertext; host file-backed ciphertext and image buffers
+  must not be counted as proven board allocations or simply subtracted from the peak.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
