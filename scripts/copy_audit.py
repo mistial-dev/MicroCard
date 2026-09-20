@@ -31,15 +31,17 @@ AUDITED = {
     "crates/microcard-core/src/domains.rs": [
         "merged.extend_from_slice(&self.storage_schema);",
         "copy.extend_from_slice(value);",
-        "copy.extend_from_slice(value);",
         # Clones a pair of offsets, not package bytes.
         "image: raw.get(metadata.image.clone()).ok_or(Error::Storage)?,",
         # MC04 recovery still owns one shared immutable package buffer.
         "raw.extend_from_slice(bytes);",
         "host.out.extend_from_slice(&host.sw.to_be_bytes());",
-        "self.out.extend_from_slice(source);",
         "version[index * 2..index * 2 + 2].copy_from_slice(&component.to_be_bytes());",
         ".copy_from_slice(&crate::globalplatform::ISD_AID);",
+    ],
+    "crates/microcard-core/src/domains/native.rs": [
+        "copy.extend_from_slice(value);",
+        "self.out.extend_from_slice(source);",
         "heap.bytes_mut(destination)?[destination_offset..destination_end].copy_from_slice(source);",
         ".copy_from_slice(digest.as_slice());",
     ],

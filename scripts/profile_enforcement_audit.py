@@ -67,9 +67,9 @@ def main() -> None:
     require("crates/microcard-core/src/domains/linking.rs", ("validate_linked_program(&units)?",))
     require("crates/microcard-core/src/domains.rs", (
         "merged_storage_schema",
-        "authorize_storage",
         "domain_schema",
     ))
+    require("crates/microcard-core/src/domains/native.rs", ("authorize_storage", "domain_schema"))
     print("PASS: MCA0001-MCA0025 coverage pointers and profile enforcement sites are present")
 
 
