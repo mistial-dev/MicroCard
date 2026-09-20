@@ -119,8 +119,8 @@ impl Card {
         reserve(&mut card.tags, sizes.frame_words.div_ceil(8))?;
 
         let mut heap = Heap::new(&mut card.heap)?;
-        // The buffer and the APDU object outlive every command, because an applet is
-        // allowed to keep the reference it was handed, JCRE §4.
+        // Runtime-owned objects are reused across callbacks. Applets may use their
+        // references locally but may not retain them in fields or arrays, JCRE §6.2.
         card.buffer = heap.new_transient_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context, heap::CLEAR_ON_RESET)?;
         let apdu_class = native_class_of(ClassId::APDU)?;
         card.apdu = heap.new_object(apdu_class, 1, card.context)?;
@@ -221,7 +221,9 @@ impl Card {
         linked.imports_resolve()?;
 
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
-        let array = heap.new_array(heap::KIND_BYTE, parameters.len() as u16, self.context)?;
+        // Installation parameters are a global array, just like the APDU buffer
+        // (JCRE §6.2.2). Reuse its storage and reference-store protection.
+        let array = self.buffer;
         heap.byte_slice_mut(array, 0, parameters.len())?
             .copy_from_slice(parameters);
         let outcome = {
@@ -585,6 +587,7 @@ mod tests {
         pub const DUP: u8 = 61;
         pub const SRETURN: u8 = 120;
         pub const RETURN: u8 = 122;
+        pub const PUTSTATIC_A: u8 = 127;
         pub const INVOKEVIRTUAL: u8 = 139;
         pub const INVOKESPECIAL: u8 = 140;
         pub const INVOKESTATIC: u8 = 141;
@@ -903,6 +906,21 @@ mod tests {
             assert_eq!(card.install_instance_with_cancel(&file, &mut crate::host::NoHost,
                 Installation { module_aid, instance_aid: &requested, parameters }, &mut || false), expected);
         }
+    }
+
+    #[test]
+    fn installation_parameters_cannot_escape_into_static_storage() {
+        let mut package = applet(vec![op::RETURN], 1);
+        package.static_bytes = 2;
+        package.constants.push([crate::cap::CONSTANT_STATIC_FIELDREF, 0, 0, 0]);
+        // Keep method offsets unchanged; this installation only attempts the store.
+        package.code[..5].copy_from_slice(&[op::ALOAD_0, op::PUTSTATIC_A, 0, 6, op::RETURN]);
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        let mut card = Card::new(&file, Sizes::default()).unwrap();
+        assert_eq!(card.install(&file, &mut crate::host::NoHost, &[0x42]), Err(Error::Unauthorized));
+        assert_eq!(card.statics, [0, 0]);
+        assert!(!card.installed());
     }
 
     #[test]

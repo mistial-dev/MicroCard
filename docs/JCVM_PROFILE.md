@@ -538,7 +538,9 @@ The 3.0.5 source review covers these implementation boundaries:
   subset, not complete 3.0.5 container support.
 - Runtime §§6.2.1–6.2.2 and 6.2.8 define temporary entry points, global arrays and
   reference-store checks. Global arrays include both the APDU buffer and installation
-  parameters. Access checks precede the bytecode's operation.
+  parameters. Installation reuses the protected global APDU buffer rather than
+  allocating an ordinary persistent parameter array. Access checks precede the
+  bytecode's operation.
 - Runtime §§7.1–7.9 define conditional persistent updates, callback transaction
   boundaries, abort, transient exclusions and commit capacity. Section 7.6.3 permits
   terminating a session after aborting a transaction that allocated objects.
