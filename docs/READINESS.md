@@ -105,7 +105,9 @@ board's reserved heap.
   The provisioned JCVM transport workload forces counter renewal and peaks at
   184,681 host-requested allocation bytes after validating the saved heap by borrowing
   it (previously 266,721). This is below the 196,608-byte board reservation for this
-  workload, but does not establish device heap safety. Bound supported workloads and
+  workload, but does not establish device heap safety. The expanded personalization
+  workload at clean revision `5fb8307` reproduces the same 184,681-byte peak
+  (`work/jcvm-personalized-heap.json`). Bound supported workloads and
   board allocations before declaring this path ready for hardware. Host figures
   exclude allocator metadata and stack and include file-backed image reads.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
