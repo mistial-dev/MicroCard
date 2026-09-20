@@ -276,6 +276,9 @@ impl<F: Flash> Journal<F> {
             ciphertext.zeroize();
             return Err(Error::Storage);
         }
+        // Any flash error from here may leave a published record or reclaim intent.
+        // Only recovery can determine which generation is safe to extend.
+        self.poisoned = true;
         if let Some(active) = self.active {
             self.flash.program(active, size - 3, &[0])?;
         }
@@ -287,10 +290,8 @@ impl<F: Flash> Journal<F> {
         }
         self.generation = generation;
         self.active = Some(slot);
-        if let Err(error) = self.flash.advance_monotonic(generation) {
-            self.poisoned = true;
-            return Err(error);
-        }
+        self.flash.advance_monotonic(generation)?;
+        self.poisoned = false;
         Ok(())
     }
     pub fn into_flash(self) -> F {
@@ -781,7 +782,14 @@ mod tests {
             let mut flash = base.clone();
             flash.fail_after = Some(cut);
             let (mut journal, _) = Journal::open(flash, KEY).unwrap();
-            let _ = journal.commit(b"three");
+            let committed = journal.commit(b"three");
+            if committed.is_err() && cut >= 4 {
+                // Removing the I/O fault must not make an uncertain commit retryable.
+                journal.flash.fail_after = None;
+                let nonce = journal.flash.nonce_generation().unwrap();
+                assert_eq!(journal.commit(b"retry"), Err(Error::Storage));
+                assert_eq!(journal.flash.nonce_generation().unwrap(), nonce);
+            }
             let mut flash = journal.into_flash();
             flash.fail_after = None;
             let (_, recovered) = Journal::open(flash, KEY).unwrap();
