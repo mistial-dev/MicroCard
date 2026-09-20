@@ -602,16 +602,20 @@ expected status words are unchanged. GSA signed objects retain their original da
 signatures, and policies. The test issuer URLs use `.invalid`; live revocation and
 chain trust are not established.
 
-### Application lifecycle limitation
+### Application lifecycle persistence
 
-`GPSystem.getCardContentState` and `setCardContentState` currently use the temporary
-`Jcre` created for each callback. A successful setter therefore does not establish a
-durable transition. This affects OpenFIPS201 personalization and must be fixed before
-release. Passing provisioning and crypto workloads does not cover this requirement.
-The replacement must use one authoritative persisted state, reject invalid transitions,
-and preserve completed changes across Java Card transaction aborts. GlobalPlatform
-specifies that its API operations are independent of an active Java Card transaction
-([API mapping guidelines, section 7](https://globalplatform.org/wp-content/uploads/2018/06/2.1.1_Mapping_guidelines_v1.0.1-Final.pdf)).
+`GPSystem.getCardContentState` reads the authenticated runtime heap header.
+`setCardContentState` accepts application-specific states from `07` through `7F`
+with the low three bits set, rejects installation-time calls, and checkpoints before
+returning success. A checkpoint error terminates execution through the existing
+storage-failure path. Recreated callback state no longer resets the lifecycle.
+Lifecycle writes survive Java Card transaction aborts while the checkpoint excludes
+conditional applet writes. This follows GlobalPlatform's independent transaction
+semantics ([API mapping guidelines, section 7](https://globalplatform.org/wp-content/uploads/2018/06/2.1.1_Mapping_guidelines_v1.0.1-Final.pdf)).
+
+Native tests cover callback recreation, abort, committed projection, and failed storage;
+engine recovery covers preserved lifecycle and rejected old or invalid headers.
+End-to-end OpenFIPS201 personalization-transition coverage remains outstanding.
 
 ### Original ICAM object recovery
 

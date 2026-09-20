@@ -119,6 +119,7 @@ impl Card {
         reserve(&mut card.tags, sizes.frame_words.div_ceil(8))?;
 
         let mut heap = Heap::new(&mut card.heap)?;
+        heap.initialize_lifecycle();
         // Runtime-owned objects are reused across callbacks. Applets may use their
         // references locally but may not retain them in fields or arrays, JCRE §6.2.
         card.buffer = heap.new_transient_array(heap::KIND_BYTE, sizes.buffer_bytes, card.context, heap::CLEAR_ON_RESET)?;
@@ -802,6 +803,7 @@ mod tests {
             .find(|class| class.id == ClassId::KeyPair).unwrap();
         // NEW checkpoints before invokespecial runs the constructor.
         let unconstructed_pair = natives::new_api_object(&mut heap, pair_class, 1).unwrap();
+        assert_eq!(heap.set_lifecycle(0x0f), Ok(true));
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -817,6 +819,7 @@ mod tests {
         let mut restored = Card::restore(&file, Sizes::default(), saved).unwrap();
         assert!(!restored.selected());
         let recovered = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+        assert_eq!(recovered.lifecycle(), Ok(0x0f));
         assert_eq!(recovered.array_get(transient, 0), Ok(0));
         assert_eq!(recovered.array_get(persistent, 0), Ok(9));
         assert_eq!(recovered.get_word(pin, 1), Ok(64));
@@ -846,7 +849,7 @@ mod tests {
         assert_eq!(live.get_word(reserved_exception, natives::REASON_FIELD), Ok(2));
         assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
         assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
-        for case in 0..26 {
+        for case in 0..29 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -877,6 +880,9 @@ mod tests {
                 }
                 23 => { invalid[pin as usize + heap::HEADER + 3] = 65; instance } // Exceeds configured PIN capacity.
                 24 => { invalid[unconstructed_pair as usize + heap::HEADER + 1] = 5; instance }
+                25 => { invalid[..2].fill(0); instance } // Pre-lifecycle heap format.
+                26 => { invalid[0] = 2; instance } // Unknown header version.
+                27 => { invalid[1] = 0x80; instance } // Invalid application state.
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());

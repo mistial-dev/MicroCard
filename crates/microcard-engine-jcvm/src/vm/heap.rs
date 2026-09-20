@@ -118,6 +118,32 @@ impl<'a> Heap<'a> {
         Ok(Self { bytes, next: used, transaction: None, aborted_allocations: false, pending_writes: PendingWrites::default() })
     }
 
+    /// Runtime-only header, outside applet-addressable objects and Java transactions.
+    pub(crate) fn initialize_lifecycle(&mut self) {
+        self.bytes[..2].copy_from_slice(&[1, 0x07]);
+    }
+
+    pub(crate) fn lifecycle(&self) -> Result<u8> {
+        if self.bytes[0] != 1 || !Self::valid_lifecycle(self.bytes[1]) {
+            return Err(Error::Format);
+        }
+        Ok(self.bytes[1])
+    }
+
+    pub(crate) fn valid_lifecycle(state: u8) -> bool {
+        state < 0x80 && state & 7 == 7
+    }
+
+    pub(crate) fn set_lifecycle(&mut self, state: u8) -> Result<bool> {
+        self.lifecycle()?;
+        if !Self::valid_lifecycle(state) { return Ok(false); }
+        if self.bytes[1] != state {
+            self.bytes[1] = state;
+            self.pending_writes.heap(1, 1);
+        }
+        Ok(true)
+    }
+
     /// Start one bounded undo log for heap and static fields. The caller must end the
     /// transaction before releasing this heap view.
     pub fn begin_transaction(&mut self, capacity: usize) -> Result<()> {
@@ -557,6 +583,14 @@ mod tests {
     fn rollback_covers_payload_writes_but_preserves_transients_and_unconditional_state() {
         let mut bytes = vec![0; 512];
         let mut heap = Heap::new(&mut bytes).unwrap();
+        heap.initialize_lifecycle();
+        assert_eq!(heap.lifecycle(), Ok(7));
+        for state in 0..=u8::MAX {
+            if state >= 0x80 || state & 7 != 7 {
+                assert_eq!(heap.set_lifecycle(state), Ok(false));
+                assert_eq!(heap.lifecycle(), Ok(7));
+            }
+        }
         let object = heap.new_object(1, 2, 1).unwrap();
         let array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
         let short = heap.new_array(KIND_SHORT, 2, 1).unwrap();
@@ -579,6 +613,7 @@ mod tests {
         heap.array_put_int(integer, 0, -70000).unwrap();
         heap.array_put(transient, 0, 1).unwrap();
         assert!(!heap.has_uncheckpointed_writes(), "conditional and transient writes do not publish committed state");
+        assert_eq!(heap.set_lifecycle(0x0f), Ok(true));
         heap.put_word_unconditional(object, 1, 2).unwrap();
         assert!(heap.has_uncheckpointed_writes());
         // Later conditional writes must restore the unconditional counter, not 3 or 5.
@@ -590,6 +625,7 @@ mod tests {
         let mut projected_statics = [0; 2];
         let remaining = heap.transaction_remaining();
         assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
+        assert_eq!(&projected[..2], &[1, 0x0f]);
         assert_eq!(projected_statics, [4, 5]);
         // Windows can split words and overlapping before-images without publishing
         // conditional values. They must agree with the existing full projection.
@@ -607,7 +643,9 @@ mod tests {
         assert_eq!(heap.get_word(object, 1), Ok(8));
         assert_eq!(heap.transaction_remaining(), remaining);
         assert!(!heap.abort_transaction(&mut statics).unwrap());
+        assert_eq!(heap.lifecycle(), Ok(0x0f));
         let mut expected = original;
+        expected[1] = 0x0f;
         expected[object as usize + HEADER + 2..object as usize + HEADER + 4]
             .copy_from_slice(&2u16.to_be_bytes());
         expected[transient as usize + HEADER] = 1;

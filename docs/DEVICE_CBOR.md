@@ -207,6 +207,14 @@ static length must match the load file, and the complete record must fit the jou
 payload capacity. Engine recovery validates object and reference structure and
 requires volatile values to be cleared. Unknown versions and trailing bytes fail.
 
+The first two heap bytes are a runtime header: byte 0 is header version `1`,
+and byte 1 is the application's GlobalPlatform lifecycle (`07`, `0F`, through
+`7F`, with the low three bits set). Objects still begin at offset 2; applet references
+cannot address this header. A fresh installation starts at `07`. Lifecycle updates
+are authenticated by the same journal and survive Java Card transaction rollback.
+Recovery rejects old zero headers, unknown header versions, and invalid lifecycle
+values without resetting the applet. Other deterministic runtime bytes remain checked.
+
 Transient symmetric key material is a byte array with its declared clear event and
 an internal one-byte initialization prefix. The key object's persistent readiness
 word remains zero. Persistent key arrays have no prefix and retain their readiness

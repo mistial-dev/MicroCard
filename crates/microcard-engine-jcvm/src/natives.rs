@@ -103,8 +103,6 @@ pub struct Jcre {
     pub reselecting: bool,
     /// Allocated before begin so a full undo log can still report its exception.
     transaction_exception: Option<Reference>,
-    /// The applet's lifecycle byte, which GlobalPlatform keeps rather than the applet.
-    pub lifecycle: u8,
     /// The AID the applet registered under, if it chose one.
     pub aid: [u8; 16],
     pub aid_length: u8,
@@ -135,7 +133,6 @@ impl Jcre {
             reselecting: false,
             transaction_exception: None,
             // Selectable, GP 2.3 Table 11-4. An applet moves itself on from here.
-            lifecycle: 0x07,
             aid: [0; 16],
             aid_length: 0,
         }
@@ -664,6 +661,49 @@ mod tests {
     /// A runtime with no command in flight, for the methods that do not read one.
     fn idle() -> Jcre {
         Jcre::new(0, 0)
+    }
+
+    #[test]
+    fn lifecycle_checkpoints_before_success_and_survives_callback_and_abort() {
+        struct Storage { saved: alloc::vec::Vec<u8>, fail: bool }
+        impl crate::host::Host for Storage {
+            fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>) -> Result<()> {
+                if self.fail { return Err(Error::Storage); }
+                self.saved.resize(state.heap_bytes(), 0);
+                state.save_into(&mut self.saved)?;
+                Ok(())
+            }
+        }
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        heap.initialize_lifecycle();
+        let buffer = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+        let instance = heap.new_object(1, 1, 1).unwrap();
+        let mut storage = Storage { saved: vec![], fail: false };
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+        let setter = framework(ClassId::GPSystem, MethodId::setCardContentState, true);
+        let getter = framework(ClassId::GPSystem, MethodId::getCardContentState, true);
+        let mut jcre = Jcre::new(0, buffer);
+        jcre.instance = Some(instance);
+        heap.begin_transaction(32).unwrap();
+        heap.put_word(instance, 0, 99).unwrap();
+        frame.push_short(0x0f).unwrap();
+        call(setter, &mut heap, &mut storage, &mut frame, 1, &mut jcre).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 1);
+        assert_eq!(&storage.saved[..2], &[1, 0x0f]);
+        let used = storage.saved.len();
+        let saved = Heap::resume(&mut storage.saved, used).unwrap();
+        assert_eq!(saved.get_word(instance, 0), Ok(0));
+        heap.abort_transaction(&mut []).unwrap();
+        let mut next = Jcre::new(0, buffer);
+        next.instance = Some(instance);
+        call(getter, &mut heap, &mut storage, &mut frame, 1, &mut next).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 0x0f);
+        storage.fail = true;
+        frame.push_short(0x17).unwrap();
+        assert!(matches!(call(setter, &mut heap, &mut storage, &mut frame, 1,
+            &mut next), Err(Error::Storage)));
+        assert_eq!(&storage.saved[..2], &[1, 0x0f]);
     }
 
     #[test]

@@ -198,7 +198,8 @@ impl Card {
             return Err(Error::Bounds);
         }
         // Runtime objects have deterministic handles and a zeroed APDU buffer.
-        if saved.heap.get(..self.runtime_bytes) != Some(&self.heap[..self.runtime_bytes]) {
+        if saved.heap[0] != 1 || !Heap::valid_lifecycle(saved.heap[1])
+            || saved.heap.get(2..self.runtime_bytes) != Some(&self.heap[2..self.runtime_bytes]) {
             return Err(Error::Format);
         }
         let mut starts = Vec::new();

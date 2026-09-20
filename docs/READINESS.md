@@ -53,13 +53,11 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
-- Persist JCVM application lifecycle transitions. `GPSystem.setCardContentState`
-  currently changes callback-local state and reports success; subsequent callbacks
-  start at `0x07` again. OpenFIPS201 personalization depends on this state. This
-  path is not release-ready despite passing ordinary provisioning acceptance.
-  Make the state durable, validate allowed transitions, and keep it independent of
-  Java Card transaction rollback. Verify callback/reboot recovery and storage failure
-  through the shared management path before claiming personalization completion.
+- Complete end-to-end OpenFIPS201 personalization-transition coverage. JCVM lifecycle
+  now lives in the authenticated heap header, checkpoints before reporting success,
+  and survives callback recreation, recovery, and Java Card transaction abort.
+  Native tests cover failed storage and invalid states; the real applet personalization
+  path still needs explicit acceptance before this blocker can be closed.
 - Complete host interruption coverage for personalized OpenFIPS201 provisioning.
   The original ICAM object-only workflow passes exact readback of 11 objects after
   reopening, and the separate P-256 NIST profile passes 37 of 63 contact vectors.
@@ -111,7 +109,7 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 221,720 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 222,184 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the

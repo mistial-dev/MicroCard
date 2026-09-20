@@ -337,12 +337,13 @@ pub fn call(
             frame.push_reference(NULL)?;
         }
         (ClassId::GPSystem, MethodId::getCardContentState) => {
-            frame.push_short(jcre.lifecycle as i16)?;
+            frame.push_short(heap.lifecycle()? as i16)?;
         }
         (ClassId::GPSystem, MethodId::setCardContentState) => {
             let state = frame.pop_short()?;
-            jcre.lifecycle = state as u8;
-            frame.push_short(1)?;
+            let accepted = !jcre.installing && heap.set_lifecycle(state as u8)?;
+            if accepted { checkpoint_committed(heap, host, jcre, context, statics)?; }
+            frame.push_short(i16::from(accepted))?;
         }
         (ClassId::MessageDigest, MethodId::doFinal) => {
             let out_offset = frame.pop_short()?;
