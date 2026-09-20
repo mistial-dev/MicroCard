@@ -26,6 +26,8 @@ pub(super) fn material(heap: &mut Heap, key: u16, context: heap::Context) -> Res
     let kind = check_key(heap, key, context)?;
     let length = if kind == 11 { 66 } else { 33 };
     let event = clear_event(kind);
+    heap.check_allocations(&[(heap::KIND_BYTE, length)])?;
+    heap.prepare_payload_writes(&[(key, MATERIAL * 2, 2)])?;
     let array = if event == 0 { heap.new_array(heap::KIND_BYTE, length, context)? }
         else { heap.new_transient_array(heap::KIND_BYTE, length, context, event)? };
     heap.put_word(key, MATERIAL, array)?;
@@ -364,6 +366,11 @@ mod tests {
             heap.put_word(key, KIND, kind).unwrap();
             heap.put_word(key, SIZE, 256).unwrap();
             assert!(!initialized(&heap, key).unwrap());
+            let before = heap.image().to_vec();
+            heap.begin_transaction(0).unwrap();
+            assert!(matches!(set_flags(&mut heap, key, 1, 1), Err(Error::TransactionFull)));
+            heap.commit_transaction().unwrap();
+            assert_eq!(heap.image(), before, "failed initial EC setup must not consume storage");
             // A scalar alone and domain parameters alone are both insufficient.
             for value in [0x40, 0x1f] {
                 set_flags(&mut heap, key, value, 1).unwrap();

@@ -262,6 +262,8 @@ Snapshots sanitize transient key data; RAM suspension retains reset-scoped keys 
 The first symmetric-key import checks array capacity and reserves the persistent
 reference/readiness update before allocating material. An undo-capacity failure leaves
 the heap unchanged, including when the applet catches the error and commits.
+Initial EC material creation uses the same ordering: reserve the persistent material
+reference before allocating its array, for both persistent and transient key types.
 
 Restoration rejects the former layout that placed transient key material in persistent
 arrays. This storage support does not enable unsupported cipher or signature algorithms.
