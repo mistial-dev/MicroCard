@@ -213,6 +213,16 @@ def main():
                        cla=0x04, status=0x6d00)
         pin = bytes.fromhex("0020008008313233343536FFFF")
         client.command(0x20, pin[5:], p2=0x80, cla=0x04, status=0x63c5)
+        # Keep both heap banks occupied and retain the second applet's reset-scoped
+        # arrays while exercising the personalized instance.
+        second = instance[:-1] + bytes([instance[-1] + 1])
+        client.connect()
+        client.command(0xe6, lv(instance[:9], instance, second, b"\0", b"\xc9\0", b""), p1=0x0c)
+        client.command(0xa4, second, p1=4, cla=0x04)
+        check_lifecycle(client, 0x07)
+        piv(client, 0xa4, instance, p1=4, le=256)
+        client.connect(select_isd=False)
+        check_lifecycle(client, 0x0f)
         client.close()
 
         # Consume only nonce reservations in the closed host fixture. The committed
@@ -226,6 +236,7 @@ def main():
 
         client = Client(keys, state, mode)
         # A normal PIV client can select and read after boot without ever opening SCP03.
+        piv(client, 0xa4, second, p1=4, le=256)
         assert piv(client, 0xa4, instance, p1=4, le=256) == selected
         assert nonces.read_bytes()[reserve - 4:] == b"\xff" * (len(counter) - reserve + 4)
         assert files(state / "registry") != registry_before, "renewal must publish its new identity"

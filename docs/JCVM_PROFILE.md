@@ -619,6 +619,9 @@ The existing transport workload now personalizes OpenFIPS201 after provisioning.
 Its own status command reports `07` before personalization and `0F` on subsequent
 callbacks, after abrupt simulator termination/reboot, and after journal renewal.
 The same workload continues certificate replacement, signing, and ECDH afterward.
+It also installs a second instance, checks independent lifecycle states, and renews
+the personalized instance with both heap banks occupied and the other instance's
+reset-scoped arrays retained.
 This covers completed personalization recovery, not interruption inside its setter.
 
 ### Original ICAM object recovery
