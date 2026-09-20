@@ -394,10 +394,11 @@ this inventory use upstream revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
   on/off. Passing these upstream does not prove that our CAP interpreter works.
 - **NIST command vectors:** the [upstream runner](https://github.com/OpenPhysical/OpenFIPS201/blob/9f3b99bd0f2600beea7e5c053613d8baef2b7716/tools/piv_test_runner/README.md)
   requires a separately installed NIST PIV Test Runner 5.0.1 package. Its harness
-  accepts `emulator` or `pcsc`; neither currently connects to MicroCard. Its
-  `NistCardTransport` interface supplies transmit, reset, ATR, and close operations.
-  A MicroCard adapter must preserve reset and persistent state semantics and identify
-  unsupported contactless behavior rather than impersonating a contactless reader.
+  accepts `emulator` or `pcsc`. Our `nist_acceptance.py` stages a transport-only
+  adaptation for MicroCard without editing that checkout or vector expectations. The
+  bridge implements `NistCardTransport` with the shared Java simulator transport.
+  It copies a closed seed per vector, preserves persistent state across reset, uses
+  an explicitly synthetic ATR, and rejects contactless operations.
 - **Personalized data and VCI:** upstream wrappers provision GSA ICAM objects and
   run SP 800-85B or CS2/CS7 matrices. These require matching credentials, objects,
   profiles, and crypto support. RSA, P-384, SHA-384, and 3DES gaps prevent claiming
@@ -407,10 +408,35 @@ this inventory use upstream revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
   exercises signed loading, authentication, PIN-gated P-256 signing, certificate
   replacement, and recovery using the standard CS2, attestation-disabled fixture.
 
-To extend coverage, first connect the upstream transport to the persistent managed
-simulator and retain vector identifiers, configuration and applet hashes, and separate
-pass/fail/unsupported results. Start with the supported P-256 profile. Do not count
-upstream JVM results, skipped vectors, or altered expectations as interpreter passes.
+The bridge lifecycle check passes against the pinned upstream interface: installed
+applet selection, PIN retry persistence across reset, independent vector state, and
+contactless rejection. The full NIST harness is **not yet verified**: its separately
+installed jars and compiled upstream tools are still required. No NIST vector pass is
+claimed from this bridge check.
+
+After building the simulator and wallet, check the binding without NIST jars:
+
+```sh
+python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
+  --check-transport --out work/nist-transport
+```
+
+With the upstream NIST package installed and upstream tools compiled, the intended
+first runner check is:
+
+```sh
+python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
+  --config /path/to/OpenFIPS201/tools/piv_test_runner/config/OpenFIPS201-ECC256.xml \
+  --test SelectCommand:1 --out work/nist-select
+```
+
+Output directories must be new. The default seed is a blank installed applet. Use
+`--seed DIR` containing `keys` and `state` for a closed, pre-personalized simulator;
+its objects and keys must match the supplied configuration. Upstream automatic
+personalization is not connected. The run retains logs, JUnit results, and a manifest
+with vector selection and configuration/simulator hashes. Skips are counted separately
+from passes. Do not count upstream JVM results or altered expectations as interpreter
+passes. Complete NIST execution and matched P-256 personalization remain open.
 
 ## Authorization
 

@@ -88,6 +88,30 @@ def sign_with_pin(client, public_key, pin):
     piv(client, 0x87, request, p1=0x11, p2=0x9c, status=0x6982)
 
 
+def install_openfips(client, discovery):
+    """Load the pinned applet through signed management and return its installation data."""
+    package = bytes.fromhex("A00000030800001000")
+    module = bytes.fromhex("A000000308000010000100")
+    instance = module
+    image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
+    manifest = jcvm_manifest(dict(domain=discovery[4].hex(), incarnation=discovery[5].hex(),
+        package=package.hex(), package_version=[1, 10], version=1,
+        limits=dict(heap_bytes=65536, frame_words=8192, buffer_bytes=261, budget=1000000)))
+    seed = bytes([7]) * 32
+    raw = create(manifest, image, signer_public_key(seed), lambda value: sign_package(seed, value), 60 * 1024)
+    client.command(0xe6, lv(package, discovery[4], hashlib.sha256(raw).digest(), b"", b""), p1=2)
+    wire = b"\xc4\x82" + len(raw).to_bytes(2, "big") + raw
+    blocks = [wire[offset:offset + 220] for offset in range(0, len(wire), 220)]
+    assert len(blocks) <= 256
+    for index, block in enumerate(blocks):
+        client.command(0xe8, block, p1=0x80 if index + 1 == len(blocks) else 0, p2=index)
+    install = lv(package, module, instance, b"\0", b"\xc9\0", b"")
+    client.command(0xe6, install, p1=0x0c)
+    selected = client.command(0xa4, instance, p1=4, cla=0x04)
+    assert selected[:3] == bytes.fromhex("618192") and len(selected) == 149
+    return instance, install, selected
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="microcard-jcvm-") as temporary:
         root = pathlib.Path(temporary)
@@ -103,25 +127,7 @@ def main():
         blocked = subprocess.run([SIM, mode, keys, state], input="", text=True,
                                  capture_output=True, timeout=10)
         assert blocked.returncode and "already in use" in blocked.stderr
-        package = bytes.fromhex("A00000030800001000")
-        module = bytes.fromhex("A000000308000010000100")
-        instance = module
-        image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
-        manifest = jcvm_manifest(dict(domain=discovery[4].hex(), incarnation=discovery[5].hex(),
-            package=package.hex(), package_version=[1, 10], version=1,
-            limits=dict(heap_bytes=65536, frame_words=8192, buffer_bytes=261, budget=1000000)))
-        seed = bytes([7]) * 32
-        raw = create(manifest, image, signer_public_key(seed), lambda value: sign_package(seed, value), 60 * 1024)
-        client.command(0xe6, lv(package, discovery[4], hashlib.sha256(raw).digest(), b"", b""), p1=2)
-        wire = b"\xc4\x82" + len(raw).to_bytes(2, "big") + raw
-        blocks = [wire[offset:offset + 220] for offset in range(0, len(wire), 220)]
-        assert len(blocks) <= 256
-        for index, block in enumerate(blocks):
-            client.command(0xe8, block, p1=0x80 if index + 1 == len(blocks) else 0, p2=index)
-        install = lv(package, module, instance, b"\0", b"\xc9\0", b"")
-        client.command(0xe6, install, p1=0x0c)
-        selected = client.command(0xa4, instance, p1=4, cla=0x04)
-        assert selected[:3] == bytes.fromhex("618192") and len(selected) == 149
+        instance, install, selected = install_openfips(client, discovery)
         # Provision the real applet through its administrative secure-channel API.
         management_key = bytes(range(0x30, 0x40))
         definition = bytes.fromhex("66128B019B8C017F8D01008E01088F0101900114")
