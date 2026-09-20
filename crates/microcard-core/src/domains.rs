@@ -1745,7 +1745,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 };
                 let encoded =
                     state.encode_snapshot()?;
-                journal.commit_with(encoded.as_slice(), &mut platform)?;
+                journal.commit_owned_with(encoded, &mut platform)?;
                 state
             }
         };

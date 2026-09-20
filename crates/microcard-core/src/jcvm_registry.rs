@@ -517,7 +517,7 @@ impl<F: crate::journal::Flash> Store<F> {
         let state = if let Some(snapshot) = snapshot {
             Registry::decode(&snapshot)?
         } else {
-            journal.commit_with(&initial.encode()?, provider)?;
+            journal.commit_owned_with(zeroize::Zeroizing::new(initial.encode()?), provider)?;
             initial
         };
         Ok(Self {
@@ -723,7 +723,7 @@ impl<F: crate::journal::Flash> Store<F> {
         provider: &mut impl crate::crypto::CryptoProvider,
     ) -> Result<()> {
         self.state()?;
-        let result = self.journal.commit_with(&next.encode()?, provider);
+        let result = self.journal.commit_owned_with(zeroize::Zeroizing::new(next.encode()?), provider);
         match result {
             Ok(()) => {
                 self.state = next;

@@ -3513,7 +3513,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         }
         self.uncommitted_images = protected;
         self.journal
-            .commit_with(data.as_slice(), &mut self.platform)?;
+            .commit_owned_with(data, &mut self.platform)?;
         self.uncommitted_images.clear();
         self.state = next;
         Ok(())

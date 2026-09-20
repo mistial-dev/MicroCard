@@ -6,7 +6,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
     pub(super) fn commit_metadata_snapshot(&mut self) -> Result<()> {
         let data = self.state.encode_snapshot()?;
         self.journal
-            .commit_with(data.as_slice(), &mut self.platform)?;
+            .commit_owned_with(data, &mut self.platform)?;
         self.uncommitted_images.clear();
         Ok(())
     }

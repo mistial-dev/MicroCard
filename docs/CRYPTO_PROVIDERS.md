@@ -32,7 +32,7 @@ CBC and CCM providers also borrow their inputs and write into caller-owned outpu
 CCM additionally exposes in-place encryption of a message followed by sixteen tag
 bytes. It clears the whole buffer on failure. The shared known-answer runner checks
 this contract for software and board providers; physical CC310 aliasing validation
-remains required. JCVM commits transfer their zeroizing snapshot allocation into
+remains required. JCVM heap/registry and MC04 metadata commits transfer their zeroizing snapshot allocation into
 the journal, which adds its header and encrypts in place. Borrowed callers receive
 a single staging allocation; undersized owned buffers are copied and wiped rather
 than reallocated while holding plaintext.
