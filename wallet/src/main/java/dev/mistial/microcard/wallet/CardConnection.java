@@ -12,7 +12,6 @@ import pro.javacard.gp.keys.PlaintextKeys;
 import java.io.*;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.*;
 import javax.smartcardio.TerminalFactory;
 
 /** GPPro owns every SCP03 cryptographic operation; adapters move APDU bytes only. */
@@ -54,7 +53,7 @@ final class CardConnection implements AutoCloseable {
     public void close() { transport.close(); }
 
     static BIBO simulator(Path binary, Path keys, Path state) throws IOException {
-        return new Simulator(binary, keys, state);
+        return new SimulatorTransport(binary, keys, state, SimulatorTransport.Engine.MC04);
     }
 
     static BIBO reader(String name) throws Exception {
@@ -71,41 +70,4 @@ final class CardConnection implements AutoCloseable {
         };
     }
 
-    private static final class Simulator implements BIBO {
-        private final Process process;
-        private final InputStream input;
-        private final OutputStream output;
-        private final ExecutorService reads = Executors.newSingleThreadExecutor(Thread.ofVirtual().factory());
-        Simulator(Path binary, Path keys, Path state) throws IOException {
-            process = new ProcessBuilder(binary.toAbsolutePath().toString(), "serve-binary",
-                keys.toAbsolutePath().toString(), state.toAbsolutePath().toString())
-                .redirectError(ProcessBuilder.Redirect.INHERIT).start();
-            input = process.getInputStream(); output = process.getOutputStream();
-        }
-        public synchronized byte[] transceive(byte[] command) {
-            if (command.length > 261) throw new BIBOException("Only short APDUs are supported");
-            try {
-                output.write(command.length & 255); output.write(command.length >>> 8);
-                output.write(command); output.flush();
-                return reads.submit(() -> {
-                    int lo = input.read(), hi = input.read();
-                    if (lo < 0 || hi < 0) throw new EOFException("Simulator stopped");
-                    int size = lo | hi << 8;
-                    if (size < 2 || size > 258) throw new IOException("Invalid response frame");
-                    byte[] response = input.readNBytes(size);
-                    if (response.length != size) throw new EOFException("Truncated response frame");
-                    return response;
-                }).get(30, TimeUnit.SECONDS);
-            } catch (Exception error) {
-                if (error instanceof InterruptedException) Thread.currentThread().interrupt();
-                close(); throw new BIBOException("Simulator exchange failed", error);
-            }
-        }
-        public void close() {
-            reads.shutdownNow();
-            try { output.close(); } catch (IOException ignored) { }
-            try { if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly(); }
-            catch (InterruptedException e) { Thread.currentThread().interrupt(); process.destroyForcibly(); }
-        }
-    }
 }
