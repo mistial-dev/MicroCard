@@ -12,7 +12,7 @@ python3 scripts/fuzz_campaign.py crypto_arguments --seconds 300
 python3 scripts/fuzz_campaign.py domain_sequences --seconds 300
 ```
 
-The required `--seconds` argument prevents an accidental invocation from starting a sustained default run. The runner uses `nightly-2025-08-31` explicitly without changing the default toolchain. Install that toolchain separately if absent. Logs, source/lock hashes, source revision, dirty status, duration and corpus counts go to `artifacts/fuzz/`. Generated corpora and crashes live under ignored `fuzz/corpus/` and `fuzz/artifacts/`. Retain minimized crash inputs as regression fixtures if a failure is found. A wall-clock timeout also bounds startup/build hangs.
+The required `--seconds` argument prevents an accidental invocation from starting a sustained default run. The runner uses `nightly-2025-08-31` explicitly without changing the default toolchain. Install that toolchain separately if absent. Logs, source/lock hashes, source revision, dirty status, duration, seed hashes and corpus counts go to `artifacts/fuzz/`. Each run passes its `input-corpus` directory explicitly to libFuzzer and writes new discoveries there. An existing `fuzz/corpus/<target>` is retained as an additional input; crashes remain under ignored `fuzz/artifacts/`. Before this wiring correction, runner-created seeds were not supplied to libFuzzer and recorded corpus counts described unused seed directories. Historical execution statistics remain in the actual run logs. Retain minimized crash inputs as regression fixtures if a failure is found. A wall-clock timeout also bounds startup/build hangs.
 
 ## Targets
 
@@ -71,3 +71,17 @@ A 121-second non-sanitized run completed 2,329 sequences without a crash, added 
 On macOS 26.6.2 with the pinned nightly, AddressSanitizer stalled in its initializer before libFuzzer's input loop. A process sample showed nested AsanInitFromRtl and StaticSpinMutex::LockSlow during dyld/malloc initialization. The stalled processes were terminated. They do not count as completed campaigns.
 
 For this environment, coverage-guided runs can use `--sanitizer none`. They retain Rust assertions/overflow checks and libFuzzer coverage guidance, but do not provide AddressSanitizer memory-error detection. Resolve the sanitizer/toolchain compatibility problem and run longer campaigns on a supported sanitizer environment before production acceptance. Two-minute runs provide initial campaign evidence. Exhaustive testing and a security audit remain separate work.
+
+## Corpus wiring verification
+
+After passing runner-created seeds explicitly, a 30-second `boundaries` campaign
+without a sanitizer completed 4,303,626 executions in 31 libFuzzer seconds, with
+75 new units and 32 MiB peak RSS. Its output corpus contains 77 files, including
+the two supplied seeds; the recorded paths and count match the actual output.
+Evidence: `artifacts/fuzz/boundaries-1789922912978765000`.
+
+The matching AddressSanitizer attempt compiled but produced no libFuzzer startup
+statistics and hit the runner's 210-second wall-clock limit (exit 124). It is not
+sanitizer coverage. Evidence: `artifacts/fuzz/boundaries-1789922857083664000`.
+Both runs used the working-tree runner correction based on `975f09a`; no fuzz-target
+source changed. Sustained campaigns and working sanitizer execution remain open.

@@ -51,9 +51,16 @@ def main():
         (corpus / "dependency-replacement").write_bytes(
             bytes([0, 10, 0, 0, 0, 0, 11, 0, 0, 0, 0])
         )
-    command = [str(tool), "run", "--sanitizer", a.sanitizer, a.target, "--", f"-max_total_time={a.seconds}",
+    # libFuzzer writes new discoveries to its first corpus directory. Additional
+    # corpora remain inputs, so retain prior discoveries without sharing writes.
+    inputs = [str(corpus)]
+    retained = ROOT / "fuzz/corpus" / a.target
+    if retained.is_dir(): inputs.append(str(retained))
+    seeds = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in corpus.iterdir()}
+    command = [str(tool), "run", "--sanitizer", a.sanitizer, a.target, *inputs, "--", f"-max_total_time={a.seconds}",
                "-max_len=4096", "-timeout=5", "-rss_limit_mb=1024", "-print_final_stats=1"]
     info = dict(target=a.target, command=command, toolchain=a.toolchain, sanitizer=a.sanitizer,
+                input_corpora=inputs, seed_sha256=seeds,
                 revision=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
                 dirty=bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT)),
                 target_sha256=hashlib.sha256((ROOT/f"fuzz/fuzz_targets/{a.target}.rs").read_bytes()).hexdigest(),
