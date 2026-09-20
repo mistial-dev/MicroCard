@@ -16,8 +16,8 @@ impl Renewal {
         let instance = state.instances().find(|instance| instance.aid == self.aid).ok_or(Error::Format)?;
         if instance.heap_bank != self.bank || instance.identity != self.old_identity
             || state.instances().any(|instance| instance.identity == self.new_identity)
-            || self.record_length <= (crate::journal::OVERHEAD - 3) as u32
-            || self.record_length > 65536 - 3
+            || self.record_length < crate::journal::SeedRecord::MIN_BYTES as u32
+            || self.record_length > crate::journal::SeedRecord::MAX_BYTES as u32
             || !state.loads().any(|load| load.aid == instance.load
                 && load.image.is_some_and(|image| image.digest == self.package_digest)) {
             return Err(Error::Format);

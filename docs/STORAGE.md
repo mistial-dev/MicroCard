@@ -72,6 +72,15 @@ identity, package, and record-length bindings. Ordinary operations and applet op
 fail closed while ownership is pending. Interrupted metadata publication retains the
 old registry or the complete pending descriptor, verified by host fault tests.
 The renewal writer and automatic recovery below are not yet implemented.
+`SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
+requires caller validation of its plaintext, and retains an immutable ciphertext
+borrow. Its copy operation accepts only a wholly erased bank with empty counters,
+reserves nonce 1, copies and reads back the exact record, publishes the marker, and
+advances the generation to 1. It neither erases storage nor calls encryption.
+Fault tests cover every publication cut and copying again after fresh preparation.
+This primitive does not itself authorize bank preparation: registry recovery must
+validate the pending descriptor, staged digest, applet state, and target geometry
+before erasing anything.
 
 Renewal will use that region as a recovery copy and the registry's existing durable
 identity reservation as the root of a new heap-key epoch. It must preserve both

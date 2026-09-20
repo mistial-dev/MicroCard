@@ -9,6 +9,10 @@ use alloc::{vec, vec::Vec};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 #[cfg(any(test, feature = "jcvm"))]
 mod append;
+#[cfg(any(test, feature = "jcvm"))]
+mod seed;
+#[cfg(any(test, feature = "jcvm"))]
+pub use seed::SeedRecord;
 
 #[derive(Debug, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct JournalKey([u8; 16]);
