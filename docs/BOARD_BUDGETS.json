@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 186048,
+      "text_bytes": 186084,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 212324,
+      "text_bytes": 212364,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 212340,
+      "text_bytes": 212388,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 223808,
+      "text_bytes": 223944,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 223636,
+      "text_bytes": 223772,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 188280,
+      "text_bytes": 187976,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 197624,
+      "text_bytes": 197936,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -75,10 +75,10 @@
   },
   "budgets_passed": false,
   "budget_failures": [
-    "software_reference text_bytes 186048 exceeds 186000",
-    "hardware_release text_bytes 212324 exceeds 212000",
-    "development_debug text_bytes 212340 exceeds 212000",
-    "jcvm_development_debug text_bytes 188280 exceeds 168000",
-    "jcvm_dongle text_bytes 197624 exceeds 178000"
+    "software_reference text_bytes 186084 exceeds 186000",
+    "hardware_release text_bytes 212364 exceeds 212000",
+    "development_debug text_bytes 212388 exceeds 212000",
+    "jcvm_development_debug text_bytes 187976 exceeds 168000",
+    "jcvm_dongle text_bytes 197936 exceeds 178000"
   ]
 }

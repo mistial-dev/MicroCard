@@ -136,8 +136,9 @@ def main():
         client.connect(level=1)
         assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
         client.command(0xdb, definition, p1=0xff, p2=0xff, status=0x6982)
-        client.connect()
-        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        # GP clients may authenticate after selecting PIV. INITIALIZE UPDATE must
+        # retain that selection while discarding the prior channel's authority.
+        client.connect(select_isd=False)
         client.command(0xdb, definition, p1=0xff, p2=0xff)
         client.command(0x25, bytes.fromhex("80010830128010") + management_key,
                        p1=1, p2=0x9b)
@@ -216,8 +217,9 @@ def main():
         piv(client, 0x20, p2=0x80)
         # The applet reset its secure channel during reselect; old SCP commands fail.
         client.command(0xe2, b"\0", status=0x6982)
-        client.connect()
-        assert client.command(0xa4, instance, p1=4, cla=0x04) == selected
+        assert piv(client, 0xa4, instance, p1=4, le=256) == selected
+        piv(client, 0x20, signing_pin, p2=0x80)
+        client.connect(select_isd=False)
         piv(client, 0x20, p2=0x80, status=0x63c6)
         # A real deselection clears PIN validation, while a missing SELECT preserves it.
         piv(client, 0x20, signing_pin, p2=0x80)

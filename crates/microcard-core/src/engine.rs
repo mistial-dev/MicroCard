@@ -27,6 +27,13 @@ pub trait CardEngine {
     fn next_secure_channel_sequence(&mut self) -> Result<u32>;
     fn abort_staging(&mut self);
     fn abort_transaction(&mut self);
+    /// Clear prior authority before INITIALIZE UPDATE. Engines may restore the
+    /// selected application from durable state without retaining its credentials.
+    fn restart_secure_channel(&mut self, _cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        self.abort_staging();
+        self.abort_transaction();
+        Ok(())
+    }
     fn globalplatform_load_active(&self) -> bool;
     fn get_status_record(
         &mut self,

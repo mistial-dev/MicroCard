@@ -302,6 +302,12 @@ DER X.509 certificate through chained encrypted PUT DATA commands, then retrieve
 exact object through plain GET DATA/GET RESPONSE before and after reboot. Signing
 and PIN operations use plain PIV commands. Reselect preserves PIN validation; a missing
 SELECT leaves it intact; selecting the ISD and returning to the applet clears it.
+INITIALIZE UPDATE discards old transport authority and reloads the selected applet
+from authenticated storage before opening the new channel. This preserves routing
+for clients that select PIV before authenticating, while clearing PIN validation and
+reset-scoped secrets. A failed reload fails the channel setup. Explicit transport
+reset and authentication failures still discard selection. Root-management test
+clients select the ISD explicitly before opening their channel.
 
 For ISD-owned applets, the shared transport passes encrypted, authenticated commands
 with a command-scoped secure-channel grant. `GPSystem.getSecureChannel` returns a

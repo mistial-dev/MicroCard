@@ -110,7 +110,9 @@ impl<C: CardEngine> Endpoint<C> {
             return fixed_response(&[0x6a, 0x88]);
         }
         if c.cla == 0x80 && c.ins == 0x50 {
-            self.reset();
+            self.session = None;
+            self.status_cursor = None;
+            self.card.restart_secure_channel(should_cancel)?;
             if c.p2 != 0 || !matches!(c.p1, 0 | 1) {
                 return Err(Error::Format);
             }

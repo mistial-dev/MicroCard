@@ -30,7 +30,9 @@ class Client:
   self.keys=keys.read_bytes();self.p=subprocess.Popen([SIM,mode,keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
  def raw(self,b):
   self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline();assert line,'simulator terminated';return bytes.fromhex(line)
- def connect(self,level=None):
+ def connect(self,level=None,*,select_isd=True):
+  if select_isd:
+   assert self.raw(bytes.fromhex("00A4040008A000000151000000"))[-2:]==b"\x90\x00"
   # Ask with the legacy width first. A card in S16 reports the wrong length, which is
   # how a host discovers the mode without knowing it in advance.
   host=os.urandom(8);probe=self.raw(bytes.fromhex('8050000008')+host+b'\x00')

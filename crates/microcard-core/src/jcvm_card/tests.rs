@@ -21,6 +21,9 @@ struct Host {
 
 impl Host {
     fn connect(endpoint: &mut Endpoint<TestCard>, level: u8) -> Self {
+        let select = Command { cla: 0, ins: 0xa4, p1: 4, p2: 0,
+            data: gp::ISD_AID.as_slice().into(), le: Some(256) };
+        assert!(endpoint.exchange(&select.encode().unwrap()).ends_with(&[0x90, 0]));
         let challenge = [0x55; CHALLENGE_BYTES];
         let request = Command {
             cla: 0x80,

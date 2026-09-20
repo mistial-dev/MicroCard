@@ -336,6 +336,21 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         self.retained.clear();
         self.reset_requested = false;
     }
+    fn restart_secure_channel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        let aid = self.selected.as_ref().map(|(aid, _)| *aid);
+        self.abort_staging();
+        self.abort_transaction();
+        if let Some(aid) = aid {
+            // Reloading clears PIN validation and reset-scoped secrets. The host
+            // may then authenticate SCP03 to the applet it selected beforehand.
+            let command = Command { cla: 0, ins: 0xa4, p1: 4, p2: 0,
+                data: aid.as_slice().into(), le: Some(256) };
+            let response = self.select_application(&command, cancel)?;
+            if !response.ends_with(&[0x90, 0]) { return Err(Error::Unauthorized); }
+            self.reset_requested = false;
+        }
+        Ok(())
+    }
     fn globalplatform_load_active(&self) -> bool {
         self.upload.is_some()
     }
