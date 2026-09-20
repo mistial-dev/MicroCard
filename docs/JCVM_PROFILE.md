@@ -602,6 +602,17 @@ expected status words are unchanged. GSA signed objects retain their original da
 signatures, and policies. The test issuer URLs use `.invalid`; live revocation and
 chain trust are not established.
 
+### Application lifecycle limitation
+
+`GPSystem.getCardContentState` and `setCardContentState` currently use the temporary
+`Jcre` created for each callback. A successful setter therefore does not establish a
+durable transition. This affects OpenFIPS201 personalization and must be fixed before
+release. Passing provisioning and crypto workloads does not cover this requirement.
+The replacement must use one authoritative persisted state, reject invalid transitions,
+and preserve completed changes across Java Card transaction aborts. GlobalPlatform
+specifies that its API operations are independent of an active Java Card transaction
+([API mapping guidelines, section 7](https://globalplatform.org/wp-content/uploads/2018/06/2.1.1_Mapping_guidelines_v1.0.1-Final.pdf)).
+
 ### Original ICAM object recovery
 
 Keep original object-storage evidence separate from private-key conformance:
