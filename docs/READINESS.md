@@ -71,44 +71,29 @@ board's reserved heap.
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
   reboot does not preserve PIN validation. These do not establish hardware execution.
-- Complete JCVM transaction durability. Heap/static rollback, callback-end abort,
-  commit-buffer exceptions, and allocation-abort session termination are implemented.
-  In-command commits now checkpoint flash before releasing undo records; the real
-  OpenFIPS201 object-update path survives cancellation after commit and preserves
-  prior content on checkpoint failure. PIN checks now durably consume attempts before
-  comparison without publishing conditional transaction changes. Cooperative cancellation
-  checkpoints ordinary persistent writes while excluding an open transaction; a failed
-  checkpoint returns a storage error. Cancellation after a successful callback now
-  occurs after its final journal commit, so completed ordinary writes survive while
-  the response is suppressed. A real OpenFIPS201 CREATE OBJECT regression covers
-  this boundary and failed persistence. Arbitrary power loss between ordinary writes
-  and checkpoints still needs independent durability. P-256 generation, scalar imports,
-  and symmetric key import/clearing admit bytes and readiness together before publication.
-  Catching a full-buffer error and committing cannot retain half a key update.
-  Transient key clearing consumes no undo space. Newly allocated objects need no
-  before-images because abort wipes the allocation tail; a KeyPair constructor now
-  uses zero undo bytes instead of 64. Existing regressions cover abort/projection of
-  new allocations, rollback after their commit, key lifetime, and earlier undo records.
-  Cipher/signature/agreement initialization reserves complete metadata before changing
-  stream state or key bindings; full-buffer errors preserve the active operation.
-  Card exception constructors, throw/reason accessors, and native error producers now
-  share non-transactional reason handling. Runtime exceptions are reused per context;
-  their reasons clear on reset and are zeroed in saved state without altering live
-  responses. Restore rejects nonzero runtime reasons; applet-created exception reasons
-  remain persistent. Field/static/array stores reject runtime exception and APDU
-  references and the shared APDU buffer with SecurityException; recovery rejects
-  saved applet references to them. Ordinary references and local temporary references
-  remain usable. Complete the remaining native-API audit and interruption boundaries.
+- Complete JCVM transaction durability and the remaining native API audit against
+  Java Card 3.0.5. In-command commits checkpoint before releasing undo; cancellation
+  checkpoints ordinary writes while excluding open transactions. Completed callbacks
+  persist before late cancellation suppresses the response. **Arbitrary power loss
+  between ordinary writes and checkpoints remains unresolved.**
+  Existing host coverage verifies rollback, callback-end abort, commit-buffer exhaustion,
+  allocation-abort session termination, key updates, crypto initialization and persistence
+  failure. PIN presentation checkpoints consume retries outside transactions, including
+  invalid inputs; PIN replacement reserves its complete conditional update and honors
+  the configured capacity. Runtime exception reasons clear on reset; recovery and
+  reference stores enforce temporary-object restrictions. Installation parameters use
+  the protected global buffer. See [JCVM semantics and source clauses](JCVM_PROFILE.md)
+  for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 199,260 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 199,324 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the board budget gate (59.678 seconds with two workers). All
-  seven profiles cross-linked after the temporary reference-store checks. After shared snapshot ownership changes, MC04
+  stages, then failed the board budget gate (56.397 seconds with two workers). All
+  seven profiles cross-linked after the installation-buffer and PIN API fixes. After shared snapshot ownership changes, MC04
   hardware release text is 212,364 bytes against 212,000, and software reference text
   is 186,084 against 186,000. All seven profile artifacts linked before budget comparison; optimization
   ceilings remain unchanged.
@@ -159,7 +144,7 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 59.678 seconds with two workers and incremental
+reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 56.397 seconds with two workers and incremental
 rebuilding (`work/checkpoint-late-cancel.json`). All stages before the final board
 budget comparison passed; the checkpoint overall fails because the unchanged
 optimization ceilings are exceeded. This is not a cold-build measurement. Historical
