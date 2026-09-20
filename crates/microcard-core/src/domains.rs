@@ -869,8 +869,12 @@ impl Drop for Domain {
     }
 }
 impl Domain {
+    fn package_metadata(&self, name: &str) -> Result<&StoredPackage> {
+        self.packages.get(name).map(Rc::as_ref).ok_or(Error::Missing)
+    }
+
     fn package(&self, name: &str) -> Result<StoredPackageView<'_>> {
-        let metadata = self.packages.get(name).ok_or(Error::Missing)?;
+        let metadata = self.package_metadata(name)?;
         let raw = self.assemblies.get(name).ok_or(Error::Storage)?;
         Ok(StoredPackageView {
             #[cfg(test)]
@@ -1117,7 +1121,7 @@ fn registry_record(p1: u8, aid: &[u8], entry: RegistryEntry<'_>) -> Result<Vec<u
             domain,
             assembly,
         } => {
-            let package = domain.package(assembly)?;
+            let package = domain.package_metadata(assembly)?;
             if package.manifest.assembly != assembly {
                 return Err(Error::Storage);
             }
@@ -1469,7 +1473,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 {
                     return Err(Error::Storage);
                 }
-                let p = d.package(assembly.as_ref())?;
+                let p = d.package_metadata(assembly.as_ref())?;
                 if !p.manifest.entry_points.iter().any(|a| &a.aid == aid) {
                     return Err(Error::Storage);
                 }

@@ -416,9 +416,9 @@ pub(super) fn resolve_dependency(
     let mut ambiguous = false;
     let mut consider = |domain: Option<&Domain>| {
         if let Some(provider) = domain
-            .and_then(|d| d.package(dependency.assembly.as_str()).ok())
+            .and_then(|d| d.package_metadata(dependency.assembly.as_str()).ok())
             .filter(|provider| {
-                dependency.matches_parts(provider.manifest, provider.signer, provider.digest)
+                dependency.matches_parts(&provider.manifest, provider.signer, provider.digest)
                     && provider
                         .manifest
                         .export

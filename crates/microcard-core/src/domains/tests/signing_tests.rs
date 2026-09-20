@@ -208,6 +208,14 @@ fn signed_dependency_predicates_and_export_policy_are_enforced() {
     );
     load(&mut c, &pinned).unwrap();
 
+    // Metadata resolution must not require resident image bytes. Execution views
+    // still reject missing storage until the flash-backed read path supplies it.
+    c.state.domains.get_mut("a").unwrap().assemblies = NameMap::new();
+    let parsed_consumer = Package::verify(&pinned).unwrap();
+    assert_eq!(resolve_dependency(&c.state, "a", &parsed_consumer.manifest.dependencies[0], &parsed_consumer),
+        Some(ResolvedDependency { digest: parsed_provider.digest }));
+    assert!(matches!(c.state.domains.get("a").unwrap().package("provider"), Err(Error::Storage)));
+
     let mut private_card = card();
     let private_inc = create(&mut private_card, "private");
     load(
