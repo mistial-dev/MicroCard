@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import time
@@ -23,17 +24,17 @@ REVISION = "9f3b99bd0f2600beea7e5c053613d8baef2b7716"
 PACKAGE = "dev.mistial.tools.openfips201.nist"
 
 
-def runtime_identity():
+def runtime_identity(simulator):
     return dict(engine="MicroCard JCVM host",
         microcard_revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         microcard_dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
-        physical_execution=False, simulator_sha256=hashlib.sha256(SIM.read_bytes()).hexdigest())
+        physical_execution=False, simulator_sha256=hashlib.sha256(simulator.read_bytes()).hexdigest(), simulator_isolated=True)
 
 
-def prepare_blank_seed(directory):
+def prepare_blank_seed(directory, simulator):
     keys = directory / "keys"
     keys.write_bytes(bytes(range(32)))
-    client = Client(keys, directory / "state", "serve-jcvm-managed")
+    client = Client(keys, directory / "state", "serve-jcvm-managed", simulator=simulator)
     try:
         client.connect()
         install_openfips(client, decode(client.command(0xe2, b"\0")))
@@ -109,13 +110,16 @@ def main():
     env = environment()
     with tempfile.TemporaryDirectory(prefix="microcard-nist-build-") as temporary:
         staging = pathlib.Path(temporary)
+        # Seed creation and every reboot must execute the same build.
+        simulator = staging / "microcard-sim"
+        shutil.copy2(SIM, simulator)
         seed = args.seed.resolve() if args.seed else staging / "seed"
         if args.seed:
             if not (seed / "keys").is_file() or not (seed / "state").is_dir():
                 parser.error("--seed must contain keys and a closed persistent state directory")
         else:
             seed.mkdir()
-            prepare_blank_seed(seed)
+            prepare_blank_seed(seed, simulator)
         if args.check_transport:
             classes = staging / "classes"
             classes.mkdir()
@@ -126,7 +130,7 @@ def main():
             subprocess.run(["javac", "--release", "21", "-cp", cp, "-d", classes, interface,
                 ROOT / "scripts/nist/MicroCardNistTransport.java", ROOT / "scripts/nist/TransportCheck.java"],
                 env=env, check=True)
-            result = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
+            result = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}",
                 "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".TransportCheck"],
                 env=env, text=True, capture_output=True)
             (output / "transport.log").write_text(result.stdout + result.stderr)
@@ -148,7 +152,7 @@ def main():
             env=env, check=True)
         if args.check_objects:
             fixture = args.check_objects.resolve()
-            evidence = dict(**runtime_identity(), mode="ICAM object write/reboot/readback",
+            evidence = dict(**runtime_identity(simulator), mode="ICAM object write/reboot/readback",
                 upstream_revision=revision, fixture=str(fixture),
                 private_keys_exercised=False, nist_vectors_run=False,
                 source_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistObjects.java").read_bytes()).hexdigest(),
@@ -156,7 +160,7 @@ def main():
                     for p in sorted(fixture.rglob("*")) if p.is_file()})
             started = time.perf_counter()
             with (output / "objects.log").open("w") as log:
-                result = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
+                result = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}",
                     "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".MicroCardNistObjects", fixture],
                     env=env, stdout=log, stderr=subprocess.STDOUT)
             evidence.update(exit_code=result.returncode, elapsed_seconds=round(time.perf_counter() - started, 3))
@@ -167,7 +171,7 @@ def main():
         subprocess.run(["java", "-cp", str(classes) + os.pathsep + cp,
             PACKAGE + ".NistCompatibilityPatcher", jars / "PIV_TestRunner_modules-5.0.1.jar", compat],
             env=env, check=True)
-        manifest = dict(**runtime_identity(), upstream_revision=revision,
+        manifest = dict(**runtime_identity(simulator), upstream_revision=revision,
             upstream_harness_sha256=hashlib.sha256(committed.encode()).hexdigest(),
             adapter_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistTransport.java").read_bytes()).hexdigest(),
             profile_loader_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistProfile.java").read_bytes()).hexdigest(),
@@ -187,7 +191,7 @@ def main():
             started = time.perf_counter()
             personalized = staging / "personalized-seed"
             with (output / "provision.log").open("w") as log:
-                provision = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
+                provision = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}",
                     "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".MicroCardNistProfile",
                     config, upstream, personalized,
                     *([args.identity_folder.resolve()] if args.identity_folder else [])], env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -197,7 +201,7 @@ def main():
                 report.write_text(json.dumps(manifest, indent=2) + "\n")
                 raise SystemExit(f"Personalization failed; see {output / 'provision.log'}")
             seed = personalized
-        command = ["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={SIM}",
+        command = ["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}",
             "-cp", os.pathsep.join([str(compat), str(classes), cp]), PACKAGE + ".NistHarnessMain",
             "--target", "microcard", "--config", config, "--out", output]
         if args.test:

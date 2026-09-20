@@ -437,8 +437,10 @@ this inventory use upstream revision `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
   accepts `emulator` or `pcsc`. Our `nist_acceptance.py` stages a transport-only
   adaptation for MicroCard without editing that checkout or vector expectations. The
   bridge implements `NistCardTransport` with the shared Java simulator transport.
-  It copies a closed seed per vector, preserves persistent state across reset, uses
-  an explicitly synthetic ATR, and rejects contactless operations.
+  It pins a private simulator copy before creating the seed, so concurrent builds
+  cannot change the executable between provisioning and reboot. It copies a closed
+  seed per vector, preserves persistent state across reset, uses an explicitly
+  synthetic ATR, and rejects contactless operations.
 - **Personalized data and VCI:** upstream wrappers provision GSA ICAM objects and
   run SP 800-85B or CS2/CS7 matrices. These require matching credentials, objects,
   profiles, and crypto support. RSA, P-384, SHA-384, and 3DES gaps prevent claiming

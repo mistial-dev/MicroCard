@@ -26,8 +26,8 @@ def aes(k,mode,data):
 def unaes(k,mode,data):
  d=Cipher(algorithms.AES(k),mode).decryptor(); return d.update(data)+d.finalize()
 class Client:
- def __init__(self,keys,state,mode='serve'):
-  self.keys=keys.read_bytes();self.p=subprocess.Popen([SIM,mode,keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+ def __init__(self,keys,state,mode='serve',*,simulator=None):
+  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode,keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
  def raw(self,b):
   self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline();assert line,'simulator terminated';return bytes.fromhex(line)
  def connect(self,level=None,*,select_isd=True):
@@ -92,8 +92,8 @@ class Client:
  def close(self): self.p.stdin.close();assert self.p.wait(timeout=5)==0
 
 class BinaryClient(Client):
- def __init__(self,keys,state,mode='serve'):
-  self.keys=keys.read_bytes();self.p=subprocess.Popen([SIM,mode+'-binary',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+ def __init__(self,keys,state,mode='serve',*,simulator=None):
+  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode+'-binary',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
  def raw(self,b):
   self.p.stdin.write(len(b).to_bytes(2,'little')+b);self.p.stdin.flush()
   def read(n):
