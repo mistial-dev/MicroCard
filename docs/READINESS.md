@@ -78,7 +78,7 @@ board's reserved heap.
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the recorded
   passing budget report predates EC integration and must be refreshed for final release.
-  The latest checkpoint passed host, wallet, generated-artifact and fuzz-build stages,
+  The 2026-09-20 checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build stages,
   then failed the board budget gate: MC04 hardware release text is 212,312 bytes against
   212,000. All seven profile artifacts linked before budget comparison; optimization
   ceilings remain unchanged.
@@ -128,6 +128,9 @@ reuses outputs with bounded workers and isolated logs/state. A warm host sample 
 same 17 acceptance invocations. Cold-build measurements remain outstanding. The consolidated checkpoint passed at
 `76dbdd9` in 49.534 seconds with two workers, including incremental recompilation.
 This validates the AES ECB integration but is not a cold-build measurement.
+The 2026-09-20 run took 55.795 seconds with two workers and incremental rebuilding;
+all stages before the final board-budget comparison passed. This is a failing
+checkpoint overall because the optimization ceilings remain exceeded.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.

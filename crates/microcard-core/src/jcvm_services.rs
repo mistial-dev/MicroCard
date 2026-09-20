@@ -24,7 +24,9 @@ impl<'a, P> Services<'a, P> {
 
     pub(crate) fn reset_requested(&self) -> bool { self.reset_requested }
 
-    pub(crate) fn with_checkpoint(mut self, checkpoint: &'a mut Checkpoint<'a, P>) -> Self {
+    /// The caller supplies the storage boundary. Persistent sessions must not return
+    /// success until the supplied state is recoverable after interruption.
+    pub fn with_checkpoint(mut self, checkpoint: &'a mut Checkpoint<'a, P>) -> Self {
         self.checkpoint = Some(checkpoint);
         self
     }

@@ -1,7 +1,7 @@
 //! Install and drive a real applet, to see how far the engine gets.
 //!
 //! The committed applet runs by default. An external corpus can extend that coverage.
-use microcard_engine_jcvm::applet::{Card, Sizes, PersistentState};
+use microcard_engine_jcvm::applet::{Card, Sizes, PersistentState, PersistentView};
 use microcard_engine_jcvm::cap::LoadFile;
 use microcard_engine_jcvm::host::Host;
 
@@ -9,9 +9,21 @@ use microcard_engine_jcvm::host::Host;
 ///
 /// A real card answers from its entropy source. What matters for this test is that the
 /// applet gets bytes at all, and that two runs of the test produce the same ones.
-struct TestHost(u8);
+#[derive(Default)]
+struct TestHost {
+    counter: u8,
+    checkpoint: Option<(Vec<u8>, Vec<u8>, u16)>,
+}
 
 impl Host for TestHost {
+    fn checkpoint(&mut self, view: PersistentView<'_>) -> microcard_engine_jcvm::Result<()> {
+        let mut heap = vec![0; view.heap_bytes()];
+        let saved = view.save_into(&mut heap)?;
+        let statics = saved.statics.to_vec();
+        let instance = saved.instance;
+        self.checkpoint = Some((heap, statics, instance));
+        Ok(())
+    }
     fn supports_digest(&self, algorithm: u8) -> bool { matches!(algorithm, 4 | 5) }
     fn supports_random(&self, algorithm: u8) -> bool { matches!(algorithm, 1 | 2) }
     fn digest(
@@ -40,8 +52,8 @@ impl Host for TestHost {
 
     fn random(&mut self, output: &mut [u8]) -> microcard_engine_jcvm::Result<()> {
         for byte in output {
-            self.0 = self.0.wrapping_add(1);
-            *byte = self.0;
+            self.counter = self.counter.wrapping_add(1);
+            *byte = self.counter;
         }
         Ok(())
     }
@@ -88,7 +100,7 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
         let mut parameters = vec![aid.len() as u8];
         parameters.extend_from_slice(aid);
         parameters.extend_from_slice(&[1, 0, 0]);
-        let mut host = TestHost(0);
+        let mut host = TestHost::default();
         match card.install(&file, &mut host, &parameters) {
             Ok(()) => {
                 let response = card
@@ -114,10 +126,8 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
                 let wrong_pin = [0x00, 0x20, 0x00, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 0xff, 0xff];
                 let before = card.process(&file, &mut host, &wrong_pin, false).unwrap();
                 assert_eq!(before.sw & 0xfff0, 0x63c0);
-                let mut bytes = vec![0; card.persistent_heap_bytes()];
-                let saved = card.save_into(&mut bytes).unwrap();
-                let instance = saved.instance;
-                let statics = saved.statics.to_vec();
+                let (bytes, statics, instance) = host.checkpoint.take()
+                    .expect("PIN check must publish its consumed attempt before returning");
                 drop(card);
                 let mut recovered = Card::restore(&file, sizes, PersistentState { heap: &bytes, statics: &statics, instance })
                     .unwrap_or_else(|error| panic!("{name}: restore {error:?}"));
