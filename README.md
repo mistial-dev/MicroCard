@@ -55,7 +55,7 @@ runner.
 
 Requirements:
 
-- Rust **1.94.1**
+- the current stable Rust toolchain
 - Python **3.12 or newer**
 
 ```sh

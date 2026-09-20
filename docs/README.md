@@ -5,7 +5,7 @@ is the authoritative list of supported behavior, unfinished implementation, and 
 
 ## Build, change, and validate
 
-- [Contributing](../CONTRIBUTING.md): install the pinned toolchain and make a focused change.
+- [Contributing](../CONTRIBUTING.md): install the required tools and make a focused change.
 - [Validation cadence](VALIDATION_CADENCE.md): select a focused suite, checkpoint, or measurement run.
 - [Architecture](ARCHITECTURE.md): locate shared services and engine-specific security boundaries.
 - [Device contracts](DEVICE_CBOR.md): implement package, management, and persistence formats.

@@ -12,9 +12,10 @@ By contributing, you agree that your contribution is licensed under AGPL-3.0-or-
 
 ## Setting up
 
-The complete validation toolchain uses the following. The versions are pinned because the gate compares generated output byte for byte.
+The complete validation toolchain uses the following. Tools that affect generated
+artifacts remain pinned; Rust follows the current stable channel.
 
-- Rust 1.94.1, with the `thumbv7em-none-eabihf` target for board builds.
+- Current stable Rust, with the `thumbv7em-none-eabihf` target for board builds.
 - .NET SDK 10.0.302.
 - Java 21, with the committed Maven wrapper for the wallet.
 - Python 3.12 or newer, then `pip install -r scripts/requirements.txt`.
