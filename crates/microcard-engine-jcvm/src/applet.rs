@@ -111,6 +111,21 @@ impl Card {
         Ok(())
     }
 
+    /// Preserve all live objects while releasing unused capacity between callbacks.
+    pub fn release_idle_memory(&mut self) {
+        self.release_execution_frames();
+        self.heap.truncate(self.heap_used);
+        self.heap.shrink_to_fit();
+    }
+
+    /// Restore the configured allocation quota before any applet instruction runs.
+    pub fn restore_idle_memory(&mut self) -> Result<()> {
+        let additional = self.sizes.heap_bytes.checked_sub(self.heap.len()).ok_or(Error::Bounds)?;
+        self.heap.try_reserve_exact(additional).map_err(|_| Error::Quota)?;
+        self.heap.resize(self.sizes.heap_bytes, 0);
+        self.restore_execution_frames()
+    }
+
     /// Lay out the memory one applet gets, and build the objects the runtime hands it.
     pub fn new(file: &LoadFile, sizes: Sizes) -> Result<Self> {
         let statics = file.static_fields()?;
@@ -837,7 +852,14 @@ mod tests {
         let saved_statics = saved.statics.to_vec();
         let mut restored = Card::restore_without_frames(&file, Sizes::default(), saved).unwrap();
         assert_eq!((restored.words.capacity(), restored.tags.capacity()), (0, 0));
-        restored.restore_execution_frames().unwrap();
+        let live_heap = restored.heap[..restored.heap_used].to_vec();
+        restored.release_idle_memory();
+        assert_eq!(restored.heap.len(), restored.heap_used);
+        assert_eq!(restored.heap, live_heap);
+        restored.restore_idle_memory().unwrap();
+        assert_eq!(restored.heap.len(), Sizes::default().heap_bytes);
+        assert_eq!(restored.heap[..restored.heap_used], live_heap);
+        assert!(restored.heap[restored.heap_used..].iter().all(|byte| *byte == 0));
         assert!(restored.words.iter().all(|word| *word == 0));
         assert!(restored.tags.iter().all(|tag| *tag == 0));
         assert!(!restored.selected());

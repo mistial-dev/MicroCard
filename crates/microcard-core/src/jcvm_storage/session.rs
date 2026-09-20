@@ -74,15 +74,15 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.store.journal.remaining_commits()
     }
 
-    pub(crate) fn release_execution_frames(&mut self) -> Result<()> {
+    pub(crate) fn release_idle_memory(&mut self) -> Result<()> {
         self.installed()?;
-        self.card.as_mut().ok_or(Error::Missing)?.release_execution_frames();
+        self.card.as_mut().ok_or(Error::Missing)?.release_idle_memory();
         Ok(())
     }
 
-    pub(crate) fn restore_execution_frames(&mut self) -> Result<()> {
+    pub(crate) fn restore_idle_memory(&mut self) -> Result<()> {
         self.installed()?;
-        self.card.as_mut().ok_or(Error::Missing)?.restore_execution_frames().map_err(engine_error)
+        self.card.as_mut().ok_or(Error::Missing)?.restore_idle_memory().map_err(engine_error)
     }
 
     pub(crate) fn renewal_snapshot(&self, old_identity: [u8; 16], image: [u8; 32],

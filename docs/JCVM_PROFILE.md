@@ -747,3 +747,8 @@ Recovery restores and validates the authenticated heap before allocating executi
 frames. The snapshot buffer is cleared and released first; frame allocation must
 succeed before the recovered card can execute. This removes 17,408 overlapping
 allocation bytes from host reboot recovery with the 8,192-word frame profile.
+
+At renewal boundaries the live card also releases unused heap capacity. Live object
+bytes and handles remain intact; the configured heap quota and zeroed execution
+frames are restored before the next callback. Failure to restore capacity drops the
+maintenance session and requires authenticated recovery before execution.
