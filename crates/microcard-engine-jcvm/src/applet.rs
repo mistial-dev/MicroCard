@@ -790,6 +790,8 @@ mod tests {
         let explicit_exception = heap.new_object(native_class_of(ClassId::CryptoException).unwrap(), 6, 1).unwrap();
         heap.put_word_unconditional(runtime_exception, natives::REASON_FIELD, 3).unwrap();
         heap.put_word_unconditional(explicit_exception, natives::REASON_FIELD, 4).unwrap();
+        let retained_references = heap.new_array(heap::KIND_REFERENCE, 1, 1).unwrap();
+        heap.array_put(retained_references, 0, explicit_exception as i16).unwrap();
         card.heap_used = heap.used();
         let mut saved_heap = vec![0; card.persistent_heap_bytes()];
         let saved = card.save_into(&mut saved_heap).unwrap();
@@ -823,7 +825,7 @@ mod tests {
         assert_eq!(live.get_word(pin, 3), Ok(1));
         assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
         assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
-        for case in 0..21 {
+        for case in 0..24 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -846,6 +848,12 @@ mod tests {
                 17 => { invalid[signature as usize + heap::HEADER + 9] = 2; instance }
                 18 => { invalid[signature as usize + heap::HEADER + 10..signature as usize + heap::HEADER + 12].copy_from_slice(&pending.to_be_bytes()); instance }
                 19 => { invalid[runtime_exception as usize + heap::HEADER + 1] = 3; instance }
+                20..=22 => {
+                    let reference = match case { 20 => runtime_exception, 21 => card.apdu, _ => card.buffer };
+                    let at = retained_references as usize + heap::HEADER;
+                    invalid[at..at + 2].copy_from_slice(&reference.to_be_bytes());
+                    instance
+                }
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
             assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());

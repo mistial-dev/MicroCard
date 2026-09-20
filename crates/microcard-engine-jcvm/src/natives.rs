@@ -63,6 +63,12 @@ pub(crate) fn is_exception_class(class: &ApiClass) -> bool {
     class.id == ClassId::Throwable || class.supers.contains(&ClassId::Throwable)
 }
 
+/// Runtime APDU and exception objects may be used locally but never retained by applets.
+pub(crate) fn is_temporary_native(class: u16, words: u16) -> bool {
+    words == 1 && api_class(class).is_some_and(|class|
+        class.id == ClassId::APDU || is_exception_class(class))
+}
+
 /// Clear reset-scoped native fields in live state or a persistence staging buffer.
 pub fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
     security::reset_native_volatile(heap)

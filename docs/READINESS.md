@@ -95,18 +95,20 @@ board's reserved heap.
   share non-transactional reason handling. Runtime exceptions are reused per context;
   their reasons clear on reset and are zeroed in saved state without altering live
   responses. Restore rejects nonzero runtime reasons; applet-created exception reasons
-  remain persistent. Complete temporary runtime-object reference-storage rules,
-  the remaining native-API audit, and interruption boundaries.
+  remain persistent. Field/static/array stores reject runtime exception and APDU
+  references and the shared APDU buffer with SecurityException; recovery rejects
+  saved applet references to them. Ordinary references and local temporary references
+  remain usable. Complete the remaining native-API audit and interruption boundaries.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 198,956 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 199,260 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the board budget gate (58.480 seconds with two workers). All
-  seven profiles cross-linked after the runtime exception reset fix. After shared snapshot ownership changes, MC04
+  stages, then failed the board budget gate (59.678 seconds with two workers). All
+  seven profiles cross-linked after the temporary reference-store checks. After shared snapshot ownership changes, MC04
   hardware release text is 212,364 bytes against 212,000, and software reference text
   is 186,084 against 186,000. All seven profile artifacts linked before budget comparison; optimization
   ceilings remain unchanged.
@@ -157,7 +159,7 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 58.480 seconds with two workers and incremental
+reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 59.678 seconds with two workers and incremental
 rebuilding (`work/checkpoint-late-cancel.json`). All stages before the final board
 budget comparison passed; the checkpoint overall fails because the unchanged
 optimization ceilings are exceeded. This is not a cold-build measurement. Historical

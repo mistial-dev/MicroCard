@@ -493,8 +493,8 @@ pub fn run_body(
         machine.limits.allows(opcode)?;
         let length = instruction_length(code, pc)?;
         let mut next = pc + length;
-        // Convert commit-buffer exhaustion into a catchable Java exception at the
-        // failing instruction. Other engine errors retain their fail-closed path.
+        // Convert transaction and firewall violations into catchable Java exceptions
+        // at the failing instruction. Other engine errors retain their fail-closed path.
         let step = (|| -> Result<Option<Outcome>> {
         match opcode {
             op::NOP => {}
@@ -911,6 +911,7 @@ pub fn run_body(
                 if !wanted {
                     return Err(Error::Type);
                 }
+                if opcode == op::AASTORE { check_reference_store(machine, value as Reference)?; }
                 machine.heap.array_put(array, bounded_index(index)?, value)?
             }
             op::IASTORE => {
@@ -1192,10 +1193,15 @@ pub fn run_body(
         match step {
             Ok(Some(outcome)) => return Ok(outcome),
             Ok(None) => {},
-            Err(Error::TransactionFull) => {
-                let Native::Threw(exception) = natives::transaction_exception(
-                    machine.heap, &mut machine.jcre, machine.context, 3,
-                )? else { return Err(Error::Inconsistent); };
+            Err(error @ (Error::TransactionFull | Error::Firewall)) => {
+                let exception = if error == Error::Firewall {
+                    natives::new_exception(machine.heap, ClassId::SecurityException, machine.context)?
+                } else {
+                    let Native::Threw(exception) = natives::transaction_exception(
+                        machine.heap, &mut machine.jcre, machine.context, 3,
+                    )? else { return Err(Error::Inconsistent); };
+                    exception
+                };
                 match find_handler(machine, body, code.len(), pc, exception)? {
                     Some(target) => {
                         enter_handler(frame, exception)?;
@@ -1272,6 +1278,15 @@ fn take_field_value(frame: &mut Frame, kind: u8) -> Result<i32> {
     })
 }
 
+fn check_reference_store(machine: &Machine, reference: Reference) -> Result<()> {
+    if reference == NULL { return Ok(()); }
+    let info = machine.heap.info(reference)?;
+    if reference == machine.jcre.buffer || natives::is_temporary_native(info.class, info.length) {
+        return Err(Error::Firewall);
+    }
+    Ok(())
+}
+
 fn put_field_value(
     machine: &mut Machine,
     object: Reference,
@@ -1280,6 +1295,7 @@ fn put_field_value(
     value: i32,
 ) -> Result<()> {
     machine.heap.check_access(object, machine.context)?;
+    if kind == KIND_REF { check_reference_store(machine, value as Reference)?; }
     match kind {
         // A byte field keeps only the low byte, so reading it back sign extends.
         KIND_BYTE => machine
@@ -1291,6 +1307,7 @@ fn put_field_value(
 }
 
 fn write_static(machine: &mut Machine, at: usize, kind: u8, value: i32) -> Result<()> {
+    if kind == KIND_REF { check_reference_store(machine, value as Reference)?; }
     let width = if kind == 3 { 4 } else { 2 };
     let bytes = machine.statics.get_mut(at..at + width).ok_or(Error::Bounds)?;
     machine.heap.remember_static(at, bytes)?;
@@ -1772,6 +1789,74 @@ mod tests {
     fn a_negative_length_array_is_refused() {
         let code = [op::SCONST_M1, op::NEWARRAY, 11, op::ARETURN];
         assert_eq!(execute(&code, 0), Err(Error::Bounds));
+    }
+
+    #[test]
+    fn reference_stores_reject_temporary_runtime_objects_before_mutation() {
+        use crate::cap::{CONSTANT_INSTANCE_FIELDREF, CONSTANT_STATIC_FIELDREF};
+        use crate::test_support::ClassSpec;
+        let native = |name| crate::jcvm_api::PACKAGES.iter().enumerate().find_map(|(index, package)|
+            package.classes.iter().find(|class| class.id == name)
+                .map(|class| natives::native_class(index, class.token))).unwrap();
+        for (opcode, transient) in [(op::AASTORE, false), (op::AASTORE, true),
+            (op::PUTFIELD_A, false), (op::PUTFIELD_A_W, false),
+            (op::PUTFIELD_A_THIS, false), (op::PUTSTATIC_A, false)] {
+            let code = match opcode {
+                op::AASTORE => vec![op::ALOAD_0, op::SCONST_0, op::ALOAD_0 + 1, opcode, op::RETURN],
+                op::PUTFIELD_A_THIS => vec![op::ALOAD_0 + 1, opcode, 0, op::RETURN],
+                op::PUTSTATIC_A => vec![op::ALOAD_0 + 1, opcode, 0, 0, op::RETURN],
+                op::PUTFIELD_A_W => vec![op::ALOAD_0, op::ALOAD_0 + 1, opcode, 0, 0, op::RETURN],
+                _ => vec![op::ALOAD_0, op::ALOAD_0 + 1, opcode, 0, op::RETURN],
+            };
+            let package = Package { code, nargs: 2, max_locals: 0, max_stack: 3, static_bytes: 2,
+                classes: vec![ClassSpec { declared_size: 1, ..ClassSpec::default() }],
+                constants: vec![[if opcode == op::PUTSTATIC_A { CONSTANT_STATIC_FIELDREF }
+                    else { CONSTANT_INSTANCE_FIELDREF }, 0, 0, 0]], ..Package::default() };
+            let bytes = package.build();
+            let file = LoadFile::parse(&bytes).unwrap();
+            let linked = Linked::new(&file).unwrap();
+            let methods = file.methods().unwrap();
+            let mut slab = [0; 1024];
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let buffer = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+            let apdu = heap.new_object(native(ClassId::APDU), 1, 1).unwrap();
+            let runtime = natives::new_exception(&mut heap, ClassId::CryptoException, 1).unwrap();
+            let explicit = heap.new_object(native(ClassId::CryptoException), 6, 1).unwrap();
+            let security = natives::new_exception(&mut heap, ClassId::SecurityException, 1).unwrap();
+            let object = heap.new_object(0, 1, 1).unwrap();
+            let array = if transient {
+                heap.new_transient_array(heap::KIND_REFERENCE, 1, 1, heap::CLEAR_ON_RESET).unwrap()
+            } else { heap.new_array(heap::KIND_REFERENCE, 1, 1).unwrap() };
+            let mut statics = [0; 2];
+            let mut host = crate::host::NoHost;
+            let mut machine = Machine::new(&mut heap, &mut host, &linked, methods,
+                &mut statics, 1, Limits::IMPLEMENTED, Jcre::new(apdu, buffer));
+            for (value, allowed) in [(NULL, true), (object, true), (explicit, true),
+                (buffer, false), (apdu, false), (runtime, false)] {
+                machine.heap.put_word(object, 0, 0).unwrap();
+                machine.heap.array_put(array, 0, 0).unwrap();
+                machine.statics.fill(0);
+                machine.heap.begin_transaction(if allowed { 8 } else { 0 }).unwrap();
+                let mut words = [0; 12];
+                let mut tags = [0; 2];
+                let mut frame = Frame::new(&mut words, &mut tags, 2, 4).unwrap();
+                frame.store_reference(0, if opcode == op::AASTORE { array } else { object }).unwrap();
+                frame.store_reference(1, value).unwrap();
+                let result = run(&mut machine, &package.code, &mut frame, &mut 100).unwrap();
+                if allowed { assert_eq!(result, Outcome::Void); }
+                else {
+                    assert_eq!(result, Outcome::Thrown(security));
+                    assert_eq!(machine.heap.transaction_remaining(), Some(0));
+                }
+                let stored = match opcode {
+                    op::AASTORE => machine.heap.array_get(array, 0).unwrap() as u16,
+                    op::PUTSTATIC_A => u16::from_be_bytes(machine.statics[..2].try_into().unwrap()),
+                    _ => machine.heap.get_word(object, 0).unwrap(),
+                };
+                assert_eq!(stored, if allowed { value } else { NULL });
+                machine.heap.commit_transaction().unwrap();
+            }
+        }
     }
 
     #[test]

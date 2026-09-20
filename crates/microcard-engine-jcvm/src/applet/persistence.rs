@@ -174,6 +174,18 @@ impl Card {
             }
             Ok(())
         };
+        let storable_reference = |reference: Reference| -> Result<()> {
+            valid_reference(reference)?;
+            if reference != 0 {
+                let at = reference as usize;
+                let class = u16::from_be_bytes([saved.heap[at], saved.heap[at + 1]]);
+                let words = u16::from_be_bytes([saved.heap[at + 2], saved.heap[at + 3]]);
+                if reference == card.buffer || natives::is_temporary_native(class, words) {
+                    return Err(Error::Firewall);
+                }
+            }
+            Ok(())
+        };
         valid_reference(saved.instance)?;
         if saved.instance == 0 {
             return Err(Error::Missing);
@@ -183,7 +195,7 @@ impl Card {
         heap.visit_objects(|_, info, payload| {
             if info.kind == heap::KIND_REFERENCE {
                 for word in payload.chunks_exact(2) {
-                    valid_reference(u16::from_be_bytes([word[0], word[1]]))?;
+                    storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
                 }
             } else if info.kind == heap::KIND_BOOLEAN {
                 if payload.iter().any(|value| *value > 1) {
@@ -361,7 +373,7 @@ impl Card {
                                 + usize::from(index))
                                 * 2;
                             let word = payload.get(at..at + 2).ok_or(Error::Bounds)?;
-                            valid_reference(u16::from_be_bytes([word[0], word[1]]))?;
+                            storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
                         }
                         class = declaration.super_class;
                     }
@@ -378,7 +390,7 @@ impl Card {
             .ok_or(Error::Bounds)?
             .chunks_exact(2)
         {
-            valid_reference(u16::from_be_bytes([word[0], word[1]]))?;
+            storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
         }
         card.instance = Some(saved.instance);
         Ok(card)
