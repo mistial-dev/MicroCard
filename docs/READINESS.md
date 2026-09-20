@@ -118,7 +118,8 @@ CBOR and image separation reduced the credential metadata snapshot to 1,408 byte
 with 5,792 bytes of separately stored packages. The measured credential workload's
 host allocation peak reached 39,335 requested bytes at `c1950b1`. The personalized
 OpenFIPS201 workload, including transaction/PIN checkpoints and interrupted certificate
-replacement, reached 192,261 requested bytes. [Heap measurements](HEAP_MEASUREMENTS.json)
+replacement, reached 178,430 requested bytes at `84f5b0b`, down from 192,261 after
+reusing the snapshot allocation for journal encryption. [Heap measurements](HEAP_MEASUREMENTS.json)
 record both clean-revision runs and per-instruction samples. These host figures omit
 allocator overhead and stack and include host-specific storage costs; they do not
 establish that the board's 196,608-byte reserved heap is sufficient.
