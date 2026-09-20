@@ -173,7 +173,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
         if data.len() > 255 {
-            self.abort_transaction();
+            self.transaction = None;
             return Err(Error::Bounds);
         }
         let mut found = self
@@ -182,22 +182,24 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .iter()
             .filter(|(_, d)| d.instances.contains_key(aid));
         let Some((domain_id, source)) = found.next() else {
-            self.abort_transaction();
+            self.transaction = None;
             return Err(Error::Missing);
         };
         if found.next().is_some() {
-            self.abort_transaction();
+            self.transaction = None;
             return Err(Error::Domain);
         }
         let source_assembly = source.instances.get(aid).ok_or(Error::Missing)?;
         let incarnation = source.incarnation;
         let domain_registry_aid = source.registry_aid;
-        let units = match execution_units(&self.state, domain_id, source_assembly) {
+        let images = match linking::BorrowedExecution::new(&self.state, &*self.journal.flash_mut(),
+            &mut self.platform, domain_id, source_assembly) {
+            Ok(images) => images,
+            Err(error) => { self.transaction = None; return Err(error); }
+        };
+        let units = match images.units() {
             Ok(units) => units,
-            Err(error) => {
-                self.abort_transaction();
-                return Err(error);
-            }
+            Err(error) => { self.transaction = None; return Err(error); }
         };
         let p = &units[0].package;
         let Some(a) = p
@@ -206,7 +208,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .iter()
             .find(|a| a.aid == aid)
         else {
-            self.abort_transaction();
+            self.transaction = None;
             return Err(Error::Missing);
         };
         let process = a.process;
@@ -250,6 +252,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             Ok(value) => value,
             Err(error) => {
                 drop(units);
+                drop(images);
                 if !retry_floor.is_empty() {
                     self.commit_credential_retry_floor(domain_registry_aid, &retry_floor)?;
                 }
@@ -264,6 +267,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     | TransactionDisposition::Abort
             );
         drop(units);
+        drop(images);
         if retry_commit {
             self.commit_credential_retry_floor(domain_registry_aid, &retry_floor)?;
         }

@@ -32,7 +32,7 @@ AUDITED = {
         "merged.extend_from_slice(&self.storage_schema);",
         "copy.extend_from_slice(value);",
         # Clones a pair of offsets, not package bytes.
-        "image: raw.get(metadata.image.clone()).ok_or(Error::Storage)?,",
+        "image: raw.get(self.image.clone()).ok_or(Error::Storage)?,",
         # MC04 recovery still owns one shared immutable package buffer.
         "raw.extend_from_slice(bytes);",
         "version[index * 2..index * 2 + 2].copy_from_slice(&component.to_be_bytes());",

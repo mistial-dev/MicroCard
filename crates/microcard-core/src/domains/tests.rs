@@ -1213,21 +1213,21 @@ fn signed_forged_platform_identity_is_rejected_before_binding() {
 }
 
 #[test]
-fn execution_unit_queue_is_deduplicated_and_bounded() {
+fn execution_source_queue_is_deduplicated_and_bounded() {
     let mut card = card();
     let incarnation = create(&mut card, "queue");
     load(&mut card, &counter_package("queue", incarnation, 1, 7)).unwrap();
 
     let mut units = Vec::new();
     units.try_reserve_exact(MAX_EXECUTION_UNITS).unwrap();
-    push_execution_unit(&card.state, &mut units, "queue", "Counter", None).unwrap();
-    let digest = units[0].package.digest;
-    push_execution_unit(&card.state, &mut units, "queue", "Counter", Some(digest)).unwrap();
+    push_execution_source(&card.state, &mut units, "queue", "Counter", None).unwrap();
+    let digest = units[0].2.package_metadata("Counter").unwrap().digest;
+    push_execution_source(&card.state, &mut units, "queue", "Counter", Some(digest)).unwrap();
     assert_eq!(units.len(), 1);
     let mut wrong_digest = digest;
     wrong_digest[0] ^= 1;
     assert_eq!(
-        push_execution_unit(
+        push_execution_source(
             &card.state,
             &mut units,
             "queue",
@@ -1238,19 +1238,13 @@ fn execution_unit_queue_is_deduplicated_and_bounded() {
     );
 
     let isd = &card.state.isd;
-    let bindings = isd.bindings.get("mscorlib").unwrap();
-    let calls = isd.imports.get("mscorlib").unwrap();
     let mut full = Vec::new();
     full.try_reserve_exact(MAX_EXECUTION_UNITS).unwrap();
     for _ in 0..MAX_EXECUTION_UNITS {
-        full.push(ExecutionUnit {
-            package: isd.package("mscorlib").unwrap(),
-            bindings,
-            calls,
-        });
+        full.push(("ISD", "mscorlib", isd));
     }
     assert_eq!(
-        push_execution_unit(&card.state, &mut full, "queue", "Counter", None),
+        push_execution_source(&card.state, &mut full, "queue", "Counter", None),
         Err(Error::Quota)
     );
 }
@@ -2372,6 +2366,23 @@ fn execution_units_borrow_persisted_packages_and_link_tables() {
     assert_eq!(units[0].calls.as_ptr(), calls.as_ptr());
     let image_offset = units[0].package.image.as_ptr() as usize - raw.as_ptr() as usize;
     assert!(image_offset >= 12 && image_offset < raw.len());
+    let descriptor = *domain.image_refs.get("library").unwrap();
+    drop(units);
+    {
+        let flash = &*card.journal.flash_mut();
+        let images = linking::BorrowedExecution::new(&card.state, flash, &mut card.platform,
+            "borrowed", "library").unwrap();
+        let units = images.units().unwrap();
+        let bytes = descriptor.read_verified(flash, &mut card.platform).unwrap();
+        assert_eq!(units[0].package.raw.as_ptr(), bytes.as_ptr());
+        assert_eq!(units[0].calls.as_ptr(), calls.as_ptr());
+    }
+    card.manage(command(0xec, &management_names_wire("borrowed", "F04D430001").unwrap())).unwrap();
+    // Invocation reads authenticated flash even when the old resident cache is empty.
+    *card.state.domains.get_mut("borrowed").unwrap().assemblies.get_mut("library").unwrap() = Rc::new(Vec::new());
+    assert_eq!(card.invoke("F04D430001", &[]).unwrap(), [0x90, 0x00]);
+    crate::image_store::ImageFlash::program(card.journal.flash_mut(), usize::from(descriptor.slot), 0, &[0]).unwrap();
+    assert_eq!(card.invoke("F04D430001", &[]), Err(Error::Authentication));
 }
 
 #[test]

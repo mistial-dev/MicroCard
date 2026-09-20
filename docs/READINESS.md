@@ -30,7 +30,8 @@ This page is the authoritative list of supported behavior and release blockers.
 
 Immutable images occupy dedicated flash slots. Journal activation protects the prior
 committed generation and uncertain candidates. JCVM holds authenticated image handles;
-MC04 still owns runtime package buffers in RAM. Both board layouts reserve separate
+MC04 invocation now borrows verified flash images for its reachable dependency graph,
+but loading and lifecycle paths still own runtime package buffers in RAM. Both board layouts reserve separate
 JCVM heap banks. MJ03 reserves a durable nonce before every encryption attempt,
 independently of the committed generation, including failed attempts.
 
@@ -89,17 +90,18 @@ board's reserved heap.
   for the supported behavior and remaining exclusions.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 199,380 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 197,956 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed only the two JCVM flash ceilings (77.521 seconds with two workers).
-  All seven profiles cross-linked after the metadata and scoped-image-read changes.
-  All MC04 profiles now meet their unchanged ceilings: hardware release text is
-  211,916 bytes against 212,000, and software reference text is 185,636 against
-  186,000. This does not establish a smaller safe runtime heap.
+  stages, then failed the flash ceilings (82.122 seconds with two workers). All seven
+  profiles cross-linked. The intermediate borrowed-invocation path still coexists with
+  resident lifecycle images: MC04 hardware release text is 212,980 bytes against
+  212,000, and software reference text is 186,768 against 186,000. All seven text
+  ceilings currently fail; none were raised. Removing the remaining resident-image
+  paths and measuring final heap use remain required.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)

@@ -31,7 +31,7 @@ use native::{BufferResult, NativeArgument};
 use linking::{CallTarget, ExecutionUnit, PackageData, ResolvedCall, ResolvedDependency,
     execution_units, resolve_calls, resolve_dependency};
 #[cfg(test)]
-use linking::{validate_program_graph, push_execution_unit, validate_linked_program, push_link_edge};
+use linking::{validate_program_graph, push_execution_source, validate_linked_program, push_link_edge};
 use application::{ApplicationChanges, ApplicationView, StagedApplication};
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
@@ -485,7 +485,7 @@ impl State {
                 .map(|(identifier, domain)| (identifier.as_str(), domain)),
         ) {
             for (assembly, (_, candidate)) in domain.versions.iter() {
-                if candidate == digest && domain.assemblies.contains_key(assembly) {
+                if candidate == digest && domain.packages.contains_key(assembly) {
                     if found.is_some() {
                         return Err(Error::Storage);
                     }
@@ -802,6 +802,17 @@ struct StoredPackage {
 }
 
 impl StoredPackage {
+    fn view<'a>(&'a self, raw: &'a [u8]) -> Result<StoredPackageView<'a>> {
+        Ok(StoredPackageView {
+            #[cfg(test)]
+            raw,
+            manifest: &self.manifest,
+            image: raw.get(self.image.clone()).ok_or(Error::Storage)?,
+            signer: self.signer,
+            digest: self.digest,
+        })
+    }
+
     fn from_verified(package: PackageView<'_>) -> Self {
         let start = package.image.as_ptr() as usize - package.raw.as_ptr() as usize;
         Self {
@@ -876,14 +887,7 @@ impl Domain {
     fn package(&self, name: &str) -> Result<StoredPackageView<'_>> {
         let metadata = self.package_metadata(name)?;
         let raw = self.assemblies.get(name).ok_or(Error::Storage)?;
-        Ok(StoredPackageView {
-            #[cfg(test)]
-            raw,
-            manifest: &metadata.manifest,
-            image: raw.get(metadata.image.clone()).ok_or(Error::Storage)?,
-            signer: metadata.signer,
-            digest: metadata.digest,
-        })
+        metadata.view(raw)
     }
 
     fn new(incarnation: [u8; 16], registry_aid: RegistryAid, policy: DomainPolicy) -> Self {

@@ -114,73 +114,99 @@ pub(super) struct ExecutionUnit<'a> {
     pub(super) calls: &'a [ResolvedCall],
 }
 
-pub(super) fn push_execution_unit<'a>(
-    state: &'a State,
-    units: &mut Vec<ExecutionUnit<'a>>,
-    domain: &'a str,
-    assembly: &'a str,
-    expected_digest: Option<[u8; 32]>,
-) -> Result<()> {
-    if let Some(existing) = units
-        .iter()
-        .find(|unit| {
-            unit.package.manifest.domain == domain && unit.package.manifest.assembly == assembly
-        })
-    {
-        if expected_digest.is_some_and(|expected| expected != existing.package.digest) {
-            return Err(Error::Storage);
-        }
-        return Ok(());
-    }
-    if units.len() >= MAX_EXECUTION_UNITS {
-        return Err(Error::Quota);
-    }
-    let source = state.domain(domain).ok_or(Error::Domain)?;
-    let package = source.package(assembly)?;
-    if expected_digest.is_some_and(|digest| digest != package.digest) {
-        return Err(Error::Unauthorized);
-    }
-    units.push(ExecutionUnit {
-        package,
-        bindings: source.bindings.get(assembly).ok_or(Error::Storage)?,
-        calls: source.imports.get(assembly).ok_or(Error::Storage)?,
-    });
-    Ok(())
-}
+type PackageSource<'a> = (&'a str, &'a str, &'a Domain);
 
-pub(super) fn execution_units<'a>(
-    state: &'a State,
-    domain: &str,
-    assembly: &str,
-) -> Result<Vec<ExecutionUnit<'a>>> {
+pub(super) fn push_execution_source<'a>(state: &'a State, sources: &mut Vec<PackageSource<'a>>, domain: &'a str,
+        assembly: &'a str, expected: Option<[u8; 32]>) -> Result<()> {
+        let source = state.domain(domain).ok_or(Error::Domain)?;
+        let metadata = source.package_metadata(assembly)?;
+        if sources.iter().any(|(d, a, _)| *d == domain && *a == assembly) {
+            if expected.is_some_and(|digest| digest != metadata.digest) { return Err(Error::Storage); }
+            return Ok(());
+        }
+        if expected.is_some_and(|digest| digest != metadata.digest) { return Err(Error::Unauthorized); }
+        if sources.len() >= MAX_EXECUTION_UNITS { return Err(Error::Quota); }
+        sources.push((domain, assembly, source));
+        Ok(())
+    }
+
+fn execution_sources<'a>(state: &'a State, domain: &str, assembly: &str) -> Result<Vec<PackageSource<'a>>> {
     let (domain, source) = state.domain_entry(domain).ok_or(Error::Domain)?;
-    let (assembly, _) = source
-        .assemblies
-        .get_key_value(assembly)
-        .ok_or(Error::Missing)?;
-    let mut units = Vec::<ExecutionUnit>::new();
-    units
-        .try_reserve_exact(MAX_EXECUTION_UNITS)
-        .map_err(|_| Error::Quota)?;
-    push_execution_unit(state, &mut units, domain, assembly.as_ref(), None)?;
-    let mut cursor = 0usize;
-    while cursor < units.len() {
-        for call_index in 0..units[cursor].calls.len() {
-            let call = &units[cursor].calls[call_index];
-            if let CallTarget::Managed { dependency, .. } = &call.target {
-                let digest = units[cursor]
-                    .bindings
-                    .get(usize::from(*dependency))
-                    .ok_or(Error::Storage)?
-                    .digest;
+    let (assembly, _) = source.packages.get_key_value(assembly).ok_or(Error::Missing)?;
+    let mut sources = Vec::new();
+    sources.try_reserve_exact(MAX_EXECUTION_UNITS).map_err(|_| Error::Quota)?;
+    push_execution_source(state, &mut sources, domain, assembly, None)?;
+    let mut cursor = 0;
+    while cursor < sources.len() {
+        let (_, name, source) = sources[cursor];
+        let calls = source.imports.get(name).ok_or(Error::Storage)?;
+        let bindings = source.bindings.get(name).ok_or(Error::Storage)?;
+        for call in calls {
+            if let CallTarget::Managed { dependency, .. } = call.target {
+                let digest = bindings.get(usize::from(dependency)).ok_or(Error::Storage)?.digest;
                 let (domain, assembly, _) = state.assembly_by_digest(&digest)?;
-                push_execution_unit(state, &mut units, domain, assembly, Some(digest))?;
+                push_execution_source(state, &mut sources, domain, assembly, Some(digest))?;
             }
         }
         cursor += 1;
     }
+    Ok(sources)
+}
+
+pub(super) fn execution_units<'a>(state: &'a State, domain: &str, assembly: &str) -> Result<Vec<ExecutionUnit<'a>>> {
+    let sources = execution_sources(state, domain, assembly)?;
+    let mut units = Vec::new();
+    units.try_reserve_exact(sources.len()).map_err(|_| Error::Quota)?;
+    for (_, name, source) in sources {
+        units.push(ExecutionUnit {
+            package: source.package(name)?,
+            bindings: source.bindings.get(name).ok_or(Error::Storage)?,
+            calls: source.imports.get(name).ok_or(Error::Storage)?,
+        });
+    }
     validate_linked_program(&units)?;
     Ok(units)
+}
+
+struct BorrowedPackage<'a, F: crate::image_store::ImageFlash + 'a> {
+    metadata: &'a StoredPackage,
+    raw: F::Image<'a>,
+    bindings: &'a [ResolvedDependency],
+    calls: &'a [ResolvedCall],
+}
+
+pub(super) struct BorrowedExecution<'a, F: crate::image_store::ImageFlash + 'a> {
+    packages: Vec<BorrowedPackage<'a, F>>,
+}
+
+impl<'a, F: crate::image_store::ImageFlash + 'a> BorrowedExecution<'a, F> {
+    pub(super) fn new(state: &'a State, flash: &'a F, provider: &mut impl crate::crypto::CryptoProvider,
+        domain: &str, assembly: &str) -> Result<Self> {
+        let sources = execution_sources(state, domain, assembly)?;
+        let mut packages = Vec::new();
+        packages.try_reserve_exact(sources.len()).map_err(|_| Error::Quota)?;
+        for (_, name, source) in sources {
+            let descriptor = source.image_refs.get(name).ok_or(Error::Storage)?;
+            packages.push(BorrowedPackage {
+                metadata: source.package_metadata(name)?,
+                raw: descriptor.read_verified(flash, provider)?,
+                bindings: source.bindings.get(name).ok_or(Error::Storage)?,
+                calls: source.imports.get(name).ok_or(Error::Storage)?,
+            });
+        }
+        Ok(Self { packages })
+    }
+
+    pub(super) fn units(&self) -> Result<Vec<ExecutionUnit<'_>>> {
+        let mut units = Vec::new();
+        units.try_reserve_exact(self.packages.len()).map_err(|_| Error::Quota)?;
+        for package in &self.packages {
+            units.push(ExecutionUnit { package: package.metadata.view(&package.raw)?,
+                bindings: package.bindings, calls: package.calls });
+        }
+        validate_linked_program(&units)?;
+        Ok(units)
+    }
 }
 
 pub(super) fn validate_program_graph(
