@@ -182,8 +182,17 @@ impl Card {
     /// Restore already authenticated state for the exact verified load file.
     /// No installation code runs, and no volatile values are reconstructed from storage.
     pub fn restore(file: &LoadFile, sizes: Sizes, saved: PersistentState<'_>) -> Result<Self> {
+        let mut card = Self::restore_without_frames(file, sizes, saved)?;
+        card.restore_execution_frames()?;
+        Ok(card)
+    }
+
+    /// Restore state while leaving execution suspended. The caller must restore
+    /// frames before invoking the applet, after releasing its snapshot buffer.
+    pub fn restore_without_frames(file: &LoadFile, sizes: Sizes, saved: PersistentState<'_>) -> Result<Self> {
         if saved.heap.len() > sizes.heap_bytes { return Err(Error::Bounds); }
-        let mut card = Self::new(file, sizes)?;
+        let mut card = Self::new(file, Sizes { frame_words: 0, ..sizes })?;
+        card.sizes = sizes;
         card.validate_saved(file, &saved)?;
         card.heap[..saved.heap.len()].copy_from_slice(saved.heap);
         card.heap_used = saved.heap.len();

@@ -835,8 +835,7 @@ mod tests {
         }
         let instance = saved.instance;
         let saved_statics = saved.statics.to_vec();
-        let mut restored = Card::restore(&file, Sizes::default(), saved).unwrap();
-        restored.release_execution_frames();
+        let mut restored = Card::restore_without_frames(&file, Sizes::default(), saved).unwrap();
         assert_eq!((restored.words.capacity(), restored.tags.capacity()), (0, 0));
         restored.restore_execution_frames().unwrap();
         assert!(restored.words.iter().all(|word| *word == 0));

@@ -160,7 +160,7 @@ impl<F: Flash> Store<F> {
     ) -> Result<(Self, Option<Card>)> {
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
         let (mut store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
-        let card = decode_card(snapshot.as_deref().map(Vec::as_slice), &file, sizes, store.image, installation)?;
+        let card = decode_card(snapshot, &file, sizes, store.image, installation)?;
         store.heap_length = card.as_ref().map(Card::persistent_heap_bytes);
         Ok((store, card))
     }
@@ -199,7 +199,7 @@ impl<F: Flash> Store<F> {
         let snapshot = self.journal.recover_with_replay(provider,
             |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, self.maximum))?;
         let card = decode_card(
-            snapshot.as_deref().map(Vec::as_slice),
+            snapshot,
             &file,
             sizes,
             self.image,
@@ -290,11 +290,14 @@ pub(crate) fn validate_seed_snapshot(snapshot: &[u8], file: &LoadFile, sizes: Si
     Card::validate_persistent(file, sizes, saved).map_err(|_| Error::Format)
 }
 
-fn decode_card(snapshot: Option<&[u8]>, file: &LoadFile, sizes: Sizes,
+fn decode_card(snapshot: Option<Zeroizing<Vec<u8>>>, file: &LoadFile, sizes: Sizes,
         image: [u8; 32], installation: [u8; 16]) -> Result<Option<Card>> {
     snapshot.map(|bytes| {
-        let saved = decode_snapshot(bytes, file, sizes, image, installation)?;
-        Card::restore(file, sizes, saved).map_err(|_| Error::Format)
+        let saved = decode_snapshot(&bytes, file, sizes, image, installation)?;
+        let mut card = Card::restore_without_frames(file, sizes, saved).map_err(|_| Error::Format)?;
+        drop(bytes);
+        card.restore_execution_frames().map_err(|_| Error::Quota)?;
+        Ok(card)
     }).transpose()
 }
 

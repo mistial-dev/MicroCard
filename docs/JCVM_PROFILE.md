@@ -742,3 +742,8 @@ execution buffers before permitting another callback. Any maintenance or allocat
 failure follows the existing path that discards the session rather than executing
 with incomplete scratch storage. The 8,192-word profile releases 17,408 requested
 bytes during renewal; supported frame limits are unchanged.
+
+Recovery restores and validates the authenticated heap before allocating execution
+frames. The snapshot buffer is cleared and released first; frame allocation must
+succeed before the recovered card can execute. This removes 17,408 overlapping
+allocation bytes from host reboot recovery with the 8,192-word frame profile.
