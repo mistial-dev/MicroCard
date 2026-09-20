@@ -1,106 +1,197 @@
 # MicroCard
 
-MicroCard is a programmable smart-card runtime written in Rust. Version **0.1-wip** provides separate .NET and Java Card firmware builds. A reduced .NET/CIL engine builds annotated C# class libraries into compact signed assemblies and executes them in isolated security domains. A Java Card virtual machine loads a standard CAP file and runs it. A desktop simulator and a bare-metal nRF52840 image use the same runtime.
+MicroCard is part of the [OpenPhysical ecosystem](https://github.com/OpenPhysical).
+It is a work in progress.
 
-This is a development release. It carries a complete simulator demonstration and hardware evidence from an nRF52840 DK. Current capabilities and release blockers are tracked in [release readiness](docs/READINESS.md). Start with the [documentation index](docs/README.md) to find anything below in more detail.
+This repository contains a Rust-based smart-card virtualization environment for the
+Nordic nRF52840. MicroCard has two separate execution modes:
 
-## What works today
+- **MC04** runs verified ECMA-335 assemblies produced from annotated .NET class
+  libraries.
+- **JCVM** loads and runs Java Card CAP files.
 
-- **The .NET engine** runs the credential wallet demonstration end to end, covering domain isolation, P-256 signing, PIN recovery, package rejection and persistence across a restart.
-- **The Java Card engine** installs OpenFIPS201, registers it, accepts a SELECT and answers PIV commands with the applet's own status words. Four of the eight OpenFIPS201 release variants reach that point. See [the Java Card profile](docs/JCVM_PROFILE.md) for what each part of the engine does and what is still missing.
-- **The secure channel** is SCP03 with implementation option `0x71`, meaning S16 mode, a derived card challenge, R-MAC and R-ENCRYPTION. It serves security levels 01, 03, 11, 13 and 33, which is every combination carrying a command MAC.
-- **Earlier DK firmware** enumerated as a USB CCID reader and carried SCP03 through GlobalPlatformPro and the Java wallet. Current firmware still requires physical acceptance.
+The nRF52840 firmware is built for one engine at a time. The host simulator includes
+both engines so they can be developed and tested independently against the same
+transport, security, persistence, and cryptographic service boundaries.
 
-JCVM cipher, signature, and key-agreement operations remain unimplemented. Both engine
-builds cross-link; [earlier DK observations](docs/HARDWARE_SMOKE.md) do not establish
-hardware acceptance of the current tree.
+The eventual goal is an open stack for running open-source secure-element firmware,
+so a system can use auditable code from its host through its security boundary. The
+same work also provides lightweight Java Card and .NET runtimes for constrained
+application firmware.
 
-## Try the credential wallet
+MicroCard is not production ready. Current capabilities and remaining release work
+are tracked in [release readiness](docs/READINESS.md).
 
-The demonstration provisions separate **Personal** and **Work** credentials, creates P-256 keys inside their security domains, signs fresh challenges, exhausts and recovers a PIN, rejects invalid packages, then restarts the simulator and verifies persistence.
+## Current status
 
-Requirements: Rust 1.94.1, .NET SDK 10.0.302, Java 21, Maven, and Python 3 with `scripts/requirements.txt` installed.
+The **JCVM environment is functional host-side**. It installs and runs the
+[OpenPhysical OpenFIPS201 fork](https://github.com/OpenPhysical/OpenFIPS201), including
+selection, PIV commands, personalization, PIN handling, P-256 signing and key
+agreement, persistent storage, reboot recovery, and authenticated package loading.
+The committed OpenFIPS201 fixture runs from a clean checkout.
+
+The full derived P-256 host profile currently passes **58 of 63 NIST contact
+vectors**. Four CHUID or certificate-profile checks fail and one vector is skipped.
+These results are development evidence rather than a conformance claim. The
+[Java Card profile](docs/JCVM_PROFILE.md) records the exact supported API surface,
+test results, and known gaps.
+
+The **MC04 environment is also functional host-side**. It compiles annotated C#
+libraries into signed assemblies and runs them in isolated security domains. The
+credential-wallet acceptance flow covers provisioning, P-256 signing, PIN recovery,
+package rejection, and persistence across restart.
+
+Both firmware engines cross-link for the nRF52840 DK and Makerdiary nRF52840 MDK USB
+Dongle. The current JCVM firmware has not yet completed physical hardware acceptance.
+
+## Run OpenFIPS201 locally
+
+The shortest path uses the committed OpenFIPS201 load file and expected PIV responses.
+It does not require hardware, an external OpenFIPS201 checkout, or the NIST test
+runner.
+
+Requirements:
+
+- Rust **1.94.1**
+- Python **3.12 or newer**
+
+```sh
+git clone https://github.com/mistial-dev/MicroCard.git
+cd MicroCard
+cargo build -p microcard-sim
+python3 scripts/piv_vector_acceptance.py
+```
+
+This starts the JCVM simulator, installs the committed OpenFIPS201 applet, and replays
+twelve PIV commands. A successful run ends with:
+
+```text
+PASS: 12 PIV commands answered by the applet on a blank card
+```
+
+To exercise authenticated loading, personalization, cryptography, persistence,
+interrupted certificate replacement, reboot recovery, two installed applets, and
+journal renewal, install the Python dependencies and run the managed transport
+acceptance:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r scripts/requirements.txt
+python3 scripts/jcvm_transport_acceptance.py
+```
+
+The simulator is at `target/debug/microcard-sim`. The raw `serve-jcvm` mode is useful
+for a fixed command corpus. `serve-jcvm-managed` uses signed packages, SCP03, and a
+persistent state directory. See the [Java Card profile](docs/JCVM_PROFILE.md) for
+manual commands and alternate CAP files.
+
+## Run the upstream NIST vectors
+
+The upstream integration requires:
+
+- the OpenPhysical OpenFIPS201 checkout pinned to the revision documented in the
+  [Java Card profile](docs/JCVM_PROFILE.md#openfips201-provisioning);
+- the separately distributed NIST PIV Test Runner **5.0.1**;
+- the OpenFIPS201 test tools built according to their upstream instructions.
+
+Generate the complete P-256 test identity and run the contact suite without a physical
+card:
+
+```sh
+python3 scripts/nist_identity.py \
+  --upstream /path/to/OpenFIPS201 \
+  --out work/p256-identity
+
+python3 scripts/nist_acceptance.py \
+  --upstream /path/to/OpenFIPS201 \
+  --config work/p256-identity/config.xml \
+  --identity-folder work/p256-identity/identity \
+  --provision-config \
+  --suite card-contact \
+  --out work/p256-identity-contact
+```
+
+The adapter stages an isolated copy of the upstream harness. It does not rewrite the
+checkout or vector expectations. Reports retain preparation logs, JUnit results,
+configuration hashes, simulator hashes, timings, skips, and failures.
+
+## Run the MC04 wallet
+
+The wallet requires .NET SDK **10.0.302**, Java **21**, Maven, and the Python
+dependencies above.
 
 ```sh
 python3 scripts/wallet_acceptance.py
 ```
 
-The Java client uses GlobalPlatformPro for SCP03 command encryption, command MAC, and response MAC. MicroCard performs package and executable verification again inside the Rust runtime. See the [wallet guide](docs/WALLET.md) for individual commands and PC/SC use.
+The demonstration provisions separate Personal and Work credentials, signs fresh
+challenges, exhausts and recovers a PIN, rejects invalid packages, and verifies state
+after restarting the simulator. See the [wallet guide](docs/WALLET.md).
 
-## Try the Java Card engine
+## Architecture and security boundaries
 
-An OpenFIPS201 build is committed, so this runs on a clean checkout.
+Both engines share APDU transport, GlobalPlatform/SCP03 management, authenticated
+persistence, immutable image storage, quotas, key services, and hardware-provider
+interfaces. Engine-specific loading, verification, linking, and execution remain
+separate.
 
-```sh
-cargo build
-python3 scripts/piv_vector_acceptance.py
-python3 scripts/jcvm_transport_acceptance.py
-```
+Packages use deterministic CBOR manifests and P-256 signatures. Persistent updates
+use authenticated journals with explicit recovery rules. The runtimes independently
+validate executable structure, bounds, native calls, ownership, and resource limits
+before executing code. Private keys remain behind opaque native handles.
 
-That replays twelve PIV commands through `microcard-sim serve-jcvm` and compares the applet's own status words against committed expectations. Half of those commands are authentic encodings captured from real cards. Their provenance and license are recorded beside them in `crates/microcard-engine-jcvm/tests/vectors`. Pass a different Load File Data Block to `scripts/jcvm_applet_acceptance.py` to drive another build, producing one with `scripts/jcvm_cap_inventory.py --load-file`.
-
-The raw `serve-jcvm` corpus runner is memory-only, including transaction checkpoints.
-Use the managed mode for persistence and recovery validation.
-
-The transport acceptance uses `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` to load
-signed packages through SCP03 and check persistent recovery. Add `-binary` to that
-mode for length-prefixed transport. Each state directory permits one simulator process.
-
-## Security model
-
-- The first assembly assigned to the ISD takes permanent ownership of the card through its signer identity.
-- Each SSD binds permanently to the signer of its first valid assembly.
-- Dependencies must already exist. Both provider and consumer policies constrain versions, signers, digests, and scope.
-- Package signatures authorize .NET code, as P-256 ECDSA over SHA-256. SCP03 authorizes management commands. Both checks are required.
-- A package carries its signer as a 65-byte uncompressed key. What a domain binds to is that key's SHA-256 digest. A compressed key is refused, and so is the malleable twin of a signature, so one signed package has exactly one encoding.
-- JCVM device loading requires a signed MP05 package, the same envelope used by .NET, with a JCVM-specific manifest and verified CAP image. Raw CAP files remain a simulator input. See [the Java Card profile](docs/JCVM_PROFILE.md) for the delivery gaps.
-- Rust verifies the reduced CIL before activation and enforces domain identity, memory limits, call targets, transactions, key ownership, and native-call budgets.
-- Private keys are opaque native handles. Managed code receives only approved cryptographic operations.
-- Persistent updates use an authenticated transactional journal. Interrupted activation exposes either the old state or the complete new state.
-
-The [architecture overview](docs/ARCHITECTURE.md) explains the Rust, .NET, Java and Java Card boundaries without repeating setup instructions.
+The [architecture overview](docs/ARCHITECTURE.md), [device contracts](docs/DEVICE_CBOR.md),
+and [protocol](docs/PROTOCOL.md) describe these boundaries in detail.
 
 ## Development
 
+Run the quick validation loop while developing:
+
 ```sh
 python3 scripts/check.py
-python3 scripts/check.py --checkpoint
 ```
 
-The quick gate builds Rust and managed code and runs structural checks. The checkpoint adds security, recovery, interoperability, wallet, and board checks. Use `--suite compiler --jobs 2` for analyzer and preprocessor cases, or choose another [focused suite](docs/VALIDATION_CADENCE.md#focused-suites-and-timings). Sustained fuzzing runs separately. See [contributing](CONTRIBUTING.md) for setup and [Rider authoring](docs/RIDER.md) for the standard Roslyn analyzer package.
-
-Build one nRF52840 engine:
+Run the broader host, wallet, recovery, generated-artifact, and board-link checkpoint
+before release-facing changes:
 
 ```sh
-cd board/nrf52840
+python3 scripts/check.py --checkpoint --jobs 2
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Sustained fuzzing is a separate release gate. See [validation cadence](docs/VALIDATION_CADENCE.md)
+and [fuzzing](docs/FUZZING.md). Contributor toolchain requirements and policies are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+Build one nRF52840 firmware engine from `board/nrf52840`:
+
+```sh
 cargo build --release --locked --features engine-mc04
-# Or build the Java Card engine:
 cargo build --release --locked --features engine-jcvm
 ```
 
-Selecting neither engine or both is an error. The board budget gate saves separate
-ELF and link-map artifacts under `artifacts/firmware/`. These are development builds;
-[readiness](docs/READINESS.md) lists the remaining release blockers.
-
-The USB dongle requires no debug probe, but its boot acceptance remains unresolved. See [the dongle guide](docs/DONGLE.md). For the nRF52840 DK, read the [board guide](docs/BOARD.md) and [first flash](docs/FIRST_FLASH.md) before provisioning or flashing.
+Each command produces a separate firmware image. Selecting both engines or neither is
+an error. Firmware defaults to the hardware-only CC310 provider; reproducible vendor
+and compiler setup is documented in [crypto providers](docs/CRYPTO_PROVIDERS.md).
 
 ## Repository map
 
-- `crates/microcard-core`: portable `no_std` verifier, CIL interpreter, domains, storage, secure messaging, and native services.
-- `crates/microcard-engine-jcvm`: portable `no_std` Java Card engine, covering the CAP container, structural verification, the object heap, linking, the interpreter and the native API classes.
-- `crates/microcard-memory`: checked allocation arithmetic shared by the two engines.
-- `crates/microcard-sim`: persistent desktop simulator, package inspection, and the Java Card serving mode.
-- `managed`: framework assemblies, Roslyn analyzers, preprocessor, packager, and bundle tools.
-- `wallet`: Java 21 client using GlobalPlatformPro.
-- `samples`: executable assemblies and reusable-library examples.
-- `board/nrf52840`: bare-metal transport, flash, entropy, watchdog, GPIO, USB CCID, and optional hardware crypto integration.
-- `format`: machine-readable opcode and API tables that generate Rust source and reference appendices.
-- `scripts`: the validation gates, the acceptance suites, and the generators.
-- `tests`, `fuzz`: shared vectors and fixtures, and the coverage-guided fuzz targets.
-- `docs`: format, protocol, security policy, hardware, and development references, indexed by [docs/README.md](docs/README.md).
+- `crates/microcard-core`: shared `no_std` transport, security, persistence, native
+  services, and the MC04 runtime.
+- `crates/microcard-engine-jcvm`: `no_std` CAP verification, Java Card linking,
+  interpreter, object heap, firewall checks, and native APIs.
+- `crates/microcard-memory`: checked allocation primitives shared by both engines.
+- `crates/microcard-sim`: desktop simulator and persistent host backends.
+- `managed`: .NET analyzers, framework assemblies, preprocessor, and packaging tools.
+- `wallet`: Java host client using GlobalPlatformPro.
+- `board/nrf52840`: board transport, flash, entropy, watchdog, USB CCID, and CC310
+  integration.
+- `scripts`: validation, acceptance, measurement, and generation tools.
+- `tests` and `fuzz`: shared vectors, fixtures, and coverage-guided targets.
+- `docs`: task-oriented documentation indexed by [docs/README.md](docs/README.md).
 
 ## License
 
-MicroCard is licensed under [AGPL-3.0-or-later](LICENSE). Dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Firmware defaults use CC310. Run the [pinned compiler and vendor setup](docs/CRYPTO_PROVIDERS.md#reproducible-build-inputs) before board builds. Software reference builds require `--no-default-features --features engine-mc04,software-crypto` (or `engine-jcvm`).
+MicroCard is licensed under [AGPL-3.0-or-later](LICENSE). Dependency notices are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
