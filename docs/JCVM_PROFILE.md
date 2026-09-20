@@ -563,19 +563,35 @@ The combined identity imports all 11 objects and four keys and passes exact
 readback after reopening. This exposed and fixed persistent-heap growth from repeated
 ISO status exceptions: runtime exceptions are reused without aliasing explicitly
 created applet objects. The combined run reports **58 passed, 4 failed, 1 skipped**
-(`work/nist-automatic-renewal-contact`, clean revision `6d48d94`):
-preparation took 29.329 seconds and vectors 131.769 seconds on the host. All 63
-individual outcomes match the preceding instruction-checkpoint run (29.634 / 124.225
-seconds). This run uses automatic renewal firmware but does not deliberately exhaust
-counters; the transport acceptance workload covers that transition separately. Remaining failures concern the original CHUID’s
+(`work/nist-native-audit-contact`, clean revision `0258030`):
+preparation took 29.494 seconds and vectors 125.272 seconds on the host. All 63
+individual outcomes match the preceding automatic-renewal run (29.329 / 131.769
+seconds). This run includes the native allocation and byte-work fixes but does not
+deliberately exhaust counters; transport acceptance covers renewal separately. Remaining failures concern the original CHUID’s
 2032-12-02 expiry exceeding the six-year window on 2026-09-20, and certificate
 policies under the NIST profile. Its 9D certificate binding check also requests
 a signature from the agreement-only key; ECDH passes separately. These remain
 failures, not exclusions, and the key role is not relaxed for the test.
 
-The failing cases are `CHECK_BER_TLV_conformance:2` and
-`CHECK_certificate_profile:4`, `:6`, and `:8`. The skipped case is
-`SecureMessagingErrorHandling:1`; its skip does not establish secure-messaging coverage.
+The remaining cases have distinct causes:
+
+- `CHECK_BER_TLV_conformance:2`: the unchanged signed CHUID expires on
+  2032-12-02, beyond the runner's six-year window on the recorded run date.
+  Editing its date alone would invalidate its signature.
+- `CHECK_certificate_profile:4`: the signing certificate retains GSA test policy
+  `2.16.840.1.101.3.2.1.48.9`; the runner accepts policies ending in `.3.16` or `.3.7`.
+- `CHECK_certificate_profile:6`: the key-management certificate has the same
+  policy mismatch (the runner also accepts `.3.6`). Its key-binding assertion
+  sends a signing request to the agreement-only 9D key and receives `6A86`.
+  Keep agreement permissions intact; a matching ECDH binding check is required.
+- `CHECK_certificate_profile:8`: the card-authentication certificate retains test
+  policy `2.16.840.1.101.3.2.1.48.13`; the runner expects
+  `2.16.840.1.101.3.2.1.3.17`.
+
+`SecureMessagingErrorHandling:1` is skipped because the SELECT response does not
+advertise secure messaging. This is missing coverage, not a passing result.
+Policy substitutions would create a different derived fixture; they would not
+prove that the original GSA image passes or establish issuer trust.
 The complete contact-suite run does not cover the separate upstream RSA-2048,
 P-384, contactless, or VCI profiles.
 
