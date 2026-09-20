@@ -182,8 +182,10 @@ impl<'a> Heap<'a> {
 
     fn remember(&mut self, at: usize, length: usize, info: Info) -> Result<()> {
         if info.clear_event == 0 {
-            if let Some((_, undo)) = &mut self.transaction {
-                undo.record(at, &self.bytes[at..at + length], false)?;
+            if let Some((start, undo)) = &mut self.transaction {
+                // Abort wipes the entire allocation tail; only pre-existing payloads
+                // need before-images. Committed projections also exclude this tail.
+                if at < *start { undo.record(at, &self.bytes[at..at + length], false)?; }
             } else if length != 0 { self.persistent_dirty = true; }
         }
         Ok(())
@@ -590,6 +592,18 @@ mod tests {
         assert_eq!(heap.copy_committed_state(&statics, &mut projected[..1], &mut projected_statics), Err(Error::Bounds));
         assert_eq!(projected[0], 0);
         assert_eq!(projected_statics, [0; 2]);
+        heap.begin_transaction(0).unwrap();
+        let created = heap.new_object(1, 1, 1).unwrap();
+        heap.put_word(created, 0, 42).unwrap();
+        assert_eq!(heap.put_word(object, 0, created), Err(Error::TransactionFull));
+        heap.commit_transaction().unwrap();
+        // Once committed, the same object must participate in later rollback.
+        heap.begin_transaction(8).unwrap();
+        heap.put_word(created, 0, 43).unwrap();
+        assert_eq!(heap.transaction_remaining(), Some(0));
+        assert!(!heap.abort_transaction(&mut []).unwrap());
+        assert_eq!(heap.get_word(created, 0), Ok(42));
+        assert_eq!(heap.get_word(object, 0), Ok(12));
     }
 
     #[test]
@@ -621,6 +635,11 @@ mod tests {
         assert_eq!(heap.array_put(array, 8, 1), Err(Error::Bounds));
         assert_eq!(heap.image(), before);
         let created = heap.new_object(1, 1, 1).unwrap();
+        heap.put_word(created, 0, 0x1234).unwrap();
+        let created_array = heap.new_array(KIND_BYTE, 8, 1).unwrap();
+        heap.copy_bytes(array, 0, created_array, 0, 8).unwrap();
+        heap.byte_slice_mut(created_array, 0, 8).unwrap().fill(0x55);
+        assert_eq!(heap.transaction_remaining(), Some(0));
         let mut projected = vec![0; heap.used()];
         let used = heap.copy_committed_state(&[], &mut projected, &mut []).unwrap();
         assert_eq!(used, before.len());

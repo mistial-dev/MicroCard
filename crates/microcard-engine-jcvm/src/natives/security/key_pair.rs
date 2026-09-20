@@ -121,6 +121,7 @@ mod tests {
         assert_eq!(small.image(), before);
         let mut slab = [0; 2048];
         let mut heap = Heap::new(&mut slab).unwrap();
+        heap.begin_transaction(0).unwrap();
         let pair = new_native(&mut heap, ClassId::KeyPair, STATE_WORDS, 1).unwrap();
         let mut words = [0; 16];
         let mut tags = [0; 8];
@@ -131,6 +132,8 @@ mod tests {
         frame.push_short(256).unwrap();
         assert!(matches!(call(MethodId::Constructor, signature(false), &mut heap,
             &mut host, &mut frame, 1, &mut 100), Ok(Native::Returned)));
+        assert_eq!(heap.transaction_remaining(), Some(0));
+        heap.commit_transaction().unwrap();
         let public = heap.get_word(pair, MATERIAL).unwrap();
         let private = heap.get_word(pair, PENDING).unwrap();
         assert!(!key_initialized(&heap, public).unwrap());

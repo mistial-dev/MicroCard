@@ -85,19 +85,21 @@ board's reserved heap.
   and checkpoints still needs independent durability. P-256 generation, scalar imports,
   and symmetric key import/clearing admit bytes and readiness together before publication.
   Catching a full-buffer error and committing cannot retain half a key update.
-  Transient key clearing consumes no undo space. Existing regression tests also cover
-  successful updates followed by abort, transient lifetime, and earlier undo records.
+  Transient key clearing consumes no undo space. Newly allocated objects need no
+  before-images because abort wipes the allocation tail; a KeyPair constructor now
+  uses zero undo bytes instead of 64. Existing regressions cover abort/projection of
+  new allocations, rollback after their commit, key lifetime, and earlier undo records.
   Finish the remaining native-API transaction audit and interruption boundaries.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 198,480 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 198,488 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
   The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
-  stages, then failed the board budget gate (55.910 seconds with two workers). All
-  seven profiles cross-linked after the symmetric key atomicity fix. After shared snapshot ownership changes, MC04
+  stages, then failed the board budget gate (56.258 seconds with two workers). All
+  seven profiles cross-linked after the allocation undo fix. After shared snapshot ownership changes, MC04
   hardware release text is 212,364 bytes against 212,000, and software reference text
   is 186,084 against 186,000. All seven profile artifacts linked before budget comparison; optimization
   ceilings remain unchanged.
@@ -148,7 +150,7 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 55.910 seconds with two workers and incremental
+reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 56.258 seconds with two workers and incremental
 rebuilding (`work/checkpoint-late-cancel.json`). All stages before the final board
 budget comparison passed; the checkpoint overall fails because the unchanged
 optimization ceilings are exceeded. This is not a cold-build measurement. Historical
