@@ -88,68 +88,29 @@ board's reserved heap.
   to recover interrupted bank replacement. Root registry counters remain finite;
   host memory bounds remain required, with physical service-life testing later.
   See [renewal and recovery invariants](STORAGE.md#jcvm-counter-renewal).
-- Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
-  answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 223,392 text bytes,
-  148 data bytes and 198,284 BSS bytes, within
-  its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
-  optimization. The unchanged 178,000-byte optimization ceiling still fails; the
-  refreshed budget report records current failures rather than historical passing sizes.
-  All seven profiles cross-linked in the consolidated checkpoint described below. MC04 no
-  longer retains package image buffers in runtime state; recovery reads verified
-  flash guards and retains metadata. MC04 hardware release text is 212,580 bytes
-  against 212,000, and software reference text is 186,464 against 186,000. Seven text
-  ceilings still fail; none were raised. The matched credential workload reduced host
-  heap peak from 43,227 to 35,137 bytes and reopened retained allocations from 13,215
-  to 4,989 bytes; [measurement evidence](HEAP_MEASUREMENTS.json) records both binaries.
-  The provisioned JCVM transport workload forces counter renewal and peaks at
-  184,681 host-requested allocation bytes after validating the saved heap by borrowing
-  it (previously 266,721). This is below the 196,608-byte board reservation for this
-  workload, but does not establish device heap safety. The expanded personalization
-  workload at clean revision `5fb8307` reproduces the same 184,681-byte peak
-  (`work/jcvm-personalized-heap.json`). The two-applet extension at clean
-  revision `37a95dd` peaks at 185,913 bytes with both banks occupied and one blank
-  applet's reset-scoped arrays retained (`work/jcvm-two-applet-clean-heap.json`).
-  Neither run fills both applets to their maximum supported allocations. A larger
-  accepted certificate capacity of 20,000 bytes passes all functional checks but peaks
-  at **341,421 host-requested bytes**, including 341,421 during SELECT and 286,330
-  during open (clean revision `5e3efcc`, `work/jcvm-large-certificate-clean-heap.json`).
-  This exceeds the board heap reservation; investigate recovery/selection allocation
-  overlap and separate host file buffers from board costs before hardware readiness. Direct
-  patch replay reduces that matched workload to **251,517 bytes** at clean revision
-  `54c67b1` (`work/jcvm-direct-replay-clean-heap.json`), saving 89,904 bytes.
-  Releasing idle execution frames reduces the matched file-backed host peak further
-  to **234,109 bytes** at clean revision `502d921` (`work/jcvm-idle-frames-clean-heap.json`).
-  The host fallback still exceeds the board reservation. Board renewal additionally
-  borrows mapped staging ciphertext; its physical peak remains unmeasured. Bound supported workloads and
-  board allocations before declaring this path ready for hardware. Host figures
-  exclude allocator metadata and stack and include file-backed image reads.
-  At clean revision `a18c7b9`, a 24,000-byte certificate capacity completes the same
-  lifecycle at **250,609 host-requested bytes** (`work/jcvm-24k-certificate-heap.json`).
-  A 32,767-byte capacity fails object creation with `6F00`; the applet allocates two
-  such arrays, which cannot fit the configured 64 KiB VM heap with their headers.
-  Its 194,804-byte failed-run peak is not a qualification result
-  (`work/jcvm-max-certificate-heap.json`). The acceptance runner's argument range is
-  an allocation probe, not a promise that every capacity is supported. A supported
-  personalization profile must budget all current and replacement buffers together.
-  The transport workload also rejects an oversized second certificate object after
-  provisioning, then verifies the original certificate, reboot, replacement, signing,
-  and key agreement. This checks preservation of existing data, not reclamation of
-  unreachable allocations left by a failed applet constructor.
-  The default-capacity workload including this failure peaks at **236,188 host
-  allocation bytes** at clean revision `c8fcd77`
-  (`work/jcvm-failed-object-clean-heap.json`); failure paths must be included when
-  establishing the board heap bound.
-  Deferring execution frames until the restored snapshot is released reduces open's
-  peak from 196,363 to **178,955 bytes** at clean revision `10dee96`
-  (`work/jcvm-deferred-restore-clean-heap.json`). The overall SELECT peak remains
-  236,188 bytes; recovery improvement alone does not qualify the board heap.
-  Phase measurements at clean revision `db8ed2d` identify forced renewal as that
-  peak; two-applet selection reaches 188,321 bytes and post-renewal operations
-  213,603 bytes (`work/jcvm-phased-clean-heap.json`). Renewal retains authenticated
-  ciphertext for exact installation while validating separate plaintext. The board
-  borrows mapped staging ciphertext; host file-backed ciphertext and image buffers
-  must not be counted as proven board allocations or simply subtracted from the peak.
+- Qualify the Makerdiary JCVM memory bound. Its current image links at 223,392 text
+  bytes, 148 data bytes, and 198,284 BSS bytes, within the 288 KiB firmware region.
+  All seven profiles link, but seven flash optimization ceilings still fail; none
+  were raised. [Board budgets](BOARD_BUDGETS.json) contain the exact measurements.
+  The 2026-09-19 USB observation had unknown firmware and does not validate this build.
+- Bound complete personalization workloads, including failures and renewal. At clean
+  revision `f1adbf4`, the full OpenFIPS transport workload peaks at **217,368 requested
+  host allocation bytes** with a 4,096-byte certificate capacity, and **238,910 bytes**
+  with 24,000-byte capacity. Both pass provisioning, oversized-object rejection,
+  interrupted replacement, reboot, signing/ECDH, two-instance selection, and renewal.
+  Forced renewal sets both peaks. These exceed the board's 196,608-byte reservation
+  on the host metric; they do not establish the board peak. Neither workload fills
+  both applets to maximum allocations.
+  [Heap evidence](HEAP_MEASUREMENTS.json) records current profiles and historical
+  comparisons. Host figures include file-backed image/ciphertext buffers and exclude
+  allocator overhead and stack. The board borrows mapped flash, but subtracting host
+  buffers from an aggregate peak would not prove device safety.
+  Fixed certificate objects need both current and replacement buffers. A 32,767-byte
+  capacity fails creation with `6F00`: those arrays plus headers exceed the 64 KiB VM
+  heap. The runner's accepted argument range is a probe, not a supported-capacity
+  promise. Existing data survives oversized creation failure; reclamation of
+  unreachable constructor allocations is not established. Define aggregate profile
+  limits before claiming memory qualification or reducing the device heap.
 - Reduce vendor dispatch overhead. Default firmware now selects hardware-only CC310;
   software is an explicit reference profile. Pinned compiler and vendor setup is wired
   into CI and release packaging, with cross-host execution still requiring CI evidence. [Provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)

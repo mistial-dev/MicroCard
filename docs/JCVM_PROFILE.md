@@ -715,9 +715,9 @@ python3 scripts/heap_profile.py --output work/jcvm-large-heap.json -- \
 ```
 
 The default remains 4,096 bytes. OpenFIPS201 reserves both current and pending
-certificate buffers. The 20,000-byte case passes functional acceptance but reaches
-341,421 requested host bytes at revision `5e3efcc`; it does not fit the board heap
-on that metric. This is a capacity stress workload, not a maximum-allocation proof.
+certificate buffers. Capacity probes are not maximum-allocation proofs; current
+successful profiles and failure-path peaks are recorded in [readiness](READINESS.md)
+and [heap measurements](HEAP_MEASUREMENTS.json).
 
 Patch recovery validates both heap and static-field changes before allocating the
 replacement snapshot. It copies the unchanged prefixes and applies spans directly
@@ -731,8 +731,7 @@ the owned ciphertext before authenticating the mapped copy. Recovery checks the
 record digest and authentication before preparing the destination bank, then copies
 that same immutable ciphertext without re-encryption. The borrow prevents staging
 mutation; heap and registry writes use disjoint regions. This removes one record-sized
-RAM allocation during authentication. File-backed staging retains the buffered path;
-its 20,000-byte capacity workload still peaks at 251,517 requested host bytes.
+RAM allocation during authentication. File-backed staging retains the buffered path.
 This source-level allocation reduction is not a physical device heap measurement.
 
 At the idle counter-renewal boundary, the live applet wipes and releases execution

@@ -2287,5 +2287,61 @@
       "forced_renewal": 236188,
       "post_renewal": 213603
     }
+  },
+  "jcvm_current_profiles": {
+    "default": {
+      "source_revision": "f1adbf49f8c780aede17235199d64172b6641c90",
+      "working_tree_dirty": false,
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "command": [
+        "python3",
+        "scripts/jcvm_transport_acceptance.py"
+      ],
+      "exit_code": 0,
+      "measurement": "host requested allocation bytes",
+      "excludes": [
+        "allocator metadata",
+        "stack",
+        "device latency"
+      ],
+      "peak_bytes": 217368,
+      "report": "work/jcvm-idle-capacity-clean-heap.json",
+      "phase_peak_bytes": {
+        "provisioning": 178808,
+        "oversized_object_failure": 203050,
+        "interrupted_replacement_reboot": 211624,
+        "two_applet_selection": 188321,
+        "forced_renewal": 217368,
+        "post_renewal": 213603
+      }
+    },
+    "certificate_24000": {
+      "source_revision": "f1adbf49f8c780aede17235199d64172b6641c90",
+      "working_tree_dirty": false,
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "command": [
+        "python3",
+        "scripts/jcvm_transport_acceptance.py",
+        "--certificate-capacity",
+        "24000"
+      ],
+      "exit_code": 0,
+      "measurement": "host requested allocation bytes",
+      "excludes": [
+        "allocator metadata",
+        "stack",
+        "device latency"
+      ],
+      "peak_bytes": 238910,
+      "report": "work/jcvm-idle-capacity-24k-clean-heap.json",
+      "phase_peak_bytes": {
+        "provisioning": 218616,
+        "oversized_object_failure": 210084,
+        "interrupted_replacement_reboot": 218658,
+        "two_applet_selection": 195795,
+        "forced_renewal": 238910,
+        "post_renewal": 234705
+      }
+    }
   }
 }
