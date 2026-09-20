@@ -464,7 +464,7 @@ python3 scripts/nist_acceptance.py --upstream /path/to/OpenFIPS201 \
   --provision-config --suite card-contact --out work/nist-p256-contact
 ```
 
-This profile reports **36 passed, 26 failed, 1 skipped** across the same 63 vectors.
+The initial external-authentication-only profile reports **36 passed, 26 failed, 1 skipped** across the same 63 vectors.
 `ChangeReferenceDataCommand:1` passes all 21 requirements and
 `ResetRetryCounterCommand:1` all 16. Preparing one seed instead of provisioning each
 vector preserves every pass/fail/skip outcome; the sampled seed preparation took 4.952
@@ -472,9 +472,15 @@ seconds and vector execution 40.950 seconds, excluding compilation. These are ho
 measurements, not device latency.
 
 Remaining profile gaps include absent CCC, CHUID, fingerprint, facial-image, Security
-Object and Discovery objects. The upstream provisioner enables external authentication
-for 9B but its NIST vectors also request mutual authentication. These failures remain
-visible; a passing applicable suite and complete matching personalization are still open.
+Object and Discovery objects. The adapter now provisions 9B with both external and
+mutual authentication through authenticated administration. The unchanged upstream
+`GenerateAsymmetricKeyPairCommand:1` reaches 14 of 19 requirements: mutual authentication,
+9A/9C signing, and 9D key generation succeed. The 9D ECDH request exhausts the
+one-million-instruction execution budget and resets selection; subsequent failures
+in that vector follow the reset. Temporary host diagnostics identified instruction
+budget exhaustion, not heap exhaustion or a provider authentication error. The
+required execution work and a full rerun with this profile remain to be established.
+A passing applicable suite and complete matching personalization are still open.
 
 The run retains preparation logs, runner logs, JUnit results, and a manifest with vector
 selection, source/configuration/simulator hashes, separate preparation/execution timings,

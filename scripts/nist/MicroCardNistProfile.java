@@ -2,6 +2,11 @@ package dev.mistial.tools.openfips201.nist;
 
 import com.tvec.utility.configuration.Configuration;
 import dev.mistial.tools.openfips201.common.ScpConfig;
+import dev.mistial.tools.openfips201.common.CardTransport;
+import dev.mistial.tools.openfips201.common.GlobalPlatformSession;
+import dev.mistial.tools.openfips201.provisioning.StandardCardProfile;
+import apdu4j.core.CommandAPDU;
+import apdu4j.core.ResponseAPDU;
 import dev.mistial.tools.openfips201.provisioning.AdminTlv;
 import dev.mistial.tools.openfips201.provisioning.ConformancePackage;
 import dev.mistial.tools.openfips201.provisioning.ConformanceProvisioner;
@@ -21,9 +26,27 @@ final class MicroCardNistProfile {
     public static void main(String[] args) throws Exception {
         var profile = load(new Configuration(Path.of(args[0]).toFile()), Path.of(args[1]));
         try (var card = new MicroCardNistTransport()) {
-            ConformanceProvisioner.provision(card::openBibo, scp(card), profile, System.out);
+            // The generic upstream provisioner enables external authentication only.
+            // NIST management vectors require mutual authentication as well.
+            var objectsAndKeys = new ConformancePackage(profile.credentialId, profile.sourceDirectory,
+                profile.pin, profile.puk, null, profile.dataObjects, profile.keys);
+            ConformanceProvisioner.provision(card::openBibo, scp(card), objectsAndKeys, System.out);
+            try (var transport = CardTransport.own(card.openBibo());
+                 var session = transport.openGlobalPlatformSession(GlobalPlatformSession.PIV_AID, scp(card))) {
+                byte[] definition = StandardCardProfile.managementKeyDefinition(profile.managementKey.algorithm);
+                definition[definition.length - 1] |= 0x08; // ATTR_PERMIT_MUTUAL
+                expect(session.transmit(new CommandAPDU(0x80, 0xdb, 0xff, 0xff, definition)), "Create mutual management key");
+                byte[] update = AdminTlv.concat(AdminTlv.tlv(0x80, new byte[]{profile.managementKey.algorithm}),
+                    StandardCardProfile.keyUpdateData(profile.managementKey.key));
+                expect(session.transmit(new CommandAPDU(0x80, 0x25, 1, 0x9b, update)), "Import management key");
+            }
             card.saveSeed(Path.of(args[2]));
         }
+    }
+
+    private static void expect(ResponseAPDU response, String operation) {
+        if (response.getSW() != 0x9000)
+            throw new IllegalStateException(String.format("%s failed: %04X", operation, response.getSW()));
     }
 
     static ScpConfig scp(MicroCardNistTransport contact) throws Exception {
