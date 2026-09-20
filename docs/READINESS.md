@@ -55,12 +55,14 @@ board's reserved heap.
 
 - Complete host interruption coverage for personalized OpenFIPS201 provisioning.
   The original ICAM object-only workflow passes exact readback of 11 objects after
-  reopening, and the separate P-256 NIST profile passes 37 of 63 contact vectors.
+  reopening.
   The combined derived P-256 identity now imports all objects and keys and verifies
   readback after reopening. Repeated ISO status exceptions previously grew the heap
   until the snapshot exceeded capacity; runtime exception reuse fixes that failure.
-  The combined profile passes 58 of 63 contact vectors, with four CHUID/certificate
-  failures and one skip. These profile limitations remain visible. See the reproducible
+  The combined profile reports 61 passed, 0 failed, and 2 not applicable among 63
+  contact vectors. One exclusion is unadvertised secure messaging. The other is a
+  Test Runner 5.0.1 defect that asks the agreement-only 9D key to sign; provisioning
+  proves the same certificate binding through ECDH before the exclusion. See the reproducible
   commands and profile distinctions in [JCVM acceptance](JCVM_PROFILE.md).
   Abrupt simulator termination between encrypted certificate fragments preserves
   the prior certificate; a fresh authenticated upload then replaces it and survives

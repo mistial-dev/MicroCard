@@ -5,20 +5,26 @@ import datetime
 import hashlib
 import json
 import shutil
+import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
-from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID, NameOID
+from cryptography.x509.oid import (
+    AuthorityInformationAccessOID,
+    ExtensionOID,
+    NameOID,
+    ObjectIdentifier,
+)
 
 from nist_acceptance import REVISION
 
 
 def create(upstream, output):
-    import subprocess
     revision = subprocess.check_output(["git", "-C", upstream, "rev-parse", "HEAD"], text=True).strip()
     if revision != REVISION:
         raise ValueError(f"upstream must be at {REVISION}")
@@ -54,10 +60,65 @@ def create(upstream, output):
           .add_extension(x509.SubjectKeyIdentifier.from_public_key(issuer_key.public_key()), critical=False)
           .sign(issuer_key, hashes.SHA256()))
     (output / "issuer.crt").write_bytes(ca.public_bytes(serialization.Encoding.PEM))
+
+    content_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    content_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,
+        "MicroCard TEST ONLY PIV Content Signer")])
+    content_certificate = (x509.CertificateBuilder().subject_name(content_subject).issuer_name(issuer)
+        .public_key(content_key.public_key()).serial_number(2).not_valid_before(start).not_valid_after(end)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
+        .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), True)
+        .add_extension(x509.ExtendedKeyUsage([ObjectIdentifier("2.16.840.1.101.3.6.7")]), True)
+        .add_extension(x509.CertificatePolicies([x509.PolicyInformation(
+            ObjectIdentifier("2.16.840.1.101.3.2.1.48.86"), None)]), False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(content_key.public_key()), False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()), False)
+        .add_extension(x509.AuthorityInformationAccess([x509.AccessDescription(
+            AuthorityInformationAccessOID.CA_ISSUERS,
+            x509.UniformResourceIdentifier("https://microcard.invalid/test-issuer.p7c"))]), False)
+        .add_extension(x509.CRLDistributionPoints([x509.DistributionPoint(
+            [x509.UniformResourceIdentifier("https://microcard.invalid/test-issuer.crl")], None, None, None)]), False)
+        .sign(issuer_key, hashes.SHA256()))
+    with tempfile.TemporaryDirectory(prefix="microcard-nist-identity-") as temporary:
+        temporary = Path(temporary)
+        key_path = temporary / "content-signer.key"
+        certificate_path = temporary / "content-signer.crt"
+        classes = temporary / "classes"
+        classes.mkdir()
+        key_path.write_bytes(content_key.private_bytes(serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        certificate_path.write_bytes(content_certificate.public_bytes(serialization.Encoding.PEM))
+        classpath = str(upstream / "build/lib/*")
+        helper = Path(__file__).parent / "nist/MicroCardNistChuid.java"
+        subprocess.run(["javac", "--release", "21", "-cp", classpath, "-d", classes, helper], check=True)
+        chuid = objects / "8 - CHUID Object"
+        refreshed = temporary / "chuid"
+        security = objects / "2 - Security Object"
+        refreshed_security = temporary / "security-object"
+        fingerprint = objects / "9 - Fingerprints"
+        refreshed_fingerprint = temporary / "fingerprints"
+        face = objects / "10 - Face Object"
+        refreshed_face = temporary / "face"
+        subprocess.run(["java", "-cp", f"{classes}:{classpath}",
+            "dev.mistial.tools.openfips201.nist.MicroCardNistChuid",
+            chuid, refreshed, key_path, certificate_path, "20291231",
+            security, refreshed_security, fingerprint, refreshed_fingerprint,
+            face, refreshed_face], check=True)
+        chuid.write_bytes(refreshed.read_bytes())
+        security.write_bytes(refreshed_security.read_bytes())
+        fingerprint.write_bytes(refreshed_fingerprint.read_bytes())
+        face.write_bytes(refreshed_face.read_bytes())
     replaced = {ExtensionOID.SUBJECT_KEY_IDENTIFIER, ExtensionOID.AUTHORITY_KEY_IDENTIFIER,
                 ExtensionOID.AUTHORITY_INFORMATION_ACCESS, ExtensionOID.CRL_DISTRIBUTION_POINTS,
-                ExtensionOID.KEY_USAGE, ExtensionOID.BASIC_CONSTRAINTS}
+                ExtensionOID.KEY_USAGE, ExtensionOID.BASIC_CONSTRAINTS,
+                ExtensionOID.CERTIFICATE_POLICIES}
     roles = ("Auth", "Dig_Sig", "Key_Mgmt", "Card_Auth")
+    policy_oids = {
+        "9A": "2.16.840.1.101.3.2.1.3.13",
+        "9C": "2.16.840.1.101.3.2.1.3.16",
+        "9D": "2.16.840.1.101.3.2.1.3.6",
+        "9E": "2.16.840.1.101.3.2.1.3.17",
+    }
     for index, (slot, role) in enumerate(zip(("9A", "9C", "9D", "9E"), roles), 3):
         certificates = sorted(source.glob(f"{index} - *.crt"))
         preferred = [p for p in certificates if "ICAM_Test_Card" in p.name]
@@ -77,6 +138,9 @@ def create(upstream, output):
         builder = (builder.add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
                    .add_extension(x509.KeyUsage(not agreement, slot == "9C", False, False,
                        agreement, False, False, False if agreement else None, False if agreement else None), True)
+                   .add_extension(x509.CertificatePolicies([
+                       x509.PolicyInformation(ObjectIdentifier(policy_oids[slot]), None)
+                   ]), False)
                    .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
                    .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()), False)
                    .add_extension(x509.AuthorityInformationAccess([x509.AccessDescription(

@@ -4,6 +4,7 @@ import com.tvec.utility.configuration.Configuration;
 import dev.mistial.tools.openfips201.common.ScpConfig;
 import dev.mistial.tools.openfips201.common.CardTransport;
 import dev.mistial.tools.openfips201.common.GlobalPlatformSession;
+import dev.mistial.tools.openfips201.common.PlainPivSession;
 import dev.mistial.tools.openfips201.provisioning.StandardCardProfile;
 import dev.mistial.tools.openfips201.provisioning.IcamCardFolder;
 import apdu4j.core.CommandAPDU;
@@ -15,9 +16,12 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.cert.*;
 import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
 import java.util.*;
+import javax.crypto.KeyAgreement;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
@@ -42,8 +46,53 @@ final class MicroCardNistProfile {
                     StandardCardProfile.keyUpdateData(profile.managementKey.key));
                 expect(session.transmit(new CommandAPDU(0x80, 0x25, 1, 0x9b, update)), "Import management key");
             }
+            verifyKeyManagementEcdh(card, profile);
             card.saveSeed(Path.of(args[2]));
         }
+    }
+
+    private static void verifyKeyManagementEcdh(MicroCardNistTransport card, ConformancePackage profile)
+            throws Exception {
+        ECPublicKey cardPublic = null;
+        for (var key : profile.keys) {
+            if (key.slot == (byte) 0x9d) cardPublic = (ECPublicKey) key.certificate.getPublicKey();
+        }
+        if (cardPublic == null) throw new IllegalArgumentException("P-256 slot 9D is missing");
+        var generator = KeyPairGenerator.getInstance("EC");
+        generator.initialize(new ECGenParameterSpec("secp256r1"));
+        var peer = generator.generateKeyPair();
+        byte[] point = encodePoint((ECPublicKey) peer.getPublic());
+        byte[] request = AdminTlv.tlv(0x7c,
+            AdminTlv.concat(AdminTlv.tlv(0x85, point), AdminTlv.tlv(0x82, new byte[0])));
+        try (var session = PlainPivSession.open(card::openBibo, GlobalPlatformSession.PIV_AID)) {
+            expect(session.transmit(new CommandAPDU(0x00, 0x20, 0x00, 0x80, profile.pin)),
+                "Verify PIN for slot 9D ECDH");
+            var response = session.transmit(new CommandAPDU(0x00, 0x87, 0x11, 0x9d, request, 256));
+            expect(response, "P-256 slot 9D ECDH");
+            byte[] value = response.getData();
+            if (value.length != 36 || value[0] != 0x7c || value[1] != 0x22
+                    || value[2] != (byte) 0x82 || value[3] != 0x20)
+                throw new IllegalStateException("P-256 slot 9D returned malformed ECDH output");
+            var agreement = KeyAgreement.getInstance("ECDH");
+            agreement.init(peer.getPrivate());
+            agreement.doPhase(cardPublic, true);
+            if (!Arrays.equals(agreement.generateSecret(), Arrays.copyOfRange(value, 4, 36)))
+                throw new IllegalStateException("P-256 slot 9D private key does not match its certificate");
+        }
+        System.out.println("Verified P-256 slot 9D certificate binding with ECDH");
+    }
+
+    private static byte[] encodePoint(ECPublicKey key) {
+        byte[] result = new byte[65];
+        result[0] = 0x04;
+        copyCoordinate(key.getW().getAffineX().toByteArray(), result, 1);
+        copyCoordinate(key.getW().getAffineY().toByteArray(), result, 33);
+        return result;
+    }
+
+    private static void copyCoordinate(byte[] source, byte[] destination, int offset) {
+        int count = Math.min(32, source.length);
+        System.arraycopy(source, source.length - count, destination, offset + 32 - count, count);
     }
 
     private static void expect(ResponseAPDU response, String operation) {
