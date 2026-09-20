@@ -70,6 +70,11 @@ two-applet selection, forced renewal, and post-renewal operations in `phases`.
 These labels separate different paths that share the SELECT instruction. Markers
 are written only after the previous command completes and only when profiling is
 enabled; they contain no APDU payloads or keys. Aggregate `stages` remain available.
+Reports capture revision, tracked/untracked working-tree fingerprints, and simulator
+SHA-256 before and after execution. Changed inputs make profiling exit nonzero while
+preserving the report for diagnosis. These endpoint checks do not detect changes
+that are reverted during the run; use an isolated checkout for release evidence and
+build its simulator before measuring. A binary hash alone does not prove its source.
 The report records live and peak
 requested allocation bytes, allocation traffic, and host execution time. It does not
 include allocator metadata or stack use. Host file reads and pointer sizes differ from

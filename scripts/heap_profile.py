@@ -1,12 +1,39 @@
 #!/usr/bin/env python3
 """Summarize simulator heap samples while running an existing acceptance workload."""
 import argparse
+import hashlib
 import json
 import os
 import pathlib
 import platform
 import subprocess
 import tempfile
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def provenance():
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=ROOT)
+    status = git("status", "--porcelain")
+    digest = hashlib.sha256(git("diff", "HEAD", "--binary"))
+    digest.update(status)
+    for name in git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0"):
+        if name:
+            path = ROOT / os.fsdecode(name)
+            digest.update(name + b"\0")
+            if path.is_symlink():
+                digest.update(os.fsencode(os.readlink(path)))
+            elif path.is_file():
+                with path.open("rb") as source:
+                    digest.update(hashlib.file_digest(source, "sha256").digest())
+    simulator = ROOT / "target/debug/microcard-sim"
+    with simulator.open("rb") as source:
+        binary_hash = hashlib.file_digest(source, "sha256").hexdigest()
+    return {"source_revision": git("rev-parse", "HEAD").decode().strip(),
+            "working_tree_dirty": bool(status.strip()),
+            "working_tree_sha256": digest.hexdigest(), "simulator_sha256": binary_hash}
 
 
 def mark_phase(name):
@@ -25,10 +52,12 @@ def main():
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("supply an acceptance command after --")
+    before = provenance()
     with tempfile.TemporaryDirectory(prefix="microcard-heap-") as directory:
         path = pathlib.Path(directory) / "samples.jsonl"
         result = subprocess.run(command, env={**os.environ, "MICROCARD_HEAP_REPORT": str(path)})
         samples = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    after = provenance()
     if not samples:
         raise SystemExit("no samples: build microcard-sim with --features heap-metrics first")
     stages = {}
@@ -55,9 +84,11 @@ def main():
                 stage[field] += sample[field]
     if not measurements:
         raise SystemExit("no allocation samples: build microcard-sim with --features heap-metrics first")
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
-    report = {"format": 1, "source_revision": revision, "working_tree_dirty": dirty, "platform": platform.platform(), "command": command,
+    changed = before != after
+    report = {"format": 1, "source_revision": before["source_revision"],
+              "working_tree_dirty": before["working_tree_dirty"] or after["working_tree_dirty"] or changed,
+              "inputs_changed_during_run": changed, "inputs_before": before, "inputs_after": after,
+              "platform": platform.platform(), "command": command,
               "exit_code": result.returncode, "measurement": "host requested allocation bytes",
               "excludes": ["allocator metadata", "stack", "device latency"],
               "note": "Host file reads and pointer sizes differ from memory-mapped board flash.",
@@ -65,7 +96,9 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Host heap peak: {report['peak_bytes']} bytes; report: {args.output}")
-    raise SystemExit(result.returncode)
+    if changed:
+        print("Inputs changed during measurement; this report is not a stable-revision baseline.")
+    raise SystemExit(result.returncode or int(changed))
 
 
 if __name__ == "__main__":
