@@ -74,6 +74,11 @@ Native APDU CLA queries follow the [Java Card 3.0.5 encoding rules](https://docs
 secure messaging uses bits 4/3 for channels 0–3 and bit 6 for channels 4–19;
 chaining uses bit 5. Both queries return false for reserved `20`–`3F` and invalid
 `FF` classes. Decoding these flags does not authorize additional transport channels.
+Incoming APDU data is fully buffered. `setIncomingAndReceive()` may be called once
+per command; `getIncomingLength()` and `getOffsetCdata()` require that call and
+remain valid only before switching to outgoing transfer. Invalid sequences throw
+`APDUException.ILLEGAL_USE` using a reserved exception object, including when the
+transaction undo capacity is exhausted. Each callback starts fresh receive state.
 MC04 continues to require SCP03. The former JCVM INS 10 tunnel is no longer decoded.
 SELECT calls `select()` and then `process()` with the
 selection flag, returning the applet's data and status. A refusal leaves no selection;

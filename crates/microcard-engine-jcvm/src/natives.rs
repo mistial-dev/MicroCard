@@ -94,6 +94,7 @@ pub struct Jcre {
     pub outgoing: u16,
     response: [u8; 256],
     pub expected: u16,
+    incoming_started: bool,
     outgoing_started: bool,
     outgoing_length: Option<u16>,
     /// Where the command data starts in the buffer. Five for a short APDU, JCRE §4.
@@ -126,6 +127,7 @@ impl Jcre {
             outgoing: 0,
             response: [0; 256],
             expected: 256,
+            incoming_started: false,
             outgoing_started: false,
             outgoing_length: None,
             data_offset: 5,
@@ -332,14 +334,18 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
         }
         MethodId::getIncomingLength => {
             frame.pop_reference()?;
+            if !jcre.incoming_started || jcre.outgoing_started { return apdu_exception(heap, context, 1); }
             frame.push_short(jcre.incoming as i16)?;
         }
         MethodId::getOffsetCdata => {
             frame.pop_reference()?;
+            if !jcre.incoming_started || jcre.outgoing_started { return apdu_exception(heap, context, 1); }
             frame.push_short(jcre.data_offset as i16)?;
         }
         MethodId::setIncomingAndReceive => {
             frame.pop_reference()?;
+            if jcre.incoming_started || jcre.outgoing_started { return apdu_exception(heap, context, 1); }
+            jcre.incoming_started = true;
             // The whole command is already in the buffer, so there is nothing to wait for
             // and the answer is everything that arrived.
             frame.push_short(jcre.incoming as i16)?;
@@ -396,6 +402,12 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
         _ => return Ok(Native::Unimplemented),
     }
     Ok(Native::Returned)
+}
+
+fn apdu_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Result<Native> {
+    let exception = new_exception(heap, ClassId::APDUException, context)?;
+    heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
+    Ok(Native::Threw(exception))
 }
 
 /// `javacard.framework.JCSystem`, JCRE §7.
@@ -990,6 +1002,47 @@ mod tests {
             &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]), Err(Error::Storage)));
         assert_eq!(heap.get_word(pin, 4), Ok(2), "failure must stop before a matching PIN resets retries");
         assert_eq!(heap.get_word(pin, 3), Ok(0));
+    }
+
+    #[test]
+    fn apdu_incoming_queries_enforce_direction_and_single_receive_per_command() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        reserve_runtime_exceptions(&mut heap, 1).unwrap();
+        let buffer = heap.new_array(heap::KIND_BYTE, 8, 1).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let used = heap.used();
+        // Exhausted transaction capacity must not prevent a catchable API error.
+        heap.begin_transaction(0).unwrap();
+        for incoming in [0, 3] {
+            let mut jcre = Jcre::new(0, buffer);
+            jcre.incoming = incoming;
+            for (method, expected) in [
+                (MethodId::getIncomingLength, None),
+                (MethodId::getOffsetCdata, None),
+                (MethodId::setIncomingAndReceive, Some(incoming as i16)),
+                (MethodId::getIncomingLength, Some(incoming as i16)),
+                (MethodId::getOffsetCdata, Some(5)),
+                (MethodId::setIncomingAndReceive, None),
+                (MethodId::setOutgoing, Some(256)),
+                (MethodId::getIncomingLength, None),
+                (MethodId::getOffsetCdata, None),
+                (MethodId::setIncomingAndReceive, None),
+            ] {
+                frame.push_reference(0).unwrap();
+                let result = apdu(method, &mut heap, &mut frame, &mut jcre, 1).unwrap();
+                if let Some(expected) = expected {
+                    assert!(matches!(result, Native::Returned));
+                    assert_eq!(frame.pop_short(), Ok(expected));
+                } else {
+                    let Native::Threw(exception) = result else { panic!("invalid receive sequence accepted"); };
+                    assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, ClassId::APDUException);
+                    assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
+                }
+            }
+        }
+        assert_eq!(heap.used(), used);
+        assert_eq!(heap.transaction_remaining(), Some(0));
     }
 
     #[test]
