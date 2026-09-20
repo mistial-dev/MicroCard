@@ -525,6 +525,28 @@ The raw simulator loader is a development entry point, not the board loading pat
 
 ## Sources
 
-Version, container and import numbers come from reading the eight committed release variants of the OpenPhysical OpenFIPS201 fork at `build/matrix`. Opcode, component and verification clauses come from the Java Card 3.1 and 3.2 editions pinned in [REFERENCES.md](REFERENCES.md).
+The OpenPhysical OpenFIPS201 release matrix supplies the observed CAP and import
+versions. The governing Java Card Classic 3.0.5 VM and runtime specifications are
+available unchanged in the Reference Library; their exact paths and verified SHA-256
+hashes are recorded in [REFERENCES.md](REFERENCES.md). Later editions are comparison
+material only.
 
-The 3.0.5 editions are not pinned yet, which is an open gap. Every clause this profile relies on has to be read in the edition that governs the target version before the verifier can claim to implement it. The same gap in the secure channel profile caused a mode to be implemented against an edition that predated it.
+The 3.0.5 source review covers these implementation boundaries:
+
+- VM §6.3 defines CAP header versions and `ACC_INT`; chapter 7 defines instructions.
+  The specification defines CAP **2.2**. This profile's **2.1** loader is a supported
+  subset, not complete 3.0.5 container support.
+- Runtime §§6.2.1–6.2.2 and 6.2.8 define temporary entry points, global arrays and
+  reference-store checks. Global arrays include both the APDU buffer and installation
+  parameters. Access checks precede the bytecode's operation.
+- Runtime §§7.1–7.9 define conditional persistent updates, callback transaction
+  boundaries, abort, transient exclusions and commit capacity. Section 7.6.3 permits
+  terminating a session after aborting a transaction that allocated objects.
+- Runtime §§9.2–9.3 require temporary API exception objects and conditional updates
+  to internal API state unless the particular API specifies an exception. Crypto
+  intermediate-state exclusions must therefore be checked per API, not generalized
+  to all native object metadata.
+
+This establishes source provenance and the reviewed rules, not full conformance.
+A complete loader/verifier and native API audit against 3.0.5 remains release work;
+the unsupported features listed above remain outside this profile.
