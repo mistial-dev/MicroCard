@@ -78,19 +78,22 @@ board's reserved heap.
   prior content on checkpoint failure. PIN checks now durably consume attempts before
   comparison without publishing conditional transaction changes. Cooperative cancellation
   checkpoints ordinary persistent writes while excluding an open transaction; a failed
-  checkpoint returns a storage error. Arbitrary power loss between ordinary writes
+  checkpoint returns a storage error. Cancellation after a successful callback now
+  occurs after its final journal commit, so completed ordinary writes survive while
+  the response is suppressed. A real OpenFIPS201 CREATE OBJECT regression covers
+  this boundary and failed persistence. Arbitrary power loss between ordinary writes
   and checkpoints still needs independent durability. Finish these boundaries,
   native-API transaction auditing, and interruption tests.
 - Finish cross-link and host memory measurements for the Makerdiary JCVM image. A connected board
   answered USB/PCSC and read-only GlobalPlatform discovery on 2026-09-19, but its flashed
-  revision and engine are unknown. The current JCVM dongle links at 197,952 text bytes,
+  revision and engine are unknown. The current JCVM dongle links at 197,944 text bytes,
   148 data bytes and 198,284 BSS bytes, within
   its 288 KiB firmware region. Functional OpenFIPS201 delivery takes priority over size
   optimization. The unchanged 178,000-byte optimization ceiling still fails; the
   refreshed budget report records current failures rather than historical passing sizes.
-  The 2026-09-20 checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build stages,
-  then failed the board budget gate (57.306 seconds with two workers). The subsequent
-  partial-AID and SCP03 selection fixes also cross-linked all seven profiles. After shared snapshot ownership changes, MC04
+  The latest checkpoint passed host, wallet, recovery, generated-artifact and fuzz-build
+  stages, then failed the board budget gate (55.212 seconds with two workers). All
+  seven profiles cross-linked after the callback-cancellation fix. After shared snapshot ownership changes, MC04
   hardware release text is 212,364 bytes against 212,000, and software reference text
   is 186,084 against 186,000. All seven profile artifacts linked before budget comparison; optimization
   ceilings remain unchanged.
@@ -141,14 +144,12 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. A warm host sample measured
-43.312 seconds with one worker and 33.489 with two for the full checkpoint, with the
-same 17 acceptance invocations. Cold-build measurements remain outstanding. The consolidated checkpoint passed at
-`76dbdd9` in 49.534 seconds with two workers, including incremental recompilation.
-This validates the AES ECB integration but is not a cold-build measurement.
-The 2026-09-20 run took 55.795 seconds with two workers and incremental rebuilding;
-all stages before the final board-budget comparison passed. This is a failing
-checkpoint overall because the optimization ceilings remain exceeded.
+reuses outputs with bounded workers and isolated logs/state. The latest checkpoint took 55.212 seconds with two workers and incremental
+rebuilding (`work/checkpoint-late-cancel.json`). All stages before the final board
+budget comparison passed; the checkpoint overall fails because the unchanged
+optimization ceilings are exceeded. This is not a cold-build measurement. Historical
+comparisons remain in Git; reproducible cold/warm final-tree measurements are still
+required.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.

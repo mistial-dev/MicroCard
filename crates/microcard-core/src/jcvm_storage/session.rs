@@ -233,11 +233,13 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<T> {
         let result = result.and_then(|value| {
+            // A completed callback's ordinary writes are already observable Java Card
+            // state. Late cancellation suppresses its response, not its durability.
+            self.store
+                .commit(self.card.as_ref().ok_or(Error::Missing)?, provider)?;
             if cancel() {
                 return Err(Error::Cancelled);
             }
-            self.store
-                .commit(self.card.as_ref().ok_or(Error::Missing)?, provider)?;
             Ok(value)
         });
         if result.is_err() {
@@ -299,6 +301,9 @@ mod tests {
         }
     }
 
+    const SELECT: [u8; 5] = [0, 0xa4, 4, 0, 0];
+    const DEFINE_CERTIFICATE: [u8; 25] = [0x84, 0xdb, 0xff, 0xff, 0x14, 0x64, 0x12, 0x8b, 0x03, 0x5f, 0xc1, 0x0a, 0x8c, 0x01, 0x7f, 0x8d, 0x01, 0x7f, 0x91, 0x01, 0x9b, 0x92, 0x02, 0x10, 0x00];
+
     fn installed_session(provider: &mut Provider) -> Session<MemoryFlash> {
         let image = include_bytes!(
             "../../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
@@ -343,15 +348,53 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_object_definition_survives_cancel_after_callback_return() {
+        let mut last_poll = None;
+        for failure in [None, Some(false), Some(true)] {
+            let mut provider = Provider::default();
+            let mut session = installed_session(&mut provider);
+            let select = SELECT;
+            session.process(&select, true, &mut provider, &mut || false).unwrap();
+            // CREATE OBJECT publishes ordinary fields, without an applet transaction.
+            let define = DEFINE_CERTIFICATE;
+            let before = provider.encryptions.get();
+            if failure == Some(true) { session.store.journal.flash_mut().fail_after = Some(0); }
+            let mut polls = 0;
+            let result = session.process_command(&define, false, Some(3), &mut provider, &mut || {
+                polls += 1;
+                last_poll == Some(polls)
+            });
+            match failure {
+                None => {
+                    assert_eq!(result.unwrap().sw, 0x9000);
+                    assert_eq!(provider.encryptions.get(), before + 1, "only the final boundary commits");
+                    last_poll = Some(polls);
+                }
+                Some(false) => assert_eq!(result, Err(Error::Cancelled)),
+                Some(true) => assert_eq!(result, Err(Error::Storage)),
+            }
+            let sizes = session.sizes;
+            let image = session.image.clone();
+            let mut flash = session.into_flash();
+            flash.fail_after = None;
+            let mut rebooted = Session::open(flash, [3; 16], image, [4; 16], sizes, &mut provider).unwrap();
+            rebooted.process(&select, true, &mut provider, &mut || false).unwrap();
+            let duplicate = rebooted.process_command(&define, false, Some(3), &mut provider, &mut || false).unwrap();
+            assert_eq!(duplicate.sw, if failure == Some(true) { 0x9000 } else { 0x6e27 },
+                "completed ordinary definition must survive late cancellation");
+        }
+    }
+
+    #[test]
     fn openfips_object_commit_survives_cancellation_before_apdu_completion() {
         let mut cuts = alloc::vec![usize::MAX];
         let mut measured = None;
         while let Some(cut) = cuts.pop() {
             let mut provider = Provider::default();
             let mut session = installed_session(&mut provider);
-            let select = [0, 0xa4, 4, 0, 0];
+            let select = SELECT;
             session.process(&select, true, &mut provider, &mut || false).unwrap();
-            let define = [0x84, 0xdb, 0xff, 0xff, 0x14, 0x64, 0x12, 0x8b, 0x03, 0x5f, 0xc1, 0x0a, 0x8c, 0x01, 0x7f, 0x8d, 0x01, 0x7f, 0x91, 0x01, 0x9b, 0x92, 0x02, 0x10, 0x00];
+            let define = DEFINE_CERTIFICATE;
             assert_eq!(session.process_command(&define, false, Some(3), &mut provider, &mut || false).unwrap().sw, 0x9000);
             let write = [0x04, 0xdb, 0x3f, 0xff, 0x0c, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00];
             let read = [0x00, 0xcb, 0x3f, 0xff, 0x05, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x00];
@@ -396,7 +439,7 @@ mod tests {
     fn command_boundaries_preserve_pin_retries_and_refuse_use_until_recovery_succeeds() {
         let mut provider = Provider::default();
         let mut session = installed_session(&mut provider);
-        let select = [0, 0xa4, 4, 0, 0];
+        let select = SELECT;
         let wrong_pin = [
             0, 0x20, 0, 0x80, 8, b'1', b'2', b'3', b'4', b'5', b'6', 255, 255,
         ];
