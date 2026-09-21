@@ -1,0 +1,1035 @@
+{
+  "source": "format/jcvm-api.json",
+  "note": "Static imports only. Host acceptance proves methods reached at runtime.",
+  "applet_count": 2,
+  "unique_method_count": 105,
+  "applets": [
+    {
+      "load_file": "openfips201-standard-cs2.lfdb",
+      "method_count": 68,
+      "methods": [
+        {
+          "kind": "static",
+          "package": "java.lang",
+          "class": "java/lang/Object",
+          "method": "<init>",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getProtocol",
+          "descriptor": "()B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "<init>",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "reSelectingApplet",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/CardRuntimeException",
+          "method": "throwIt",
+          "descriptor": "(S)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/ISOException",
+          "method": "throwIt",
+          "descriptor": "(S)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "abortTransaction",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "beginTransaction",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "commitTransaction",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "getTransactionDepth",
+          "descriptor": "()B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "isObjectDeletionSupported",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "makeTransientByteArray",
+          "descriptor": "(SB)[B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "makeTransientObjectArray",
+          "descriptor": "(SB)[Ljava/lang/Object;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "makeTransientShortArray",
+          "descriptor": "(SB)[S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "requestObjectDeletion",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPIN",
+          "method": "<init>",
+          "descriptor": "(BB)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/PINException",
+          "method": "throwIt",
+          "descriptor": "(S)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayCompare",
+          "descriptor": "([BS[BSS)B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayCopy",
+          "descriptor": "([BS[BSS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayCopyNonAtomic",
+          "descriptor": "([BS[BSS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayFillNonAtomic",
+          "descriptor": "([BSSB)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "getShort",
+          "descriptor": "([BS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "setShort",
+          "descriptor": "([BSS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyAgreement",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/KeyAgreement;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyBuilder",
+          "method": "buildKey",
+          "descriptor": "(BSZ)Ljavacard/security/Key;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "<init>",
+          "descriptor": "(Ljavacard/security/PublicKey;Ljavacard/security/PrivateKey;)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/MessageDigest;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData",
+          "method": "getInstance",
+          "descriptor": "(B)Ljavacard/security/RandomData;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/Signature;"
+        },
+        {
+          "kind": "static",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacardx/crypto/Cipher;"
+        },
+        {
+          "kind": "static",
+          "package": "org.globalplatform",
+          "class": "org/globalplatform/GPSystem",
+          "method": "getCVM",
+          "descriptor": "(B)Lorg/globalplatform/CVM;"
+        },
+        {
+          "kind": "static",
+          "package": "org.globalplatform",
+          "class": "org/globalplatform/GPSystem",
+          "method": "getCardContentState",
+          "descriptor": "()B"
+        },
+        {
+          "kind": "static",
+          "package": "org.globalplatform",
+          "class": "org/globalplatform/GPSystem",
+          "method": "getSecureChannel",
+          "descriptor": "()Lorg/globalplatform/SecureChannel;"
+        },
+        {
+          "kind": "static",
+          "package": "org.globalplatform",
+          "class": "org/globalplatform/GPSystem",
+          "method": "setCardContentState",
+          "descriptor": "(B)Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getBuffer",
+          "descriptor": "()[B"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getIncomingLength",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getOffsetCdata",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "isSecureMessagingCLA",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "receiveBytes",
+          "descriptor": "(S)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "sendBytes",
+          "descriptor": "(SS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "sendBytesLong",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "setIncomingAndReceive",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "setOutgoing",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "setOutgoingAndSend",
+          "descriptor": "(SS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "setOutgoingLength",
+          "descriptor": "(S)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "register",
+          "descriptor": "([BSB)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "selectingApplet",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/CardRuntimeException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/ISOException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPIN",
+          "method": "check",
+          "descriptor": "([BSB)Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPIN",
+          "method": "getTriesRemaining",
+          "descriptor": "()B"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPIN",
+          "method": "isValidated",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPIN",
+          "method": "reset",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPIN",
+          "method": "update",
+          "descriptor": "([BSB)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyAgreement",
+          "method": "generateSecret",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyAgreement",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/PrivateKey;)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "genKeyPair",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "doFinal",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData",
+          "method": "generateData",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/Key;B)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "sign",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "signPreComputedHash",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "update",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "verifyPreComputedHash",
+          "descriptor": "([BSS[BSS)Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "doFinal",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/Key;B)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/Key;B[BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "update",
+          "descriptor": "([BSS[BS)S"
+        }
+      ]
+    },
+    {
+      "load_file": "jcalgtest-v1.8.2-jc305.lfdb",
+      "method_count": 77,
+      "methods": [
+        {
+          "kind": "static",
+          "package": "java.lang",
+          "class": "java/lang/Object",
+          "method": "<init>",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getInBlockSize",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getOutBlockSize",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getProtocol",
+          "descriptor": "()B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "<init>",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/ISOException",
+          "method": "throwIt",
+          "descriptor": "(S)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "getAvailableMemory",
+          "descriptor": "(B)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "getAvailableMemory",
+          "descriptor": "([SSB)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "getMaxCommitCapacity",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "getVersion",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "isObjectDeletionSupported",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "makeTransientByteArray",
+          "descriptor": "(SB)[B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "makeTransientShortArray",
+          "descriptor": "(SB)[S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/JCSystem",
+          "method": "requestObjectDeletion",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/OwnerPINBuilder",
+          "method": "buildOwnerPIN",
+          "descriptor": "(BBB)Ljavacard/framework/PIN;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayCompare",
+          "descriptor": "([BS[BSS)B"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayCopy",
+          "descriptor": "([BS[BSS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayCopyNonAtomic",
+          "descriptor": "([BS[BSS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "arrayFillNonAtomic",
+          "descriptor": "([BSSB)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "getShort",
+          "descriptor": "([BS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "makeShort",
+          "descriptor": "(BB)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Util",
+          "method": "setShort",
+          "descriptor": "([BSS)S"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/Checksum",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/Checksum;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/InitializedMessageDigest$OneShot",
+          "method": "open",
+          "descriptor": "(B)Ljavacard/security/InitializedMessageDigest$OneShot;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyAgreement",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/KeyAgreement;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyBuilder",
+          "method": "buildKey",
+          "descriptor": "(BSZ)Ljavacard/security/Key;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "<init>",
+          "descriptor": "(BS)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "<init>",
+          "descriptor": "(Ljavacard/security/PublicKey;Ljavacard/security/PrivateKey;)V"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "getInitializedMessageDigestInstance",
+          "descriptor": "(BZ)Ljavacard/security/InitializedMessageDigest;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/MessageDigest;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest$OneShot",
+          "method": "open",
+          "descriptor": "(B)Ljavacard/security/MessageDigest$OneShot;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData",
+          "method": "getInstance",
+          "descriptor": "(B)Ljavacard/security/RandomData;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData$OneShot",
+          "method": "open",
+          "descriptor": "(B)Ljavacard/security/RandomData$OneShot;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "getInstance",
+          "descriptor": "(BBBZ)Ljavacard/security/Signature;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacard/security/Signature;"
+        },
+        {
+          "kind": "static",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature$OneShot",
+          "method": "open",
+          "descriptor": "(BBB)Ljavacard/security/Signature$OneShot;"
+        },
+        {
+          "kind": "static",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "getInstance",
+          "descriptor": "(BBZ)Ljavacardx/crypto/Cipher;"
+        },
+        {
+          "kind": "static",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "getInstance",
+          "descriptor": "(BZ)Ljavacardx/crypto/Cipher;"
+        },
+        {
+          "kind": "static",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher$OneShot",
+          "method": "open",
+          "descriptor": "(BB)Ljavacardx/crypto/Cipher$OneShot;"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getBuffer",
+          "descriptor": "()[B"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "getNAD",
+          "descriptor": "()B"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "setIncomingAndReceive",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/APDU",
+          "method": "setOutgoingAndSend",
+          "descriptor": "(SS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "register",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "register",
+          "descriptor": "([BSB)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/Applet",
+          "method": "selectingApplet",
+          "descriptor": "()Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/CardRuntimeException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/PINException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/SystemException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.framework",
+          "class": "javacard/framework/TransactionException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Checksum",
+          "method": "doFinal",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Checksum",
+          "method": "update",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/CryptoException",
+          "method": "getReason",
+          "descriptor": "()S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/InitializedMessageDigest$OneShot",
+          "method": "close",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyAgreement",
+          "method": "generateSecret",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyAgreement",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/PrivateKey;)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "genKeyPair",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "getPrivate",
+          "descriptor": "()Ljavacard/security/PrivateKey;"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/KeyPair",
+          "method": "getPublic",
+          "descriptor": "()Ljavacard/security/PublicKey;"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "doFinal",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "reset",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest",
+          "method": "update",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/MessageDigest$OneShot",
+          "method": "close",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData",
+          "method": "generateData",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData",
+          "method": "setSeed",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/RandomData$OneShot",
+          "method": "close",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/Key;B)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "sign",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "signPreComputedHash",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "update",
+          "descriptor": "([BSS)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "verify",
+          "descriptor": "([BSS[BSS)Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature",
+          "method": "verifyPreComputedHash",
+          "descriptor": "([BSS[BSS)Z"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacard.security",
+          "class": "javacard/security/Signature$OneShot",
+          "method": "close",
+          "descriptor": "()V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "doFinal",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "init",
+          "descriptor": "(Ljavacard/security/Key;B)V"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher",
+          "method": "update",
+          "descriptor": "([BSS[BS)S"
+        },
+        {
+          "kind": "virtual",
+          "package": "javacardx.crypto",
+          "class": "javacardx/crypto/Cipher$OneShot",
+          "method": "close",
+          "descriptor": "()V"
+        }
+      ]
+    }
+  ]
+}

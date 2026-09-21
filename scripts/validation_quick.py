@@ -15,6 +15,10 @@ def schemas():
         run("python3", f"scripts/generate_{name}.py", "--check")
     for name in ("package_envelope_test", "device_cbor_test", "prepare_first_flash_test", "doc_links", "jcvm_cap_inventory_test", "copy_audit", "profile_enforcement_audit"):
         run("python3", f"scripts/{name}.py")
+    run("python3", "scripts/jcvm_api_surface.py",
+        "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb",
+        "crates/microcard-engine-jcvm/tests/vectors/jcalgtest-v1.8.2-jc305.lfdb",
+        "--output", "format/jcvm-applet-api-surface.json", "--check")
 
 
 def rust():

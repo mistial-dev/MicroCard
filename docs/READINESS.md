@@ -91,8 +91,9 @@ board's reserved heap.
   also queries all 104 algorithm values in its contiguous 3.0.5 factory tables and
   requires exact supported/unsupported results from the configured provider. This
   makes exercised gaps visible, but does not replace the remaining method-by-method
-  audit. [JCVM semantics](JCVM_PROFILE.md) records the exact supported behavior and
-  source clauses.
+  audit. The committed static surface resolves all 145 applet references to 105 unique
+  3.0.5 API methods and the quick gate catches drift. [JCVM semantics](JCVM_PROFILE.md)
+  records the exact supported behavior and source clauses.
 - Qualify journal renewal capacity and memory for all supported workloads. Automatic
   command-boundary renewal preserves the live applet and uses authenticated staging
   to recover interrupted bank replacement. Root registry counters remain finite;

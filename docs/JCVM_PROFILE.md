@@ -114,6 +114,13 @@ agreement, and pseudo/secure-random profile. CI and the checkpoint build the sim
 either real-applet run if it reaches an unimplemented native method or rejected
 instruction. The checkpoint gate and CI run both applet tests.
 
+[`format/jcvm-applet-api-surface.json`](../format/jcvm-applet-api-surface.json)
+resolves the external method constants in both committed load files against the pinned
+3.0.5 exports. OpenFIPS201 references 68 methods and JCAlgTest references 77, with 105
+unique methods across the pair. The quick gate regenerates this inventory and fails if
+an applet adds, removes, or can no longer resolve an API reference. This is a static
+surface check; the diagnostic acceptance runs above prove behavior for paths they reach.
+
 Half of those commands are authentic encodings taken from NIST Special Database 33 contact captures. The captured responses are deliberately absent, because that card was personalised and the card under test is blank, so a captured response would disagree for a correct reason. What carries over is the command encoding. Every entry is the case 4 form a real host sends, carrying a trailing expected-length byte.
 
 ## Version and container
@@ -698,8 +705,9 @@ The 3.0.5 source review covers these implementation boundaries:
   to all native object metadata.
 
 This establishes source provenance and the reviewed rules, not full conformance.
-A complete loader/verifier and native API audit against 3.0.5 remains release work;
-the unsupported features listed above remain outside this profile.
+The supported applet API surface is now mechanically pinned. Method semantics not
+reached by acceptance and a complete loader/verifier audit against 3.0.5 remain release
+work; the unsupported features listed above remain outside this profile.
 
 ### Larger allocation qualification
 
