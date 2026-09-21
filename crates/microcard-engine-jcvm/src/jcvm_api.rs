@@ -44,6 +44,7 @@ impl Signature {
     pub fn init_vector(self) -> bool { self.0 & 2 != 0 }
     pub fn init_mode(self) -> bool { self.0 & 4 != 0 }
     pub fn key_pair_references(self) -> bool { self.0 & 8 != 0 }
+    pub fn combined_factory(self) -> bool { self.0 & 16 != 0 }
 }
 
 const SUPERS_A0000000620001_0: [ClassId; 0] = [];
@@ -803,7 +804,7 @@ const METHODS_A0000000620102_15: [ApiMethod; 17] = [
     ApiMethod { token: 0, id: MethodId::equals, signature: Signature(0), is_static: false, static_token: false },
     ApiMethod { token: 1, id: MethodId::Constructor, signature: Signature(1), is_static: false, static_token: true },
     ApiMethod { token: 1, id: MethodId::getAlgorithm, signature: Signature(0), is_static: false, static_token: false },
-    ApiMethod { token: 2, id: MethodId::getInstance, signature: Signature(0), is_static: true, static_token: true },
+    ApiMethod { token: 2, id: MethodId::getInstance, signature: Signature(16), is_static: true, static_token: true },
     ApiMethod { token: 2, id: MethodId::getLength, signature: Signature(0), is_static: false, static_token: false },
     ApiMethod { token: 3, id: MethodId::init, signature: Signature(4), is_static: false, static_token: false },
     ApiMethod { token: 4, id: MethodId::init, signature: Signature(2), is_static: false, static_token: false },
@@ -898,7 +899,7 @@ const METHODS_A0000000620201_1: [ApiMethod; 11] = [
     ApiMethod { token: 0, id: MethodId::equals, signature: Signature(0), is_static: false, static_token: false },
     ApiMethod { token: 1, id: MethodId::Constructor, signature: Signature(1), is_static: false, static_token: true },
     ApiMethod { token: 1, id: MethodId::doFinal, signature: Signature(2), is_static: false, static_token: false },
-    ApiMethod { token: 2, id: MethodId::getInstance, signature: Signature(0), is_static: true, static_token: true },
+    ApiMethod { token: 2, id: MethodId::getInstance, signature: Signature(16), is_static: true, static_token: true },
     ApiMethod { token: 2, id: MethodId::getAlgorithm, signature: Signature(0), is_static: false, static_token: false },
     ApiMethod { token: 3, id: MethodId::init, signature: Signature(4), is_static: false, static_token: false },
     ApiMethod { token: 4, id: MethodId::init, signature: Signature(2), is_static: false, static_token: false },

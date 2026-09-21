@@ -720,13 +720,19 @@ mod tests {
     use alloc::vec;
 
     fn framework(class: ClassId, method: MethodId, static_token: bool) -> ApiTarget {
+        framework_token(class, method, static_token, None)
+    }
+
+    fn framework_token(class: ClassId, method: MethodId, static_token: bool,
+        token: Option<u8>) -> ApiTarget {
         for package in PACKAGES.iter() {
             for entry in package.classes.iter() {
                 if entry.id != class {
                     continue;
                 }
                 for candidate in entry.methods.iter() {
-                    if candidate.id == method && candidate.static_token == static_token {
+                    if candidate.id == method && candidate.static_token == static_token
+                        && token.is_none_or(|token| candidate.token == token) {
                         return ApiTarget {
                             package,
                             class: entry,
@@ -1643,6 +1649,31 @@ mod tests {
                 &mut heap, &mut Capabilities, &mut frame, 1, &mut idle(), &mut 100, &[]);
             assert!(matches!(result, Err(Error::Quota)));
             assert!(heap.image() == before, "failed cipher creation must not leave an incomplete holder");
+        }
+
+        for (class, method, token, arguments) in [
+            (ClassId::Checksum, MethodId::getInstance, None, 2),
+            (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance, None, 2),
+            (ClassId::InitializedMessageDigest_OneShot, MethodId::open, None, 1),
+            (ClassId::MessageDigest_OneShot, MethodId::open, None, 1),
+            (ClassId::RandomData_OneShot, MethodId::open, None, 1),
+            (ClassId::Signature_OneShot, MethodId::open, None, 3),
+            (ClassId::Cipher_OneShot, MethodId::open, None, 2),
+            (ClassId::Signature, MethodId::getInstance, Some(2), 4),
+            (ClassId::Cipher, MethodId::getInstance, Some(2), 3),
+        ] {
+            let (mut slab, mut words, mut tags) = setup(0);
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+            for value in 0..arguments { frame.push_short(value).unwrap(); }
+            let target = framework_token(class, method, true, token);
+            let Native::Threw(exception) = security::call(class, method,
+                target.method.signature, &mut heap, &mut Capabilities, &mut frame, 1,
+                &mut idle(), &mut 100, &[]).unwrap()
+                else { panic!("optional factory {class:?}.{method:?} did not throw"); };
+            assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id,
+                ClassId::CryptoException);
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(3));
         }
     }
 

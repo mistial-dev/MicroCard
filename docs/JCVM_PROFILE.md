@@ -448,6 +448,10 @@ restores both bytes, following the [Java Card 3.0.5 atomicity contract](https://
 
 Cipher creation preflights its holder and streaming-state array together. If the heap
 cannot fit both, it leaves no incomplete holder or consumed allocation tail.
+Unsupported Checksum, initialized-digest, one-shot, and combined Signature/Cipher
+factories consume their complete argument shape and throw
+`CryptoException.NO_SUCH_ALGORITHM`. They cannot fall through to a VM-level `6F00` or
+leave extra arguments on the operand stack.
 
 `RandomData.generateData` returns no value; `nextBytes` returns the ending offset.
 Both reject empty requests with `CryptoException.ILLEGAL_VALUE` before calling the

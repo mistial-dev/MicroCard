@@ -160,6 +160,25 @@ pub fn call(
     if class == ClassId::OwnerPINBuilder && method == MethodId::buildOwnerPIN {
         return pin::build(heap, frame, context);
     }
+    // Optional factories still have a defined Java Card failure contract. Consume their
+    // complete argument list and report NO_SUCH_ALGORITHM instead of falling through to
+    // a VM-level unimplemented-method failure.
+    let unavailable_factory_arguments = match (class, method) {
+        (ClassId::Checksum, MethodId::getInstance)
+        | (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance) => Some(2),
+        (ClassId::InitializedMessageDigest_OneShot, MethodId::open)
+        | (ClassId::MessageDigest_OneShot, MethodId::open)
+        | (ClassId::RandomData_OneShot, MethodId::open) => Some(1),
+        (ClassId::Signature_OneShot, MethodId::open) => Some(3),
+        (ClassId::Cipher_OneShot, MethodId::open) => Some(2),
+        (ClassId::Signature, MethodId::getInstance) if signature.combined_factory() => Some(4),
+        (ClassId::Cipher, MethodId::getInstance) if signature.combined_factory() => Some(3),
+        _ => None,
+    };
+    if let Some(arguments) = unavailable_factory_arguments {
+        for _ in 0..arguments { frame.pop_short()?; }
+        return crypto_exception(heap, context, 3);
+    }
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
     if class == ClassId::KeyAgreement {
         if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? { return Ok(result); }

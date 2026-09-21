@@ -283,7 +283,8 @@ def rust(schema: dict) -> str:
               "    pub fn empty_parameters(self) -> bool { self.0 & 1 != 0 }",
               "    pub fn init_vector(self) -> bool { self.0 & 2 != 0 }",
               "    pub fn init_mode(self) -> bool { self.0 & 4 != 0 }",
-              "    pub fn key_pair_references(self) -> bool { self.0 & 8 != 0 }", "}", ""]
+              "    pub fn key_pair_references(self) -> bool { self.0 & 8 != 0 }",
+              "    pub fn combined_factory(self) -> bool { self.0 & 16 != 0 }", "}", ""]
     ids = identities(schema)
     for package in schema["packages"]:
         for klass in package["classes"]:
@@ -295,6 +296,7 @@ def rust(schema: dict) -> str:
                 descriptor = method["descriptor"]
                 signature = int(descriptor == "()V") | (int("[BSS" in descriptor) << 1) | (int(descriptor.endswith("B)V") or "SB" in descriptor) << 2)
                 signature |= int(descriptor == "(Ljavacard/security/PublicKey;Ljavacard/security/PrivateKey;)V") << 3
+                signature |= int(descriptor in ("(BBBZ)Ljavacard/security/Signature;", "(BBZ)Ljavacardx/crypto/Cipher;")) << 4
                 lines.append(
                     f"    ApiMethod {{ token: {method['token']}, id: MethodId::{ids['MethodId'][method['name']]}, "
                     f"signature: Signature({signature}), is_static: {str(method['static']).lower()}, "
