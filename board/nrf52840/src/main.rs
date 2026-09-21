@@ -16,7 +16,7 @@ use microcard_core::{
         MonotonicClock, ResetReason, ResetReport, StagingFlash, TickExtender, Watchdog,
         MAX_SHORT_COMMAND_BYTES,
     },
-    journal::{decode_monotonic_bits, Flash},
+    journal::{decode_program_once_words, next_program_once_word, Flash},
     provisioning::{ownership_marker_action, OwnershipMarkerAction, PROGRAMMED_OWNERSHIP_MARKER},
     scp03::Keys,
     transport::Endpoint,
@@ -1737,8 +1737,8 @@ impl Nvm {
             }
         }
         Ok(
-            Self::bit_counter(layout::MONOTONIC_BASE, layout::MONOTONIC_BYTES)? == 0
-                && Self::bit_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES)? == 0,
+            Self::word_counter(layout::MONOTONIC_BASE, layout::MONOTONIC_BYTES)? == 0
+                && Self::word_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES)? == 0,
         )
     }
 
@@ -1944,37 +1944,31 @@ impl microcard_core::image_store::ImageFlash for Nvm {
     }
 }
 impl Nvm {
-    fn bit_counter(base: usize, capacity: usize) -> Result<u64> {
-        decode_monotonic_bits(unsafe { core::slice::from_raw_parts(base as *const u8, capacity) })
+    fn word_counter(base: usize, capacity: usize) -> Result<u64> {
+        decode_program_once_words(unsafe {
+            core::slice::from_raw_parts(base as *const u8, capacity)
+        })
     }
-    fn advance_bit_counter(base: usize, capacity: usize, generation: u64) -> Result<()> {
-        let current = Self::bit_counter(base, capacity)?;
-        if current.checked_add(1) != Some(generation) {
-            return Err(Error::Storage);
-        }
-        let index = usize::try_from(generation.checked_sub(1).ok_or(Error::Storage)?)
-            .map_err(|_| Error::Storage)?;
-        let byte_offset = index / 8;
-        if byte_offset >= capacity {
-            return Err(Error::Quota);
-        }
-        let word_offset = byte_offset & !3;
-        let bit = (byte_offset % 4) * 8 + index % 8;
+    fn advance_word_counter(base: usize, capacity: usize, generation: u64) -> Result<()> {
+        let counter = unsafe { core::slice::from_raw_parts(base as *const u8, capacity) };
+        let word_offset = next_program_once_word(counter, generation)?;
         let address = base + word_offset;
-        let word = unsafe { read(address) };
-        let mask = 1u32 << bit;
-        if word & mask == 0 {
+        if unsafe { read(address) } != u32::MAX {
             return Err(Error::Storage);
         }
         unsafe {
             write(NVMC + 0x504, 1);
-            write(address, word & !mask);
+            write(address, 0);
         }
         let result = Self::ready();
         unsafe {
             write(NVMC + 0x504, 0);
         }
-        result
+        result?;
+        if unsafe { read(address) } != 0 {
+            return Err(Error::Storage);
+        }
+        Ok(())
     }
 }
 impl Flash for Nvm {
@@ -1985,26 +1979,26 @@ impl Flash for Nvm {
         self.size
     }
     fn monotonic_capacity(&self) -> u64 {
-        (Self::COUNTER_BYTES * 8) as u64
+        (Self::COUNTER_BYTES / 4) as u64
     }
     fn monotonic_generation(&self) -> Result<u64> {
-        Self::bit_counter(self.monotonic, Self::COUNTER_BYTES)
+        Self::word_counter(self.monotonic, Self::COUNTER_BYTES)
     }
     fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
-        Self::advance_bit_counter(self.monotonic, Self::COUNTER_BYTES, generation)
+        Self::advance_word_counter(self.monotonic, Self::COUNTER_BYTES, generation)
     }
     fn nonce_capacity(&self) -> u64 {
-        (Self::COUNTER_BYTES * 8) as u64
+        (Self::COUNTER_BYTES / 4) as u64
     }
     fn nonce_generation(&self) -> Result<u64> {
-        Self::bit_counter(self.nonces, Self::COUNTER_BYTES)
+        Self::word_counter(self.nonces, Self::COUNTER_BYTES)
     }
     fn reserve_nonce(&mut self) -> Result<u64> {
         let next = self
             .nonce_generation()?
             .checked_add(1)
             .ok_or(Error::Quota)?;
-        Self::advance_bit_counter(self.nonces, Self::COUNTER_BYTES, next)?;
+        Self::advance_word_counter(self.nonces, Self::COUNTER_BYTES, next)?;
         Ok(next)
     }
     fn is_erased(&self, slot: usize) -> Result<bool> {

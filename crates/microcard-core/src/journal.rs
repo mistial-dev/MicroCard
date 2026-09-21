@@ -474,6 +474,45 @@ pub fn decode_monotonic_words(bytes: &[u8]) -> Result<u64> {
     Ok(generation)
 }
 
+/// Decode a programmed-once word counter. Every consumed word must be fully
+/// programmed, and all consumed words must precede all erased words.
+pub fn decode_program_once_words(bytes: &[u8]) -> Result<u64> {
+    if !bytes.len().is_multiple_of(4) {
+        return Err(Error::Storage);
+    }
+    let mut generation = 0u64;
+    let mut saw_erased = false;
+    for bytes in bytes.chunks_exact(4) {
+        let word = u32::from_le_bytes(bytes.try_into().map_err(|_| Error::Storage)?);
+        match word {
+            0 => {
+                if saw_erased {
+                    return Err(Error::Storage);
+                }
+                generation = generation.checked_add(1).ok_or(Error::Storage)?;
+            }
+            u32::MAX => saw_erased = true,
+            _ => return Err(Error::Storage),
+        }
+    }
+    Ok(generation)
+}
+
+/// Select the erased word that advances a programmed-once counter by exactly one.
+pub fn next_program_once_word(bytes: &[u8], generation: u64) -> Result<usize> {
+    let current = decode_program_once_words(bytes)?;
+    if current.checked_add(1) != Some(generation) {
+        return Err(Error::Storage);
+    }
+    let index = usize::try_from(generation.checked_sub(1).ok_or(Error::Storage)?)
+        .map_err(|_| Error::Storage)?;
+    let offset = index.checked_mul(4).ok_or(Error::Storage)?;
+    if offset.checked_add(4).is_none_or(|end| end > bytes.len()) {
+        return Err(Error::Quota);
+    }
+    Ok(offset)
+}
+
 /// Decode a one-way bit anchor. Bits are consumed least-significant first and
 /// every consumed bit must precede every erased bit.
 pub fn decode_monotonic_bits(bytes: &[u8]) -> Result<u64> {
@@ -869,6 +908,32 @@ mod tests {
         assert_eq!(decode_monotonic_bits(&[0x00, 0xfe]).unwrap(), 9);
         assert_eq!(decode_monotonic_bits(&[0xfa, 0xff]), Err(Error::Storage));
         assert_eq!(decode_monotonic_bits(&[0xff, 0xfe]), Err(Error::Storage));
+    }
+
+    #[test]
+    fn programmed_once_counter_exhausts_without_reusing_or_skipping_words() {
+        let erased = [0xff; 12];
+        assert_eq!(decode_program_once_words(&erased), Ok(0));
+
+        let mut full = erased;
+        for generation in 1..=3 {
+            let offset = next_program_once_word(&full, generation).unwrap();
+            assert_eq!(offset, (generation as usize - 1) * 4);
+            full[offset..offset + 4].fill(0);
+        }
+        assert_eq!(decode_program_once_words(&full), Ok(3));
+        assert_eq!(next_program_once_word(&full, 3), Err(Error::Storage));
+        assert_eq!(next_program_once_word(&full, 4), Err(Error::Quota));
+
+        let mut hole = erased;
+        hole[..4].fill(0);
+        hole[8..].fill(0);
+        assert_eq!(decode_program_once_words(&hole), Err(Error::Storage));
+
+        let mut malformed = erased;
+        malformed[0] = 0;
+        assert_eq!(decode_program_once_words(&malformed), Err(Error::Storage));
+        assert_eq!(decode_program_once_words(&erased[..11]), Err(Error::Storage));
     }
 
     #[test]
