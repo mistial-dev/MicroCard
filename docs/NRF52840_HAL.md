@@ -2,6 +2,8 @@
 
 The board crate owns all peripheral addresses and startup policy. Portable runtime code depends only on `microcard_core::hal` and the journal flash contract.
 
+Startup selects the supported 64 MHz external crystal before opening storage or CC310 and enables the nRF52840's 2 KiB instruction cache. NVMC and ACL control use the generated PAC register types. Flash programming skips words that already contain the requested value; page erase remains explicit and is used only when a storage slot is reclaimed.
+
 ## Service mapping
 
 - `BoardUart` implements bounded, caller-buffered short-APDU transport. It retains the existing two-byte little-endian frame length, resets the decoder on UART errors, feeds the watchdog while polling, and applies one monotonic deadline to each receive or send operation.
@@ -24,4 +26,4 @@ Transport, identity and erased-slot inspection allocate no heap memory. Oversize
 
 ## Current verification
 
-`cargo check --release --locked --features engine-mc04` cross-compiles the board with the HAL path. Host HAL tests enforce transport and protected-key output bounds. Physical deadline, watchdog-reset and UART reconnect acceptance remains in the DK work list.
+Locked release builds for both `engine-mc04` and `engine-jcvm`, plus the JCVM dongle and software-reference profiles, cross-compile the board with this path. Host HAL tests enforce transport and protected-key output bounds. Physical flash timing, deadline, watchdog-reset and UART reconnect acceptance remain in the board work list.

@@ -619,6 +619,7 @@ dependencies = [
  "interchange",
  "microcard-core",
  "nrf52840-hal",
+ "nrf52840-pac",
  "sha2",
  "usb-device",
  "usbd-ccid",

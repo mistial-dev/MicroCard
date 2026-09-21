@@ -6,6 +6,7 @@ mod jcvm;
 #[cfg(feature = "usb-ccid")]
 mod usb_ccid;
 use cortex_m_rt::entry;
+use nrf52840_pac as pac;
 #[cfg(feature = "development-recovery")]
 use cortex_m_rt::{exception, ExceptionFrame};
 #[cfg(feature = "usb-ccid")]
@@ -25,7 +26,6 @@ use microcard_core::{
 #[cfg(feature = "usb-ccid")]
 use nrf52840_hal::{
     clocks::{Clocks, ExternalOscillator, Internal, LfOscStopped},
-    pac,
     usbd::UsbPeripheral,
 };
 #[cfg(feature = "usb-ccid")]
@@ -44,11 +44,23 @@ unsafe fn read(a: usize) -> u32 {
 unsafe fn write(a: usize, v: u32) {
     core::ptr::write_volatile(a as *mut u32, v)
 }
+
+fn start_hfxo_and_instruction_cache() {
+    // Leave EVENTS_HFCLKSTARTED set. The HAL consumes and clears it when it later takes
+    // ownership of CLOCK for USB, while storage and CC310 already run from the crystal.
+    let clock = unsafe { &*pac::CLOCK::ptr() };
+    clock
+        .tasks_hfclkstart
+        .write(|w| w.tasks_hfclkstart().set_bit());
+    while clock.events_hfclkstarted.read().bits() == 0 {}
+
+    let nvmc = unsafe { &*pac::NVMC::ptr() };
+    nvmc.icachecnf.write(|w| w.cacheen().enabled());
+}
 const UART: usize = 0x40002000;
 #[cfg(not(feature = "cc310-entropy"))]
 const RNG: usize = 0x4000D000;
 const TIMER: usize = 0x40008000;
-const NVMC: usize = 0x4001E000;
 // The flash region map the linker used, so the firmware and the linker cannot disagree.
 mod layout {
     // Generated for every region. A given build reads the ones its configuration needs.
@@ -340,6 +352,7 @@ fn now() -> u32 {
         read(TIMER + 0x540)
     }
 }
+#[cfg(not(feature = "cc310-entropy"))]
 fn wait(a: usize) -> Result<()> {
     let start = now();
     while unsafe { read(a) } == 0 {
@@ -1755,7 +1768,14 @@ impl Nvm {
         )
     }
     fn ready() -> Result<()> {
-        wait(NVMC + 0x400)
+        let nvmc = unsafe { &*pac::NVMC::ptr() };
+        let start = now();
+        while nvmc.ready.read().ready().is_busy() {
+            if now().wrapping_sub(start) > 1_000_000 {
+                return Err(Error::Native);
+            }
+        }
+        Ok(())
     }
     fn read_region(base: usize, size: usize, offset: usize, output: &mut [u8]) -> Result<()> {
         let end = offset.checked_add(output.len()).ok_or(Error::Bounds)?;
@@ -1771,16 +1791,18 @@ impl Nvm {
         if !size.is_multiple_of(4096) {
             return Err(Error::Bounds);
         }
-        unsafe { write(NVMC + 0x504, 2) }
+        let nvmc = unsafe { &*pac::NVMC::ptr() };
+        nvmc.config.write(|w| w.wen().een());
         let result = (|| {
             for page in (base..base + size).step_by(4096) {
-                unsafe { write(NVMC + 0x508, page as u32) }
+                nvmc.erasepage()
+                    .write(|w| unsafe { w.erasepage().bits(page as u32) });
                 Self::ready()?;
                 feed();
             }
             Ok(())
         })();
-        unsafe { write(NVMC + 0x504, 0) }
+        nvmc.config.write(|w| w.wen().ren());
         result
     }
     fn program_region(base: usize, size: usize, offset: usize, bytes: &[u8]) -> Result<()> {
@@ -1790,11 +1812,13 @@ impl Nvm {
         if bytes.is_empty() {
             return Ok(());
         }
-        unsafe { write(NVMC + 0x504, 1) }
+        let nvmc = unsafe { &*pac::NVMC::ptr() };
+        nvmc.config.write(|w| w.wen().wen());
         let result = (|| {
             let end = offset + bytes.len();
             for pos in ((offset & !3)..((end + 3) & !3)).step_by(4) {
-                let mut word = unsafe { read(base + pos) }.to_le_bytes();
+                let current = unsafe { read(base + pos) };
+                let mut word = current.to_le_bytes();
                 for (index, byte) in word.iter_mut().enumerate() {
                     let location = pos + index;
                     if location >= offset && location < end {
@@ -1805,13 +1829,17 @@ impl Nvm {
                         *byte = new;
                     }
                 }
-                unsafe { write(base + pos, u32::from_le_bytes(word)) }
+                let word = u32::from_le_bytes(word);
+                if word == current {
+                    continue;
+                }
+                unsafe { write(base + pos, word) }
                 Self::ready()?;
                 feed();
             }
             Ok(())
         })();
-        unsafe { write(NVMC + 0x504, 0) }
+        nvmc.config.write(|w| w.wen().ren());
         result
     }
 }
@@ -1956,14 +1984,11 @@ impl Nvm {
         if unsafe { read(address) } != u32::MAX {
             return Err(Error::Storage);
         }
-        unsafe {
-            write(NVMC + 0x504, 1);
-            write(address, 0);
-        }
+        let nvmc = unsafe { &*pac::NVMC::ptr() };
+        nvmc.config.write(|w| w.wen().wen());
+        unsafe { write(address, 0) };
         let result = Self::ready();
-        unsafe {
-            write(NVMC + 0x504, 0);
-        }
+        nvmc.config.write(|w| w.wen().ren());
         result?;
         if unsafe { read(address) } != 0 {
             return Err(Error::Storage);
@@ -2197,6 +2222,7 @@ impl ResetReport for BoardResetReport {
 fn main() -> ! {
     #[cfg(feature = "dongle-layout")]
     ensure_clean_bootloader_handoff();
+    start_hfxo_and_instruction_cache();
     unsafe {
         // Nordic PS Debug and trace: Fxx+ needs both HwDisabled and SwDisable.
         // Respect the provisioned hardware policy; never rewrite UICR at startup.
@@ -2321,24 +2347,30 @@ fn main() -> ! {
     // ACL entries are reset-scoped. Keep debug recovery enabled; protect firmware writes.
     // Each entry covers at most half of flash. Stop at the linked firmware boundary:
     // images and upload staging must remain writable even when the layout changes.
-    unsafe {
-        let firmware_end = layout::FLASH_BASE + layout::FLASH_BYTES;
-        for (slot, start, size, perm) in [
-            (0, 0, firmware_end.min(0x80000) as u32, 2),
-            (1, 0x80000, firmware_end.saturating_sub(0x80000) as u32, 2),
-            (2, KEYS_BASE as u32, KEYS_BYTES as u32, 6),
-        ] {
-            if size == 0 {
-                continue;
-            }
-            let base = NVMC + 0x800 + slot * 16;
-            write(base, start);
-            write(base + 4, size);
-            write(base + 8, perm);
+    let acl = unsafe { &*pac::ACL::ptr() };
+    let firmware_end = layout::FLASH_BASE + layout::FLASH_BYTES;
+    for (slot, start, size, block_read) in [
+        (0, 0, firmware_end.min(0x80000) as u32, false),
+        (1, 0x80000, firmware_end.saturating_sub(0x80000) as u32, false),
+        (2, KEYS_BASE as u32, KEYS_BYTES as u32, true),
+    ] {
+        if size == 0 {
+            continue;
         }
-        cortex_m::asm::dsb();
-        cortex_m::asm::isb();
+        let region = &acl.acl[slot];
+        region.addr.write(|w| unsafe { w.addr().bits(start) });
+        region.size.write(|w| unsafe { w.size().bits(size) });
+        region.perm.write(|w| {
+            let w = w.write().disable();
+            if block_read {
+                w.read().disable()
+            } else {
+                w
+            }
+        });
     }
+    cortex_m::asm::dsb();
+    cortex_m::asm::isb();
     #[cfg(feature = "usb-ccid")]
     let mut usb_stack: Option<(
         BoardUsbDevice,
