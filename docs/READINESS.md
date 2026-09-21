@@ -2,7 +2,8 @@
 
 MicroCard is a development system, not yet a pre-hardware release candidate.
 MC04 (.NET) and JCVM firmware are separate builds. Both cross-link for nRF52840;
-current hardware execution and production certification remain unverified.
+the Makerdiary JCVM baseline has run on hardware, while complete physical acceptance
+and production certification remain unfinished.
 This page is the authoritative list of supported behavior and release blockers.
 
 ## Supported behavior
@@ -81,7 +82,8 @@ board's reserved heap.
   Management-key creation/import, PIV challenge-response, PIN provisioning, P-256
   generation, and independently verified signing before/after reboot now pass through
   the shared simulator path. Slot 9C requires a fresh PIN verification for each signature;
-  reboot does not preserve PIN validation. These do not establish hardware execution.
+  reboot does not preserve PIN validation. These paths still need complete physical
+  NIST execution and fault-injection coverage.
 - Complete the remaining JCVM native API audit against Java Card 3.0.5, including
   internal failure boundaries. Instruction, transaction, PIN, and lifecycle changes
   checkpoint committed state while excluding open applet transactions. Existing tests
@@ -105,8 +107,9 @@ board's reserved heap.
   All seven profiles link, but seven flash optimization ceilings still fail; none
   were raised. [Board budgets](BOARD_BUDGETS.json) contain the exact measurements.
   Earlier 2026-09-20 UF2 attempts used an invalid family and were ignored by the
-  bootloader. The corrected image is built but still needs physical transfer and
-  startup acceptance.
+  bootloader. The corrected image later booted, enumerated over USB CCID, passed its
+  CC310 startup checks, and ran the signed OpenFIPS201 load/install/select smoke test.
+  The final tree still needs the full physical closeout described below.
 - Bound complete personalization workloads, including failures and renewal. At clean
   revision `f1adbf4`, the full OpenFIPS transport workload peaks at **217,368 requested
   host allocation bytes** with a 4,096-byte certificate capacity, and **238,910 bytes**

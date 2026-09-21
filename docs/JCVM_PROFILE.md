@@ -29,7 +29,9 @@ real SCP03 messages, installs the committed PIV applet, selects it, checks PIN r
 across reboot, and deletes it. `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` uses this
 path with persistent files; `serve-jcvm-managed-binary` uses the shared framed transport.
 The separate `engine-jcvm` board build uses the same adapter with NVMC storage.
-Both DK and dongle layouts cross-link; physical execution remains unverified.
+Both DK and dongle layouts cross-link. The Makerdiary dongle has booted this image,
+opened SCP03, loaded and installed the signed OpenFIPS201 fixture, and selected PIV.
+Complete physical personalization, NIST, interruption, and resource tests remain open.
 
 The shared C4 receiver enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
