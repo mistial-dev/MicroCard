@@ -10,11 +10,11 @@ Discarded state copies and deleted domains zeroize application Int32 records and
 
 The MJ03 journal encrypts and authenticates each snapshot with AES-CCM. The storage key is derived from both device-specific SCP03 management keys through a domain-separated AES-CMAC operation. Recovery rejects a wrong key and any changed authenticated header, ciphertext or tag, then revalidates all state invariants and stored package signatures.
 
-An append-only generation anchor lives outside the journal slots. A commit writes and closes the authenticated journal record before advancing the anchor. On recovery, a journal exactly one generation ahead finishes that interrupted advance. A journal behind the anchor, more than one generation ahead, or absent after ownership was established fails closed. Anchor capacity is checked before any journal mutation. The nRF52840 clears one bit per generation, least-significant bit first, in a 4 KiB region. Any cleared bit after an erased bit is corruption. This provides 32,768 runtime commits and the runtime never erases the anchor.
+An append-only generation anchor lives outside the journal slots. A commit writes and closes the authenticated journal record before advancing the anchor. On recovery, a journal exactly one generation ahead finishes that interrupted advance. A journal behind the anchor, more than one generation ahead, or absent after ownership was established fails closed. Anchor capacity is checked before any journal mutation. The nRF52840 programs one previously erased 32-bit word per generation in a 4 KiB region. Recovery accepts only a contiguous programmed prefix followed by erased words; a hole, partial value, or other word is corruption. This provides 1,024 runtime commits and the runtime never erases the anchor.
 
 A second append-only counter reserves each encryption nonce before use. Failed attempts
 consume nonce capacity without advancing the committed generation. Its separate 4 KiB
-region provides 32,768 attempts; neither counter is erased in service. Exhausting either
+region provides 1,024 attempts; neither counter is erased in service. Exhausting either
 counter refuses further commits, while the last committed snapshot remains readable.
 MJ01/MJ02 records are rejected rather than migrated. See [the wire contract](PROTOCOL.md#durable-activation).
 

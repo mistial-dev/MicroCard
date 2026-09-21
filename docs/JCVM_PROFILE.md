@@ -512,8 +512,8 @@ validated before replay mutates scratch state; the complete resulting snapshot m
 fit its storage quota. A provider or flash failure stops the operation. Full snapshots
 and records use the same providers, with no software retry.
 
-The board still consumes one bit from separate 4 KiB generation and nonce counters
-per commit/encryption attempt, limiting each to 32,768 values. Append records reduce
+The board programs one fresh 32-bit word in separate 4 KiB generation and nonce counters
+per commit/encryption attempt, limiting each to 1,024 values. Append records reduce
 erases but do not extend these counters. Remaining work includes auditing internal
 native bulk-write/allocation failure boundaries, counter lifetime, and the remaining
 native-API transaction semantics.
