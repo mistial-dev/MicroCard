@@ -542,6 +542,24 @@ impl<'a> Heap<'a> {
         Ok(())
     }
 
+    pub fn write_bytes_unconditional(
+        &mut self,
+        reference: Reference,
+        offset: usize,
+        value: &[u8],
+    ) -> Result<()> {
+        self.byte_slice(reference, offset, value.len())?;
+        let at = reference as usize + HEADER + offset;
+        if self.info(reference)?.clear_event == 0 {
+            self.pending_writes.heap(at, value.len());
+        }
+        self.bytes[at..at + value.len()].copy_from_slice(value);
+        if let Some((_, undo)) = &mut self.transaction {
+            undo.preserve(at, &self.bytes[at..at + value.len()]);
+        }
+        Ok(())
+    }
+
     /// Reserve before-images for a compound write before publishing any component.
     /// Spans use byte offsets into object or array payloads, excluding headers.
     /// Failure releases only these reservations, preserving earlier transaction writes.
@@ -624,6 +642,7 @@ mod tests {
         assert!(!heap.has_uncheckpointed_writes(), "conditional and transient writes do not publish committed state");
         assert_eq!(heap.set_lifecycle(0x0f), Ok(true));
         heap.put_word_unconditional(object, 1, 2).unwrap();
+        heap.write_bytes_unconditional(array, 1, b"PRNG").unwrap();
         assert!(heap.has_uncheckpointed_writes());
         // Later conditional writes must restore the unconditional counter, not 3 or 5.
         heap.put_word(object, 1, 8).unwrap();
@@ -657,6 +676,8 @@ mod tests {
         expected[1] = 0x0f;
         expected[object as usize + HEADER + 2..object as usize + HEADER + 4]
             .copy_from_slice(&2u16.to_be_bytes());
+        expected[array as usize + HEADER + 1..array as usize + HEADER + 5]
+            .copy_from_slice(b"PRNG");
         expected[transient as usize + HEADER] = 1;
         assert_eq!(heap.image(), expected);
         assert_eq!(projected, expected);
