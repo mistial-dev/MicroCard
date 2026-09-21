@@ -5,6 +5,7 @@ import struct
 import tempfile
 from unittest.mock import patch
 from prepare_first_flash import NRF52840_UF2_FAMILY, publish_bundle, write_uf2
+from verify_uf2_readback import addressed
 
 
 def main():
@@ -23,6 +24,8 @@ def main():
         assert image[32:288] == raw[:256]
         assert image[544:588] == raw[256:]
         assert image[588:800] == bytes(212)
+        readback = addressed(destination)
+        assert bytes(readback[address] for address in sorted(readback)) == raw + bytes(212)
 
     for fail in (0, 1, 2):
         with tempfile.TemporaryDirectory() as root:

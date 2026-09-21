@@ -41,6 +41,17 @@ cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
 
 The dongle reboots itself when the copy finishes. The volume disappears and a smart card reader called `MicroCard MicroCard virtual smart card` takes its place.
 
+To prove what was written after returning to bootloader mode, compare the bootloader's
+readback by flash address:
+
+```sh
+python3 scripts/verify_uf2_readback.py \
+  --expected artifacts/development-firmware/jcvm/dongle/microcard.uf2 \
+  --current /Volumes/UF2BOOT/CURRENT.UF2
+```
+
+This checks every application byte and reports the first missing or different address.
+
 If startup cannot safely open card state, the firmware still enumerates as CCID but
 answers APDUs with a proprietary diagnostic status. `6F01` is watchdog setup, `6F02`
 management-key provisioning, `6F03` an ownership/state mismatch, `6F04` hardware
