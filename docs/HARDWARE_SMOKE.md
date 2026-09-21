@@ -1,4 +1,35 @@
-# First DK hardware smoke test
+# Hardware smoke results
+
+## Makerdiary JCVM USB acceptance
+
+Date: 2026-09-21. Firmware source revision:
+`ec39ff17725121ac64a99ba890f90eb099c3084d`. Development UF2 SHA-256:
+`541b2ff7234caa8b19624e876d5c845a1812d264c2f0ef1d61a6b66714b2f830`.
+
+The Makerdiary nRF52840 MDK USB Dongle booted the JCVM image without a cable power
+cycle and enumerated as `MicroCard MicroCard virtual smart card`. OpenSC read ATR
+`3B 80 01 81`; an ISD SELECT returned valid GlobalPlatform FCI and `9000`.
+
+The physical acceptance client opened SCP03 at security level 33 with the documented
+development key, streamed the committed signed OpenFIPS201 load file, installed its
+applet, and selected the full PIV AID. The applet returned its 149-byte PIV selection
+response. CCID time-extension replies kept the same PC/SC command alive during the
+long JCVM install and select callbacks. Package deletion retained its rollback
+tombstone as designed: reloading version 1 returned `6985`, while signed version 2
+loaded, installed, and selected successfully.
+
+The authenticated `80 FE 55 AA` management command entered UF2. Copying the new image
+returned to the application automatically, and the installed applet remained usable
+after that firmware restart. The image passed its boot-time CC310 SHA-256, entropy,
+CMAC, HMAC, AES, CBC, CCM, and P-256 checks. This establishes execution of those fixed
+known answers on this board; it does not replace independent hardware vector, forced
+failure, timing, memory, or side-channel work.
+
+The current physical result does not run the complete NIST suite on the board. Full
+personalization, interrupted writes, USB abort/suspend, sustained throughput, heap and
+stack high-water, and both-engine hardware acceptance remain release blockers.
+
+## nRF52840 DK first smoke test
 
 Firmware revision: `128d83b82695b209f5fb9b01b7b2dd9fda7f352a`.
 Target: nRF52840_xxAA through an on-board J-Link probe.

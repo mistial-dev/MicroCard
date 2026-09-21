@@ -117,14 +117,14 @@ def agree_with_pin(client, public_key, pin):
     piv(client, 0x20, p2=0x80)
 
 
-def install_openfips(client, discovery):
+def install_openfips(client, discovery, version=1):
     """Load the pinned applet through signed management and return its installation data."""
     package = bytes.fromhex("A00000030800001000")
     module = bytes.fromhex("A000000308000010000100")
     instance = module
     image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
     manifest = jcvm_manifest(dict(domain=discovery[4].hex(), incarnation=discovery[5].hex(),
-        package=package.hex(), package_version=[1, 10], version=1,
+        package=package.hex(), package_version=[1, 10], version=version,
         limits=dict(heap_bytes=65536, frame_words=8192, buffer_bytes=261, budget=4000000)))
     seed = bytes([7]) * 32
     raw = create(manifest, image, signer_public_key(seed), lambda value: sign_package(seed, value), 60 * 1024)

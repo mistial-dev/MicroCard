@@ -26,10 +26,14 @@ def aes(k,mode,data):
 def unaes(k,mode,data):
  d=Cipher(algorithms.AES(k),mode).decryptor(); return d.update(data)+d.finalize()
 class Client:
- def __init__(self,keys,state,mode='serve',*,simulator=None):
-  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode,keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+ def __init__(self,keys,state,mode='serve',*,simulator=None,transport=None):
+  if simulator is not None and transport is not None: raise ValueError('choose simulator or transport')
+  command=transport if transport is not None else [simulator or SIM,mode,keys,state]
+  self.keys=keys.read_bytes();self.p=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
  def raw(self,b):
-  self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline();assert line,'simulator terminated';return bytes.fromhex(line)
+  self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline()
+  if not line: raise RuntimeError('transport terminated: '+self.p.stderr.read().strip())
+  return bytes.fromhex(line)
  def connect(self,level=None,*,select_isd=True):
   if select_isd:
    assert self.raw(bytes.fromhex("00A4040008A000000151000000"))[-2:]==b"\x90\x00"
@@ -90,8 +94,10 @@ class Client:
    plain=unaes(self.enc,modes.CBC(iv),body);body=plain[:plain.rindex(0x80)]
   return body
  def close(self):
-  self.p.stdin.close();assert self.p.wait(timeout=5)==0
-  diagnostics=self.p.stderr.read();assert 'jcvm:' not in diagnostics,diagnostics
+  if self.p.poll() is None: self.p.stdin.close()
+  status=self.p.wait(timeout=5);diagnostics=self.p.stderr.read()
+  assert status==0,(status,diagnostics)
+  assert 'jcvm:' not in diagnostics,diagnostics
 
 class BinaryClient(Client):
  def __init__(self,keys,state,mode='serve',*,simulator=None):

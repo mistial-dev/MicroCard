@@ -36,6 +36,9 @@ only in that already unusable state and performs no operation other than enterin
 Dongle builds also use that documented handoff after a Rust panic or Cortex-M hard fault.
 A failed replacement therefore returns to `UF2BOOT` instead of becoming unreachable. A
 power-loss or corrupt-vector failure can still require the physical recovery gesture.
+The `dongle` development profile enables this recovery behavior. A production
+`dongle-layout` profile leaves unauthenticated diagnostic and fault recovery disabled;
+its normal UF2 command still requires SCP03 management authentication.
 
 ## Copy the image
 
@@ -75,10 +78,23 @@ This checks every application byte and reports the first missing or different ad
 
 If startup cannot safely open card state, the firmware still enumerates as CCID but
 answers APDUs with a proprietary diagnostic status. `6F01` is watchdog setup, `6F02`
-management-key provisioning, `6F03` an ownership/state mismatch, `6F04` hardware
-self-test, `6F05` storage-key derivation, `6F06` ownership-marker programming,
+management-key provisioning, and `6F03` is an ownership/state mismatch. Hardware
+self-test failures are `6F41` through `6F4D`, identifying initialization/SHA-256,
+streaming SHA-256, entropy, CMAC, HMAC, AES, CBC, CCM, or P-256 stages in execution
+order. `6F05` is storage-key derivation, `6F06` ownership-marker programming,
 `6F07` incompatible persistent state, and `6F08` another storage-open failure. This
 mode is read-only: it never erases or repairs state.
+
+The RGB LED mirrors startup without replacing the USB diagnostic. Solid blue means startup
+is still running and solid green means the card endpoint is ready. A fatal startup error
+holds red between short coded flashes. CC310 SHA stages use one through four blue flashes,
+entropy uses one cyan flash, symmetric stages use one through five yellow flashes, and
+P-256 stages use one through three magenta flashes. The mapping uses the board schematic's
+active-low P0.23 red, P0.22 green and P0.24 blue channels.
+
+USB startup failures flash red followed by five blue flashes if the host never assigns an
+address, or six if addressing finishes without configuration. The development image then
+returns to UF2 automatically.
 
 ## Check that it answers
 
@@ -93,6 +109,19 @@ java -jar gp.jar -i
 ```
 
 That reports GlobalPlatform 2.3.1 and `GP SCP03 (i=71)`, which is S16 mode with a derived card challenge, R-MAC and R-ENCRYPTION. A freshly flashed dongle answers the GlobalPlatform test keys, which is what tooling tries when given no keys, so `gp -l` lists an empty registry with no further arguments.
+
+For a development JCVM card, the repository acceptance client keeps one Java PC/SC
+connection open, uses the existing independent SCP03 implementation, and loads the
+committed signed OpenFIPS201 fixture:
+
+```sh
+python3 scripts/jcvm_board_acceptance.py \
+  --reader 'MicroCard MicroCard virtual smart card' --version 1
+```
+
+Use `--select-only` after installation. Package versions are monotonic; after deleting
+an installed package, pass a higher `--version` rather than trying to reuse the retained
+rollback tombstone.
 
 ## What you are agreeing to
 
@@ -113,14 +142,9 @@ The nRF52840 DK takes the same firmware through a debug probe instead. [First fl
 
 ## Known state
 
-On 2026-09-20, the official Makerdiary OpenSK UF2 enumerated on the connected board,
-proving the bootloader, USB wiring, and host port. Its bootloader reported no SoftDevice.
-A minimal Rust image linked at `0x1000` executed and returned to UF2. A full JCVM image
-then enumerated through `usbd-ccid` and `nrf-usbd`, exposed ATR `3B 80 01 81`, and answered
-APDUs. Its hardware-provider startup stopped with diagnostic `6F04`, so CC310 remains a
-board acceptance blocker.
-
-The Cortex-M runtime sets VTOR to the application vector table before Rust data
-initialization can overwrite the MBR's RAM forwarding word. The next hardware run must
-verify software-requested UF2 entry, automatic boot after copying, and the corrected
-provider startup before applet loading begins.
+The revision-bound Makerdiary result is recorded in [hardware smoke](HARDWARE_SMOKE.md).
+The installed UF2 bootloader transfers control with a direct branch. The application uses
+`GPREGRET2` to request one ordinary reset, after which the bootloader takes its clean
+non-DFU path and the standard HAL, `nrf-usbd`, and `usbd-ccid` stack owns the device.
+Authenticated entry into UF2 and automatic return to the application after copying were
+both exercised without unplugging the board.

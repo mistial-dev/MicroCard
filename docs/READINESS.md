@@ -188,13 +188,12 @@ verify the engine, revision, artifact hashes, and `hardware_flashed: false` in i
 
 ## Hardware and production blockers
 
-[Hardware smoke](HARDWARE_SMOKE.md) records earlier revision-specific DK observations;
-they do not validate this cleanup. The [dongle guide](DONGLE.md) records its unresolved
-revision-unknown USB/APDU observation. Neither that observation nor host tests validate
-this JCVM build's physical behavior.
+[Hardware smoke](HARDWARE_SMOKE.md) records revision-bound DK results and the current
+Makerdiary JCVM result. The Makerdiary image now boots, enumerates over USB CCID, opens
+SCP03, and loads, installs, persists, and selects the signed OpenFIPS201 fixture.
 
-Hardware access is deferred. Physical acceptance must prove the personalized OpenFIPS201
-workflow on Makerdiary and cover both engine builds, CC310 independent vectors and
+Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
+Makerdiary and cover both engine builds, CC310 independent vectors and
 forced failures, buffer aliasing, stack/heap peaks, latency and sustained throughput,
 USB abort/disconnect/suspend, and power interruption during ownership, activation,
 commit, credential retries, sequence reservation, and deletion. Complete a bounded
