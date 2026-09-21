@@ -176,13 +176,15 @@ and [fuzzing](docs/FUZZING.md). Contributor toolchain requirements and policies 
 Build one nRF52840 firmware engine from `board/nrf52840`:
 
 ```sh
-cargo build --release --locked --features engine-mc04
-cargo build --release --locked --features engine-jcvm
+MICROCARD_USB_VID=0x1234 MICROCARD_USB_PID=0x5678 cargo build --release --locked --features engine-mc04,usb-ccid
+MICROCARD_USB_VID=0x1234 MICROCARD_USB_PID=0x5678 cargo build --release --locked --features engine-jcvm,usb-ccid
 ```
 
 Each command produces a separate firmware image. Selecting both engines or neither is
-an error. Firmware defaults to the hardware-only CC310 provider; reproducible vendor
-and compiler setup is documented in [crypto providers](docs/CRYPTO_PROVIDERS.md).
+an error. The identifiers above are compile-only examples; distributing firmware
+requires authorized USB identifiers. Firmware defaults to the hardware-only CC310
+provider; reproducible vendor and compiler setup is documented in
+[crypto providers](docs/CRYPTO_PROVIDERS.md).
 
 ## Repository map
 

@@ -13,16 +13,15 @@ use cortex_m_rt::{exception, ExceptionFrame};
 use microcard_core::transport::ENTER_BOOTLOADER_APDU;
 use microcard_core::{
     hal::{
-        receive_command, send_response, ApduTransport, DeviceIdentity, Entropy, LogicalGpio,
-        MonotonicClock, ResetReason, ResetReport, StagingFlash, TickExtender, Watchdog,
-        MAX_SHORT_COMMAND_BYTES,
+        DeviceIdentity, Entropy, LogicalGpio, ResetReason, ResetReport, StagingFlash, Watchdog,
     },
     journal::{decode_program_once_words, next_program_once_word, Flash},
     provisioning::{ownership_marker_action, OwnershipMarkerAction, PROGRAMMED_OWNERSHIP_MARKER},
     scp03::Keys,
-    transport::Endpoint,
     Error, Result,
 };
+#[cfg(feature = "usb-ccid")]
+use microcard_core::transport::Endpoint;
 #[cfg(feature = "usb-ccid")]
 use nrf52840_hal::{
     clocks::{Clocks, ExternalOscillator, Internal, LfOscStopped},
@@ -66,7 +65,6 @@ fn start_hfxo() -> Result<()> {
     }
     Ok(())
 }
-const UART: usize = 0x40002000;
 #[cfg(not(feature = "cc310-entropy"))]
 const RNG: usize = 0x4000D000;
 const TIMER: usize = 0x40008000;
@@ -267,9 +265,7 @@ fn initialize_usb() -> Option<(
 /// These failures remain terminal and never erase or repair storage. Returning a
 /// proprietary `6Fxx` status lets unattended hardware tests distinguish the failure
 /// boundary after the ordinary CCID power-on and ATR exchange succeeds.
-fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], _code: u8) -> ! {
-    let deadline = transport.deadline_after(1_000_000);
-    let _ = transport.write_raw(message, deadline);
+fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> ! {
     #[cfg(feature = "usb-ccid")]
     let mut usb_stack = None;
     #[cfg(feature = "usb-ccid")]
@@ -291,7 +287,7 @@ fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], _code: u8) ->
     #[cfg(feature = "dongle-layout")]
     let mut led_deadline = now();
     loop {
-        let _ = transport.watchdog.feed();
+        let _ = watchdog.feed();
         #[cfg(feature = "dongle-layout")]
         if now().wrapping_sub(led_deadline) < 0x8000_0000 {
             if blinks_remaining == 0 {
@@ -2052,31 +2048,6 @@ impl Flash for Nvm {
         Self::program_region(self.base(slot)?, self.size, offset, bytes)
     }
 }
-#[derive(Default)]
-struct BoardClock {
-    ticks: TickExtender,
-}
-impl BoardClock {
-    fn init() -> Self {
-        unsafe {
-            write(TIMER + 0x504, 0);
-            write(TIMER + 0x508, 3);
-            write(TIMER + 0x510, 4);
-            write(TIMER, 1);
-        }
-        Self::default()
-    }
-}
-impl MonotonicClock for BoardClock {
-    fn ticks(&mut self) -> u64 {
-        self.ticks.update(now())
-    }
-
-    fn ticks_per_second(&self) -> u32 {
-        1_000_000
-    }
-}
-
 struct BoardWatchdog;
 impl Watchdog for BoardWatchdog {
     fn arm(&mut self, timeout_ticks: u64) -> Result<()> {
@@ -2101,98 +2072,6 @@ impl Watchdog for BoardWatchdog {
     fn feed(&mut self) -> Result<()> {
         feed();
         Ok(())
-    }
-}
-
-struct BoardUart {
-    clock: BoardClock,
-    watchdog: BoardWatchdog,
-    decoder: microcard_core::framing::Decoder,
-}
-impl BoardUart {
-    fn init() -> Self {
-        unsafe {
-            // PCA10056 debug UART: TX P0.06, RX P0.08, no flow control, 115200 baud.
-            write(0x50000508, 1 << 6);
-            write(0x50000700 + 6 * 4, 3);
-            write(0x50000700 + 8 * 4, 0);
-            write(UART + 0x50C, 6);
-            write(UART + 0x514, 8);
-            write(UART + 0x508, u32::MAX);
-            write(UART + 0x510, u32::MAX);
-            write(UART + 0x524, 0x01D7E000);
-            write(UART + 0x56C, 0);
-            write(UART + 0x500, 4);
-            write(UART + 0x008, 1);
-            write(UART, 1);
-        }
-        Self {
-            clock: BoardClock::init(),
-            watchdog: BoardWatchdog,
-            decoder: microcard_core::framing::Decoder::default(),
-        }
-    }
-
-    fn deadline_after(&mut self, duration_ticks: u64) -> u64 {
-        self.clock.ticks().saturating_add(duration_ticks)
-    }
-
-    fn write_raw(&mut self, bytes: &[u8], deadline_ticks: u64) -> Result<()> {
-        for byte in bytes {
-            unsafe {
-                write(UART + 0x11C, 0);
-                write(UART + 0x51C, u32::from(*byte));
-            }
-            while unsafe { read(UART + 0x11C) } == 0 {
-                self.watchdog.feed()?;
-                if self.clock.ticks() >= deadline_ticks {
-                    return Err(Error::Native);
-                }
-            }
-        }
-        Ok(())
-    }
-}
-impl ApduTransport for BoardUart {
-    fn receive(&mut self, output: &mut [u8], deadline_ticks: u64) -> Result<usize> {
-        loop {
-            self.watchdog.feed()?;
-            let current = self.clock.ticks();
-            self.decoder.expire(current as u32);
-            if current >= deadline_ticks {
-                return Err(Error::Native);
-            }
-            if unsafe { read(UART + 0x124) } != 0 {
-                unsafe {
-                    write(UART + 0x124, 0);
-                    let errors = read(UART + 0x480);
-                    write(UART + 0x480, errors);
-                }
-                self.decoder = microcard_core::framing::Decoder::default();
-            }
-            if unsafe { read(UART + 0x108) } == 0 {
-                continue;
-            }
-            let byte = unsafe { read(UART + 0x518) } as u8;
-            unsafe {
-                write(UART + 0x108, 0);
-            }
-            if let Some(frame) = self.decoder.push(byte, current as u32) {
-                if frame.len() > output.len() {
-                    self.decoder = microcard_core::framing::Decoder::default();
-                    return Err(Error::Bounds);
-                }
-                let length = frame.len();
-                output[..length].copy_from_slice(frame);
-                return Ok(length);
-            }
-        }
-    }
-
-    fn send(&mut self, input: &[u8], deadline_ticks: u64) -> Result<()> {
-        let length = u16::try_from(input.len()).map_err(|_| Error::Bounds)?;
-        self.write_raw(&length.to_le_bytes(), deadline_ticks)?;
-        self.write_raw(input, deadline_ticks)
     }
 }
 
@@ -2241,25 +2120,17 @@ fn main() -> ! {
         }
         HEAP.init(core::ptr::addr_of_mut!(HEAP_MEMORY) as usize, 196608);
     }
-    let mut transport = BoardUart::init();
+    let mut watchdog = BoardWatchdog;
     #[cfg(feature = "dongle-layout")]
     {
         led_init();
         led_color(LedColor::Blue);
     }
-    if transport.watchdog.arm(10_000_000).is_err() {
-        halt_with_diagnostic(
-            &mut transport,
-            b"MicroCard: watchdog startup failed\r\n",
-            0x01,
-        );
+    if watchdog.arm(10_000_000).is_err() {
+        halt_with_diagnostic(&mut watchdog, 0x01);
     }
     if start_hfxo().is_err() {
-        halt_with_diagnostic(
-            &mut transport,
-            b"MicroCard: external high-frequency clock failed\r\n",
-            0x09,
-        );
+        halt_with_diagnostic(&mut watchdog, 0x09);
     }
     let _reset_reason = BoardResetReport::capture().reset_reason();
     let mut device_identity = [0; 8];
@@ -2285,11 +2156,7 @@ fn main() -> ! {
     let key: &[u8] = if unprovisioned { &DEFAULT_KEY } else { key };
     #[cfg(not(feature = "gp-test-keys"))]
     if unprovisioned {
-        halt_with_diagnostic(
-            &mut transport,
-            b"MicroCard: provision management keys at the key page\r\n",
-            0x02,
-        );
+        halt_with_diagnostic(&mut watchdog, 0x02);
     }
     let keys = Keys {
         enc: key[..16].try_into().unwrap(),
@@ -2300,40 +2167,24 @@ fn main() -> ! {
     {
         Ok(action) => action,
         Err(_) => {
-            halt_with_diagnostic(
-                &mut transport,
-                b"MicroCard: persistent state erased after ownership; provision fresh management keys\r\n",
-                0x03,
-            );
+            halt_with_diagnostic(&mut watchdog, 0x03);
         }
     };
     let mut hardware = Hardware::new();
     if hardware.self_test().is_err() {
         let stage = hardware.self_test_stage.min(0x0f);
-        halt_with_diagnostic(
-            &mut transport,
-            b"MicroCard: hardware self-test failed\r\n",
-            0x40 | stage,
-        );
+        halt_with_diagnostic(&mut watchdog, 0x40 | stage);
     }
     let storage_key = match keys.storage_key_with(&mut hardware) {
         Ok(key) => key,
         Err(_) => {
-            halt_with_diagnostic(
-                &mut transport,
-                b"MicroCard: storage-key derivation failed\r\n",
-                0x05,
-            );
+            halt_with_diagnostic(&mut watchdog, 0x05);
         }
     };
     if ownership_action == OwnershipMarkerAction::ProgramBeforeOpen
         && Nvm::program_ownership_marker().is_err()
     {
-        halt_with_diagnostic(
-            &mut transport,
-            b"MicroCard: ownership marker write failed\r\n",
-            0x06,
-        );
+        halt_with_diagnostic(&mut watchdog, 0x06);
     }
     #[cfg(feature = "engine-mc04")]
     let opened = microcard_core::domains::Mc04Engine::open_with_staging(
@@ -2347,18 +2198,14 @@ fn main() -> ! {
     let card = match opened {
         Ok(c) => c,
         Err(error) => {
-            let (message, code): (&[u8], u8) = if error == Error::IncompatibleState {
-                (
-                    b"MicroCard: incompatible persistent state; explicit provisioning required\r\n",
-                    0x07,
-                )
-            } else {
-                (b"MicroCard: persistent state open failed\r\n", 0x08)
-            };
-            halt_with_diagnostic(&mut transport, message, code);
+            let code = if error == Error::IncompatibleState { 0x07 } else { 0x08 };
+            halt_with_diagnostic(&mut watchdog, code);
         }
     };
+    #[cfg(feature = "usb-ccid")]
     let mut endpoint = Endpoint::new(card, keys);
+    #[cfg(not(feature = "usb-ccid"))]
+    let _ = (card, keys);
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     // ACL entries are reset-scoped. Keep debug recovery enabled; protect firmware writes.
     // Each entry covers at most half of flash. Stop at the linked firmware boundary:
@@ -2399,7 +2246,6 @@ fn main() -> ! {
     let mut maintenance_at = None;
     #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
     let mut usb_configuration_deadline = None;
-    let mut command = [0; MAX_SHORT_COMMAND_BYTES];
     #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
     let mut enter_uf2_at = None;
     loop {
@@ -2527,25 +2373,10 @@ fn main() -> ! {
                 }
             }
         }
-        #[cfg(feature = "usb-ccid")]
-        let receive_ticks = 1_000;
         #[cfg(not(feature = "usb-ccid"))]
-        let receive_ticks = 1_000_000;
-        let deadline = transport.deadline_after(receive_ticks);
-        let Ok(length) = receive_command(&mut transport, &mut command, deadline) else {
-            continue;
-        };
-        let response = endpoint.exchange(&command[..length]);
-        let deadline = transport.deadline_after(1_000_000);
-        if send_response(&mut transport, &response, deadline).is_ok()
-            && endpoint
-                .maintenance_with_cancel(&mut || {
-                    feed();
-                    false
-                })
-                .is_err()
         {
-            cortex_m::peripheral::SCB::sys_reset();
+            let _ = watchdog.feed();
+            cortex_m::asm::wfi();
         }
     }
 }

@@ -35,7 +35,7 @@ This writes `artifacts/development-firmware/jcvm/dongle/`. Its manifest sets
 cross-build, flash ranges, reset vector, stack margin, engine/provider symbols, vendor
 archives, and artifact hashes. It does not claim host checkpoint or Clippy evidence.
 
-The host gate includes .NET differential execution, deterministic preprocessing/signing, incremental MSBuild/pin checks, first-load failure injection, independent SCP03, persistent key operations, binary UART framing, and the real serial adapter through a fragmented pseudo-terminal. See `scripts/check.py --checkpoint` and the keystore documentation for the scenarios.
+The host gate includes .NET differential execution, deterministic preprocessing/signing, incremental MSBuild/pin checks, first-load failure injection, independent SCP03, persistent key operations, and binary simulator framing. See `scripts/check.py --checkpoint` and the keystore documentation for the scenarios.
 
 ## Development credentials
 
@@ -64,16 +64,8 @@ probe-rs download --chip nRF52840_xxAA --connect-under-reset --verify --binary-f
 
 The key file is exactly 32 bytes. Offset 32 in the same 4 KiB page must remain erased. Firmware programs that ownership word before creating the first journal record. Existing markerless state is rejected with no migration path. After ownership, erasing the journals and anchor requires erasing the key page and provisioning new management keys.
 
-Power-cycle the DK after both writes. UART uses the debugger's virtual serial port at 115200 8N1, TX P0.06/RX P0.08. Do not open a terminal concurrently. The key page is read/write locked by reset-scoped ACL after boot, so subsequent provisioning needs a controlled reset. Flash writes must stay out of journal regions 0xC0000–0xDFFFF.
-
-Then run, with the actual serial port and a new domain identifier:
-
-```sh
-python3 scripts/dk_smoke.py --port /dev/cu.YOUR_DK_PORT --management-key .keys/first-test-management.key --signing-seed .keys/first-test-signing.seed --domain first-test
-```
-
-This script opens SCP03, creates an SSD, signs for its returned incarnation, uploads an assembly, installs two of its lifecycle entries, and exercises shared keys, values, HMAC/CMAC and CBC/CCM. It never erases an existing domain and never flashes firmware.
+Power-cycle the DK after both writes. The key page is read/write locked by reset-scoped ACL after boot, so subsequent provisioning needs a controlled reset. Flash writes must stay out of journal regions 0xC0000–0xDFFFF. Build with `usb-ccid` and authorized USB identifiers to exercise the card; the firmware has no UART APDU transport.
 
 ## After first flash
 
-Hardware acceptance still needs actual UART/RNG/ACL behavior, reboot and interrupted-flash tests, peak heap/stack, watchdog behavior and latency measurements. Snapshot wear leveling, production key protection, full library/type coverage and firmware update trust remain production work. They must not be confused with the first-test-build stopping point.
+Hardware acceptance still needs actual USB/RNG/ACL behavior, reboot and interrupted-flash tests, peak heap/stack, watchdog behavior and latency measurements. Snapshot wear leveling, production key protection, full library/type coverage and firmware update trust remain production work. They must not be confused with the first-test-build stopping point.

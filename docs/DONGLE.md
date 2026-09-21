@@ -138,7 +138,7 @@ The application origin comes from a successful official OpenSK image and a minim
 
 ## If the DK is what you have
 
-The nRF52840 DK takes the same firmware through a debug probe instead. [First flash](FIRST_FLASH.md) covers that route, which also lets you provision a real key page and use the UART management transport.
+The nRF52840 DK takes the same firmware through a debug probe instead. [First flash](FIRST_FLASH.md) covers that route and provisioning a real key page. Build the board with `usb-ccid` for management; the firmware no longer exposes a UART APDU transport.
 
 ## Known state
 

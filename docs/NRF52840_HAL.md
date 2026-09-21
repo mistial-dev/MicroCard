@@ -6,8 +6,7 @@ Startup selects the supported 64 MHz external crystal before opening storage or 
 
 ## Service mapping
 
-- `BoardUart` implements bounded, caller-buffered short-APDU transport. It retains the existing two-byte little-endian frame length, resets the decoder on UART errors, feeds the watchdog while polling, and applies one monotonic deadline to each receive or send operation.
-- `BoardClock` extends the 32-bit, 1 MHz TIMER counter into a wrapping-safe 64-bit monotonic value without allocation. TIMER uses a 16 MHz source divided by `2^4`, as specified by Nordic.
+- `usbd-ccid` owns the board APDU transport. The board keeps USB polling during applet work and uses the library's standard time-extension and reset paths.
 - `BoardWatchdog` converts microsecond HAL ticks to the 32.768 kHz watchdog counter with checked arithmetic. A ten-second request programs `CRV=327679`, following `timeout=(CRV+1)/32768`.
 - `Hardware` implements entropy, logical GPIO and the board-selected cryptographic provider. Managed code cannot select a provider or raw GPIO pin.
 - `Nvm` rotates authenticated snapshots through three 64 KiB journal slots and keeps separate 4 KiB append-only generation and nonce counters behind the portable flash interface. Each counter programs one fresh 32-bit word per committed generation or encryption attempt, giving 1,024 values. Recovery accepts only a contiguous programmed prefix followed by erased words, then copies only the fixed header, trailer and declared authenticated record. It never allocates a complete slot buffer. Runtime code has no counter erase operation.
@@ -15,7 +14,7 @@ Startup selects the supported 64 MHz external crystal before opening storage or 
 - `BoardIdentity` returns the immutable eight-byte `FICR.DEVICEID` into caller-owned storage.
 - `BoardResetReport` reads cumulative `POWER.RESETREAS`. Watchdog, reset-pin and software reasons map explicitly. A zero value remains `Unknown` because Nordic defines it as either power-on or brownout and the register cannot distinguish them.
 
-Transport, identity and erased-slot inspection allocate no heap memory. Oversized frames fail before APDU dispatch, invalid protected-key provider output is cleared by the portable HAL helper, and journal reads validate every offset before copying into an exact caller-owned buffer.
+Identity and erased-slot inspection allocate no heap memory. Oversized USB CCID frames fail before APDU dispatch, invalid protected-key provider output is cleared by the portable HAL helper, and journal reads validate every offset before copying into an exact caller-owned buffer.
 
 ## Register references
 
@@ -26,4 +25,4 @@ Transport, identity and erased-slot inspection allocate no heap memory. Oversize
 
 ## Current verification
 
-Locked release builds for both `engine-mc04` and `engine-jcvm`, plus the JCVM dongle and software-reference profiles, cross-compile the board with this path. Host HAL tests enforce transport and protected-key output bounds. Physical flash timing, deadline, watchdog-reset and UART reconnect acceptance remain in the board work list.
+Locked release builds for both `engine-mc04` and `engine-jcvm`, plus the JCVM dongle and software-reference profiles, cross-compile the board with this path. Host HAL tests enforce transport and protected-key output bounds. Physical flash timing, deadline, watchdog-reset and USB reconnect acceptance remain in the board work list.

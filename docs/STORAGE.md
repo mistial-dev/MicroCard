@@ -91,8 +91,8 @@ execution. Seed validation and normal restore share a read-only validator. Valid
 the saved heap, allocating only the initial runtime layout and a reference bitmap.
 It checks the configured quota before constructing that layout; no execution frames
 or saved-heap copy are needed. The simulator invokes the explicit idle hook after
-flushing its response, and UART invokes it after a successful send. USB gives the
-`usbd-ccid` response a bounded drain interval while continuing to poll, then invokes
+flushing its response. USB gives the `usbd-ccid` response a bounded drain interval
+while continuing to poll, then invokes
 the hook; the first pending deadline is retained under continuous traffic. The hook
 renews a selected session when either counter has 1024 or fewer commits remaining.
 APDU selection and execution never start renewal. Active uploads defer maintenance

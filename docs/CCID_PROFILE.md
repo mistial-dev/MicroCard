@@ -1,6 +1,6 @@
 # USB CCID profile
 
-MicroCard presents one permanently inserted virtual card through USB CCID 1.1. The USB transport frames the same short APDUs used by the simulator and UART. It does not change authorization, SCP03, assembly verification, domain identity, or command semantics.
+MicroCard presents one permanently inserted virtual card through USB CCID 1.1. The USB transport carries the same short APDUs used by the simulator. It does not change authorization, SCP03, assembly verification, domain identity, or command semantics.
 
 ## Fixed profile
 

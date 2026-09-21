@@ -4,13 +4,12 @@ Target PCA10056 / Cortex-M4F. Bare-metal Rust, no RTOS. The same `Endpoint`, `Ca
 
 ## Current hardware use
 
-- UART: P0.06 TX / P0.08 RX, 115200 8N1, no flow control. Binary framing is a two-byte little-endian length followed by a short APDU. Replies use the same framing.
-- TIMER0: 1 MHz free-running clock. Hardware operations have bounded waits and UART partial frames expire after one second.
+- TIMER0: 1 MHz free-running clock for bounded hardware waits.
 - RNG: the default image uses CryptoCell's documented TRNG path. The explicit software-reference profile uses the hardware RNG peripheral with digital error correction enabled. Entropy failures reject requests.
 - NVMC: three AES-CCM encrypted/authenticated MJ03 journal slots plus separate append-only generation and nonce regions. One fresh 32-bit nonce word is programmed before encryption; journal commit closes before its generation word is programmed. No generic arbitrary-address native API.
 - WDT: ten-second reset deadline. Loops feed it. VM fuel and native work limits independently bound managed work.
 - Logical GPIO resource 0: active-low DK LED1 on P0.13. Other resources are rejected.
-- Optional native USB: one full-speed CCID interface with 64-byte bulk endpoints and a two-byte interrupt endpoint. The board loop polls it at least once per millisecond while also retaining UART management framing. Disconnect clears partial commands and reconnect forces re-enumeration.
+- USB CCID: one full-speed interface with 64-byte bulk endpoints and a two-byte interrupt endpoint. Disconnect clears partial commands and reconnect forces re-enumeration. This is the board's only APDU transport.
 - ACL: firmware region write/erase protection after initialization, and read/write blocking of the provisioning page after management keys enter framework RAM. The write-protected range ends at the selected linker layout’s firmware boundary, leaving image, staging, and journal regions writable. Each protected region obeys the half-flash maximum. Registers are reset-scoped. Debug recovery remains enabled.
 - Ownership marker: one word immediately after the 32 management-key bytes shares their 4 KiB erase page. Any programmed bit means the keys have owned persistent state. Boot accepts only an erased marker with completely erased durable state, or a programmed marker with present durable state.
 
@@ -40,7 +39,7 @@ The build checks every region's size, alignment, overlap, and protected boundari
 
 ```sh
 cd board/nrf52840
-cargo build --release --locked --features engine-mc04
+MICROCARD_USB_VID=0x1234 MICROCARD_USB_PID=0x5678 cargo build --release --locked --features engine-mc04,usb-ccid
 arm-none-eabi-size target/thumbv7em-none-eabihf/release/microcard-nrf52840
 ```
 
@@ -78,7 +77,7 @@ BSS includes a 192 KiB heap reservation. These link-time sizes provide no measur
 
 ## Hardware acceptance still required
 
-Run the host SCP03 scenarios through binary UART framing and USB CCID. Verify enumeration, SELECT, counter storage, shared-domain storage, echo and protected commands. Capture GlobalPlatformPro CCID and SCP03 vectors after physical enumeration. Power-cycle after activation and after counter changes. Interrupt power during erase/program operations, then verify complete old/new state. Measure peak memory, maximum-case P-256 verification latency, watchdog behavior, entropy failure, flash endurance and ACL behavior. The current snapshot journal erases many pages per commit. Production wear leveling is not implemented.
+Run the host SCP03 scenarios through USB CCID. Verify enumeration, SELECT, counter storage, shared-domain storage, echo and protected commands. Capture GlobalPlatformPro CCID and SCP03 vectors after physical enumeration. Power-cycle after activation and after counter changes. Interrupt power during erase/program operations, then verify complete old/new state. Measure peak memory, maximum-case P-256 verification latency, watchdog behavior, entropy failure, flash endurance and ACL behavior. The current snapshot journal erases many pages per commit. Production wear leveling is not implemented.
 
 ## Development debug access
 

@@ -66,7 +66,7 @@ Complete every applicable item for a production board. Record commands, tool ver
 - [ ] Route every transport into the same APDU endpoint and security-domain execution path.
 - [ ] Enforce the short-command and short-response limits before dispatch. Reject inconsistent lengths, stale fragments and sequence errors.
 - [ ] Test fragmentation, timeout, disconnect, reconnect, back-to-back frames and malformed lengths.
-- [ ] Keep UART development framing documented and disabled or policy-controlled for production.
+- [ ] Keep development transports disabled or policy-controlled for production.
 - [ ] For USB CCID, verify descriptors, one-slot state, power commands, transfer blocks, abort handling, interrupt status and PC/SC enumeration on macOS and Linux.
 - [ ] For NFC, keep field detection and framing outside trusted command semantics and run contactless timing/interoperability tests separately.
 
