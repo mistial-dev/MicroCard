@@ -409,6 +409,13 @@ New allocations need no before-images: abort wipes the allocation tail, and comm
 projections exclude it. Key updates and algorithm initialization reserve complete
 metadata before publishing values or changing active streaming state.
 
+The before-image log exists only after `JCSystem.beginTransaction()`. Ordinary
+persistent writes record bounded dirty ranges and checkpoint once when the APDU
+callback completes. An applet-thrown Java exception is a completed callback, so
+writes made before it remain durable. Cancellation, interpreter failure, and storage
+failure are unsafe boundaries: the host session discards the live card and recovers
+the last authenticated journal state before accepting another command.
+
 Explicit abort restores conditional writes. Returning or throwing from an applet
 callback with an unfinished transaction aborts it; process answers `6F00`. PIN
 presentation counters and validation, transient arrays (including the APDU buffer),

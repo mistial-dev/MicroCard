@@ -1089,7 +1089,7 @@ mod tests {
     }
 
     #[test]
-    fn transactions_restore_fields_and_statics_at_real_callback_boundaries() {
+    fn explicit_transactions_and_ordinary_writes_follow_callback_boundaries() {
         #[derive(Default)]
         struct CheckpointHost { saved: Vec<(Vec<u8>, Vec<u8>, Reference)>, fail_at: Option<usize>, calls: usize }
         impl Host for CheckpointHost {
@@ -1102,7 +1102,7 @@ mod tests {
                 Ok(())
             }
         }
-        for ending in ["commit", "commit-throw", "commit-cancel", "commit-fail", "abort", "return", "throw", "allocate-abort", "cancel", "plain-cancel", "plain-store-fail", "full", "full-caught"] {
+        for ending in ["commit", "commit-throw", "commit-cancel", "commit-fail", "abort", "return", "throw", "allocate-abort", "cancel", "plain-throw", "plain-cancel", "plain-store-fail", "full", "full-caught"] {
             // Constants 6..12: begin, commit, abort, static field, instance field,
             // ISOException.throwIt, Util.arrayCopy.
             let mut process = vec![
@@ -1132,7 +1132,7 @@ mod tests {
                     } else { process.extend_from_slice(&[112, 0]); }
                 },
                 "abort" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 8]),
-                "throw" => process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]),
+                "throw" | "plain-throw" => process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]),
                 "allocate-abort" => process.extend_from_slice(&[op::NEW, 0, 3, op::ASTORE_0 + 2, op::INVOKESTATIC, 0, 8]),
                 "cancel" | "plain-cancel" => process.extend_from_slice(&[112, 0]), // goto itself until cancellation
                 "full" | "full-caught" => process.extend_from_slice(&[
@@ -1185,7 +1185,12 @@ mod tests {
             if matches!(ending, "commit-fail" | "plain-store-fail") { assert_eq!(result, Err(Error::Storage), "{ending}"); }
             else if ending.ends_with("cancel") { assert_eq!(result, Err(Error::Cancelled)); }
             else {
-                assert_eq!(result.unwrap().sw, if matches!(ending, "commit" | "abort" | "full-caught") { SW_SUCCESS } else { SW_UNKNOWN }, "{ending}");
+                let expected_sw = match ending {
+                    "commit" | "abort" | "full-caught" => SW_SUCCESS,
+                    "plain-throw" => 0x6a80,
+                    _ => SW_UNKNOWN,
+                };
+                assert_eq!(result.unwrap().sw, expected_sw, "{ending}");
             }
             let expected: u16 = if ending.starts_with("plain-") || ending.starts_with("commit") && ending != "commit-fail" { 12 } else { 9 };
             assert_eq!(card.statics, if ending == "full-caught" { 3u16 } else { expected }.to_be_bytes(), "{ending}");
