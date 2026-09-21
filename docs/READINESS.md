@@ -29,7 +29,8 @@ This page is the authoritative list of supported behavior and release blockers.
 ## Memory and atomicity
 
 Immutable images occupy dedicated flash slots. Journal activation protects the prior
-committed generation and uncertain candidates. JCVM holds authenticated image handles;
+committed generation and uncertain candidates. JCVM pins a digest-verified slot so it cannot
+be reclaimed while selected and reuses that mapping without hashing it on each APDU;
 MC04 retains metadata and descriptors, borrowing verified flash images for loading,
 recovery and execution. Both board layouts reserve separate JCVM heap banks. Both journal formats reserve a durable nonce before every encryption attempt,
 independently of the committed generation, including failed attempts.
