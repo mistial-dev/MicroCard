@@ -85,8 +85,14 @@ The flashed revision and engine are still unknown, so this is a reproducible obs
 about that image rather than evidence of a defect in the current tree. No debug probe or
 `UF2BOOT` volume was exposed, so an unattended update was not possible.
 
-The current JCVM dongle build links within its 288 KiB firmware region. Its physical
-execution and OpenFIPS201 workflow remain unverified.
+Revision `9f44ff0` was built as JCVM development firmware and copied to `UF2BOOT` on
+2026-09-20. The copy completed normally and the bootloader volume disappeared, but no
+USB device or PC/SC reader enumerated afterward. The image therefore reaches neither
+the observable CCID startup path nor OpenFIPS201 acceptance. Its initial stack pointer
+is `0x20040000`, reset vector is `0x27101`, and every loadable section is inside the
+application window. The remaining fault is in boot handoff or startup before USB
+initialization; storage-open and CC310 self-test failures are currently silent on this
+USB-only board because USB is initialized after both checks.
 
 One flash attempt ended with the copy reporting an input and output error, the `UF2BOOT` volume disappearing, and the board never re-enumerating. That error is ambiguous on its own, because a UF2 bootloader reboots the moment it has every block and severs the copy, which produces the same message as a write that stopped early.
 

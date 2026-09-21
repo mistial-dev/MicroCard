@@ -99,11 +99,12 @@ board's reserved heap.
   to recover interrupted bank replacement. Root registry counters remain finite;
   host memory bounds remain required, with physical service-life testing later.
   See [renewal and recovery invariants](STORAGE.md#jcvm-counter-renewal).
-- Qualify the Makerdiary JCVM memory bound. Its current image links at 224,704 text
+- Qualify the Makerdiary JCVM memory bound. Its current image links at 226,616 text
   bytes, 148 data bytes, and 198,284 BSS bytes, within the 288 KiB firmware region.
   All seven profiles link, but seven flash optimization ceilings still fail; none
   were raised. [Board budgets](BOARD_BUDGETS.json) contain the exact measurements.
-  The 2026-09-19 USB observation had unknown firmware and does not validate this build.
+  The current image was transferred through UF2 on 2026-09-20 but did not enumerate;
+  startup diagnostics are the next board blocker.
 - Bound complete personalization workloads, including failures and renewal. At clean
   revision `f1adbf4`, the full OpenFIPS transport workload peaks at **217,368 requested
   host allocation bytes** with a 4,096-byte certificate capacity, and **238,910 bytes**
