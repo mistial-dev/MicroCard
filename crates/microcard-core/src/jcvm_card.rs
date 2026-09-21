@@ -23,6 +23,26 @@ pub struct Storage<F: Flash, I: ImageFlash, H: HeapBanks> {
     pub heap_key: JournalKey,
 }
 
+impl<F: Flash, I: ImageFlash, H: HeapBanks> Storage<F, I, H> {
+    fn renew_epoch(
+        &mut self,
+        aid: Aid,
+        session: &mut StoredSession<H::Bank, I>,
+        staging: &mut impl PackageStaging,
+        scratch: &mut [u8],
+        provider: &mut impl CryptoProvider,
+    ) -> Result<()> {
+        self.registry.begin_renewal(aid, session, &self.images, &self.heaps,
+            &self.heap_key, staging, scratch, provider)?;
+        self.registry.recover_renewal(&self.images, &mut self.heaps, &self.heap_key,
+            staging, scratch, provider)?;
+        self.registry.handoff_renewed_session(aid, session, &self.images, &mut self.heaps,
+            &self.heap_key, scratch, provider)?;
+        staging.reset();
+        Ok(())
+    }
+}
+
 /// Concrete board and host integrations bundle the five platform resources once.
 /// Associated types keep the engine statically dispatched without leaking that
 /// plumbing through every APDU-facing type.
@@ -132,7 +152,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         })
     }
 
-    fn maintain_session(&mut self, aid: Aid,
+    fn renew_epoch_if_needed(&mut self, aid: Aid,
             session: &mut StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>,
             cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
@@ -141,16 +161,8 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         if session.remaining_commits()? > 1024 { return Ok(()); }
         if self.upload.is_some() { return Ok(()); }
         session.release_idle_memory()?;
-        self.storage.registry.begin_renewal(aid, session, &self.storage.images,
-            &self.storage.heaps, &self.storage.heap_key, &mut self.staging,
+        self.storage.renew_epoch(aid, session, &mut self.staging,
             &mut self.scratch, &mut self.provider)?;
-        // Once ownership is published, finish or retain the protected recovery copy.
-        // Cancellation must not expose the old session against a replaced bank.
-        self.storage.registry.recover_renewal(&self.storage.images, &mut self.storage.heaps,
-            &self.storage.heap_key, &self.staging, &mut self.scratch, &mut self.provider)?;
-        self.storage.registry.handoff_renewed_session(aid, session, &self.storage.images,
-            &mut self.storage.heaps, &self.storage.heap_key, &mut self.scratch, &mut self.provider)?;
-        self.staging.reset();
         session.restore_idle_memory()?;
         if cancel() { return Err(Error::Cancelled); }
         Ok(())
@@ -159,7 +171,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
     fn maintain_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
         // Any maintenance error drops the old journal handle before returning.
-        self.maintain_session(aid, &mut session, cancel)?;
+        self.renew_epoch_if_needed(aid, &mut session, cancel)?;
         self.selected = Some((aid, session));
         Ok(())
     }

@@ -48,7 +48,7 @@ impl<F: crate::journal::Flash> Store<F> {
     /// Stage a live committed heap under a newly reserved identity. The old bank is
     /// untouched; after publication, only renewal recovery may prepare that bank.
     #[allow(clippy::too_many_arguments)]
-    pub fn begin_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
+    pub(crate) fn begin_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
             S: crate::staging::PackageStaging>(
         &mut self, aid: Aid, session: &crate::jcvm_storage::Session<H::Bank, PinnedImage<I>>,
         images: &crate::image_store::Images<I>, heaps: &H, root: &crate::journal::JournalKey,
@@ -117,7 +117,7 @@ impl<F: crate::journal::Flash> Store<F> {
     /// Resolve authenticated staging ownership before uploads or applet execution.
     /// Failure retains the pending descriptor; no command is replayed.
     #[allow(clippy::too_many_arguments)]
-    pub fn recover_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
+    pub(crate) fn recover_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
             S: crate::staging::PackageStaging>(
         &mut self, images: &crate::image_store::Images<I>, heaps: &mut H,
         root: &crate::journal::JournalKey, staging: &S, scratch: &mut [u8],
