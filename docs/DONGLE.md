@@ -30,6 +30,11 @@ For a working hardware-iteration image while those optimization ceilings remain 
 add `--development-only`. The result is kept under `artifacts/development-firmware`,
 and its manifest does not claim the skipped host gates.
 
+The generated UF2 uses the nRF52840 application family `0xADA52840` required by the
+board's Adafruit-derived bootloader. USB vendor/product identifiers are not UF2 family
+identifiers; using one causes the copy to finish while the bootloader ignores every
+payload block.
+
 ```sh
 cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
 ```

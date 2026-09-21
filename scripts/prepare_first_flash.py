@@ -14,19 +14,19 @@ def flash_region(path):
    return int(value,16) if value.lower().startswith('0x') else int(value.rstrip('K'))*1024
   return field('ORIGIN'),field('LENGTH')
  raise RuntimeError(f'no FLASH region in {path}')
-MAKERDIARY_MDK_DONGLE_FAMILY=0x2886F00F
+NRF52840_UF2_FAMILY=0xADA52840
 def write_uf2(raw,origin,destination):
  """Wrap a raw image as UF2, which is how a bootloader-equipped dongle is flashed.
 
- Blocks are 512 bytes carrying 256 payload bytes each. The family identifier is the one
- this board's own bootloader announces in its CURRENT.UF2, which is its USB vendor and
- product pair rather than the generic nRF52840 family. A bootloader ignores every block
- whose family it does not recognize, so the wrong value here writes nothing at all.
+ Blocks are 512 bytes carrying 256 payload bytes each. Makerdiary ships the Adafruit
+ nRF52 bootloader, whose UF2 contract assigns 0xADA52840 to nRF52840 applications. A
+ bootloader ignores every block whose family it does not recognize, so a USB VID/PID or
+ board identifier here can appear to copy successfully while writing nothing at all.
  """
  payload=256;blocks=(len(raw)+payload-1)//payload;image=bytearray()
  for index in range(blocks):
   chunk=raw[index*payload:(index+1)*payload];chunk=chunk+bytes(payload-len(chunk))
-  image+=struct.pack('<8I',0x0A324655,0x9E5D5157,0x00002000,origin+index*payload,payload,index,blocks,MAKERDIARY_MDK_DONGLE_FAMILY)
+  image+=struct.pack('<8I',0x0A324655,0x9E5D5157,0x00002000,origin+index*payload,payload,index,blocks,NRF52840_UF2_FAMILY)
   image+=chunk+bytes(476-payload)+struct.pack('<I',0x0AB16F30)
  destination.write_bytes(bytes(image))
 def publish_bundle(staged, destination):
