@@ -17,7 +17,25 @@ That runs the checkpoint gate first, so expect it to take a while. It writes `ar
 
 ## Put the dongle in bootloader mode
 
-Hold the button while inserting the dongle, or press reset twice quickly if it is already inserted. A volume named `UF2BOOT` appears.
+From a running MicroCard development image, ask GlobalPlatformPro to authenticate and
+enter UF2 mode:
+
+```sh
+gp --secure-apdu 80FE55AA
+```
+
+The command requires the SCP03 management key. The firmware sends the protected success
+response, writes the bootloader's documented `0x57` request to `GPREGRET`, and resets.
+A volume named `UF2BOOT` appears. If the application cannot start, hold the button while
+inserting the dongle or press reset twice quickly.
+
+If startup reaches MicroCard's read-only diagnostic mode but cannot establish SCP03, send
+the same four-byte APDU without secure messaging (`gp --apdu 80FE55AA`). It is accepted
+only in that already unusable state and performs no operation other than entering UF2.
+
+Dongle builds also use that documented handoff after a Rust panic or Cortex-M hard fault.
+A failed replacement therefore returns to `UF2BOOT` instead of becoming unreachable. A
+power-loss or corrupt-vector failure can still require the physical recovery gesture.
 
 ## Copy the image
 
@@ -39,7 +57,10 @@ payload block.
 cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
 ```
 
-The dongle reboots itself when the copy finishes. The volume disappears and a smart card reader called `MicroCard MicroCard virtual smart card` takes its place.
+The dongle reboots itself when the complete UF2 copy finishes. The runtime sets VTOR to
+the application vector table before initializing RAM, so that bootloader-to-application
+handoff does not need a physical disconnect. The volume disappears and a smart card
+reader called `MicroCard MicroCard virtual smart card` takes its place.
 
 To prove what was written after returning to bootloader mode, compare the bootloader's
 readback by flash address:
@@ -81,10 +102,10 @@ Two features make this explicit. `dongle-layout` is the flash map alone. `gp-tes
 
 ## Where the flash goes
 
-This board keeps a UF2 bootloader above `0xEA000` and an S140 SoftDevice below `0x27000`. MicroCard may overwrite neither, so the image links at `0x27000` and divides the 780 KiB between them. [The board guide](BOARD.md) has the region table, and the linker reads `board/nrf52840/memory-dongle.x` for MC04 or
+The current UF2 bootloader reports `SoftDevice: not found`, starts applications at `0x1000`, and remains protected above `0xEA000`. MicroCard links at `0x1000` while retaining the established persistent-region addresses. [The board guide](BOARD.md) has the region table, and the linker reads `board/nrf52840/memory-dongle.x` for MC04 or
 `board/nrf52840/memory-dongle-jcvm.x` for JCVM. Their persistent regions differ.
 
-Those addresses were read from the bootloader's own `CURRENT.UF2` readback rather than from documentation. Confirm them against the board in front of you before trusting them, because a different bootloader version moves them.
+The application origin comes from a successful official OpenSK image and a minimal reset probe at `0x1000`. The protected upper boundary comes from the bootloader's `CURRENT.UF2` readback. A different bootloader version may use a different map.
 
 ## If the DK is what you have
 
@@ -92,36 +113,14 @@ The nRF52840 DK takes the same firmware through a debug probe instead. [First fl
 
 ## Known state
 
-On 2026-09-19, the connected board enumerated as `MicroCard virtual smart card`
-(USB `20A0:430A`). macOS PC/SC opened it with T=1 and returned ATR `3B800181`.
-Read-only `80CA006600` returned GlobalPlatform recognition data ending in `9000`,
-advertising SCP03 `i=71`. The flashed revision and engine are unknown; this confirms
-USB and APDU operation for that image, not the current JCVM build. No image was
-flashed or persistent data changed during this check. PC/SC required access outside
-the development sandbox; inside it, context creation reported service unavailable.
+On 2026-09-20, the official Makerdiary OpenSK UF2 enumerated on the connected board,
+proving the bootloader, USB wiring, and host port. Its bootloader reported no SoftDevice.
+A minimal Rust image linked at `0x1000` executed and returned to UF2. A full JCVM image
+then enumerated through `usbd-ccid` and `nrf-usbd`, exposed ATR `3B 80 01 81`, and answered
+APDUs. Its hardware-provider startup stopped with diagnostic `6F04`, so CC310 remains a
+board acceptance blocker.
 
-On 2026-09-20, the same USB identity again answered ISD SELECT and read-only card
-recognition data with `9000`. A 16-byte SCP03 INITIALIZE UPDATE then caused PC/SC to
-report `SCARD_E_NOT_TRANSACTED` while the reader disconnected and re-enumerated. The
-same failure reproduced with a raw short APDU, independently of GlobalPlatformPro.
-The flashed revision and engine are still unknown, so this is a reproducible observation
-about that image rather than evidence of a defect in the current tree. No debug probe or
-`UF2BOOT` volume was exposed, so an unattended update was not possible.
-
-The `9f44ff0` and `53870f0` attempts used UF2 family `0x2886F00F`. The copies completed
-and the bootloader rebooted, but its nRF52840 application contract requires
-`0xADA52840`, so those transfers did not establish that any payload block was written.
-They provide no evidence about boot handoff or firmware startup. Revision `3c17c99`
-corrects the family, starts at `0x27000`, and has not yet been transferred to the board.
-Its startup path also keeps CCID observable for hardware self-test and storage-open
-failures, which previously stopped before USB initialization.
-
-One flash attempt ended with the copy reporting an input and output error, the `UF2BOOT` volume disappearing, and the board never re-enumerating. That error is ambiguous on its own, because a UF2 bootloader reboots the moment it has every block and severs the copy, which produces the same message as a write that stopped early.
-
-Two things are worth separating before flashing again.
-
-Copy the file with a tool that reports a short write rather than `cp`, so a truncated transfer is visible instead of being guessed at. The image is over thirteen hundred blocks and `cp` shows no progress.
-
-Then rule out the handover. This board's bootloader starts an application through the SoftDevice's master boot record, and a bare image linked at the application origin may need forwarding that a SoftDevice-based application arranges for itself. That would be a property of the image rather than of the transfer, and it needs the reset path checked rather than another copy.
-
-Recovery is expected to work, because only the application region is ever targeted. The bootloader above `0xEA000` and the SoftDevice below `0x27000` are named in no block of the file.
+The Cortex-M runtime sets VTOR to the application vector table before Rust data
+initialization can overwrite the MBR's RAM forwarding word. The next hardware run must
+verify software-requested UF2 entry, automatic boot after copying, and the corrected
+provider startup before applet loading begins.

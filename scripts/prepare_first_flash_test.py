@@ -12,10 +12,10 @@ def main():
     with tempfile.TemporaryDirectory() as root:
         destination = pathlib.Path(root) / "firmware.uf2"
         raw = bytes(index & 0xff for index in range(300))
-        write_uf2(raw, 0x27000, destination)
+        write_uf2(raw, 0x1000, destination)
         image = destination.read_bytes()
         assert len(image) == 1024
-        for index, target in enumerate((0x27000, 0x27100)):
+        for index, target in enumerate((0x1000, 0x1100)):
             block = image[index * 512:(index + 1) * 512]
             header = struct.unpack_from("<8I", block)
             assert header == (0x0A324655, 0x9E5D5157, 0x2000, target, 256,

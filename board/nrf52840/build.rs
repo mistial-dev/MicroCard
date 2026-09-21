@@ -140,7 +140,7 @@ fn flash_layout(path: &str) -> String {
         "{path}: wrong engine storage regions"
     );
     let (first, last) = if path.starts_with("memory-dongle") {
-        (0x27000, 0xea000)
+        (0x1000, 0xea000)
     } else {
         (0, 0x100000)
     };

@@ -6,6 +6,8 @@ mod jcvm;
 #[cfg(feature = "usb-ccid")]
 mod usb_ccid;
 use cortex_m_rt::entry;
+#[cfg(feature = "dongle-layout")]
+use cortex_m_rt::{exception, ExceptionFrame};
 use microcard_core::{
     hal::{
         receive_command, send_response, ApduTransport, DeviceIdentity, Entropy, LogicalGpio,
@@ -15,7 +17,7 @@ use microcard_core::{
     journal::{decode_monotonic_bits, Flash},
     provisioning::{ownership_marker_action, OwnershipMarkerAction, PROGRAMMED_OWNERSHIP_MARKER},
     scp03::Keys,
-    transport::Endpoint,
+    transport::{Endpoint, ENTER_BOOTLOADER_APDU},
     Error, Result,
 };
 #[cfg(feature = "usb-ccid")]
@@ -64,6 +66,24 @@ unsafe extern "C" {
 }
 use layout::{KEYS_BASE, KEYS_BYTES};
 const OWNERSHIP_MARKER_OFFSET: usize = 32;
+
+#[cfg(feature = "dongle-layout")]
+fn enter_uf2() -> ! {
+    // The Makerdiary bootloader documents 0x57 in GPREGRET as its application-to-UF2
+    // handoff. Use the generated peripheral API so the register address and field width
+    // continue to come from Nordic's device description.
+    unsafe {
+        (&*pac::POWER::ptr())
+            .gpregret
+            .write(|w| w.gpregret().bits(0x57));
+    }
+    cortex_m::peripheral::SCB::sys_reset()
+}
+
+#[cfg(feature = "usb-ccid")]
+fn is_enter_uf2_command(command: &[u8]) -> bool {
+    cfg!(feature = "dongle-layout") && command == ENTER_BOOTLOADER_APDU
+}
 
 #[cfg(feature = "usb-ccid")]
 type BoardUsbDevice = UsbDevice<'static, usb_ccid::UsbBus>;
@@ -129,21 +149,29 @@ fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], code: u8) -> 
             if powered && !attempted {
                 attempted = true;
                 usb_stack = initialize_usb();
-                if usb_stack.is_some() {
-                    let start = now();
-                    usb_ccid::attach_when_regulator_ready(|| {
-                        feed();
-                        now().wrapping_sub(start) > 100_000
-                    });
-                }
             }
             if let Some((device, class, responder)) = usb_stack.as_mut() {
                 if powered {
                     let _ = device.poll(&mut [class]);
-                    if responder.take_request().is_some() {
+                    if let Some(request) = responder.take_request() {
                         let mut response = heapless::Vec::new();
-                        let _ = response.extend_from_slice(&[0x6f, code]);
+                        let uf2_requested = is_enter_uf2_command(&request);
+                        let status = if uf2_requested { [0x90, 0x00] } else { [0x6f, code] };
+                        let _ = response.extend_from_slice(&status);
                         let _ = responder.respond(response);
+                        #[cfg(feature = "dongle-layout")]
+                        if uf2_requested {
+                            // The card cannot establish SCP03 in diagnostic mode. This exact
+                            // command only resets an already unusable development dongle into
+                            // its bootloader, and remains unavailable during normal operation.
+                            let deadline = now().wrapping_add(250_000);
+                            while now().wrapping_sub(deadline) >= 0x8000_0000 {
+                                feed();
+                                let _ = device.poll(&mut [class]);
+                                class.check_for_app_response();
+                            }
+                            enter_uf2();
+                        }
                     }
                     class.check_for_app_response();
                 }
@@ -2054,6 +2082,8 @@ fn main() -> ! {
     #[cfg(feature = "usb-ccid")]
     let mut usb_was_powered = false;
     let mut command = [0; MAX_SHORT_COMMAND_BYTES];
+    #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
+    let mut enter_uf2_at = None;
     loop {
         #[cfg(feature = "usb-ccid")]
         {
@@ -2061,16 +2091,6 @@ fn main() -> ! {
             if powered && usb_stack.is_none() {
                 usb_stack = initialize_usb();
                 usb_was_powered = usb_stack.is_some();
-                if usb_was_powered {
-                    // Building the device enabled USBD and raised the pull-up. Re-attach
-                    // once the supply regulator reports ready, bounded so a regulator
-                    // that never settles cannot wedge the management transport.
-                    let start = now();
-                    usb_ccid::attach_when_regulator_ready(|| {
-                        feed();
-                        now().wrapping_sub(start) > 100_000
-                    });
-                }
             }
             if let Some((device, class, responder)) = usb_stack.as_mut() {
                 if powered {
@@ -2090,8 +2110,20 @@ fn main() -> ! {
                         if outgoing.extend_from_slice(&reply).is_ok() {
                             let _ = responder.respond(outgoing);
                         }
+                        #[cfg(feature = "dongle-layout")]
+                        if endpoint.take_bootloader_request() {
+                            // Keep polling long enough to transmit the protected response before
+                            // asking the installed Adafruit-derived bootloader to enter UF2.
+                            enter_uf2_at = Some(now().wrapping_add(250_000));
+                        }
                     }
                     class.check_for_app_response();
+                    #[cfg(feature = "dongle-layout")]
+                    if enter_uf2_at.is_some_and(|deadline| {
+                        now().wrapping_sub(deadline) < 0x8000_0000
+                    }) {
+                        enter_uf2();
+                    }
                 } else if usb_was_powered {
                     endpoint.reset();
                     usb_was_powered = false;
@@ -2113,7 +2145,16 @@ fn main() -> ! {
 }
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
+    #[cfg(feature = "dongle-layout")]
+    enter_uf2();
+    #[cfg(not(feature = "dongle-layout"))]
     loop {
         cortex_m::asm::wfi();
     }
+}
+
+#[cfg(feature = "dongle-layout")]
+#[exception]
+unsafe fn HardFault(_: &ExceptionFrame) -> ! {
+    enter_uf2()
 }

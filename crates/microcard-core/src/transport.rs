@@ -8,6 +8,8 @@ use crate::{
 };
 use alloc::vec::Vec;
 
+pub const ENTER_BOOTLOADER_APDU: [u8; 4] = [0x80, 0xfe, 0x55, 0xaa];
+
 fn fixed_response(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut response = Vec::new();
     response
@@ -26,6 +28,7 @@ pub struct Endpoint<C: CardEngine> {
     keys: Keys,
     session: Option<Session>,
     status_cursor: Option<StatusCursor>,
+    bootloader_requested: bool,
 }
 impl<C: CardEngine> Endpoint<C> {
     pub fn new(card: C, keys: Keys) -> Self {
@@ -34,7 +37,16 @@ impl<C: CardEngine> Endpoint<C> {
             keys,
             session: None,
             status_cursor: None,
+            bootloader_requested: false,
         }
+    }
+
+    /// Consume a board bootloader request accepted through authenticated management.
+    ///
+    /// The portable transport records intent only. The board owns the reset mechanism and
+    /// waits until the protected response has reached its physical transport.
+    pub fn take_bootloader_request(&mut self) -> bool {
+        core::mem::take(&mut self.bootloader_requested)
     }
     pub fn exchange(&mut self, raw: &[u8]) -> Vec<u8> {
         self.exchange_with_cancel(raw, &mut || false)
@@ -219,6 +231,22 @@ impl<C: CardEngine> Endpoint<C> {
                 if data.is_some() { 0x9000 } else { 0x6a88 },
                 self.card.crypto_provider(),
             );
+        }
+        if management_class && verified.command().ins == ENTER_BOOTLOADER_APDU[1] {
+            let command = verified.command();
+            if verified.level() & crate::scp03::MANAGEMENT_SECURITY_LEVEL == 0 {
+                return s.response_with(&[], 0x6985, self.card.crypto_provider());
+            }
+            if command.p1 != ENTER_BOOTLOADER_APDU[2]
+                || command.p2 != ENTER_BOOTLOADER_APDU[3]
+                || !command.data.is_empty()
+                || command.le.is_some()
+            {
+                return s.response_with(&[], 0x6a80, self.card.crypto_provider());
+            }
+            let response = s.response_with(&[], 0x9000, self.card.crypto_provider())?;
+            self.bootloader_requested = true;
+            return Ok(response);
         }
         if management_class && verified.command().ins == 0xf2 {
             let command = verified.command();
