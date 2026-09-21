@@ -397,6 +397,9 @@ mod tests {
             [0x6a, 0x88]
         );
 
+        assert_eq!(endpoint.exchange(&ENTER_BOOTLOADER_APDU), [0x69, 0x82]);
+        assert!(!endpoint.take_bootloader_request());
+
         command[12] ^= 1;
         assert_eq!(endpoint.exchange(&command), [0x6a, 0x82]);
     }
