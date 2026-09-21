@@ -867,11 +867,21 @@ mod tests {
                 if self.fail_random { return Err(Error::Storage); }
                 Ok(())
             }
-            fn digest(&mut self, algorithm: u8, _message: &[u8], output: &mut [u8]) -> Result<usize> {
+            fn digest(&mut self, algorithm: u8, message: &[u8], output: &mut [u8]) -> Result<usize> {
                 assert_eq!(algorithm, 4);
                 self.digest_calls += 1;
                 if self.fail_digest { return Err(Error::Storage); }
-                output.fill(self.digest_calls as u8);
+                let mut value = 0xcbf2_9ce4_8422_2325u64 ^ u64::from(algorithm);
+                for byte in message {
+                    value ^= u64::from(*byte);
+                    value = value.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+                for byte in output.iter_mut() {
+                    value ^= value << 13;
+                    value ^= value >> 7;
+                    value ^= value << 17;
+                    *byte = value as u8;
+                }
                 Ok(output.len())
             }
         }
@@ -916,21 +926,37 @@ mod tests {
             assert_eq!(host.random_calls, calls);
             assert_eq!(frame.depth(), 0);
         }
-        assert_eq!(host.random_calls, 2);
+        assert_eq!(host.random_calls, 3, "pseudo construction seeds once; secure output always uses entropy");
 
-        heap.byte_slice_mut(output, 0, 6).unwrap().copy_from_slice(b"seed!!");
+        let seed = heap.new_array(heap::KIND_BYTE, 6, 1).unwrap();
+        heap.byte_slice_mut(seed, 0, 6).unwrap().copy_from_slice(b"seed!!");
+        let digest_calls = host.digest_calls;
         invoke_security(ClassId::RandomData, MethodId::setSeed,
-            &[(true, pseudo), (true, output), (false, 0), (false, 4)],
+            &[(true, pseudo), (true, seed), (false, 0), (false, 4)],
             &mut heap, &mut frame, &mut host).unwrap();
-        assert_eq!(host.digest_calls, 1);
-        for expected in [2, 3] {
+        assert_eq!(host.digest_calls, digest_calls + 2);
+        let random_calls = host.random_calls;
+        let mut pseudo_outputs = [[0u8; 6]; 2];
+        for captured in &mut pseudo_outputs {
             invoke_security(ClassId::RandomData, MethodId::nextBytes,
                 &[(true, pseudo), (true, output), (false, 0), (false, 6)],
                 &mut heap, &mut frame, &mut host).unwrap();
             assert_eq!(frame.pop_short(), Ok(6));
-            assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[expected; 6]);
+            captured.copy_from_slice(heap.byte_slice(output, 0, 6).unwrap());
         }
-        assert_eq!(host.random_calls, 2, "seeded output must use the digest provider");
+        assert_ne!(pseudo_outputs[0], pseudo_outputs[1], "the PRNG chain must advance");
+        assert_eq!(host.random_calls, random_calls, "pseudo output must not request entropy");
+
+        invoke_security(ClassId::RandomData, MethodId::setSeed,
+            &[(true, pseudo), (true, seed), (false, 0), (false, 4)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::RandomData, MethodId::nextBytes,
+            &[(true, pseudo), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short(), Ok(6));
+        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), pseudo_outputs[0],
+            "re-seeding with the same fixture must replay the deterministic stream");
+
         host.fail_digest = true;
         heap.byte_slice_mut(output, 0, 6).unwrap().fill(0x55);
         assert!(matches!(invoke_security(ClassId::RandomData, MethodId::nextBytes,
@@ -939,16 +965,34 @@ mod tests {
         assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x55; 6]);
         host.fail_digest = false;
 
-        invoke_security(ClassId::RandomData, MethodId::setSeed,
-            &[(true, secure), (true, output), (false, 0), (false, 4)],
+        heap.begin_transaction(64).unwrap();
+        invoke_security(ClassId::RandomData, MethodId::nextBytes,
+            &[(true, pseudo), (true, output), (false, 0), (false, 6)],
             &mut heap, &mut frame, &mut host).unwrap();
-        assert_eq!(host.random_calls, 3, "secure seeding must add provider entropy");
-        assert_eq!(host.digest_calls, 6);
+        assert_eq!(frame.pop_short(), Ok(6));
+        let generated_in_transaction: [u8; 6] = heap.byte_slice(output, 0, 6).unwrap().try_into().unwrap();
+        assert!(!heap.abort_transaction(&mut []).unwrap());
+        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x55; 6]);
+        invoke_security(ClassId::RandomData, MethodId::nextBytes,
+            &[(true, pseudo), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short(), Ok(6));
+        assert_ne!(heap.byte_slice(output, 0, 6).unwrap(), generated_in_transaction,
+            "transaction abort must not roll the PRNG stream backward");
+
+        let random_calls = host.random_calls;
+        let digest_calls = host.digest_calls;
+        invoke_security(ClassId::RandomData, MethodId::setSeed,
+            &[(true, secure), (true, seed), (false, 0), (false, 4)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(host.random_calls, random_calls + 1, "secure seeding must add provider entropy");
+        assert_eq!(host.digest_calls, digest_calls + 2);
         invoke_security(ClassId::RandomData, MethodId::generateData,
             &[(true, secure), (true, output), (false, 0), (false, 6)],
             &mut heap, &mut frame, &mut host).unwrap();
-        assert_eq!(host.random_calls, 4, "secure output must always use provider entropy");
-        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x45; 6]);
+        assert_eq!(host.random_calls, random_calls + 2, "secure output must always use provider entropy");
+        assert_ne!(heap.byte_slice(output, 0, 6).unwrap(), &[0x42; 6],
+            "the caller seed must contribute to secure output");
         host.fail_random = true;
         heap.byte_slice_mut(output, 0, 6).unwrap().fill(0x55);
         assert!(matches!(invoke_security(ClassId::RandomData, MethodId::generateData,
@@ -958,11 +1002,18 @@ mod tests {
         host.fail_random = false;
 
         heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
+        let random_calls = host.random_calls;
         invoke_security(ClassId::RandomData, MethodId::generateData,
             &[(true, pseudo), (true, output), (false, 0), (false, 6)],
             &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(host.random_calls, random_calls, "reset must preserve persistent PRNG state");
+        let digest_calls = host.digest_calls;
+        invoke_security(ClassId::RandomData, MethodId::generateData,
+            &[(true, secure), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(host.random_calls, random_calls + 1);
+        assert_eq!(host.digest_calls, digest_calls, "reset must clear the optional secure seed mask");
         assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x42; 6]);
-        assert_eq!(host.random_calls, 6);
     }
 
     #[test]

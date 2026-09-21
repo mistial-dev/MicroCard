@@ -36,6 +36,56 @@ const COUNTER: usize = 4;
 /// Reset-scoped cipher state: count/seen-input flag, fifteen pending bytes, then CBC IV.
 const PENDING: usize = 5;
 const RANDOM_STATE_BYTES: u16 = 33; // Seeded flag followed by a SHA-256 chain value.
+const PSEUDO_INIT_DOMAIN: &[u8] = b"MicroCard JCVM PRNG init v1";
+const PSEUDO_SEED_DOMAIN: &[u8] = b"MicroCard JCVM PRNG seed v1";
+const PSEUDO_STEP_DOMAIN: &[u8] = b"MicroCard JCVM PRNG step v1";
+const SECURE_SEED_DOMAIN: &[u8] = b"MicroCard JCVM secure seed v1";
+const SECURE_MASK_DOMAIN: &[u8] = b"MicroCard JCVM secure mask v1";
+
+#[derive(Clone, Copy)]
+pub(crate) struct SecureRandom;
+#[derive(Clone, Copy)]
+pub(crate) struct PseudoRandom;
+
+#[derive(Clone, Copy)]
+enum RandomService {
+    Secure(SecureRandom),
+    Pseudo(PseudoRandom),
+}
+
+impl RandomService {
+    fn from_algorithm(algorithm: u8) -> Result<Self> {
+        match algorithm {
+            1 => Ok(Self::Pseudo(PseudoRandom)),
+            2 => Ok(Self::Secure(SecureRandom)),
+            _ => Err(Error::Unsupported),
+        }
+    }
+}
+
+fn random_domain_hash(host: &mut dyn crate::host::Host, domain: &[u8], material: &[u8; 32],
+        output: &mut [u8; 32]) -> Result<()> {
+    if domain.len() > 32 { return Err(Error::Format); }
+    let mut input = Zeroizing::new([0u8; 64]);
+    input[..domain.len()].copy_from_slice(domain);
+    input[32..].copy_from_slice(material);
+    if host.digest(4, &input[..], &mut output[..])? != output.len() { return Err(Error::Format); }
+    Ok(())
+}
+
+fn store_pseudo_chain(heap: &mut Heap, state: u16, chain: &[u8; 32]) -> Result<()> {
+    let mut encoded = Zeroizing::new([0u8; RANDOM_STATE_BYTES as usize]);
+    encoded[0] = 1;
+    encoded[1..].copy_from_slice(chain);
+    heap.write_bytes_unconditional(state, 0, &encoded[..])
+}
+
+fn store_secure_chain(heap: &mut Heap, state: u16, chain: &[u8; 32]) -> Result<()> {
+    let destination = heap.byte_slice_mut(state, 0, RANDOM_STATE_BYTES as usize)?;
+    destination[0] = 1;
+    destination[1..].copy_from_slice(chain);
+    Ok(())
+}
 
 pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops::Range<usize>>> {
     if info.kind != heap::KIND_OBJECT { return Ok(None); }
@@ -351,8 +401,20 @@ pub fn call(
                 heap.put_word(instance, PENDING, pending)?;
             }
             if let Some(bytes) = random_state {
-                let state = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
+                let service = RandomService::from_algorithm(algorithm as u8)?;
+                let state = match service {
+                    RandomService::Pseudo(_) => heap.new_array(heap::KIND_BYTE, bytes, context)?,
+                    RandomService::Secure(_) => heap.new_transient_array(
+                        heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?,
+                };
                 heap.put_word(instance, MATERIAL, state)?;
+                if matches!(service, RandomService::Pseudo(_)) {
+                    let mut entropy = Zeroizing::new([0u8; 32]);
+                    host.random(&mut entropy[..])?;
+                    let mut chain = Zeroizing::new([0u8; 32]);
+                    random_domain_hash(host, PSEUDO_INIT_DOMAIN, &entropy, &mut chain)?;
+                    store_pseudo_chain(heap, state, &chain)?;
+                }
             }
             frame.push_reference(instance)?;
         }
@@ -526,39 +588,38 @@ pub fn call(
             result.try_reserve_exact(length as usize).map_err(|_| Error::Quota)?;
             result.resize(length as usize, 0);
             let algorithm = word_field(heap, this, KIND)? as u8;
+            let service = RandomService::from_algorithm(algorithm)?;
             let state = heap.get_word(this, MATERIAL)?;
             let seeded = state != NULL && heap.byte_slice(state, 0, RANDOM_STATE_BYTES as usize)?[0] != 0;
-            let mut next_chain = None;
-            if algorithm == 1 && seeded {
-                let mut chain = Zeroizing::new([0u8; 32]);
-                chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
-                for output in result.chunks_mut(32) {
-                    let mut next = Zeroizing::new([0u8; 32]);
-                    if host.digest(4, &chain[..], &mut next[..])? != 32 { return Err(Error::Format); }
-                    let count = output.len();
-                    output.copy_from_slice(&next[..count]);
-                    *chain = *next;
-                }
-                next_chain = Some(*chain);
-            } else {
-                host.random(&mut result)?;
-                // A secure generator always begins with fresh provider entropy. A seed
-                // contributes an additional mask; it can never replace that entropy or
-                // turn ALG_SECURE_RANDOM into an applet-controlled deterministic stream.
-                if algorithm == 2 && seeded {
+            match service {
+                RandomService::Pseudo(_) => {
+                    if !seeded { return Err(Error::Format); }
                     let mut chain = Zeroizing::new([0u8; 32]);
                     chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
                     for output in result.chunks_mut(32) {
                         let mut next = Zeroizing::new([0u8; 32]);
-                        if host.digest(4, &chain[..], &mut next[..])? != 32 { return Err(Error::Format); }
-                        for (byte, mask) in output.iter_mut().zip(next.iter()) { *byte ^= mask; }
+                        random_domain_hash(host, PSEUDO_STEP_DOMAIN, &chain, &mut next)?;
+                        let count = output.len();
+                        output.copy_from_slice(&next[..count]);
                         *chain = *next;
                     }
-                    next_chain = Some(*chain);
+                    // This state is intentionally outside Java Card transaction rollback.
+                    store_pseudo_chain(heap, state, &chain)?;
                 }
-            }
-            if let Some(chain) = next_chain {
-                heap.byte_slice_mut(state, 1, 32)?.copy_from_slice(&chain);
+                RandomService::Secure(_) => {
+                    host.random(&mut result)?;
+                    if seeded {
+                        let mut chain = Zeroizing::new([0u8; 32]);
+                        chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
+                        for output in result.chunks_mut(32) {
+                            let mut next = Zeroizing::new([0u8; 32]);
+                            random_domain_hash(host, SECURE_MASK_DOMAIN, &chain, &mut next)?;
+                            for (byte, mask) in output.iter_mut().zip(next.iter()) { *byte ^= mask; }
+                            *chain = *next;
+                        }
+                        store_secure_chain(heap, state, &chain)?;
+                    }
+                }
             }
             heap.byte_slice_mut(array, offset as usize, length as usize)?.copy_from_slice(&result);
             if method == MethodId::nextBytes {
@@ -575,21 +636,28 @@ pub fn call(
             let seed = heap.byte_slice(source, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             let algorithm = word_field(heap, this, KIND)? as u8;
+            let service = RandomService::from_algorithm(algorithm)?;
             let mut seed_digest = Zeroizing::new([0u8; 32]);
             if host.digest(4, seed, &mut seed_digest[..])? != 32 { return Err(Error::Format); }
             let mut chain = Zeroizing::new([0u8; 32]);
-            if algorithm == 2 {
-                let mut mixed = Zeroizing::new([0u8; 64]);
-                host.random(&mut mixed[..32])?;
-                mixed[32..].copy_from_slice(&seed_digest[..]);
-                if host.digest(4, &mixed[..], &mut chain[..])? != 32 { return Err(Error::Format); }
-            } else {
-                *chain = *seed_digest;
+            match service {
+                RandomService::Pseudo(_) => {
+                    random_domain_hash(host, PSEUDO_SEED_DOMAIN, &seed_digest, &mut chain)?;
+                }
+                RandomService::Secure(_) => {
+                    let mut entropy = Zeroizing::new([0u8; 32]);
+                    host.random(&mut entropy[..])?;
+                    for (byte, seed_byte) in entropy.iter_mut().zip(seed_digest.iter()) {
+                        *byte ^= seed_byte;
+                    }
+                    random_domain_hash(host, SECURE_SEED_DOMAIN, &entropy, &mut chain)?;
+                }
             }
             let state = heap.get_word(this, MATERIAL)?;
-            let destination = heap.byte_slice_mut(state, 0, RANDOM_STATE_BYTES as usize)?;
-            destination[0] = 1;
-            destination[1..].copy_from_slice(&chain[..]);
+            match service {
+                RandomService::Pseudo(_) => store_pseudo_chain(heap, state, &chain)?,
+                RandomService::Secure(_) => store_secure_chain(heap, state, &chain)?,
+            }
         }
         _ => return Ok(Native::Unimplemented),
     }
