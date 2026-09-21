@@ -3,7 +3,7 @@ use super::{layout, Hardware, Nvm, StagingNvm};
 use microcard_core::{
     hal::Entropy,
     image_store::Images,
-    jcvm_card::{JcvmEngine, Storage},
+    jcvm_card::{JcvmBackend, JcvmEngine, Storage},
     jcvm_registry::{Registry, Store},
     jcvm_storage::{heap_root, HeapBanks},
     journal::JournalKey,
@@ -45,7 +45,24 @@ impl HeapBanks for Heaps {
 }
 
 type Staging = BoundedFlashStaging<StagingNvm, { microcard_core::jcvm_package::MAX_PACKAGE_BYTES }>;
-pub(super) type BoardCard = JcvmEngine<Nvm, Nvm, Heaps, Hardware, Staging>;
+pub(super) struct BoardBackend {
+    storage: Storage<Nvm, Nvm, Heaps>,
+    hardware: Hardware,
+    staging: Staging,
+    scratch: alloc::vec::Vec<u8>,
+}
+impl JcvmBackend for BoardBackend {
+    type RegistryFlash = Nvm;
+    type ImageFlash = Nvm;
+    type HeapBanks = Heaps;
+    type Provider = Hardware;
+    type Staging = Staging;
+
+    fn into_parts(self) -> (Storage<Nvm, Nvm, Heaps>, Hardware, Staging, alloc::vec::Vec<u8>) {
+        (self.storage, self.hardware, self.staging, self.scratch)
+    }
+}
+pub(super) type BoardCard = JcvmEngine<BoardBackend>;
 
 pub(super) fn open(mut hardware: Hardware, key: JournalKey) -> Result<BoardCard> {
     let heap_key = heap_root(&mut hardware, &key)?;
@@ -62,10 +79,10 @@ pub(super) fn open(mut hardware: Hardware, key: JournalKey) -> Result<BoardCard>
         heaps: Heaps,
         heap_key,
     };
-    JcvmEngine::open(
+    JcvmEngine::open(BoardBackend {
         storage,
         hardware,
-        Staging::new(StagingNvm::new()),
-        alloc::vec![0; 16384],
-    )
+        staging: Staging::new(StagingNvm::new()),
+        scratch: alloc::vec![0; 16384],
+    })
 }

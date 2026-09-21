@@ -11,8 +11,26 @@ use alloc::{rc::Rc, vec};
 use core::cell::RefCell;
 use microcard_engine_jcvm::cap::LoadFile;
 
-type TestCard =
-    JcvmEngine<MemoryFlash, MemoryFlash, Heaps, Provider, BoundedFlashStaging<Scratch, MAX_PACKAGE_BYTES>>;
+type TestStaging = BoundedFlashStaging<Scratch, MAX_PACKAGE_BYTES>;
+struct TestBackend {
+    storage: Storage<MemoryFlash, MemoryFlash, Heaps>,
+    provider: Provider,
+    staging: TestStaging,
+    scratch: Vec<u8>,
+}
+impl JcvmBackend for TestBackend {
+    type RegistryFlash = MemoryFlash;
+    type ImageFlash = MemoryFlash;
+    type HeapBanks = Heaps;
+    type Provider = Provider;
+    type Staging = TestStaging;
+
+    fn into_parts(self) -> (Storage<MemoryFlash, MemoryFlash, Heaps>, Provider,
+            TestStaging, Vec<u8>) {
+        (self.storage, self.provider, self.staging, self.scratch)
+    }
+}
+type TestCard = JcvmEngine<TestBackend>;
 
 struct Host {
     key: [u8; 16],
@@ -111,12 +129,12 @@ fn lv(values: &[&[u8]]) -> Vec<u8> {
 
 fn endpoint(storage: Storage<MemoryFlash, MemoryFlash, Heaps>) -> Endpoint<TestCard> {
     Endpoint::new(
-        JcvmEngine::open(
+        JcvmEngine::open(TestBackend {
             storage,
-            Provider,
-            BoundedFlashStaging::new(Scratch(vec![0xff; MAX_PACKAGE_BYTES])),
-            vec![0; 16384],
-        )
+            provider: Provider,
+            staging: BoundedFlashStaging::new(Scratch(vec![0xff; MAX_PACKAGE_BYTES])),
+            scratch: vec![0; 16384],
+        })
         .unwrap(),
         Keys {
             enc: [1; 16],

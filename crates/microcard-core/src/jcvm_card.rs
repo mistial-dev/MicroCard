@@ -23,6 +23,24 @@ pub struct Storage<F: Flash, I: ImageFlash, H: HeapBanks> {
     pub heap_key: JournalKey,
 }
 
+/// Concrete board and host integrations bundle the five platform resources once.
+/// Associated types keep the engine statically dispatched without leaking that
+/// plumbing through every APDU-facing type.
+pub trait JcvmBackend: Sized {
+    type RegistryFlash: Flash;
+    type ImageFlash: ImageFlash;
+    type HeapBanks: HeapBanks;
+    type Provider: CryptoProvider + Entropy;
+    type Staging: PackageStaging;
+
+    fn into_parts(self) -> (
+        Storage<Self::RegistryFlash, Self::ImageFlash, Self::HeapBanks>,
+        Self::Provider,
+        Self::Staging,
+        Vec<u8>,
+    );
+}
+
 struct Upload {
     load: Aid,
     domain: Aid,
@@ -40,30 +58,25 @@ struct Retained {
     state: microcard_engine_jcvm::applet::VolatileState,
 }
 
-pub struct JcvmEngine<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
-    storage: Storage<F, I, H>,
-    provider: P,
-    staging: S,
+pub struct JcvmEngine<B: JcvmBackend> {
+    storage: Storage<B::RegistryFlash, B::ImageFlash, B::HeapBanks>,
+    provider: B::Provider,
+    staging: B::Staging,
     scratch: Vec<u8>,
     upload: Option<Upload>,
-    selected: Option<(Aid, StoredSession<H::Bank, I>)>,
+    selected: Option<(Aid, StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>)>,
     retained: Vec<Retained>,
     reset_requested: bool,
+    backend: core::marker::PhantomData<B>,
     #[cfg(feature = "scp03-pseudo-random")]
     sequences: Option<core::ops::RangeInclusive<u32>>,
 }
 
-impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: PackageStaging>
-    JcvmEngine<F, I, H, P, S>
-{
+impl<B: JcvmBackend> JcvmEngine<B> {
     /// Verify all committed references on boot. Recovery never repairs missing heaps
     /// by running install, and each temporary session is dropped before opening another.
-    pub fn open(
-        mut storage: Storage<F, I, H>,
-        mut provider: P,
-        mut staging: S,
-        mut scratch: Vec<u8>,
-    ) -> Result<Self> {
+    pub fn open(backend: B) -> Result<Self> {
+        let (mut storage, mut provider, mut staging, mut scratch) = backend.into_parts();
         storage.registry.recover_renewal(&storage.images, &mut storage.heaps,
             &storage.heap_key, &staging, &mut scratch, &mut provider)?;
         staging.reset();
@@ -100,12 +113,14 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
             selected: None,
             retained: Vec::new(),
             reset_requested: false,
+            backend: core::marker::PhantomData,
             #[cfg(feature = "scp03-pseudo-random")]
             sequences: None,
         })
     }
 
-    fn maintain_session(&mut self, aid: Aid, session: &mut StoredSession<H::Bank, I>,
+    fn maintain_session(&mut self, aid: Aid,
+            session: &mut StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>,
             cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
         // Renew between callbacks. This reserve is a maintenance threshold, not a
@@ -224,7 +239,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
         response_wire(response)
     }
 
-    pub fn into_storage(self) -> Storage<F, I, H> {
+    pub fn into_storage(self) -> Storage<B::RegistryFlash, B::ImageFlash, B::HeapBanks> {
         self.storage
     }
 
@@ -335,15 +350,13 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
     }
 }
 
-impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: PackageStaging>
-    CardEngine for JcvmEngine<F, I, H, P, S>
-{
-    type Provider = P;
+impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
+    type Provider = B::Provider;
     const DIRECT_APDUS: bool = true;
     fn is_application_command(&self, command: &Command<'_>) -> bool {
         command.cla == 0 || command.ins == 0xa4 || self.selected.is_some() && command.ins != 0xe2
     }
-    fn crypto_provider(&mut self) -> &mut P {
+    fn crypto_provider(&mut self) -> &mut B::Provider {
         &mut self.provider
     }
     fn random(&mut self, output: &mut [u8]) -> Result<()> {
