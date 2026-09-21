@@ -89,17 +89,27 @@ int32_t microcard_cc310_aes128_cbc_in_place(const uint8_t *key,
     }
 
     size_t written = 0u;
-    if (status == PSA_SUCCESS) {
+    while (status == PSA_SUCCESS && written < buffer_size) {
+        size_t block_written = 0u;
         status = psa_driver_wrapper_cipher_update(
-            &operation, buffer, buffer_size, buffer, buffer_size, &written);
+            &operation,
+            buffer + written,
+            MICROCARD_AES_BLOCK_BYTES,
+            buffer + written,
+            MICROCARD_AES_BLOCK_BYTES,
+            &block_written);
+        if (status == PSA_SUCCESS && block_written != MICROCARD_AES_BLOCK_BYTES) {
+            status = PSA_ERROR_CORRUPTION_DETECTED;
+        } else if (status == PSA_SUCCESS) {
+            written += block_written;
+        }
     }
     size_t tail = 0u;
-    if (status == PSA_SUCCESS && written <= buffer_size) {
+    if (status == PSA_SUCCESS) {
         status = psa_driver_wrapper_cipher_finish(
-            &operation, buffer + written, buffer_size - written, &tail);
+            &operation, NULL, 0u, &tail);
     }
-    if (status == PSA_SUCCESS &&
-        (written > buffer_size || tail != buffer_size - written)) {
+    if (status == PSA_SUCCESS && (written != buffer_size || tail != 0u)) {
         status = PSA_ERROR_CORRUPTION_DETECTED;
     }
     (void)psa_driver_wrapper_cipher_abort(&operation);
@@ -151,6 +161,12 @@ static int32_t microcard_cc310_aes128_ccm(const uint8_t *key,
     psa_set_key_usage_flags(
         &attributes, decrypt != 0 ? PSA_KEY_USAGE_DECRYPT : PSA_KEY_USAGE_ENCRYPT);
     psa_set_key_algorithm(&attributes, PSA_ALG_CCM);
+
+    /* Rust represents an empty slice with a non-null dangling pointer. Do not pass that
+     * sentinel into a hardware driver even though its length is zero. */
+    if (aad_size == 0u) {
+        aad = NULL;
+    }
 
     size_t written = 0u;
     psa_status_t status;

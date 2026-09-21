@@ -6,8 +6,10 @@ mod jcvm;
 #[cfg(feature = "usb-ccid")]
 mod usb_ccid;
 use cortex_m_rt::entry;
-#[cfg(feature = "dongle-layout")]
+#[cfg(feature = "development-recovery")]
 use cortex_m_rt::{exception, ExceptionFrame};
+#[cfg(feature = "usb-ccid")]
+use microcard_core::transport::ENTER_BOOTLOADER_APDU;
 use microcard_core::{
     hal::{
         receive_command, send_response, ApduTransport, DeviceIdentity, Entropy, LogicalGpio,
@@ -17,7 +19,7 @@ use microcard_core::{
     journal::{decode_monotonic_bits, Flash},
     provisioning::{ownership_marker_action, OwnershipMarkerAction, PROGRAMMED_OWNERSHIP_MARKER},
     scp03::Keys,
-    transport::{Endpoint, ENTER_BOOTLOADER_APDU},
+    transport::Endpoint,
     Error, Result,
 };
 #[cfg(feature = "usb-ccid")]
@@ -29,7 +31,7 @@ use nrf52840_hal::{
 #[cfg(feature = "usb-ccid")]
 use usb_device::{
     bus::UsbBusAllocator,
-    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
+    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
     LangID,
 };
 #[global_allocator]
@@ -68,6 +70,49 @@ use layout::{KEYS_BASE, KEYS_BYTES};
 const OWNERSHIP_MARKER_OFFSET: usize = 32;
 
 #[cfg(feature = "dongle-layout")]
+const LED_MASK: u32 = (1 << 22) | (1 << 23) | (1 << 24);
+
+#[cfg(feature = "dongle-layout")]
+const CLEAN_BOOT_MAGIC: u8 = 0xa5;
+
+#[cfg(feature = "dongle-layout")]
+#[derive(Clone, Copy)]
+enum LedColor {
+    Off,
+    Red,
+    Green,
+    Blue,
+    Cyan,
+    Yellow,
+    Magenta,
+}
+
+#[cfg(feature = "dongle-layout")]
+fn led_init() {
+    let gpio = unsafe { &*pac::P0::ptr() };
+    // The common-anode RGB LED is active low. Set every output high before changing
+    // direction so startup cannot produce a misleading flash.
+    gpio.outset.write(|w| unsafe { w.bits(LED_MASK) });
+    gpio.dirset.write(|w| unsafe { w.bits(LED_MASK) });
+}
+
+#[cfg(feature = "dongle-layout")]
+fn led_color(color: LedColor) {
+    let gpio = unsafe { &*pac::P0::ptr() };
+    gpio.outset.write(|w| unsafe { w.bits(LED_MASK) });
+    let active = match color {
+        LedColor::Off => 0,
+        LedColor::Red => 1 << 23,
+        LedColor::Green => 1 << 22,
+        LedColor::Blue => 1 << 24,
+        LedColor::Cyan => (1 << 22) | (1 << 24),
+        LedColor::Yellow => (1 << 22) | (1 << 23),
+        LedColor::Magenta => (1 << 23) | (1 << 24),
+    };
+    gpio.outclr.write(|w| unsafe { w.bits(active) });
+}
+
+#[cfg(feature = "dongle-layout")]
 fn enter_uf2() -> ! {
     // The Makerdiary bootloader documents 0x57 in GPREGRET as its application-to-UF2
     // handoff. Use the generated peripheral API so the register address and field width
@@ -80,9 +125,26 @@ fn enter_uf2() -> ! {
     cortex_m::peripheral::SCB::sys_reset()
 }
 
+#[cfg(feature = "dongle-layout")]
+fn ensure_clean_bootloader_handoff() {
+    let power = unsafe { &*pac::POWER::ptr() };
+    if power.gpregret2.read().gpregret().bits() != CLEAN_BOOT_MAGIC {
+        // Makerdiary UF2 transfers control with a direct branch, so active USB state can survive
+        // into the application. One ordinary system reset gives the bootloader a clean run that
+        // skips DFU and tears its board state down before branching back to us. GPREGRET2 is not
+        // used by the installed bootloader and prevents a reset loop.
+        power
+            .gpregret2
+            .write(|w| unsafe { w.gpregret().bits(CLEAN_BOOT_MAGIC) });
+        cortex_m::asm::dsb();
+        cortex_m::peripheral::SCB::sys_reset();
+    }
+    power.gpregret2.write(|w| unsafe { w.gpregret().bits(0) });
+}
+
 #[cfg(feature = "usb-ccid")]
 fn is_enter_uf2_command(command: &[u8]) -> bool {
-    cfg!(feature = "dongle-layout") && command == ENTER_BOOTLOADER_APDU
+    cfg!(feature = "development-recovery") && command == ENTER_BOOTLOADER_APDU
 }
 
 #[cfg(feature = "usb-ccid")]
@@ -94,39 +156,89 @@ type BoardCcidClass = usb_ccid::CcidClass<'static>;
 #[cfg(feature = "usb-ccid")]
 static APDU_CHANNEL: usb_ccid::ApduChannel = interchange::Channel::new();
 
+#[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
+fn report_usb_failure(code: u8) -> ! {
+    for _ in 0..2 {
+        led_color(LedColor::Red);
+        let deadline = now().wrapping_add(400_000);
+        while now().wrapping_sub(deadline) >= 0x8000_0000 {
+            feed();
+        }
+        led_color(LedColor::Off);
+        let deadline = now().wrapping_add(150_000);
+        while now().wrapping_sub(deadline) >= 0x8000_0000 {
+            feed();
+        }
+        for _ in 0..code {
+            led_color(LedColor::Blue);
+            let deadline = now().wrapping_add(150_000);
+            while now().wrapping_sub(deadline) >= 0x8000_0000 {
+                feed();
+            }
+            led_color(LedColor::Off);
+            let deadline = now().wrapping_add(150_000);
+            while now().wrapping_sub(deadline) >= 0x8000_0000 {
+                feed();
+            }
+        }
+    }
+    enter_uf2()
+}
+
+#[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
+fn set_uf2_recovery_marker(value: u8) {
+    unsafe {
+        (&*pac::POWER::ptr())
+            .gpregret
+            .write(|w| w.gpregret().bits(value));
+    }
+}
+
 #[cfg(feature = "usb-ccid")]
 fn initialize_usb() -> Option<(
     BoardUsbDevice,
     BoardCcidClass,
     usb_ccid::ApduResponder<'static>,
 )> {
-    let peripherals = pac::Peripherals::take()?;
-    // Taking the external oscillator by value is what lets `UsbPeripheral` exist at all,
-    // so an image that forgets the crystal fails to compile rather than to enumerate.
-    let clocks = cortex_m::singleton!(
-        : Clocks<ExternalOscillator, Internal, LfOscStopped> =
-            Clocks::new(peripherals.CLOCK).enable_ext_hfosc()
-    )?;
-    let allocator = cortex_m::singleton!(
-        : UsbBusAllocator<usb_ccid::UsbBus> = UsbBusAllocator::new(usb_ccid::UsbBus::new(
-            UsbPeripheral::new(peripherals.USBD, clocks)
-        ))
-    )?;
-    let (requester, responder) = APDU_CHANNEL.split()?;
-    let class = BoardCcidClass::new(allocator, requester, None);
-    // Hosts conventionally request strings with EN_US rather than neutral EN, and
-    // usb-device matches the requested identifier exactly.
-    let strings = [StringDescriptors::new(LangID::EN_US)
-        .manufacturer("MicroCard")
-        .product("MicroCard virtual smart card")];
-    let device = UsbDeviceBuilder::new(allocator, UsbVidPid(usb_ccid::USB_VID, usb_ccid::USB_PID))
-        .strings(&strings)
-        .ok()?
-        .max_packet_size_0(64)
-        .ok()?
-        .device_release(0x0100)
-        .build();
-    Some((device, class, responder))
+    #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
+    set_uf2_recovery_marker(0x57);
+
+    let initialized = (|| {
+        let peripherals = pac::Peripherals::take()?;
+        // Taking the external oscillator by value is what lets `UsbPeripheral` exist at all,
+        // so an image that forgets the crystal fails to compile rather than to enumerate.
+        let clocks = cortex_m::singleton!(
+            : Clocks<ExternalOscillator, Internal, LfOscStopped> =
+                Clocks::new(peripherals.CLOCK).enable_ext_hfosc()
+        )?;
+        let allocator = cortex_m::singleton!(
+            : UsbBusAllocator<usb_ccid::UsbBus> = UsbBusAllocator::new(usb_ccid::UsbBus::new(
+                UsbPeripheral::new(peripherals.USBD, clocks)
+            ))
+        )?;
+        let (requester, responder) = APDU_CHANNEL.split()?;
+        let class = BoardCcidClass::new(allocator, requester, None);
+        // Hosts conventionally request strings with EN_US rather than neutral EN, and
+        // usb-device matches the requested identifier exactly.
+        let strings = [StringDescriptors::new(LangID::EN_US)
+            .manufacturer("MicroCard")
+            .product("MicroCard virtual smart card")];
+        let device =
+            UsbDeviceBuilder::new(allocator, UsbVidPid(usb_ccid::USB_VID, usb_ccid::USB_PID))
+                .strings(&strings)
+                .ok()?
+                .max_packet_size_0(64)
+                .ok()?
+                .device_release(0x0100)
+                .build();
+        Some((device, class, responder))
+    })();
+
+    #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
+    if initialized.is_none() {
+        enter_uf2();
+    }
+    initialized
 }
 
 /// Keep a USB-only board observable when startup cannot safely open card state.
@@ -134,15 +246,49 @@ fn initialize_usb() -> Option<(
 /// These failures remain terminal and never erase or repair storage. Returning a
 /// proprietary `6Fxx` status lets unattended hardware tests distinguish the failure
 /// boundary after the ordinary CCID power-on and ATR exchange succeeds.
-fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], code: u8) -> ! {
+fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], _code: u8) -> ! {
     let deadline = transport.deadline_after(1_000_000);
     let _ = transport.write_raw(message, deadline);
     #[cfg(feature = "usb-ccid")]
     let mut usb_stack = None;
     #[cfg(feature = "usb-ccid")]
     let mut attempted = false;
+    #[cfg(feature = "dongle-layout")]
+    led_init();
+    #[cfg(feature = "dongle-layout")]
+    let (blink_color, blink_count) = match _code {
+        0x41..=0x44 => (LedColor::Blue, _code - 0x40),
+        0x45 => (LedColor::Cyan, 1),
+        0x46..=0x4a => (LedColor::Yellow, _code - 0x45),
+        0x4b..=0x4d => (LedColor::Magenta, _code - 0x4a),
+        _ => (LedColor::Blue, _code.min(8).max(1)),
+    };
+    #[cfg(feature = "dongle-layout")]
+    let mut blinks_remaining = 0;
+    #[cfg(feature = "dongle-layout")]
+    let mut blink_on = false;
+    #[cfg(feature = "dongle-layout")]
+    let mut led_deadline = now();
     loop {
         let _ = transport.watchdog.feed();
+        #[cfg(feature = "dongle-layout")]
+        if now().wrapping_sub(led_deadline) < 0x8000_0000 {
+            if blinks_remaining == 0 {
+                led_color(LedColor::Red);
+                blinks_remaining = blink_count;
+                blink_on = false;
+                led_deadline = now().wrapping_add(800_000);
+            } else if blink_on {
+                led_color(LedColor::Off);
+                blink_on = false;
+                blinks_remaining -= 1;
+                led_deadline = now().wrapping_add(150_000);
+            } else {
+                led_color(blink_color);
+                blink_on = true;
+                led_deadline = now().wrapping_add(150_000);
+            }
+        }
         #[cfg(feature = "usb-ccid")]
         {
             let powered = usb_ccid::power_ready();
@@ -153,10 +299,18 @@ fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], code: u8) -> 
             if let Some((device, class, responder)) = usb_stack.as_mut() {
                 if powered {
                     let _ = device.poll(&mut [class]);
+                    #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
+                    if device.state() == UsbDeviceState::Configured {
+                        set_uf2_recovery_marker(0);
+                    }
                     if let Some(request) = responder.take_request() {
                         let mut response = heapless::Vec::new();
                         let uf2_requested = is_enter_uf2_command(&request);
-                        let status = if uf2_requested { [0x90, 0x00] } else { [0x6f, code] };
+                        let status = if uf2_requested {
+                            [0x90, 0x00]
+                        } else {
+                            [0x6f, _code]
+                        };
                         let _ = response.extend_from_slice(&status);
                         let _ = responder.respond(response);
                         #[cfg(feature = "dongle-layout")]
@@ -211,6 +365,9 @@ mod cc310 {
     unsafe impl Sync for AbortApis {}
 
     unsafe extern "C" fn abort(_reason: *const c_char) {
+        #[cfg(feature = "development-recovery")]
+        super::enter_uf2();
+        #[cfg(not(feature = "development-recovery"))]
         cortex_m::peripheral::SCB::sys_reset()
     }
 
@@ -221,8 +378,13 @@ mod cc310 {
 
     unsafe extern "C" {
         #[cfg(feature = "cc310-p256")]
-        pub(super) fn microcard_cc310_sha256_stream(state: *mut u8, state_size: usize,
-            input: *const u8, input_size: usize, output: *mut u8) -> i32;
+        pub(super) fn microcard_cc310_sha256_stream(
+            state: *mut u8,
+            state_size: usize,
+            input: *const u8,
+            input_size: usize,
+            output: *mut u8,
+        ) -> i32;
         fn nrf_cc3xx_platform_set_abort(apis: *const AbortApis);
         #[cfg(feature = "cc310-entropy")]
         fn nrf_cc3xx_platform_init() -> i32;
@@ -565,15 +727,28 @@ mod cc310 {
 
     #[cfg(feature = "cc310-ccm")]
     pub(super) fn aes128_ccm_encrypt_in_place(
-        key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], buffer: &mut [u8],
+        key: &[u8; 16],
+        nonce: &[u8; 13],
+        aad: &[u8],
+        buffer: &mut [u8],
     ) -> i32 {
-        let Some(length) = buffer.len().checked_sub(16) else { return -1; };
+        let Some(length) = buffer.len().checked_sub(16) else {
+            return -1;
+        };
         // Pass raw pointers through FFI, never overlapping Rust references.
         let pointer = buffer.as_mut_ptr();
         unsafe {
             microcard_cc310_aes128_ccm_encrypt(
-                key.as_ptr(), key.len(), nonce.as_ptr(), nonce.len(),
-                aad.as_ptr(), aad.len(), pointer, length, pointer, buffer.len(),
+                key.as_ptr(),
+                key.len(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                pointer,
+                length,
+                pointer,
+                buffer.len(),
             )
         }
     }
@@ -696,6 +871,7 @@ mod cc310 {
 struct Hardware {
     #[cfg(feature = "cc310-sha256")]
     cc310_initialized: bool,
+    self_test_stage: u8,
 }
 
 impl Hardware {
@@ -703,6 +879,7 @@ impl Hardware {
         Self {
             #[cfg(feature = "cc310-sha256")]
             cc310_initialized: false,
+            self_test_stage: 0,
         }
     }
 
@@ -734,15 +911,18 @@ impl Hardware {
             ];
             static FLASH_INPUT: [u8; 3] = *b"abc";
 
+            self.self_test_stage = 1;
             let mut digest = [0; 32];
             self.sha256_into(&[], &mut digest)?;
             if digest != EMPTY_DIGEST {
                 return Err(Error::Native);
             }
+            self.self_test_stage = 2;
             self.sha256_into(&FLASH_INPUT, &mut digest)?;
             if digest != ABC_DIGEST {
                 return Err(Error::Native);
             }
+            self.self_test_stage = 3;
             let ram_input = *b"abc";
             self.sha256_into(&ram_input, &mut digest)?;
             if digest != ABC_DIGEST {
@@ -750,6 +930,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-p256")]
             {
+                self.self_test_stage = 4;
                 let mut state = [0; microcard_core::crypto::SHA256_STATE_BYTES];
                 self.sha256_stream(&mut state, &FLASH_INPUT[..1], None)?;
                 self.sha256_stream(&mut state, &ram_input[1..], Some(&mut digest))?;
@@ -759,6 +940,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-entropy")]
             {
+                self.self_test_stage = 5;
                 let mut first = [0; 32];
                 let mut second = [0; 32];
                 if !cc310::fill_entropy(&mut first)
@@ -778,11 +960,12 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-cmac")]
             {
+                self.self_test_stage = 6;
                 const KEY: [u8; 16] = [
                     0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09,
                     0xcf, 0x4f, 0x3c,
                 ];
-                const MESSAGE: [u8; 64] = [
+                static MESSAGE: [u8; 64] = [
                     0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73,
                     0x93, 0x17, 0x2a, 0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7,
                     0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51, 0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4,
@@ -797,9 +980,9 @@ impl Hardware {
                     0x07, 0x0a, 0x16, 0xb4, 0x6b, 0x4d, 0x41, 0x44, 0xf7, 0x9b, 0xdd, 0x9d, 0xd0,
                     0x4a, 0x28, 0x7c,
                 ];
-                const EXPECTED_40: [u8; 16] = [
-                    0xdf, 0xa6, 0x67, 0x47, 0xde, 0x9a, 0xe6, 0x30, 0x30, 0xca, 0x32, 0x61, 0x14,
-                    0x97, 0xc8, 0x27,
+                const EXPECTED_42: [u8; 16] = [
+                    0x17, 0xb0, 0x9c, 0xab, 0xe5, 0x09, 0x25, 0xeb, 0xd0, 0x5a, 0xc5, 0x60, 0x66,
+                    0x83, 0xdb, 0xf3,
                 ];
                 const EXPECTED_64: [u8; 16] = [
                     0x51, 0xf0, 0xbe, 0xbf, 0x7e, 0x3b, 0x9d, 0x92, 0xfc, 0x49, 0x74, 0x17, 0x79,
@@ -814,12 +997,8 @@ impl Hardware {
                 if mac != EXPECTED_16 {
                     return Err(Error::Native);
                 }
-                self.aes_cmac_parts_into(
-                    &KEY,
-                    &[&MESSAGE[..7], &MESSAGE[7..23], &MESSAGE[23..40]],
-                    &mut mac,
-                )?;
-                if mac != EXPECTED_40 {
+                self.aes_cmac_parts_into(&KEY, &[&MESSAGE[..26], &MESSAGE[26..42]], &mut mac)?;
+                if mac != EXPECTED_42 {
                     return Err(Error::Native);
                 }
                 let mut ram_message = MESSAGE;
@@ -834,6 +1013,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-hmac")]
             {
+                self.self_test_stage = 7;
                 const KEY: [u8; 20] = [0x0b; 20];
                 const EXPECTED: [u8; 32] = [
                     0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf, 0xce, 0xaf,
@@ -863,6 +1043,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-aes")]
             {
+                self.self_test_stage = 8;
                 const KEY: [u8; 16] = [
                     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
                     0x0d, 0x0e, 0x0f,
@@ -891,6 +1072,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-cbc")]
             {
+                self.self_test_stage = 9;
                 const KEY: [u8; 16] = [
                     0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09,
                     0xcf, 0x4f, 0x3c,
@@ -931,6 +1113,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-ccm")]
             {
+                self.self_test_stage = 10;
                 const KEY: [u8; 16] = [
                     0xd2, 0x4a, 0x3d, 0x3d, 0xde, 0x8c, 0x84, 0x83, 0x02, 0x80, 0xcb, 0x87, 0xab,
                     0xad, 0x0b, 0xb3,
@@ -948,9 +1131,13 @@ impl Hardware {
                     0x30, 0x12, 0x19, 0xc7, 0x05, 0x99, 0xb7, 0xc3, 0x73, 0xad, 0x4b, 0x3a, 0xd6,
                     0x7b,
                 ];
+                // CC310's AEAD path consumes the payload through DMA. Real APDUs are in RAM,
+                // so keep this vector in RAM instead of relying on a promoted flash constant.
+                let plaintext = PLAINTEXT;
+                core::hint::black_box(&plaintext);
                 let mut ciphertext = [0; 40];
                 let ciphertext_length =
-                    self.aes_ccm_encrypt(&KEY, &NONCE, &[], &PLAINTEXT, &mut ciphertext)?;
+                    self.aes_ccm_encrypt(&KEY, &NONCE, &[], &plaintext, &mut ciphertext)?;
                 if ciphertext_length != ciphertext.len() || ciphertext != CIPHERTEXT {
                     ciphertext.fill(0);
                     return Err(Error::Native);
@@ -978,6 +1165,7 @@ impl Hardware {
             }
             #[cfg(feature = "cc310-p256")]
             {
+                self.self_test_stage = 11;
                 const PRIVATE_KEY: [u8; 32] = [
                     0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16, 0x6b, 0x5c, 0x21, 0x57, 0x67,
                     0xb1, 0xd6, 0x93, 0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8, 0x9b, 0x12, 0x7b, 0x8a,
@@ -1016,6 +1204,7 @@ impl Hardware {
                     return Err(Error::Native);
                 }
                 let mut signature = [0; 64];
+                self.self_test_stage = 12;
                 self.p256_ecdsa_sign_into(&PRIVATE_KEY, b"sample", &mut signature)?;
                 if signature != SIGNATURE
                     || !self.p256_ecdsa_verify(&public_key, b"sample", &signature)?
@@ -1026,6 +1215,7 @@ impl Hardware {
                     return Err(Error::Native);
                 }
                 let mut shared_secret = [0; 32];
+                self.self_test_stage = 13;
                 self.p256_ecdh_into(&PRIVATE_KEY, &PEER_PUBLIC_KEY, &mut shared_secret)?;
                 if shared_secret != SHARED_SECRET {
                     public_key.fill(0);
@@ -1038,25 +1228,47 @@ impl Hardware {
                 shared_secret.fill(0);
             }
         }
+        self.self_test_stage = 0;
         Ok(())
     }
 }
 
 impl microcard_core::crypto::CryptoProvider for Hardware {
     #[cfg(feature = "cc310-p256")]
-    fn sha256_stream(&mut self, state: &mut [u8; microcard_core::crypto::SHA256_STATE_BYTES],
-        input: &[u8], mut output: Option<&mut [u8; 32]>) -> Result<()> {
-        if let Some(output) = output.as_mut() { output.fill(0); }
+    fn sha256_stream(
+        &mut self,
+        state: &mut [u8; microcard_core::crypto::SHA256_STATE_BYTES],
+        input: &[u8],
+        mut output: Option<&mut [u8; 32]>,
+    ) -> Result<()> {
+        if let Some(output) = output.as_mut() {
+            output.fill(0);
+        }
         let result = (|| {
             self.ensure_cc310()?;
-            let pointer = output.as_mut().map_or(core::ptr::null_mut(), |value| value.as_mut_ptr());
-            let status = unsafe { cc310::microcard_cc310_sha256_stream(
-                state.as_mut_ptr(), state.len(), input.as_ptr(), input.len(), pointer) };
-            if status == 0 { Ok(()) } else { Err(Error::Native) }
+            let pointer = output
+                .as_mut()
+                .map_or(core::ptr::null_mut(), |value| value.as_mut_ptr());
+            let status = unsafe {
+                cc310::microcard_cc310_sha256_stream(
+                    state.as_mut_ptr(),
+                    state.len(),
+                    input.as_ptr(),
+                    input.len(),
+                    pointer,
+                )
+            };
+            if status == 0 {
+                Ok(())
+            } else {
+                Err(Error::Native)
+            }
         })();
         if result.is_err() {
             state.fill(0);
-            if let Some(output) = output { output.fill(0); }
+            if let Some(output) = output {
+                output.fill(0);
+            }
         }
         result
     }
@@ -1145,7 +1357,9 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         output.fill(0);
         let padded = microcard_core::crypto::cbc_pad_into(data, output);
         let length = microcard_core::crypto::clear_output_on_error(output, padded)?;
-        let result = self.aes_cbc_in_place(key, &iv, &mut output[..length], true).map(|()| length);
+        let result = self
+            .aes_cbc_in_place(key, &iv, &mut output[..length], true)
+            .map(|()| length);
         microcard_core::crypto::clear_output_on_error(output, result)
     }
 
@@ -1202,14 +1416,22 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
 
     #[cfg(feature = "cc310-ccm")]
     fn aes_ccm_encrypt_in_place(
-        &mut self, key: &[u8; 16], nonce: &[u8; 13], aad: &[u8], buffer: &mut [u8],
+        &mut self,
+        key: &[u8; 16],
+        nonce: &[u8; 13],
+        aad: &[u8],
+        buffer: &mut [u8],
     ) -> Result<usize> {
         let result = (|| {
             self.ensure_cc310()?;
-            if buffer.len() < 16 { return Err(Error::Bounds); }
+            if buffer.len() < 16 {
+                return Err(Error::Bounds);
+            }
             if cc310::aes128_ccm_encrypt_in_place(key, nonce, aad, buffer) == 0 {
                 Ok(buffer.len())
-            } else { Err(Error::Native) }
+            } else {
+                Err(Error::Native)
+            }
         })();
         microcard_core::crypto::clear_output_on_error(buffer, result)
     }
@@ -1309,11 +1531,22 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
     }
 
     #[cfg(feature = "cc310-p256")]
-    fn p256_sign_hash_into(&mut self, private_key: &[u8; 32], hash: &[u8; 32], output: &mut [u8; 64]) -> Result<()> {
+    fn p256_sign_hash_into(
+        &mut self,
+        private_key: &[u8; 32],
+        hash: &[u8; 32],
+        output: &mut [u8; 64],
+    ) -> Result<()> {
         output.fill(0);
-        if !microcard_core::crypto::p256_private_key_valid(private_key) { return Err(Error::Storage); }
+        if !microcard_core::crypto::p256_private_key_valid(private_key) {
+            return Err(Error::Storage);
+        }
         self.ensure_cc310()?;
-        let result = if cc310::p256_sign_hash(private_key, hash, output) { Ok(()) } else { Err(Error::Native) };
+        let result = if cc310::p256_sign_hash(private_key, hash, output) {
+            Ok(())
+        } else {
+            Err(Error::Native)
+        };
         microcard_core::crypto::clear_output_on_error(output, result)
     }
 
@@ -1334,7 +1567,12 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
     }
 
     #[cfg(feature = "cc310-p256")]
-    fn p256_verify_hash(&mut self, public_key: &[u8], hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
+    fn p256_verify_hash(
+        &mut self,
+        public_key: &[u8],
+        hash: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<bool> {
         self.ensure_cc310()?;
         match cc310::p256_verify_hash(public_key, hash, signature) {
             0 => Ok(true),
@@ -1615,13 +1853,18 @@ impl StagingNvm {
 }
 impl StagingFlash for StagingNvm {
     fn mapped(&self, offset: usize, length: usize) -> Result<Option<&[u8]>> {
-        if offset.checked_add(length).is_none_or(|end| end > Self::BANK_BYTES) {
+        if offset
+            .checked_add(length)
+            .is_none_or(|end| end > Self::BANK_BYTES)
+        {
             return Err(Error::Bounds);
         }
         let base = self.bank_base()?;
         // This bank is exclusively owned by staging. Mutations require &mut self,
         // and registry/heap writes use disjoint flash regions.
-        Ok(Some(unsafe { core::slice::from_raw_parts((base + offset) as *const u8, length) }))
+        Ok(Some(unsafe {
+            core::slice::from_raw_parts((base + offset) as *const u8, length)
+        }))
     }
     fn capacity(&self) -> usize {
         Self::BANK_BYTES
@@ -1682,7 +1925,9 @@ impl microcard_core::image_store::ImageFlash for Nvm {
     type Image<'a> = &'a [u8];
     fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
         let base = Self::image_base(index)?;
-        if range.start > range.end || range.end > Self::IMAGE_SLOT_BYTES { return Err(Error::Bounds); }
+        if range.start > range.end || range.end > Self::IMAGE_SLOT_BYTES {
+            return Err(Error::Bounds);
+        }
         // The borrow prevents programming or erasing through this Nvm handle.
         Ok(unsafe { core::slice::from_raw_parts((base + range.start) as *const u8, range.len()) })
     }
@@ -1956,6 +2201,8 @@ impl ResetReport for BoardResetReport {
 }
 #[entry]
 fn main() -> ! {
+    #[cfg(feature = "dongle-layout")]
+    ensure_clean_bootloader_handoff();
     unsafe {
         // Nordic PS Debug and trace: Fxx+ needs both HwDisabled and SwDisable.
         // Respect the provisioned hardware policy; never rewrite UICR at startup.
@@ -1966,8 +2213,17 @@ fn main() -> ! {
         HEAP.init(core::ptr::addr_of_mut!(HEAP_MEMORY) as usize, 196608);
     }
     let mut transport = BoardUart::init();
+    #[cfg(feature = "dongle-layout")]
+    {
+        led_init();
+        led_color(LedColor::Blue);
+    }
     if transport.watchdog.arm(10_000_000).is_err() {
-        halt_with_diagnostic(&mut transport, b"MicroCard: watchdog startup failed\r\n", 0x01);
+        halt_with_diagnostic(
+            &mut transport,
+            b"MicroCard: watchdog startup failed\r\n",
+            0x01,
+        );
     }
     let _reset_reason = BoardResetReport::capture().reset_reason();
     let mut device_identity = [0; 8];
@@ -2017,18 +2273,31 @@ fn main() -> ! {
     };
     let mut hardware = Hardware::new();
     if hardware.self_test().is_err() {
-        halt_with_diagnostic(&mut transport, b"MicroCard: hardware self-test failed\r\n", 0x04);
+        let stage = hardware.self_test_stage.min(0x0f);
+        halt_with_diagnostic(
+            &mut transport,
+            b"MicroCard: hardware self-test failed\r\n",
+            0x40 | stage,
+        );
     }
     let storage_key = match keys.storage_key_with(&mut hardware) {
         Ok(key) => key,
         Err(_) => {
-            halt_with_diagnostic(&mut transport, b"MicroCard: storage-key derivation failed\r\n", 0x05);
+            halt_with_diagnostic(
+                &mut transport,
+                b"MicroCard: storage-key derivation failed\r\n",
+                0x05,
+            );
         }
     };
     if ownership_action == OwnershipMarkerAction::ProgramBeforeOpen
         && Nvm::program_ownership_marker().is_err()
     {
-        halt_with_diagnostic(&mut transport, b"MicroCard: ownership marker write failed\r\n", 0x06);
+        halt_with_diagnostic(
+            &mut transport,
+            b"MicroCard: ownership marker write failed\r\n",
+            0x06,
+        );
     }
     #[cfg(feature = "engine-mc04")]
     let opened = microcard_core::domains::Card::open_with_staging(
@@ -2043,7 +2312,10 @@ fn main() -> ! {
         Ok(c) => c,
         Err(error) => {
             let (message, code): (&[u8], u8) = if error == Error::IncompatibleState {
-                (b"MicroCard: incompatible persistent state; explicit provisioning required\r\n", 0x07)
+                (
+                    b"MicroCard: incompatible persistent state; explicit provisioning required\r\n",
+                    0x07,
+                )
             } else {
                 (b"MicroCard: persistent state open failed\r\n", 0x08)
             };
@@ -2081,6 +2353,8 @@ fn main() -> ! {
     )> = None;
     #[cfg(feature = "usb-ccid")]
     let mut usb_was_powered = false;
+    #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
+    let mut usb_configuration_deadline = None;
     let mut command = [0; MAX_SHORT_COMMAND_BYTES];
     #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
     let mut enter_uf2_at = None;
@@ -2091,20 +2365,73 @@ fn main() -> ! {
             if powered && usb_stack.is_none() {
                 usb_stack = initialize_usb();
                 usb_was_powered = usb_stack.is_some();
+                #[cfg(feature = "dongle-layout")]
+                if usb_was_powered {
+                    usb_configuration_deadline = Some(now().wrapping_add(5_000_000));
+                }
             }
             if let Some((device, class, responder)) = usb_stack.as_mut() {
                 if powered {
                     if !usb_was_powered {
+                        #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
+                        set_uf2_recovery_marker(0x57);
                         let _ = device.force_reset();
                         usb_was_powered = true;
+                        #[cfg(feature = "dongle-layout")]
+                        {
+                            led_color(LedColor::Blue);
+                            usb_configuration_deadline = Some(now().wrapping_add(5_000_000));
+                        }
                     }
                     let _ = device.poll(&mut [class]);
+                    #[cfg(feature = "dongle-layout")]
+                    match device.state() {
+                        UsbDeviceState::Configured => {
+                            if usb_configuration_deadline.take().is_some() {
+                                #[cfg(feature = "development-recovery")]
+                                set_uf2_recovery_marker(0);
+                                led_color(LedColor::Green);
+                            }
+                        }
+                        state => {
+                            if usb_configuration_deadline
+                                .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
+                            {
+                                report_usb_failure(if state == UsbDeviceState::Addressed {
+                                    6
+                                } else {
+                                    5
+                                });
+                            }
+                        }
+                    }
                     // One APDU is in flight at a time, so the runtime answers it
                     // synchronously and hands the reply straight back to the class.
                     if let Some(request) = responder.take_request() {
+                        let mut wait_extension_at = match class.did_start_processing() {
+                            usbd_ccid::Status::ReceivedData(_) => Some(now().wrapping_add(750_000)),
+                            usbd_ccid::Status::Idle => None,
+                        };
                         let reply = endpoint.exchange_with_cancel(&request, &mut || {
                             feed();
-                            !usb_ccid::power_ready()
+                            if !usb_ccid::power_ready() {
+                                return true;
+                            }
+                            // Long JCVM callbacks remain one APDU. Keep USB serviced and use
+                            // the CCID library's standard time-extension response until the
+                            // runtime publishes the final reply.
+                            let _ = device.poll(&mut [class]);
+                            if wait_extension_at
+                                .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
+                            {
+                                wait_extension_at = match class.send_wait_extension() {
+                                    usbd_ccid::Status::ReceivedData(_) => {
+                                        Some(now().wrapping_add(750_000))
+                                    }
+                                    usbd_ccid::Status::Idle => None,
+                                };
+                            }
+                            false
                         });
                         let mut outgoing = heapless::Vec::new();
                         if outgoing.extend_from_slice(&reply).is_ok() {
@@ -2119,14 +2446,19 @@ fn main() -> ! {
                     }
                     class.check_for_app_response();
                     #[cfg(feature = "dongle-layout")]
-                    if enter_uf2_at.is_some_and(|deadline| {
-                        now().wrapping_sub(deadline) < 0x8000_0000
-                    }) {
+                    if enter_uf2_at
+                        .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
+                    {
                         enter_uf2();
                     }
                 } else if usb_was_powered {
                     endpoint.reset();
                     usb_was_powered = false;
+                    #[cfg(feature = "dongle-layout")]
+                    {
+                        led_color(LedColor::Blue);
+                        usb_configuration_deadline = None;
+                    }
                 }
             }
         }
@@ -2145,15 +2477,15 @@ fn main() -> ! {
 }
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
-    #[cfg(feature = "dongle-layout")]
+    #[cfg(feature = "development-recovery")]
     enter_uf2();
-    #[cfg(not(feature = "dongle-layout"))]
+    #[cfg(not(feature = "development-recovery"))]
     loop {
         cortex_m::asm::wfi();
     }
 }
 
-#[cfg(feature = "dongle-layout")]
+#[cfg(feature = "development-recovery")]
 #[exception]
 unsafe fn HardFault(_: &ExceptionFrame) -> ! {
     enter_uf2()

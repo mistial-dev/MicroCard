@@ -1,11 +1,13 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "psa/crypto.h"
 #include "psa_crypto_driver_wrappers.h"
 
 #define MICROCARD_MAC_STATE_BYTES 544u
 #define MICROCARD_SHA256_BYTES 32u
+#define MICROCARD_DMA_CHUNK_BYTES 64u
 
 _Static_assert(sizeof(psa_mac_operation_t) == MICROCARD_MAC_STATE_BYTES,
                "pinned TF-PSA MAC state size changed");
@@ -103,7 +105,24 @@ int32_t microcard_cc310_mac_update(void *storage, size_t storage_size,
         return PSA_SUCCESS;
     }
 
-    psa_status_t status = psa_driver_wrapper_mac_update(operation, input, input_size);
+    /* CryptoCell 310 symmetric inputs must be in DMA-accessible RAM. Callers may
+     * pass Rust static data from flash, so adapt that contract at the provider edge. */
+    _Alignas(4) uint8_t dma_input[MICROCARD_DMA_CHUNK_BYTES];
+    psa_status_t status = PSA_SUCCESS;
+    while (input_size != 0u) {
+        size_t chunk_size = input_size;
+        if (chunk_size > sizeof(dma_input)) {
+            chunk_size = sizeof(dma_input);
+        }
+        memcpy(dma_input, input, chunk_size);
+        status = psa_driver_wrapper_mac_update(operation, dma_input, chunk_size);
+        if (status != PSA_SUCCESS) {
+            break;
+        }
+        input += chunk_size;
+        input_size -= chunk_size;
+    }
+    microcard_wipe(dma_input, sizeof(dma_input));
     if (status != PSA_SUCCESS) {
         (void)psa_driver_wrapper_mac_abort(operation);
         microcard_wipe(storage, storage_size);

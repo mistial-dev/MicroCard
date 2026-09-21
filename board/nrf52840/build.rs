@@ -464,7 +464,7 @@ fn verify_mac_shim_stack(path: &std::path::Path) {
         path,
         &[
             ("microcard_cc310_cmac_begin", 64usize),
-            ("microcard_cc310_mac_update", 24usize),
+            ("microcard_cc310_mac_update", 96usize),
             ("microcard_cc310_cmac_finish", 32usize),
             ("microcard_cc310_hmac_sha256_begin", 64usize),
             ("microcard_cc310_hmac_sha256_finish", 32usize),

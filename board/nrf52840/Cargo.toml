@@ -23,8 +23,9 @@ dongle-layout = ["usb-ccid"]
 # freshly flashed board answers ordinary tooling with no probe. A board built this way is
 # claimable by anyone until its first signed assembly takes ownership. Never for a product.
 gp-test-keys = []
+development-recovery = []
 # The convenience build for a development dongle, which is both of the above.
-dongle = ["dongle-layout", "gp-test-keys"]
+dongle = ["dongle-layout", "gp-test-keys", "development-recovery"]
 cc310-sha256 = []
 cc310-entropy = ["cc310-sha256"]
 cc310-cmac = ["cc310-entropy"]
