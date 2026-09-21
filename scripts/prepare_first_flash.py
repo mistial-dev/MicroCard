@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and verify first-flash artifacts. Never invokes a probe or writes a device."""
 import argparse,hashlib,json,pathlib,shutil,struct,subprocess,sys,os,tempfile
+from firmware_link import inspect_link
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def run(*args,cwd=ROOT,**kw):return subprocess.run(args,cwd=cwd,check=True,**kw)
 def flash_region(path):
@@ -49,10 +50,13 @@ def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--engine',choices=('mc04','jcvm'),required=True)
  parser.add_argument('--features',default='',help='extra board cargo features, comma separated')
+ parser.add_argument('--development-only',action='store_true',
+                     help='build a flashable hardware-iteration bundle without the checkpoint gate')
  args=parser.parse_args()
  features=[f'engine-{args.engine}',*[f for f in args.features.split(',') if f]]
  if f"engine-{'jcvm' if args.engine=='mc04' else 'mc04'}" in features:parser.error('features select a different engine')
- run(sys.executable,'scripts/check.py','--checkpoint');run('cargo','clippy','--all-targets','--','-D','warnings')
+ if not args.development_only:
+  run(sys.executable,'scripts/check.py','--checkpoint');run('cargo','clippy','--all-targets','--','-D','warnings')
  board=ROOT/'board/nrf52840';extra=['--features',','.join(features)] if features else []
  # The flash window comes from the linker map the build will use, so this script and the
  # image agree about where the application ends on either board.
@@ -60,9 +64,13 @@ def main():
  layout=board/f"memory-{'dongle' if dongle else 'dk'}{'-jcvm' if args.engine=='jcvm' else ''}.x"
  flash_origin,flash_length=flash_region(layout);flash_end=flash_origin+flash_length
  target=board/'target/profiles'/f'first-flash-{args.engine}-{"dongle" if dongle else "dk"}'
- run('cargo','build','--release','--locked','--target-dir',str(target),*extra,cwd=board)
+ link_map=target/f'microcard-{args.engine}.map'
+ run('cargo','rustc','--release','--locked','--target-dir',str(target),*extra,
+     '--','-C',f'link-arg=-Map={link_map}',cwd=board)
  elf=target/'thumbv7em-none-eabihf/release/microcard-nrf52840'
- destination=ROOT/'artifacts/first-flash'/args.engine/('dongle' if dongle else 'dk')
+ link=inspect_link(elf,link_map,hardware=True)
+ artifact_kind='development-firmware' if args.development_only else 'first-flash'
+ destination=ROOT/'artifacts'/artifact_kind/args.engine/('dongle' if dongle else 'dk')
  destination.parent.mkdir(parents=True,exist_ok=True)
  staging=tempfile.TemporaryDirectory(prefix='.preparing-',dir=destination.parent)
  out=pathlib.Path(staging.name)/'bundle';out.mkdir()
@@ -83,7 +91,10 @@ def main():
  if bss+data>208896:raise RuntimeError('less than 52 KiB stack margin')
  for stem in (['counter','keys'] if args.engine=='mc04' else []):
   for ext in ['mca','json','map.json']:shutil.copy2(ROOT/f'work/{stem}.{ext}',out/f'{stem}.{ext}')
- result={'engine':args.engine,'layout':layout.name,'layout_sha256':hashlib.sha256(layout.read_bytes()).hexdigest(),'git_revision':run('git','rev-parse','HEAD',capture_output=True,text=True).stdout.strip(),'working_tree_dirty':bool(run('git','status','--porcelain',capture_output=True,text=True).stdout),'flash_text':text,'ram_bss':bss,'ram_data':data,'checks':'host corpus, text and binary SCP03/key scenarios, clippy, release cross-build, flash sections','hardware_flashed':False,'board_features':features,'flash_origin':flash_origin,'flash_end':flash_end,'sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='manifest.json'}}
+ checks=['release cross-build','flash sections','initial stack/reset vector',
+         'static stack margin','hardware-provider link inspection']
+ if not args.development_only:checks[:0]=['host checkpoint','workspace clippy']
+ result={'engine':args.engine,'layout':layout.name,'layout_sha256':hashlib.sha256(layout.read_bytes()).hexdigest(),'git_revision':run('git','rev-parse','HEAD',capture_output=True,text=True).stdout.strip(),'working_tree_dirty':bool(run('git','status','--porcelain',capture_output=True,text=True).stdout),'development_only':args.development_only,'flash_text':text,'ram_bss':bss,'ram_data':data,'checks':checks,'link_inspection':link,'hardware_flashed':False,'board_features':features,'flash_origin':flash_origin,'flash_end':flash_end,'sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='manifest.json'}}
  (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n')
  publish_bundle(out,destination)
  staging.cleanup()

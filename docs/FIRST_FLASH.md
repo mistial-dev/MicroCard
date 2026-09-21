@@ -23,6 +23,18 @@ stages a fresh bundle, then replaces the previous generated directory, so stale
 files cannot enter its manifest. A failed publication restores the prior bundle;
 if restoration fails, its `.previous-*` backup remains for recovery.
 
+For hardware iteration while a known checkpoint or optimization budget is red, build a
+clearly marked development bundle without weakening the release bundle:
+
+```sh
+python3 scripts/prepare_first_flash.py --engine jcvm --features dongle --development-only
+```
+
+This writes `artifacts/development-firmware/jcvm/dongle/`. Its manifest sets
+`development_only: true` and records only the checks it actually ran: the release
+cross-build, flash ranges, reset vector, stack margin, engine/provider symbols, vendor
+archives, and artifact hashes. It does not claim host checkpoint or Clippy evidence.
+
 The host gate includes .NET differential execution, deterministic preprocessing/signing, incremental MSBuild/pin checks, first-load failure injection, independent SCP03, persistent key operations, binary UART framing, and the real serial adapter through a fragmented pseudo-terminal. See `scripts/check.py --checkpoint` and the keystore documentation for the scenarios.
 
 ## Development credentials

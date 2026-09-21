@@ -26,6 +26,10 @@ Verify the selected engine and addresses in the generated manifest first. Curren
 [size-budget failures](READINESS.md) prevent preparation from completing; do not
 treat older artifacts as a validated build of the current tree.
 
+For a working hardware-iteration image while those optimization ceilings remain red,
+add `--development-only`. The result is kept under `artifacts/development-firmware`,
+and its manifest does not claim the skipped host gates.
+
 ```sh
 cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
 ```
@@ -72,6 +76,14 @@ advertising SCP03 `i=71`. The flashed revision and engine are unknown; this conf
 USB and APDU operation for that image, not the current JCVM build. No image was
 flashed or persistent data changed during this check. PC/SC required access outside
 the development sandbox; inside it, context creation reported service unavailable.
+
+On 2026-09-20, the same USB identity again answered ISD SELECT and read-only card
+recognition data with `9000`. A 16-byte SCP03 INITIALIZE UPDATE then caused PC/SC to
+report `SCARD_E_NOT_TRANSACTED` while the reader disconnected and re-enumerated. The
+same failure reproduced with a raw short APDU, independently of GlobalPlatformPro.
+The flashed revision and engine are still unknown, so this is a reproducible observation
+about that image rather than evidence of a defect in the current tree. No debug probe or
+`UF2BOOT` volume was exposed, so an unattended update was not possible.
 
 The current JCVM dongle build links within its 288 KiB firmware region. Its physical
 execution and OpenFIPS201 workflow remain unverified.
