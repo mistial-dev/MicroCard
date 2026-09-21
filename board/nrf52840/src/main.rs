@@ -45,17 +45,26 @@ unsafe fn write(a: usize, v: u32) {
     core::ptr::write_volatile(a as *mut u32, v)
 }
 
-fn start_hfxo_and_instruction_cache() {
+fn enable_instruction_cache() {
+    let nvmc = unsafe { &*pac::NVMC::ptr() };
+    nvmc.icachecnf.write(|w| w.cacheen().enabled());
+}
+
+fn start_hfxo() -> Result<()> {
     // Leave EVENTS_HFCLKSTARTED set. The HAL consumes and clears it when it later takes
     // ownership of CLOCK for USB, while storage and CC310 already run from the crystal.
     let clock = unsafe { &*pac::CLOCK::ptr() };
     clock
         .tasks_hfclkstart
         .write(|w| w.tasks_hfclkstart().set_bit());
-    while clock.events_hfclkstarted.read().bits() == 0 {}
-
-    let nvmc = unsafe { &*pac::NVMC::ptr() };
-    nvmc.icachecnf.write(|w| w.cacheen().enabled());
+    let start = now();
+    while clock.events_hfclkstarted.read().bits() == 0 {
+        feed();
+        if now().wrapping_sub(start) > 1_000_000 {
+            return Err(Error::Native);
+        }
+    }
+    Ok(())
 }
 const UART: usize = 0x40002000;
 #[cfg(not(feature = "cc310-entropy"))]
@@ -2222,7 +2231,7 @@ impl ResetReport for BoardResetReport {
 fn main() -> ! {
     #[cfg(feature = "dongle-layout")]
     ensure_clean_bootloader_handoff();
-    start_hfxo_and_instruction_cache();
+    enable_instruction_cache();
     unsafe {
         // Nordic PS Debug and trace: Fxx+ needs both HwDisabled and SwDisable.
         // Respect the provisioned hardware policy; never rewrite UICR at startup.
@@ -2243,6 +2252,13 @@ fn main() -> ! {
             &mut transport,
             b"MicroCard: watchdog startup failed\r\n",
             0x01,
+        );
+    }
+    if start_hfxo().is_err() {
+        halt_with_diagnostic(
+            &mut transport,
+            b"MicroCard: external high-frequency clock failed\r\n",
+            0x09,
         );
     }
     let _reset_reason = BoardResetReport::capture().reset_reason();
