@@ -108,6 +108,49 @@ fn initialize_usb() -> Option<(
         .build();
     Some((device, class, responder))
 }
+
+/// Keep a USB-only board observable when startup cannot safely open card state.
+///
+/// These failures remain terminal and never erase or repair storage. Returning a
+/// proprietary `6Fxx` status lets unattended hardware tests distinguish the failure
+/// boundary after the ordinary CCID power-on and ATR exchange succeeds.
+fn halt_with_diagnostic(transport: &mut BoardUart, message: &[u8], code: u8) -> ! {
+    let deadline = transport.deadline_after(1_000_000);
+    let _ = transport.write_raw(message, deadline);
+    #[cfg(feature = "usb-ccid")]
+    let mut usb_stack = None;
+    #[cfg(feature = "usb-ccid")]
+    let mut attempted = false;
+    loop {
+        let _ = transport.watchdog.feed();
+        #[cfg(feature = "usb-ccid")]
+        {
+            let powered = usb_ccid::power_ready();
+            if powered && !attempted {
+                attempted = true;
+                usb_stack = initialize_usb();
+                if usb_stack.is_some() {
+                    let start = now();
+                    usb_ccid::attach_when_regulator_ready(|| {
+                        feed();
+                        now().wrapping_sub(start) > 100_000
+                    });
+                }
+            }
+            if let Some((device, class, responder)) = usb_stack.as_mut() {
+                if powered {
+                    let _ = device.poll(&mut [class]);
+                    if responder.take_request().is_some() {
+                        let mut response = heapless::Vec::new();
+                        let _ = response.extend_from_slice(&[0x6f, code]);
+                        let _ = responder.respond(response);
+                    }
+                    class.check_for_app_response();
+                }
+            }
+        }
+    }
+}
 const WDT: usize = 0x40010000;
 fn now() -> u32 {
     unsafe {
@@ -1896,9 +1939,7 @@ fn main() -> ! {
     }
     let mut transport = BoardUart::init();
     if transport.watchdog.arm(10_000_000).is_err() {
-        loop {
-            let _ = transport.watchdog.feed();
-        }
+        halt_with_diagnostic(&mut transport, b"MicroCard: watchdog startup failed\r\n", 0x01);
     }
     let _reset_reason = BoardResetReport::capture().reset_reason();
     let mut device_identity = [0; 8];
@@ -1924,14 +1965,11 @@ fn main() -> ! {
     let key: &[u8] = if unprovisioned { &DEFAULT_KEY } else { key };
     #[cfg(not(feature = "gp-test-keys"))]
     if unprovisioned {
-        let deadline = transport.deadline_after(1_000_000);
-        let _ = transport.write_raw(
+        halt_with_diagnostic(
+            &mut transport,
             b"MicroCard: provision management keys at the key page\r\n",
-            deadline,
+            0x02,
         );
-        loop {
-            let _ = transport.watchdog.feed();
-        }
     }
     let keys = Keys {
         enc: key[..16].try_into().unwrap(),
@@ -1942,45 +1980,27 @@ fn main() -> ! {
     {
         Ok(action) => action,
         Err(_) => {
-            let deadline = transport.deadline_after(1_000_000);
-            let _ = transport.write_raw(
+            halt_with_diagnostic(
+                &mut transport,
                 b"MicroCard: persistent state erased after ownership; provision fresh management keys\r\n",
-                deadline,
+                0x03,
             );
-            drop(keys);
-            loop {
-                let _ = transport.watchdog.feed();
-            }
         }
     };
     let mut hardware = Hardware::new();
     if hardware.self_test().is_err() {
-        let deadline = transport.deadline_after(1_000_000);
-        let _ = transport.write_raw(b"MicroCard: hardware self-test failed\r\n", deadline);
-        drop(keys);
-        loop {
-            let _ = transport.watchdog.feed();
-        }
+        halt_with_diagnostic(&mut transport, b"MicroCard: hardware self-test failed\r\n", 0x04);
     }
     let storage_key = match keys.storage_key_with(&mut hardware) {
         Ok(key) => key,
         Err(_) => {
-            drop(keys);
-            loop {
-                let _ = transport.watchdog.feed();
-            }
+            halt_with_diagnostic(&mut transport, b"MicroCard: storage-key derivation failed\r\n", 0x05);
         }
     };
     if ownership_action == OwnershipMarkerAction::ProgramBeforeOpen
         && Nvm::program_ownership_marker().is_err()
     {
-        let deadline = transport.deadline_after(1_000_000);
-        let _ = transport.write_raw(b"MicroCard: ownership marker write failed\r\n", deadline);
-        drop(storage_key);
-        drop(keys);
-        loop {
-            let _ = transport.watchdog.feed();
-        }
+        halt_with_diagnostic(&mut transport, b"MicroCard: ownership marker write failed\r\n", 0x06);
     }
     #[cfg(feature = "engine-mc04")]
     let opened = microcard_core::domains::Card::open_with_staging(
@@ -1994,17 +2014,12 @@ fn main() -> ! {
     let card = match opened {
         Ok(c) => c,
         Err(error) => {
-            let message: &[u8] = if error == Error::IncompatibleState {
-                b"MicroCard: incompatible persistent state; explicit provisioning required\r\n"
+            let (message, code): (&[u8], u8) = if error == Error::IncompatibleState {
+                (b"MicroCard: incompatible persistent state; explicit provisioning required\r\n", 0x07)
             } else {
-                b"MicroCard: persistent state open failed\r\n"
+                (b"MicroCard: persistent state open failed\r\n", 0x08)
             };
-            let deadline = transport.deadline_after(1_000_000);
-            let _ = transport.write_raw(message, deadline);
-            drop(keys);
-            loop {
-                let _ = transport.watchdog.feed();
-            }
+            halt_with_diagnostic(&mut transport, message, code);
         }
     };
     let mut endpoint = Endpoint::new(card, keys);

@@ -36,6 +36,13 @@ cp artifacts/first-flash/mc04/dongle/microcard.uf2 /Volumes/UF2BOOT/
 
 The dongle reboots itself when the copy finishes. The volume disappears and a smart card reader called `MicroCard MicroCard virtual smart card` takes its place.
 
+If startup cannot safely open card state, the firmware still enumerates as CCID but
+answers APDUs with a proprietary diagnostic status. `6F01` is watchdog setup, `6F02`
+management-key provisioning, `6F03` an ownership/state mismatch, `6F04` hardware
+self-test, `6F05` storage-key derivation, `6F06` ownership-marker programming,
+`6F07` incompatible persistent state, and `6F08` another storage-open failure. This
+mode is read-only: it never erases or repairs state.
+
 ## Check that it answers
 
 ```sh
