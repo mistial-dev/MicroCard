@@ -33,13 +33,19 @@ pub trait JcvmBackend: Sized {
     type Provider: CryptoProvider + Entropy;
     type Staging: PackageStaging;
 
-    fn into_parts(self) -> (
-        Storage<Self::RegistryFlash, Self::ImageFlash, Self::HeapBanks>,
-        Self::Provider,
-        Self::Staging,
-        Vec<u8>,
-    );
+    fn into_parts(self) -> BackendParts<Self>;
 }
+
+type BackendParts<B> = (
+    Storage<
+        <B as JcvmBackend>::RegistryFlash,
+        <B as JcvmBackend>::ImageFlash,
+        <B as JcvmBackend>::HeapBanks,
+    >,
+    <B as JcvmBackend>::Provider,
+    <B as JcvmBackend>::Staging,
+    Vec<u8>,
+);
 
 struct Upload {
     load: Aid,
@@ -49,6 +55,13 @@ struct Upload {
 }
 
 type StoredSession<F, I> = Session<F, PinnedImage<I>>;
+type SelectedSession<B> = (
+    Aid,
+    StoredSession<
+        <<B as JcvmBackend>::HeapBanks as HeapBanks>::Bank,
+        <B as JcvmBackend>::ImageFlash,
+    >,
+);
 
 // A card-wide RAM quota, independent of the persistent heap journals.
 const MAX_RETAINED_VOLATILE: usize = 65536;
@@ -64,7 +77,7 @@ pub struct JcvmEngine<B: JcvmBackend> {
     staging: B::Staging,
     scratch: Vec<u8>,
     upload: Option<Upload>,
-    selected: Option<(Aid, StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>)>,
+    selected: Option<SelectedSession<B>>,
     retained: Vec<Retained>,
     reset_requested: bool,
     backend: core::marker::PhantomData<B>,
