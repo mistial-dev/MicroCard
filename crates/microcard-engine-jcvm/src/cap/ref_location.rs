@@ -4,18 +4,9 @@
 //! index in the bytecode and one for every two-byte index. A linker that rewrites indices
 //! into addresses walks these to find what to patch.
 //!
-//! This engine does not rewrite anything. It keeps the image position independent and uses
-//! the lists as proof instead. Every listed offset must be the operand of an instruction
-//! that really does take a constant pool index, and every index must be in range. That
-//! turns the component from a list of places to patch into a statement the card can check.
+//! This engine does not rewrite anything. The loader validates both lists and their Method
+//! component bounds, then discards the component before constructing the runtime view.
 use crate::{Error, Result};
-
-/// The offset lists of one package.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RefLocation<'a> {
-    one_byte: &'a [u8],
-    two_byte: &'a [u8],
-}
 
 /// Offsets are stored as distances from the previous one, JCVM §6.12.
 ///
@@ -43,32 +34,52 @@ fn offsets(jumps: &[u8]) -> impl Iterator<Item = Result<usize>> + use<'_> {
     })
 }
 
-impl<'a> RefLocation<'a> {
-    pub fn parse(info: &'a [u8]) -> Result<Self> {
-        let head = info.get(..2).ok_or(Error::Bounds)?;
-        let one_byte_count = u16::from_be_bytes([head[0], head[1]]) as usize;
-        let one_byte = info.get(2..2 + one_byte_count).ok_or(Error::Bounds)?;
-        let at = 2 + one_byte_count;
-        let tail = info.get(at..at + 2).ok_or(Error::Bounds)?;
-        let two_byte_count = u16::from_be_bytes([tail[0], tail[1]]) as usize;
-        let two_byte = info
-            .get(at + 2..at + 2 + two_byte_count)
-            .ok_or(Error::Bounds)?;
-        if at + 2 + two_byte_count != info.len() {
+fn lists(info: &[u8]) -> Result<(&[u8], &[u8])> {
+    let head = info.get(..2).ok_or(Error::Bounds)?;
+    let one_byte_count = u16::from_be_bytes([head[0], head[1]]) as usize;
+    let one_byte_end = 2usize.checked_add(one_byte_count).ok_or(Error::Bounds)?;
+    let one_byte = info.get(2..one_byte_end).ok_or(Error::Bounds)?;
+    let tail = info
+        .get(one_byte_end..one_byte_end + 2)
+        .ok_or(Error::Bounds)?;
+    let two_byte_count = u16::from_be_bytes([tail[0], tail[1]]) as usize;
+    let two_byte_start = one_byte_end + 2;
+    let two_byte_end = two_byte_start
+        .checked_add(two_byte_count)
+        .ok_or(Error::Bounds)?;
+    let two_byte = info
+        .get(two_byte_start..two_byte_end)
+        .ok_or(Error::Bounds)?;
+    if two_byte_end != info.len() {
+        return Err(Error::Format);
+    }
+    Ok((one_byte, two_byte))
+}
+
+fn validate_offsets(jumps: &[u8], method_size: usize, width: usize) -> Result<()> {
+    if jumps.last() == Some(&255) {
+        return Err(Error::Format);
+    }
+    let mut previous = None;
+    for offset in offsets(jumps) {
+        let offset = offset?;
+        if previous.is_some_and(|last| last >= offset) {
             return Err(Error::Format);
         }
-        Ok(Self { one_byte, two_byte })
+        if offset.checked_add(width).is_none_or(|end| end > method_size) {
+            return Err(Error::Bounds);
+        }
+        previous = Some(offset);
     }
+    Ok(())
+}
 
-    /// Offsets into the Method component of every one-byte constant pool index.
-    pub fn one_byte_indices(&self) -> impl Iterator<Item = Result<usize>> + use<'a> {
-        offsets(self.one_byte)
-    }
-
-    /// Offsets into the Method component of every two-byte constant pool index.
-    pub fn two_byte_indices(&self) -> impl Iterator<Item = Result<usize>> + use<'a> {
-        offsets(self.two_byte)
-    }
+/// Validate a Reference Location component without retaining a runtime representation.
+pub(super) fn validate(info: &[u8], method_size: usize) -> Result<()> {
+    let (one_byte, two_byte) = lists(info)?;
+    validate_offsets(one_byte, method_size, 1)?;
+    validate_offsets(two_byte, method_size, 2)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -90,20 +101,18 @@ mod tests {
         // JCVM Table 6-16, which is the case that shows a distance of 255 is a continuation
         // and never an offset on its own.
         let info = component(&[10, 55, 255, 255, 5, 255, 0, 8], &[]);
-        let decoded: Vec<usize> = RefLocation::parse(&info)
-            .unwrap()
-            .one_byte_indices()
-            .map(Result::unwrap)
-            .collect();
+        let (one_byte, _) = lists(&info).unwrap();
+        let decoded: Vec<usize> = offsets(one_byte).map(Result::unwrap).collect();
         assert_eq!(decoded, [10, 65, 580, 835, 843]);
+        validate(&info, 844).unwrap();
     }
 
     #[test]
     fn the_two_lists_are_kept_apart() {
         let info = component(&[4, 4], &[9]);
-        let location = RefLocation::parse(&info).unwrap();
-        let one: Vec<usize> = location.one_byte_indices().map(Result::unwrap).collect();
-        let two: Vec<usize> = location.two_byte_indices().map(Result::unwrap).collect();
+        let (one_byte, two_byte) = lists(&info).unwrap();
+        let one: Vec<usize> = offsets(one_byte).map(Result::unwrap).collect();
+        let two: Vec<usize> = offsets(two_byte).map(Result::unwrap).collect();
         assert_eq!(one, [4, 8]);
         // The second list counts from its own start, because it describes different
         // operands rather than continuing the first.
@@ -114,28 +123,22 @@ mod tests {
     fn a_list_longer_than_the_component_is_refused() {
         let mut info = component(&[1, 2], &[3]);
         info[1] = 9;
-        assert_eq!(RefLocation::parse(&info), Err(Error::Bounds));
+        assert_eq!(validate(&info, 10), Err(Error::Bounds));
         // Trailing bytes mean a layout this parser cannot read.
         let mut longer = component(&[1], &[2]);
         longer.push(0);
-        assert_eq!(RefLocation::parse(&longer), Err(Error::Format));
-        assert_eq!(RefLocation::parse(&[0]), Err(Error::Bounds));
+        assert_eq!(validate(&longer, 10), Err(Error::Format));
+        assert_eq!(validate(&[0], 10), Err(Error::Bounds));
         // Both lists empty is legal for a package that references nothing.
         assert_eq!(
-            RefLocation::parse(&[0, 0, 0, 0]).unwrap().one_byte_indices().count(),
-            0
+            validate(&[0, 0, 0, 0], 0),
+            Ok(())
         );
     }
 
     #[test]
-    fn a_run_of_continuations_with_no_end_yields_nothing_further() {
-        // The list stops mid distance, so there is no offset to report rather than a
-        // partial one.
+    fn a_run_of_continuations_with_no_end_is_refused() {
         let info = component(&[10, 255, 255], &[]);
-        let decoded: Vec<Result<usize>> = RefLocation::parse(&info)
-            .unwrap()
-            .one_byte_indices()
-            .collect();
-        assert_eq!(decoded, [Ok(10)]);
+        assert_eq!(validate(&info, 1024), Err(Error::Format));
     }
 }

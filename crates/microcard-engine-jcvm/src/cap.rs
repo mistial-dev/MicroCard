@@ -27,7 +27,6 @@ pub use directory::Directory;
 pub use header::{Header, MAGIC};
 pub use import::{Import, PackageRef};
 pub use method::{ACC_ABSTRACT, ACC_EXTENDED, Handler, Method, MethodHeader};
-pub use ref_location::RefLocation;
 pub use static_field::{
     ArrayInit, StaticField, TYPE_BOOLEAN, TYPE_BYTE, TYPE_INT, TYPE_SHORT,
 };
@@ -160,6 +159,17 @@ impl<'a> LoadFile<'a> {
         if file.components[Tag::Method as usize - 1].is_none() {
             return Err(Error::Format);
         }
+        if let Some(component) = file.components[Tag::RefLocation as usize - 1] {
+            let method_size = file.components[Tag::Method as usize - 1]
+                .ok_or(Error::Format)?
+                .info
+                .len();
+            ref_location::validate(component.info, method_size)?;
+            // The converter-only relocation table is never consulted while executing an
+            // applet. Drop its borrowed view after validation so it cannot become runtime
+            // state by accident.
+            file.components[Tag::RefLocation as usize - 1] = None;
+        }
         Ok(file)
     }
 
@@ -186,14 +196,6 @@ impl<'a> LoadFile<'a> {
             self.component(Tag::Class).ok_or(Error::Format)?.info,
             &self.header()?,
         )
-    }
-
-    /// Where every constant pool index sits in the bytecode, or an empty pair of lists.
-    pub fn ref_locations(&self) -> Result<RefLocation<'a>> {
-        match self.component(Tag::RefLocation) {
-            Some(component) => RefLocation::parse(component.info),
-            None => RefLocation::parse(&[0, 0, 0, 0]),
-        }
     }
 
     /// The static field image description, which every static access indexes into.
@@ -289,6 +291,30 @@ mod tests {
         assert_eq!(header.package_aid, &PACKAGE_AID[..]);
         assert_eq!(file.component(Tag::Method).unwrap().declared_size(), 40);
         assert!(file.component(Tag::Import).is_none());
+    }
+
+    #[test]
+    fn ref_location_is_validated_during_load_and_then_discarded() {
+        let valid = block(&[
+            (Tag::Header, header_info()),
+            (Tag::Method, alloc::vec![0; 40]),
+            (Tag::RefLocation, alloc::vec![0, 1, 10, 0, 1, 20]),
+        ]);
+        let file = LoadFile::parse(&valid).unwrap();
+        assert!(file.component(Tag::RefLocation).is_none());
+
+        for malformed in [
+            alloc::vec![0, 1, 255, 0, 0],
+            alloc::vec![0, 1, 40, 0, 0],
+            alloc::vec![0, 2, 10, 0, 0, 0],
+        ] {
+            let bytes = block(&[
+                (Tag::Header, header_info()),
+                (Tag::Method, alloc::vec![0; 40]),
+                (Tag::RefLocation, malformed),
+            ]);
+            assert!(LoadFile::parse(&bytes).is_err());
+        }
     }
 
     #[test]
