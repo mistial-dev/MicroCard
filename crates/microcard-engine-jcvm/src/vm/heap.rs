@@ -24,6 +24,8 @@ pub const KIND_REFERENCE: u8 = 6;
 pub const CLEAR_ON_RESET: u8 = 1;
 pub const CLEAR_ON_DESELECT: u8 = 2;
 const KIND_MASK: u8 = 0x0f;
+const HEAP_VERSION: u8 = 2;
+pub const ANY_REFERENCE_CLASS: u16 = u16::MAX;
 
 /// Bytes of header every object carries: class or element type, length, kind and owner.
 pub const HEADER: usize = 6;
@@ -47,7 +49,8 @@ pub struct Heap<'a> {
 /// What an object is, read back from its header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Info {
-    /// The Class component offset for an object, or zero for an array.
+    /// The Class component offset for an object, the raw component `ClassRef` for a
+    /// reference array, or zero for a primitive array.
     pub class: u16,
     /// Field words for an object, elements for an array.
     pub length: u16,
@@ -76,7 +79,7 @@ impl Info {
         if !matches!(info.kind, KIND_OBJECT | KIND_BOOLEAN..=KIND_REFERENCE)
             || info.clear_event > CLEAR_ON_DESELECT
             || (info.kind == KIND_OBJECT && info.clear_event != 0)
-            || (info.is_array() && info.class != 0)
+            || (info.is_array() && info.kind != KIND_REFERENCE && info.class != 0)
         { return Err(Error::Format); }
         if at + HEADER + info.length as usize * info.element_size() > used { return Err(Error::Bounds); }
         Ok(info)
@@ -120,13 +123,12 @@ impl<'a> Heap<'a> {
 
     /// Runtime-only header, outside applet-addressable objects and Java transactions.
     pub(crate) fn initialize_lifecycle(&mut self) {
-        self.bytes[..2].copy_from_slice(&[1, 0x07]);
+        self.bytes[..2].copy_from_slice(&[HEAP_VERSION, 0x07]);
     }
 
     pub(crate) fn lifecycle(&self) -> Result<u8> {
-        if self.bytes[0] != 1 || !Self::valid_lifecycle(self.bytes[1]) {
-            return Err(Error::Format);
-        }
+        if self.bytes[0] != HEAP_VERSION { return Err(Error::IncompatibleState); }
+        if !Self::valid_lifecycle(self.bytes[1]) { return Err(Error::Format); }
         Ok(self.bytes[1])
     }
 
@@ -322,7 +324,15 @@ impl<'a> Heap<'a> {
         if !(KIND_BOOLEAN..=KIND_REFERENCE).contains(&kind) {
             return Err(Error::Format);
         }
-        self.allocate(0, length, kind, owner)
+        let class = if kind == KIND_REFERENCE { ANY_REFERENCE_CLASS } else { 0 };
+        self.allocate(class, length, kind, owner)
+    }
+
+    /// A reference array whose elements must be assignment-compatible with the named class.
+    pub fn new_reference_array(&mut self, component_class: u16, length: u16,
+            owner: Context) -> Result<Reference> {
+        if component_class == ANY_REFERENCE_CLASS { return Err(Error::Format); }
+        self.allocate(component_class, length, KIND_REFERENCE, owner)
     }
 
     pub fn new_transient_array(&mut self, kind: u8, length: u16, owner: Context, event: u8) -> Result<Reference> {
@@ -446,7 +456,7 @@ impl<'a> Heap<'a> {
 
     pub fn array_put(&mut self, reference: Reference, index: usize, value: i16) -> Result<()> {
         let (at, info) = self.slot(reference, index, true)?;
-        if info.kind == KIND_INT { return Err(Error::Type); }
+        if matches!(info.kind, KIND_INT | KIND_REFERENCE) { return Err(Error::Type); }
         self.remember(at, info.element_size(), info)?;
         match info.kind {
             KIND_BOOLEAN => self.bytes[at] = (value != 0) as u8,
@@ -454,6 +464,15 @@ impl<'a> Heap<'a> {
             KIND_INT => return Err(Error::Type),
             _ => self.bytes[at..at + 2].copy_from_slice(&value.to_be_bytes()),
         }
+        Ok(())
+    }
+
+    pub(crate) fn array_put_reference(&mut self, reference: Reference, index: usize,
+            value: Reference) -> Result<()> {
+        let (at, info) = self.slot(reference, index, true)?;
+        if info.kind != KIND_REFERENCE { return Err(Error::Type); }
+        self.remember(at, 2, info)?;
+        self.bytes[at..at + 2].copy_from_slice(&value.to_be_bytes());
         Ok(())
     }
 
@@ -653,7 +672,7 @@ mod tests {
         let mut projected_statics = [0; 2];
         let remaining = heap.transaction_remaining();
         assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
-        assert_eq!(&projected[..2], &[1, 0x0f]);
+        assert_eq!(&projected[..2], &[2, 0x0f]);
         assert_eq!(projected_statics, [4, 5]);
         // Windows can split words and overlapping before-images without publishing
         // conditional values. They must agree with the existing full projection.
@@ -785,6 +804,7 @@ mod tests {
                     let reference = if event == 0 { heap.new_array(kind, 3, owner).unwrap() }
                         else { heap.new_transient_array(kind, 3, owner, event).unwrap() };
                     if kind == KIND_INT { heap.array_put_int(reference, 0, 1).unwrap(); }
+                    else if kind == KIND_REFERENCE { heap.array_put_reference(reference, 0, 1).unwrap(); }
                     else { heap.array_put(reference, 0, 1).unwrap(); }
                     arrays.push((reference, event, owner, kind));
                 }

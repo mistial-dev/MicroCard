@@ -750,6 +750,7 @@ mod tests {
         package.static_bytes = 2;
         package.constants.push([CONSTANT_STATIC_FIELDREF, 0, 0, 0]);
         package.constants.push([CONSTANT_STATIC_METHODREF, 0x81, 7, 1]);
+        let typed_component = 0x800b; // java.lang.ArrayStoreException
         // deselect records that it ran, then throws; JCRE must still clear its arrays.
         package.extra.push((1, 0, vec![op::SCONST_1, 129, 0, 9,
             op::SSPUSH, 0x6a, 0x82, op::INVOKESTATIC, 0, 10, op::RETURN]));
@@ -860,7 +861,8 @@ mod tests {
         heap.put_word_unconditional(runtime_exception, natives::REASON_FIELD, 3).unwrap();
         heap.put_word_unconditional(explicit_exception, natives::REASON_FIELD, 4).unwrap();
         let retained_references = heap.new_array(heap::KIND_REFERENCE, 1, 1).unwrap();
-        heap.array_put(retained_references, 0, explicit_exception as i16).unwrap();
+        heap.array_put_reference(retained_references, 0, explicit_exception).unwrap();
+        let typed_references = heap.new_reference_array(typed_component, 1, 1).unwrap();
         let pair_class = PACKAGES.iter().flat_map(|package| package.classes)
             .find(|class| class.id == ClassId::KeyPair).unwrap();
         // NEW checkpoints before invokespecial runs the constructor.
@@ -902,6 +904,7 @@ mod tests {
         assert_eq!(recovered.get_word(reserved_exception, natives::REASON_FIELD), Ok(0));
         assert_eq!(recovered.get_word(runtime_exception, natives::REASON_FIELD), Ok(0));
         assert_eq!(recovered.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
+        assert_eq!(recovered.info(typed_references).unwrap().class, typed_component);
         assert_eq!(recovered.byte_slice(key_material, 0, 17).unwrap(), &[0; 17]);
         assert_eq!(recovered.byte_slice(pending, 0, 32).unwrap(), &[0; 32]);
         assert_eq!(recovered.get_word(cipher, 2), Ok(key));
@@ -922,7 +925,21 @@ mod tests {
         assert_eq!(live.get_word(reserved_exception, natives::REASON_FIELD), Ok(2));
         assert_eq!(live.get_word(runtime_exception, natives::REASON_FIELD), Ok(3));
         assert_eq!(live.get_word(explicit_exception, natives::REASON_FIELD), Ok(4));
-        for case in 0..29 {
+        let mut old_heap = saved_heap.clone();
+        old_heap[0] = 1;
+        assert!(matches!(
+            AppletInstance::restore(
+                &file,
+                Sizes::default(),
+                PersistentState {
+                    heap: &old_heap,
+                    statics: &saved_statics,
+                    instance,
+                },
+            ),
+            Err(Error::IncompatibleState)
+        ));
+        for case in 0..30 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -954,9 +971,14 @@ mod tests {
                 23 => { invalid[pin as usize + heap::HEADER + 3] = 65; instance } // Exceeds configured PIN capacity.
                 24 => { invalid[unconstructed_pair as usize + heap::HEADER + 1] = 5; instance }
                 25 => { invalid[..2].fill(0); instance } // Pre-lifecycle heap format.
-                26 => { invalid[0] = 2; instance } // Unknown header version.
+                26 => { invalid[0] = 3; instance } // Unknown header version.
                 27 => { invalid[1] = 0x80; instance } // Invalid application state.
-                _ => { invalid.truncate(invalid.len() - 1); instance }
+                28 => { invalid.truncate(invalid.len() - 1); instance }
+                _ => {
+                    let at = typed_references as usize + heap::HEADER;
+                    invalid[at..at + 2].copy_from_slice(&explicit_exception.to_be_bytes());
+                    instance
+                }
             };
             assert!(AppletInstance::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
         }

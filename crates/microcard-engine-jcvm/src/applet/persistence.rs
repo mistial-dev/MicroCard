@@ -207,7 +207,8 @@ impl AppletInstance {
             return Err(Error::Bounds);
         }
         // Runtime objects have deterministic handles and a zeroed APDU buffer.
-        if saved.heap[0] != 1 || !Heap::valid_lifecycle(saved.heap[1])
+        if saved.heap[0] != 2 { return Err(Error::IncompatibleState); }
+        if !Heap::valid_lifecycle(saved.heap[1])
             || saved.heap.get(2..self.runtime_bytes) != Some(&self.heap[2..self.runtime_bytes]) {
             return Err(Error::Format);
         }
@@ -256,8 +257,27 @@ impl AppletInstance {
         linked.imports_resolve()?;
         visit_saved_objects(saved.heap, |_, info, payload| {
             if info.kind == heap::KIND_REFERENCE {
+                let component = if info.class == heap::ANY_REFERENCE_CLASS { None } else {
+                    let target = ClassRef::decode(info.class);
+                    match target {
+                        ClassRef::Internal(offset) => { linked.classes().at(offset)?; }
+                        ClassRef::External { package, class } => { linked.api_class(package, class)?; }
+                        ClassRef::None => return Err(Error::Format),
+                    }
+                    Some(target)
+                };
                 for word in payload.chunks_exact(2) {
-                    storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
+                    let reference = u16::from_be_bytes([word[0], word[1]]);
+                    storable_reference(reference)?;
+                    if let Some(component) = component.filter(|_| reference != 0) {
+                        let value = heap::Info::read(saved.heap, saved.heap.len(), reference)?;
+                        let compatible = if value.is_array() {
+                            linked.class_reference_is_object(component)?
+                        } else {
+                            linked.class_matches_target(value.class, component)?
+                        };
+                        if !compatible { return Err(Error::Type); }
+                    }
                 }
             } else if info.kind == heap::KIND_BOOLEAN {
                 if payload.iter().any(|value| *value > 1) {

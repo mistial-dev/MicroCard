@@ -781,7 +781,7 @@ mod tests {
         frame.push_short(0x0f).unwrap();
         call(setter, &mut heap, &mut storage, &mut frame, 1, &mut jcre).unwrap();
         assert_eq!(frame.pop_short().unwrap(), 1);
-        assert_eq!(&storage.saved[..2], &[1, 0x0f]);
+        assert_eq!(&storage.saved[..2], &[2, 0x0f]);
         let used = storage.saved.len();
         let saved = Heap::resume(&mut storage.saved, used).unwrap();
         assert_eq!(saved.get_word(instance, 0), Ok(0));
@@ -794,7 +794,7 @@ mod tests {
         frame.push_short(0x17).unwrap();
         assert!(matches!(call(setter, &mut heap, &mut storage, &mut frame, 1,
             &mut next), Err(Error::Storage)));
-        assert_eq!(&storage.saved[..2], &[1, 0x0f]);
+        assert_eq!(&storage.saved[..2], &[2, 0x0f]);
     }
 
     #[test]

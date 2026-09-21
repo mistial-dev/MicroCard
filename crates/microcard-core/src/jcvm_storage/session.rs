@@ -328,6 +328,7 @@ fn engine_error(error: microcard_engine_jcvm::Error) -> Error {
         E::Cancelled => Error::Cancelled,
         E::Quota => Error::Quota,
         E::Storage => Error::Storage,
+        E::IncompatibleState => Error::IncompatibleState,
         E::Bounds => Error::Bounds,
         E::Missing => Error::Missing,
         E::Unsupported => Error::Unsupported,

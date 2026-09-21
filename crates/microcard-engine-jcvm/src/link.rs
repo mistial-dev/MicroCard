@@ -12,7 +12,7 @@ use crate::cap::{
     CONSTANT_INSTANCE_FIELDREF, CONSTANT_STATIC_FIELDREF, CONSTANT_STATIC_METHODREF,
     CONSTANT_SUPER_METHODREF, CONSTANT_VIRTUAL_METHODREF, Class, ClassInfo, ClassRef, LoadFile,
 };
-use crate::jcvm_api::{ApiClass, ApiMethod, ApiPackage, PACKAGES};
+use crate::jcvm_api::{ApiClass, ApiMethod, ApiPackage, ClassId, PACKAGES};
 use crate::{Error, Result};
 
 /// The high bit of a virtual method token marks the package-visible namespace, §4.3.7.6.
@@ -228,6 +228,42 @@ impl<'a> Linked<'a> {
             .iter()
             .find(|entry| entry.token == class)
             .ok_or(Error::Missing)
+    }
+
+    /// Whether an object's concrete class is assignment-compatible with a class reference.
+    pub(crate) fn class_matches(&self, class: u16, index: u16) -> Result<bool> {
+        let entry = self.constants()?.get(index)?;
+        if entry.tag != crate::cap::CONSTANT_CLASSREF { return Err(Error::Format); }
+        let target = ClassRef::decode(u16::from_be_bytes([entry.info[0], entry.info[1]]));
+        self.class_matches_target(class, target)
+    }
+
+    pub(crate) fn class_matches_target(&self, class: u16, target: ClassRef) -> Result<bool> {
+        if target == ClassRef::None { return Err(Error::Format); }
+        if crate::natives::is_native_class(class) {
+            let ClassRef::External { package, class: token } = target else { return Ok(false); };
+            let wanted = self.api_class(package, token)?;
+            let position = PACKAGES.iter()
+                .position(|entry| entry.classes.iter().any(|candidate| candidate == wanted))
+                .ok_or(Error::Missing)?;
+            return Ok(crate::natives::native_is_a(class,
+                crate::natives::native_class(position, wanted.token)));
+        }
+        let mut at = ClassRef::Internal(class);
+        for _ in 0..=u8::MAX {
+            let ClassRef::Internal(offset) = at else { return Ok(at == target); };
+            if target == ClassRef::Internal(offset) { return Ok(true); }
+            let entry = self.classes.at(offset)?;
+            if entry.interfaces().any(|(implemented, _)| implemented == target) { return Ok(true); }
+            at = entry.super_class;
+        }
+        Ok(false)
+    }
+
+    pub(crate) fn class_reference_is_object(&self, target: ClassRef) -> Result<bool> {
+        if target == ClassRef::None { return Ok(true); }
+        let ClassRef::External { package, class } = target else { return Ok(false); };
+        Ok(self.api_class(package, class)?.id == ClassId::Object)
     }
 
     /// Whether every package this one imports is one the engine provides, at a version it

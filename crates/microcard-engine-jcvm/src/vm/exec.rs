@@ -371,47 +371,7 @@ fn catches(machine: &Machine, catch_type: u16, thrown: u16) -> Result<bool> {
 /// the card provides answers through the hierarchy its export file records, and an
 /// applet's own class answers by walking what it extends and implements.
 fn class_matches(machine: &Machine, class: u16, index: u16) -> Result<bool> {
-    let entry = machine.linked.constants()?.get(index)?;
-    let target = u16::from_be_bytes([entry.info[0], entry.info[1]]);
-    if natives::is_native_class(class) {
-        let crate::cap::ClassRef::External {
-            package,
-            class: token,
-        } = crate::cap::ClassRef::decode(target)
-        else {
-            return Ok(false);
-        };
-        let wanted = machine.linked.api_class(package, token)?;
-        let position = crate::jcvm_api::PACKAGES
-            .iter()
-            .position(|entry| entry.classes.iter().any(|candidate| candidate == wanted))
-            .ok_or(Error::Missing)?;
-        return Ok(natives::native_is_a(
-            class,
-            natives::native_class(position, wanted.token),
-        ));
-    }
-    let classes = machine.linked.classes();
-    let mut at = crate::cap::ClassRef::Internal(class);
-    for _ in 0..=u8::MAX {
-        let class = match at {
-            crate::cap::ClassRef::Internal(offset) => offset,
-            // The chain left this package, so the only way to match is for the target to
-            // name the same class outright.
-            other => return Ok(other == crate::cap::ClassRef::decode(target)),
-        };
-        if crate::cap::ClassRef::decode(target) == crate::cap::ClassRef::Internal(class) {
-            return Ok(true);
-        }
-        let entry = classes.at(class)?;
-        for (implemented, _) in entry.interfaces() {
-            if implemented == crate::cap::ClassRef::decode(target) {
-                return Ok(true);
-            }
-        }
-        at = entry.super_class;
-    }
-    Ok(false)
+    machine.linked.class_matches(class, index)
 }
 
 /// Whether an object can be used as the type a cast names, JCVM §7.5.16.
@@ -440,6 +400,20 @@ fn assignable(
         return Ok(false);
     }
     class_matches(machine, info.class, index)
+}
+
+fn reference_array_accepts(machine: &Machine, array: heap::Info,
+        value: Reference) -> Result<bool> {
+    if value == NULL || array.class == heap::ANY_REFERENCE_CLASS { return Ok(true); }
+    let component = crate::cap::ClassRef::decode(array.class);
+    if component == crate::cap::ClassRef::None { return Err(Error::Format); }
+    let value_info = machine.heap.info(value)?;
+    if !value_info.is_array() {
+        return machine.linked.class_matches_target(value_info.class, component);
+    }
+    // Every array is an Object. Java Card does not expose Cloneable or Serializable,
+    // so no other named class can accept an array value here.
+    machine.linked.class_reference_is_object(component)
 }
 
 /// Run a method body with no arena, which refuses any invocation it meets.
@@ -835,11 +809,13 @@ pub fn run_body(
                 }
             }
             op::ANEWARRAY => {
-                // The element class is named but not recorded. Every reference element is
-                // one word whatever it points at, and a store is checked against the
-                // object it actually finds rather than against a declared type.
                 let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
-                let _ = index;
+                let entry = machine.linked.constants()?.get(index)?;
+                if entry.tag != crate::cap::CONSTANT_CLASSREF { return Err(Error::Format); }
+                let component = u16::from_be_bytes([entry.info[0], entry.info[1]]);
+                if crate::cap::ClassRef::decode(component) == crate::cap::ClassRef::None {
+                    return Err(Error::Format);
+                }
                 let length = frame.pop_short()?;
                 if length < 0 {
                     let exception = natives::new_exception(machine.heap, ClassId::NegativeArraySizeException, machine.context)?;
@@ -848,7 +824,7 @@ pub fn run_body(
                 let array =
                     machine
                         .heap
-                        .new_array(heap::KIND_REFERENCE, length as u16, machine.context)?;
+                        .new_reference_array(component, length as u16, machine.context)?;
                 frame.push_reference(array)?
             }
             op::NEWARRAY => {
@@ -912,8 +888,19 @@ pub fn run_body(
                 if !wanted {
                     return Err(Error::Type);
                 }
-                if opcode == op::AASTORE { check_reference_store(machine, value as Reference)?; }
-                machine.heap.array_put(array, bounded_index(index, info.length)?, value)?
+                if opcode == op::AASTORE {
+                    let reference = value as Reference;
+                    check_reference_store(machine, reference)?;
+                    if !reference_array_accepts(machine, info, reference)? {
+                        let exception = natives::new_exception(machine.heap,
+                            ClassId::ArrayStoreException, machine.context)?;
+                        return Ok(Some(Outcome::Thrown(exception)));
+                    }
+                    machine.heap.array_put_reference(array,
+                        bounded_index(index, info.length)?, reference)?;
+                } else {
+                    machine.heap.array_put(array, bounded_index(index, info.length)?, value)?;
+                }
             }
             op::IASTORE => {
                 let value = frame.pop_int()?;
@@ -1271,7 +1258,8 @@ fn take_field_value(frame: &mut Frame, kind: u8) -> Result<i32> {
 fn check_reference_store(machine: &Machine, reference: Reference) -> Result<()> {
     if reference == NULL { return Ok(()); }
     let info = machine.heap.info(reference)?;
-    if reference == machine.jcre.buffer || natives::is_temporary_native(info.class, info.length) {
+    if info.owner != machine.context || reference == machine.jcre.buffer
+        || natives::is_temporary_native(info.class, info.length) {
         return Err(Error::Firewall);
     }
     Ok(())
@@ -1786,14 +1774,68 @@ mod tests {
 
     #[test]
     fn a_reference_array_holds_references_and_says_so() {
-        let code = [
+        let code = vec![
             op::SCONST_5, op::ANEWARRAY, 0x00, 0x00, op::ASTORE_0,
             op::ALOAD_0, op::SCONST_0, op::ALOAD_0, op::AASTORE,
             op::ALOAD_0, op::SCONST_0, op::AALOAD, op::ARETURN,
         ];
+        let package = Package {
+            code,
+            max_stack: 15,
+            nargs: 0,
+            max_locals: 2,
+            constants: vec![[crate::cap::CONSTANT_CLASSREF, 0x80, 0, 0]],
+            imports: vec![(vec![0xa0, 0, 0, 0, 0x62, 0, 1], 1, 0)],
+            ..Package::default()
+        };
         // The array holds itself, and what comes back is tagged as a reference, which
         // areturn requires.
-        assert!(matches!(execute(&code, 2), Ok(Outcome::Reference(_))));
+        assert!(matches!(execute_package(&package), Ok(Outcome::Reference(_))));
+    }
+
+    #[test]
+    fn reference_array_stores_enforce_the_declared_component_type() {
+        use crate::cap::CONSTANT_CLASSREF;
+        use crate::test_support::ClassSpec;
+
+        let mut package = Package {
+            max_stack: 4,
+            nargs: 0,
+            max_locals: 2,
+            classes: vec![ClassSpec::default(), ClassSpec::default()],
+            imports: vec![(vec![0xa0, 0, 0, 0, 0x62, 0, 1], 1, 0)],
+            ..Package::default()
+        };
+        let offsets = package.class_offsets();
+        package.classes[1].super_class = offsets[0];
+        package.constants = vec![
+            [CONSTANT_CLASSREF, (offsets[0] >> 8) as u8, offsets[0] as u8, 0],
+            [CONSTANT_CLASSREF, (offsets[1] >> 8) as u8, offsets[1] as u8, 0],
+            [CONSTANT_CLASSREF, 0x80, 11, 0], // ArrayStoreException
+        ];
+
+        // A subclass is valid in an array declared for its superclass.
+        package.code = vec![
+            op::SCONST_1, op::ANEWARRAY, 0, 0, op::ASTORE_0,
+            op::NEW, 0, 1, op::ASTORE_0 + 1,
+            op::ALOAD_0, op::SCONST_0, op::ALOAD_0 + 1, op::AASTORE,
+            op::ALOAD_0 + 1, op::ARETURN,
+        ];
+        assert!(matches!(execute_package(&package), Ok(Outcome::Reference(_))));
+
+        // The inverse store throws ArrayStoreException before mutating the array.
+        package.code = vec![
+            op::SCONST_1, op::ANEWARRAY, 0, 1, op::ASTORE_0,
+            op::NEW, 0, 0, op::ASTORE_0 + 1,
+            op::ALOAD_0, op::SCONST_0, op::ALOAD_0 + 1, op::AASTORE,
+            op::SCONST_0, op::SRETURN,
+        ];
+        package.handlers = vec![[0; 8]];
+        let body = package.install_offset() + 2;
+        let protected = package.code.len() as u16;
+        package.code.extend([op::POP, op::SCONST_1, op::SRETURN]);
+        package.handlers = vec![handler(body, protected, body + protected, 2, true)];
+        assert_eq!(execute_package(&package), Ok(Outcome::Short(1)));
     }
 
     #[test]
@@ -1881,6 +1923,7 @@ mod tests {
             let explicit = heap.new_object(native(ClassId::CryptoException), 6, 1).unwrap();
             let security = natives::new_exception(&mut heap, ClassId::SecurityException, 1).unwrap();
             let object = heap.new_object(0, 1, 1).unwrap();
+            let foreign = heap.new_object(0, 1, 2).unwrap();
             let array = if transient {
                 heap.new_transient_array(heap::KIND_REFERENCE, 1, 1, heap::CLEAR_ON_RESET).unwrap()
             } else { heap.new_array(heap::KIND_REFERENCE, 1, 1).unwrap() };
@@ -1889,9 +1932,9 @@ mod tests {
             let mut machine = Machine::new(&mut heap, &mut host, &linked, methods,
                 &mut statics, 1, Limits::IMPLEMENTED, Jcre::new(apdu, buffer));
             for (value, allowed) in [(NULL, true), (object, true), (explicit, true),
-                (buffer, false), (apdu, false), (runtime, false)] {
+                (foreign, false), (buffer, false), (apdu, false), (runtime, false)] {
                 machine.heap.put_word(object, 0, 0).unwrap();
-                machine.heap.array_put(array, 0, 0).unwrap();
+                machine.heap.array_put_reference(array, 0, NULL).unwrap();
                 machine.statics.fill(0);
                 machine.heap.begin_transaction(if allowed { 8 } else { 0 }).unwrap();
                 let mut words = [0; 12];

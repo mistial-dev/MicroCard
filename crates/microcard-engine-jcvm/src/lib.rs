@@ -46,6 +46,8 @@ pub enum Error {
     TransactionAborted,
     /// A durable boundary failed; the platform must recover before reusing the card.
     Storage,
+    /// Persistent bytes use a version this runtime intentionally cannot decode.
+    IncompatibleState,
     /// Transport cancellation, outside the applet's exception mechanism.
     Cancelled,
     /// A word was used as the wrong kind of value, such as a number as a reference.
