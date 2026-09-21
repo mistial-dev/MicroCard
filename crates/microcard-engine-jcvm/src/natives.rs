@@ -331,9 +331,19 @@ fn new_native(
 /// so an applet reading it goes through the same bounds and firewall checks as any array.
 fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context: heap::Context) -> Result<Native> {
     match name {
+        // The host presents contacted T=1 semantics. A 254-byte information field plus
+        // the seven-byte extended header fits the runtime's 261-byte APDU buffer.
+        MethodId::getInBlockSize | MethodId::getOutBlockSize => {
+            frame.push_short(254)?;
+        }
         MethodId::getBuffer => {
             frame.pop_reference()?;
             frame.push_reference(jcre.buffer)?;
+        }
+        MethodId::getNAD => {
+            frame.pop_reference()?;
+            // NAD is optional in T=1 and zero when it is not used.
+            frame.push_short(0)?;
         }
         MethodId::getIncomingLength => {
             frame.pop_reference()?;
@@ -352,6 +362,22 @@ fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, con
             // The whole command is already in the buffer, so there is nothing to wait for
             // and the answer is everything that arrived.
             frame.push_short(jcre.incoming as i16)?;
+        }
+        MethodId::receiveBytes => {
+            let offset = frame.pop_short()?;
+            frame.pop_reference()?;
+            if !jcre.incoming_started || jcre.outgoing_started {
+                return apdu_exception(heap, context, 1); // ILLEGAL_USE
+            }
+            if offset < 0 { return apdu_exception(heap, context, 2); }
+            let offset = offset as usize;
+            let buffer = heap.info(jcre.buffer)?;
+            if offset.checked_add(254).is_none_or(|end| end > buffer.length as usize) {
+                return apdu_exception(heap, context, 2); // BUFFER_BOUNDS
+            }
+            // Commands are fully framed before the VM is entered, so the primary receive
+            // consumed every byte and a legal follow-up receive has nothing left to copy.
+            frame.push_short(0)?;
         }
         MethodId::setOutgoing | MethodId::setOutgoingNoChaining => {
             frame.pop_reference()?;
@@ -476,6 +502,7 @@ fn jcsystem(
             frame.push_short(i16::from(heap.transient_event(reference)?))?;
         }
         MethodId::isObjectDeletionSupported => frame.push_short(0)?,
+        MethodId::getVersion => frame.push_short(0x0305)?,
         MethodId::requestObjectDeletion => {
             // Legal to do nothing, JCRE §7.4. An applet that depends on it asks first.
         }
@@ -1085,6 +1112,39 @@ mod tests {
         }
         assert_eq!(heap.used(), used);
         assert_eq!(heap.transaction_remaining(), Some(0));
+    }
+
+    #[test]
+    fn contacted_transport_parameters_and_buffered_receive_match_the_runtime() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        reserve_runtime_exceptions(&mut heap, 1).unwrap();
+        let buffer = heap.new_array(heap::KIND_BYTE, 261, 1).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut jcre = Jcre::new(0, buffer);
+
+        for method in [MethodId::getInBlockSize, MethodId::getOutBlockSize] {
+            assert!(matches!(apdu(method, &mut heap, &mut frame, &mut jcre, 1), Ok(Native::Returned)));
+            assert_eq!(frame.pop_short(), Ok(254));
+        }
+        frame.push_reference(0).unwrap();
+        assert!(matches!(apdu(MethodId::getNAD, &mut heap, &mut frame, &mut jcre, 1), Ok(Native::Returned)));
+        assert_eq!(frame.pop_short(), Ok(0));
+
+        jcre.incoming_started = true;
+        frame.push_reference(0).unwrap();
+        frame.push_short(7).unwrap();
+        assert!(matches!(apdu(MethodId::receiveBytes, &mut heap, &mut frame, &mut jcre, 1), Ok(Native::Returned)));
+        assert_eq!(frame.pop_short(), Ok(0));
+        frame.push_reference(0).unwrap();
+        frame.push_short(8).unwrap();
+        let Native::Threw(exception) = apdu(MethodId::receiveBytes, &mut heap, &mut frame, &mut jcre, 1).unwrap()
+            else { panic!("an undersized receive window was accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
+
+        assert!(matches!(jcsystem(MethodId::getVersion, 0, &mut heap, &mut frame, 1,
+            &mut jcre, &mut [], &mut crate::host::NoHost), Ok(Native::Returned)));
+        assert_eq!(frame.pop_short(), Ok(0x0305));
     }
 
     #[test]

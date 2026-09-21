@@ -358,6 +358,14 @@ reset-scoped secrets. A failed reload fails the channel setup. Explicit transpor
 reset and authentication failures still discard selection. Root-management test
 clients select the ISD explicitly before opening their channel.
 
+The runtime presents contacted T=1 APDU semantics. `getProtocol` returns T=1,
+`getNAD` returns zero because NAD is unused, and the incoming and outgoing information
+field sizes are 254 bytes. The 261-byte APDU buffer therefore holds either information
+field plus an extended command header. Commands are completely framed before applet
+entry, so `setIncomingAndReceive` returns the complete input and a valid later
+`receiveBytes` returns zero after enforcing the required 254-byte free window.
+`JCSystem.getVersion` reports Java Card 3.0.5 (`0305`).
+
 For ISD-owned applets, the shared transport passes encrypted, authenticated commands
 with a command-scoped secure-channel grant. `GPSystem.getSecureChannel` returns a
 reusable handle containing no authority. `getSecurityLevel` reads the current grant;
