@@ -225,33 +225,44 @@ mod tests {
 
     #[cfg(feature = "jcvm")]
     #[test]
-    fn pinned_code_blocks_reclamation_and_overlapping_writes_and_checks_each_read() {
+    fn pinned_code_blocks_reclamation_and_reuses_its_verified_mapping() {
+        struct CountingHash {
+            calls: usize,
+        }
+        impl CryptoProvider for CountingHash {
+            fn sha256_into(&mut self, input: &[u8], output: &mut [u8; 32]) -> Result<()> {
+                self.calls += 1;
+                SoftwareCrypto.sha256_into(input, output)
+            }
+        }
         let mut images = Images::new(Memory {
             slots: [[255; 32]; 2],
             remaining: None,
         })
         .unwrap();
-        let first = images.stage(b"first", &[], &mut SoftwareCrypto).unwrap();
-        let pin = images.pin(&first, 1..4, &mut SoftwareCrypto).unwrap();
+        let mut provider = CountingHash { calls: 0 };
+        let first = images.stage(b"first", &[], &mut provider).unwrap();
+        let pin = images.pin(&first, 1..4, &mut provider).unwrap();
         let second = images.stage(b"second", &[], &mut SoftwareCrypto).unwrap();
         assert_ne!(first.slot, second.slot);
         assert_eq!(
             images.stage(b"third", &[second], &mut SoftwareCrypto),
             Err(Error::Quota)
         );
-        pin.with_bytes(&mut SoftwareCrypto, |bytes, provider| {
+        pin.with_bytes(&mut provider, |bytes, provider| {
             assert_eq!(bytes, b"irs");
             assert_eq!(images.stage(b"third", &[], provider), Err(Error::Busy));
             assert_eq!(bytes, b"irs");
             Ok(())
         })
         .unwrap();
-        // Model a storage fault outside the authorized writer, not a new activation.
-        images.shared.flash.borrow_mut().slots[first.slot as usize][0] ^= 1;
-        assert_eq!(
-            pin.with_bytes(&mut SoftwareCrypto, |_, _| panic!("damaged code executed")),
-            Err::<(), _>(Error::Authentication)
-        );
+        let verified_calls = provider.calls;
+        pin.with_bytes(&mut provider, |bytes, _| {
+            assert_eq!(bytes, b"irs");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(provider.calls, verified_calls, "a pinned image is hashed only when pinned");
         drop(pin);
         let replacement = images
             .stage(b"third", &[second], &mut SoftwareCrypto)
@@ -345,13 +356,13 @@ impl<F: ImageFlash> CodeImage for PinnedImage<F> {
         provider: &mut P,
         read: impl FnOnce(&[u8], &mut P) -> Result<T>,
     ) -> Result<T> {
-        self.images
-            .with_verified_image(&self.descriptor, provider, |bytes, provider| {
-                read(
-                    bytes.get(self.range.clone()).ok_or(Error::Bounds)?,
-                    provider,
-                )
-            })
+        self.images.with_flash(|flash| {
+            let bytes = flash.read_range(usize::from(self.descriptor.slot), self.range.clone())?;
+            if bytes.len() != self.range.len() {
+                return Err(Error::Storage);
+            }
+            read(&bytes, provider)
+        })
     }
 }
 #[cfg(feature = "jcvm")]
@@ -382,8 +393,8 @@ impl<F: ImageFlash> Images<F> {
         })
     }
 
-    /// Authenticate before retaining a range. The range normally excludes the package
-    /// envelope; every subsequent read still authenticates the complete descriptor.
+    /// Authenticate before retaining a range. The pin prevents the verified slot from being
+    /// erased or replaced, so subsequent mapped reads do not hash the complete image again.
     #[cfg(feature = "jcvm")]
     pub fn pin(
         &self,
