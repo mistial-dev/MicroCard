@@ -1,7 +1,7 @@
 //! Application selection, invocation and execution transaction boundaries.
 use super::*;
 
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     pub fn select(&mut self, aid: &str) -> Result<()> {
         self.select_with_cancel(aid, &mut || false)
     }

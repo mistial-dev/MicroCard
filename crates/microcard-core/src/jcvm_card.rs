@@ -40,7 +40,7 @@ struct Retained {
     state: microcard_engine_jcvm::applet::VolatileState,
 }
 
-pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
+pub struct JcvmEngine<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
     storage: Storage<F, I, H>,
     provider: P,
     staging: S,
@@ -54,7 +54,7 @@ pub struct Card<F: Flash, I: ImageFlash, H: HeapBanks, P, S> {
 }
 
 impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: PackageStaging>
-    Card<F, I, H, P, S>
+    JcvmEngine<F, I, H, P, S>
 {
     /// Verify all committed references on boot. Recovery never repairs missing heaps
     /// by running install, and each temporary session is dropped before opening another.
@@ -336,7 +336,7 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: Pack
 }
 
 impl<F: Flash, I: ImageFlash, H: HeapBanks, P: CryptoProvider + Entropy, S: PackageStaging>
-    CardEngine for Card<F, I, H, P, S>
+    CardEngine for JcvmEngine<F, I, H, P, S>
 {
     type Provider = P;
     const DIRECT_APDUS: bool = true;

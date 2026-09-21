@@ -1,7 +1,7 @@
 //! Small metadata mutations with allocation-free undo after publication begins.
 use super::*;
 
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     /// Publishes existing image descriptors; this never stages or erases code.
     pub(super) fn commit_metadata_snapshot(&mut self) -> Result<()> {
         let data = self.state.encode_snapshot()?;

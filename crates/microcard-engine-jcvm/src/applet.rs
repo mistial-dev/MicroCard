@@ -51,7 +51,7 @@ impl Default for Sizes {
 }
 
 /// One installed applet and everything it owns.
-pub struct Card {
+pub struct AppletInstance {
     heap: Vec<u8>,
     heap_used: usize,
     runtime_bytes: usize,
@@ -69,7 +69,7 @@ pub struct Card {
     sizes: Sizes,
 }
 
-impl Drop for Card {
+impl Drop for AppletInstance {
     fn drop(&mut self) {
         self.heap.zeroize();
         self.statics.zeroize();
@@ -92,7 +92,7 @@ pub struct Installation<'a> {
     pub parameters: &'a [u8],
 }
 
-impl Card {
+impl AppletInstance {
     /// Release callback scratch only at an idle maintenance boundary.
     pub fn release_execution_frames(&mut self) {
         self.words.zeroize();
@@ -370,6 +370,7 @@ impl Card {
         if selecting {
             let answer = self.callback(file, host, Callback::Select, (incoming, expected), &mut budget, cancel)?;
             if answer.aborted || answer.exception.is_some() || answer.returned == 0 {
+                if cancel() { return Err(Error::Cancelled); }
                 self.checkpoint_dirty(host)?;
                 return Ok(Response { data: Vec::new(), sw: 0x6999 });
             }
@@ -380,6 +381,7 @@ impl Card {
         let heap = Heap::resume(&mut self.heap, self.heap_used)?;
         let sw = if answer.aborted { SW_UNKNOWN } else { answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception)) };
         drop(heap);
+        if cancel() { return Err(Error::Cancelled); }
         self.checkpoint_dirty(host)?;
         Ok(Response { data: answer.data, sw })
     }
@@ -390,6 +392,7 @@ impl Card {
         &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         self.deselect_inner(file, host, cancel, false)?;
+        if cancel() { return Err(Error::Cancelled); }
         self.checkpoint_dirty(host)
     }
 
@@ -754,7 +757,7 @@ mod tests {
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
 
-        let mut card = Card::new(&file, Sizes::default()).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
         let initial_heap = card.heap_used;
         let module = file.applets().unwrap().iter().next().unwrap().aid;
         assert_eq!(card.install_module_with_cancel(&file, &mut crate::host::NoHost, module, &[], &mut || true), Err(Error::Cancelled));
@@ -763,7 +766,7 @@ mod tests {
         assert_eq!(card.heap_used, initial_heap);
         assert!(!card.installed());
         {
-            let mut interrupted = Card::new(&file, Sizes::default()).unwrap();
+            let mut interrupted = AppletInstance::new(&file, Sizes::default()).unwrap();
             let mut polls = 0;
             assert_eq!(interrupted.install_module_with_cancel(&file, &mut crate::host::NoHost, module, &[], &mut || {
                 polls += 1;
@@ -875,7 +878,7 @@ mod tests {
         }
         let instance = saved.instance;
         let saved_statics = saved.statics.to_vec();
-        let mut restored = Card::restore_without_frames(&file, Sizes::default(), saved).unwrap();
+        let mut restored = AppletInstance::restore_without_frames(&file, Sizes::default(), saved).unwrap();
         assert_eq!((restored.words.capacity(), restored.tags.capacity()), (0, 0));
         let live_heap = restored.heap[..restored.heap_used].to_vec();
         restored.release_idle_memory();
@@ -955,7 +958,7 @@ mod tests {
                 27 => { invalid[1] = 0x80; instance } // Invalid application state.
                 _ => { invalid.truncate(invalid.len() - 1); instance }
             };
-            assert!(Card::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
+            assert!(AppletInstance::restore(&file, Sizes::default(), PersistentState { heap: &invalid, statics: &saved_statics, instance: root }).is_err());
         }
         card.deselect_with_cancel(&file, &mut crate::host::NoHost, &mut || false).unwrap();
         assert!(!card.selected());
@@ -969,7 +972,7 @@ mod tests {
         // Runtime exceptions are reserved, so deselection preserves the heap layout.
         restored.restore_volatile(&retained).unwrap();
         let mut suspended_heap = vec![0; card.persistent_heap_bytes()];
-        restored = Card::restore(&file, Sizes::default(), card.save_into(&mut suspended_heap).unwrap()).unwrap();
+        restored = AppletInstance::restore(&file, Sizes::default(), card.save_into(&mut suspended_heap).unwrap()).unwrap();
         restored.restore_volatile(&retained).unwrap();
         let resumed = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
         assert_eq!(resumed.array_get(transient, 0), Ok(7));
@@ -998,7 +1001,7 @@ mod tests {
         let module_aid = file.applets().unwrap().iter().next().unwrap().aid;
         let requested = [0xf0, 1, 2, 3, 4];
         for (parameters, expected) in [(&requested[..], Ok(())), (&[0xf0, 1, 2, 3, 5][..], Err(Error::Unauthorized)), (&[0xf0, 1, 2, 3][..], Err(Error::Bounds))] {
-            let mut card = Card::new(&file, Sizes::default()).unwrap();
+            let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
             assert_eq!(card.install_instance_with_cancel(&file, &mut crate::host::NoHost,
                 Installation { module_aid, instance_aid: &requested, parameters }, &mut || false), expected);
         }
@@ -1013,7 +1016,7 @@ mod tests {
         package.code[..5].copy_from_slice(&[op::ALOAD_0, op::PUTSTATIC_A, 0, 6, op::RETURN]);
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
-        let mut card = Card::new(&file, Sizes::default()).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
         assert_eq!(card.install(&file, &mut crate::host::NoHost, &[0x42]), Err(Error::Unauthorized));
         assert_eq!(card.statics, [0, 0]);
         assert!(!card.installed());
@@ -1029,7 +1032,7 @@ mod tests {
         package.constants.push([CONSTANT_STATIC_METHODREF, 0x81, 7, 1]);
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
-        let mut card = Card::new(&file, Sizes::default()).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
         card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
         let response = card
             .process(&file, &mut crate::host::NoHost, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
@@ -1043,7 +1046,7 @@ mod tests {
         package.extra[1].2[0] = op::SCONST_0;
         let declined_bytes = package.build();
         let declined_file = LoadFile::parse(&declined_bytes).unwrap();
-        let mut declined = Card::new(&declined_file, Sizes::default()).unwrap();
+        let mut declined = AppletInstance::new(&declined_file, Sizes::default()).unwrap();
         declined.install(&declined_file, &mut crate::host::NoHost, &[]).unwrap();
         assert_eq!(declined.process(&declined_file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x6999);
         assert!(!declined.selected());
@@ -1051,7 +1054,7 @@ mod tests {
         package.classes[0].public[applet_token(MethodId::select).unwrap() as usize] = 0xffff;
         let inherited_bytes = package.build();
         let inherited_file = LoadFile::parse(&inherited_bytes).unwrap();
-        let mut inherited = Card::new(&inherited_file, Sizes::default()).unwrap();
+        let mut inherited = AppletInstance::new(&inherited_file, Sizes::default()).unwrap();
         inherited.install(&inherited_file, &mut crate::host::NoHost, &[]).unwrap();
         assert_eq!(inherited.process(&inherited_file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x6a82);
         assert!(inherited.selected());
@@ -1149,7 +1152,7 @@ mod tests {
             }
             let bytes = package.build();
             let file = LoadFile::parse(&bytes).unwrap();
-            let mut card = Card::new(&file, Sizes { heap_bytes: 16384, ..Sizes::default() }).unwrap();
+            let mut card = AppletInstance::new(&file, Sizes { heap_bytes: 16384, ..Sizes::default() }).unwrap();
             card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
             let mut polls = 0;
             let mut host = CheckpointHost { fail_at: match ending { "commit-fail" | "plain-store-fail" => Some(1), _ => None }, ..Default::default() };
@@ -1174,7 +1177,7 @@ mod tests {
                 assert!(!host.saved.is_empty(), "{ending}");
             }
             for (heap, statics, instance) in &host.saved {
-                let mut restored = Card::restore(&file, card.sizes, PersistentState { heap, statics, instance: *instance }).unwrap();
+                let mut restored = AppletInstance::restore(&file, card.sizes, PersistentState { heap, statics, instance: *instance }).unwrap();
                 let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
                 assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
             }
@@ -1184,7 +1187,7 @@ mod tests {
                     else if ending.starts_with("plain-") { 12 }
                     else { 9 };
                 let durable_static = if ending == "full-caught" { 3 } else { durable_field };
-                let mut restored = Card::restore(&file, card.sizes,
+                let mut restored = AppletInstance::restore(&file, card.sizes,
                     PersistentState { heap, statics, instance: *instance }).unwrap();
                 assert_eq!(statics, &durable_static.to_be_bytes(), "{ending}");
                 let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
@@ -1193,7 +1196,7 @@ mod tests {
             if let Some(failed) = host.fail_at { assert_eq!(host.calls, failed, "failed checkpoint must not retry"); }
             if !ending.ends_with("cancel") && ending != "commit-fail" {
                 let mut saved = vec![0; card.persistent_heap_bytes()];
-                let mut restored = Card::restore(&file, card.sizes, card.save_into(&mut saved).unwrap()).unwrap();
+                let mut restored = AppletInstance::restore(&file, card.sizes, card.save_into(&mut saved).unwrap()).unwrap();
                 assert_eq!(restored.statics, card.statics);
                 let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
                 assert_eq!(heap.get_word(restored.instance.unwrap(), 0), Ok(expected));
@@ -1223,7 +1226,7 @@ mod tests {
         package.constants.push([CONSTANT_STATIC_METHODREF, 0x81, 8, 2]);
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
-        let mut card = Card::new(&file, Sizes::default()).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
         card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
         let response = card
             .process(&file, &mut crate::host::NoHost, &[0x00, 0x01, 0x00, 0x00, 0x00], false)
@@ -1258,7 +1261,7 @@ mod tests {
         package.code = vec![op::RETURN];
         let bytes = package.build();
         let file = LoadFile::parse(&bytes).unwrap();
-        let mut card = Card::new(&file, Sizes::default()).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
         assert_eq!(card.install(&file, &mut crate::host::NoHost, &[]), Err(Error::Missing));
         assert!(!card.installed());
     }

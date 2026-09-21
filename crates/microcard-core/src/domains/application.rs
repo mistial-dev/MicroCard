@@ -103,7 +103,7 @@ impl StagedApplication {
     }
 }
 
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     fn application_domain_index(&self, aid: RegistryAid) -> Result<usize> {
         self.state
             .domains

@@ -67,7 +67,7 @@ fn old_snapshot_fails_explicitly_without_mutating_flash() {
     // Any attempted write consumes this budget, including an erase or sequence reservation.
     shared.0.borrow_mut().fail_after = Some(1);
     assert!(matches!(
-        Card::open(shared.clone(), TestPlatform(10), STORAGE_KEY),
+        Mc04Engine::open(shared.clone(), TestPlatform(10), STORAGE_KEY),
         Err(Error::IncompatibleState)
     ));
     assert_eq!(shared.0.borrow().fail_after, Some(1));

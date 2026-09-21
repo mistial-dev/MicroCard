@@ -2294,7 +2294,7 @@ fn main() -> ! {
         );
     }
     #[cfg(feature = "engine-mc04")]
-    let opened = microcard_core::domains::Card::open_with_staging(
+    let opened = microcard_core::domains::Mc04Engine::open_with_staging(
         Nvm::new(),
         hardware,
         storage_key,

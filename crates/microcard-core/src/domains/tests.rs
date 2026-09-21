@@ -130,10 +130,10 @@ impl Flash for SharedJournalFlash {
         self.0.borrow_mut().program(slot, offset, bytes)
     }
 }
-fn fresh_card() -> Card<MemoryFlash, TestPlatform> {
-    Card::open(MemoryFlash::new(16384), TestPlatform(0), STORAGE_KEY).unwrap()
+fn fresh_card() -> Mc04Engine<MemoryFlash, TestPlatform> {
+    Mc04Engine::open(MemoryFlash::new(16384), TestPlatform(0), STORAGE_KEY).unwrap()
 }
-fn card() -> Card<MemoryFlash, TestPlatform> {
+fn card() -> Mc04Engine<MemoryFlash, TestPlatform> {
     let mut card = fresh_card();
     let package = library_package("ISD", card.state.isd.incarnation, "mscorlib", 1, 42);
     load(&mut card, &package).unwrap();
@@ -215,7 +215,7 @@ fn command(ins: u8, data: &[u8]) -> Verified<'_> {
         },
     }
 }
-fn create(c: &mut Card<MemoryFlash, TestPlatform>, id: &str) -> [u8; 16] {
+fn create(c: &mut Mc04Engine<MemoryFlash, TestPlatform>, id: &str) -> [u8; 16] {
     c.manage(command(0xe0, id.as_bytes()))
         .unwrap()
         .try_into()
@@ -351,7 +351,7 @@ fn globalplatform_ssd_creation_and_deletion_are_durable_and_aid_addressed() {
             .any(|value| value == [0x4f, 5, 0xf0, 0x4d, 0x43, 0x53, 0x44])
     );
 
-    let mut reopened = Card::open(owned.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
+    let mut reopened = Mc04Engine::open(owned.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
     reopened.globalplatform_load = Some(GlobalPlatformLoad {
         domain_aid: RegistryAid::new(&requested).unwrap(),
         load_aid: RegistryAid::synthetic(0x4c, &[7; 32]),
@@ -376,7 +376,7 @@ fn globalplatform_ssd_creation_and_deletion_are_durable_and_aid_addressed() {
     assert!(!reopened.state.domains.contains_key("F04D435344"));
     assert!(reopened.globalplatform_load.is_none());
     assert!(reopened.staging.bytes.is_empty());
-    let final_state = Card::open(reopened.into_flash(), TestPlatform(30), STORAGE_KEY).unwrap();
+    let final_state = Mc04Engine::open(reopened.into_flash(), TestPlatform(30), STORAGE_KEY).unwrap();
     assert!(!final_state.state.domains.contains_key("F04D435344"));
 }
 
@@ -523,7 +523,7 @@ fn one_load_file_backs_several_instances_under_their_own_aids() {
         request.push(value.len() as u8);
         request.extend_from_slice(value);
     }
-    let gp = |owned: &mut Card<MemoryFlash, TestPlatform>, p1: u8, p2: u8, ins: u8, data: Vec<u8>| {
+    let gp = |owned: &mut Mc04Engine<MemoryFlash, TestPlatform>, p1: u8, p2: u8, ins: u8, data: Vec<u8>| {
         owned.manage_globalplatform(Verified {
             level: 0x13,
             command: Command {
@@ -1074,7 +1074,7 @@ fn signed_compiled_package(manifest: &Manifest, image: &[u8], seed: u8) -> Vec<u
     raw.extend(signature); raw.extend(image);
     raw
 }
-fn load<P: Platform>(c: &mut Card<MemoryFlash, P>, p: &[u8]) -> Result<Vec<u8>> {
+fn load<P: Platform>(c: &mut Mc04Engine<MemoryFlash, P>, p: &[u8]) -> Result<Vec<u8>> {
     c.manage(command(0xe6, &[]))?;
     for (i, chunk) in p.chunks(200).enumerate() {
         let mut data = (i as u32 * 200).to_le_bytes().to_vec();
@@ -1084,7 +1084,7 @@ fn load<P: Platform>(c: &mut Card<MemoryFlash, P>, p: &[u8]) -> Result<Vec<u8>> 
     c.manage(command(0xea, &[]))
 }
 fn run_loaded(
-    card: &mut Card<MemoryFlash, TestPlatform>,
+    card: &mut Mc04Engine<MemoryFlash, TestPlatform>,
     domain: &str,
     assembly: &str,
     entry: u16,
@@ -1298,7 +1298,7 @@ fn mscorlib_takes_permanent_isd_ownership_before_ssd_creation() {
         Err(Error::KeyMismatch)
     );
     create(&mut c, "a");
-    let c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let c = Mc04Engine::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(c.state.is_owned());
     assert_eq!(
         c.state.isd.key,
@@ -1319,7 +1319,7 @@ fn domain_capacity_is_bounded_and_survives_reboot() {
     assert_eq!(inventory[1] as usize, MAX_SSDS + 1);
     assert_eq!(inventory[2] as usize, MAX_SSDS);
 
-    let mut reopened = Card::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
+    let mut reopened = Mc04Engine::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
     assert_eq!(reopened.state.domains.len(), MAX_SSDS);
     assert_eq!(
         reopened.manage(command(0xe0, b"overflow")),
@@ -1340,7 +1340,7 @@ fn domain_capacity_is_bounded_and_survives_reboot() {
 
 #[test]
 fn metadata_commit_failures_restore_live_state_without_reboot() {
-    fn rejected(card: &mut Card<MemoryFlash, TestPlatform>, change: impl FnOnce(&mut Card<MemoryFlash, TestPlatform>) -> Result<()>) {
+    fn rejected(card: &mut Mc04Engine<MemoryFlash, TestPlatform>, change: impl FnOnce(&mut Mc04Engine<MemoryFlash, TestPlatform>) -> Result<()>) {
         let before = card.state.encode_snapshot().unwrap().to_vec();
         card.journal.flash_mut().fail_after = Some(0);
         assert_eq!(change(card), Err(Error::Storage));
@@ -1364,7 +1364,7 @@ fn metadata_commit_failures_restore_live_state_without_reboot() {
         assert_eq!(card.next_secure_channel_sequence().unwrap(), next);
     }
     card.manage(command(0xe4, b"new")).unwrap();
-    let recovered = Card::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
+    let recovered = Mc04Engine::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
     assert!(!recovered.state.domains.contains_key("new"));
 }
 
@@ -1498,7 +1498,7 @@ fn installed_instance_capacity_is_enforced_per_domain_and_card() {
     )
     .unwrap();
 
-    let install = |card: &mut Card<MemoryFlash, TestPlatform>, domain: &str, aid: u16| {
+    let install = |card: &mut Mc04Engine<MemoryFlash, TestPlatform>, domain: &str, aid: u16| {
         let request = management_names_wire(domain, &alloc::format!("F04D43{aid:04X}")).unwrap();
         card.manage(command(0xec, &request))
     };
@@ -1511,7 +1511,7 @@ fn installed_instance_capacity_is_enforced_per_domain_and_card() {
     }
     assert_eq!(install(&mut card, "c", 0x300), Err(Error::Quota));
 
-    let reopened = Card::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(20), STORAGE_KEY).unwrap();
     assert_eq!(
         reopened
             .state
@@ -1530,7 +1530,7 @@ fn pin_survives_unload_and_reboot() {
     let p = package("a", inc, "one", 1, 7, &[0x2a]);
     load(&mut c, &p).unwrap();
     c.manage(command(0xf0, &management_names_wire("a", "one").unwrap())).unwrap();
-    let mut c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let mut c = Mc04Engine::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(
         load(&mut c, &package("a", inc, "two", 1, 8, &[0x2a])),
         Err(Error::KeyMismatch)
@@ -1668,7 +1668,7 @@ fn domain_policy_is_immutable_and_enforced() {
     let mut invalid = request(policy);
     invalid[3] = 1;
     assert_eq!(c.manage(command(0xe1, &invalid)), Err(Error::Format));
-    let reopened = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(reopened.state.domains["a"].policy.max_int_records, 1);
 }
 #[test]
@@ -1808,7 +1808,7 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
         assert_eq!(card.state.encode_snapshot().unwrap().as_slice(), before);
         card.manage(command(instruction, &request)).unwrap();
     }
-    let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(reopened.state.domains["first"].instances.contains_key("F04D431001"));
     assert_eq!(reopened.state.domains["first"].store.get(&1), Some(&0));
     assert_eq!(reopened.state.domains["second"].store.get(&1), Some(&2));
@@ -1863,7 +1863,7 @@ fn signed_multi_command_transactions_commit_abort_and_expire() {
     assert!(card.state.domains["transaction"].store.is_empty());
     assert!(card.state.domains["transaction"].blobs.is_empty());
 
-    let mut card = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(card.transaction.is_none());
     assert_eq!(card.invoke("F04D430020", &[6]).unwrap(), [0, 0, 0, 0x90, 0]);
 
@@ -1882,7 +1882,7 @@ fn signed_multi_command_transactions_commit_abort_and_expire() {
     assert_eq!(card.state.domains["transaction"].store.get(&2), Some(&22));
     assert_eq!(card.state.domains["transaction"].blobs.get(&3).unwrap(), &[33]);
 
-    let mut card = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(
         card.invoke("F04D430020", &[6]).unwrap(),
         [11, 22, 33, 0x90, 0]
@@ -2009,7 +2009,7 @@ fn native_failure_and_fuel_exhaustion_roll_back_all_writes() {
     assert_eq!(card.invoke("F04D430013", &[]), Err(Error::Budget));
     assert!(!card.state.domains["atomic"].store.contains_key(&30));
 
-    let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(!reopened.state.domains["atomic"].store.contains_key(&10));
     assert!(!reopened.state.domains["atomic"].store.contains_key(&30));
 }
@@ -2035,7 +2035,7 @@ fn cooperative_cancellation_rolls_back_all_writes() {
     assert_eq!(polls, 2);
     assert!(!card.state.domains["cancel"].store.contains_key(&30));
 
-    let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(!reopened.state.domains["cancel"].store.contains_key(&30));
 }
 
@@ -2071,28 +2071,28 @@ fn invocation_and_package_removal_boundaries_recover_old_or_new_state() {
     let base = card.into_flash();
 
     for remove in [false, true] {
-        let mutate = |card: &mut Card<MemoryFlash, TestPlatform>| {
+        let mutate = |card: &mut Mc04Engine<MemoryFlash, TestPlatform>| {
             if remove {
                 card.manage(command(0xf0, &management_names_wire("untouched", "Counter").unwrap()))
             } else {
                 card.invoke("F04D430001", &[])
             }
         };
-        let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
+        let mut complete = Mc04Engine::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
         mutate(&mut complete).unwrap();
         assert_eq!(complete.state.domains["untouched"].store.get(&1), Some(&123));
         let committed = complete.state.encode_snapshot().unwrap().to_vec();
         for cut in commit_cuts(committed.len(), 0) {
             let mut flash = base.clone();
             flash.fail_after = Some(cut);
-            let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+            let mut interrupted = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
             if mutate(&mut interrupted).is_err() {
                 assert_eq!(interrupted.state.encode_snapshot().unwrap().as_slice(), previous);
             }
             assert_eq!(interrupted.state.domains["untouched"].store.get(&1), Some(&123));
             let mut flash = interrupted.into_flash();
             flash.fail_after = None;
-            let recovered = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+            let recovered = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
             let actual = recovered.state.encode_snapshot().unwrap().to_vec();
             assert!(
                 actual == previous || actual == committed,
@@ -2182,7 +2182,7 @@ fn persistent_storage_schema_is_pinned_until_domain_deletion() {
         &pinned_schema,
         &card.state.domains["schema"].storage_schema
     ));
-    let card = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(
         card.state.domains["schema"].storage_declaration(1),
         Some(&StorageDeclaration { key: 1, kind: 1, max_bytes: 0 })
@@ -2225,7 +2225,7 @@ fn recovery_rejects_missing_or_retyped_persistent_schema() {
     domain.storage_schema = Rc::new(schema);
     card.commit(corrupted).unwrap();
     assert!(matches!(
-        Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY),
+        Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY),
         Err(Error::Storage)
     ));
 }
@@ -2426,7 +2426,7 @@ fn package_names_are_shared_after_installation_and_recovery() {
     assert_shared_names(&card.state.isd, "mscorlib");
     assert_shared_names(&card.state.domains["shared"], "Counter");
     assert_shared_names(&card.state.domains["shared"], "KeyOperations");
-    let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_shared_names(&reopened.state.isd, "mscorlib");
     assert_shared_names(&reopened.state.domains["shared"], "Counter");
     assert_shared_names(&reopened.state.domains["shared"], "KeyOperations");
@@ -2504,13 +2504,13 @@ fn package_activation_power_loss_preserves_complete_generations() {
         let p = package("a", inc, "one", version, 7, &[0x2a]);
         let previous = c.state.encode_snapshot().unwrap().to_vec();
         let base = c.into_flash();
-        let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
+        let mut complete = Mc04Engine::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
         load(&mut complete, &p).unwrap();
         let serialized = complete.state.encode_snapshot().unwrap().to_vec(); // Journal mutation behavior is exhaustively tested separately.
         for cut in commit_cuts(serialized.len(), p.len()) {
             let mut f = base.clone();
             f.fail_after = Some(cut);
-            let mut c = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
+            let mut c = Mc04Engine::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
             if load(&mut c, &p).is_err() {
                 assert_eq!(c.state.encode_snapshot().unwrap().as_slice(), previous);
                 assert_eq!(c.staging.as_slice(), Some(p.as_slice()));
@@ -2526,7 +2526,7 @@ fn package_activation_power_loss_preserves_complete_generations() {
             }
             let mut f = c.into_flash();
             f.fail_after = None;
-            let mut recovered = Card::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
+            let mut recovered = Mc04Engine::open(f, TestPlatform(10), STORAGE_KEY).unwrap();
             let actual = recovered.state.encode_snapshot().unwrap().to_vec();
             assert!(
                 actual == previous || actual == serialized,
@@ -2535,7 +2535,7 @@ fn package_activation_power_loss_preserves_complete_generations() {
             load(&mut recovered, &p).unwrap();
             assert_eq!(recovered.state.encode_snapshot().unwrap().to_vec(), serialized);
             let reopened =
-                Card::open(recovered.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+                Mc04Engine::open(recovered.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
             assert_eq!(reopened.state.encode_snapshot().unwrap().to_vec(), serialized);
         }
     }
@@ -2558,7 +2558,7 @@ fn activation_moves_staging_and_restores_it_after_commit_failure() {
 
     let mut flash = card.into_flash();
     flash.fail_after = Some(0);
-    let mut card = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+    let mut card = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
     let replacement = signed_package_with_storage(
         "move",
         incarnation,
@@ -2592,7 +2592,7 @@ fn activation_moves_staging_and_restores_it_after_commit_failure() {
 fn flash_staging_streams_and_activates_without_a_ram_upload_buffer() {
     let flash = TestStagingFlash::new();
     let erases = Rc::clone(&flash.erases);
-    let mut card = Card::open_with_staging(
+    let mut card = Mc04Engine::open_with_staging(
         MemoryFlash::new(16384),
         TestPlatform(0),
         STORAGE_KEY,
@@ -2633,7 +2633,7 @@ fn flash_staging_survives_journal_failure_for_activation_retry() {
     let journal = Rc::new(RefCell::new(MemoryFlash::new(16384)));
     let flash = TestStagingFlash::new();
     let erases = Rc::clone(&flash.erases);
-    let mut card = Card::open_with_staging(
+    let mut card = Mc04Engine::open_with_staging(
         SharedJournalFlash(Rc::clone(&journal)),
         TestPlatform(0),
         STORAGE_KEY,
@@ -2703,7 +2703,7 @@ fn failed_install_is_invisible_and_durable() {
         c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())),
         Err(Error::Budget)
     );
-    let c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let c = Mc04Engine::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(c.state.domains["a"].instances.is_empty());
     assert!(c.state.domains["a"].key.is_some());
 }
@@ -3081,7 +3081,7 @@ fn lifecycle_retry_floors_accumulate_without_restoring_consumed_attempts() {
             .unwrap(),
         (2, 1)
     );
-    let reopened = Card::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(reopened.state.isd.credentials.retries(isd_incarnation, 4).unwrap(), (1, 2));
     assert_eq!(
         reopened.state.domains["credential-floor"]
@@ -3121,7 +3121,7 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
     let base = card.into_flash();
     let mut floor = CredentialRetryFloors::default();
     floor.record(4, (2, 1)).unwrap();
-    let mut complete = Card::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let mut complete = Mc04Engine::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
     complete
         .commit_credential_retry_floor(domain_registry_aid, &floor)
         .unwrap();
@@ -3130,11 +3130,11 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
     for cut in commit_cuts(serialized.len(), 0) {
         let mut flash = base.clone();
         flash.fail_after = Some(cut);
-        let mut interrupted = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+        let mut interrupted = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
         let _ = interrupted.commit_credential_retry_floor(domain_registry_aid, &floor);
         let mut flash = interrupted.into_flash();
         flash.fail_after = None;
-        let recovered = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+        let recovered = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
         let retries = recovered.state.domains["credential-cut"]
             .credentials
             .retries(incarnation, 4)
@@ -3418,7 +3418,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
         random: 0,
         calls: Rc::clone(&calls),
     };
-    let mut card = Card::open(MemoryFlash::new(16384), platform, STORAGE_KEY).unwrap();
+    let mut card = Mc04Engine::open(MemoryFlash::new(16384), platform, STORAGE_KEY).unwrap();
     let package = library_package("ISD", card.state.isd.incarnation, "mscorlib", 1, 42);
     load(&mut card, &package).unwrap();
     assert_eq!(calls.get(), [5, 1]);
@@ -3442,7 +3442,7 @@ fn package_trust_boundaries_use_the_platform_crypto_provider() {
         random: 0,
         calls: Rc::clone(&calls),
     };
-    Card::open(flash, platform, STORAGE_KEY).unwrap();
+    Mc04Engine::open(flash, platform, STORAGE_KEY).unwrap();
     // Digest and signature again on reopening. A stored identity is the digest of a
     // key rather than a key, so there is nothing left for recovery to revalidate as a
     // curve point. A package whose key is wrong fails its signature instead.
@@ -3478,7 +3478,7 @@ fn management_cbor_matches_shared_vectors_and_rejects_other_encodings() {
 }
 
 // Fixture-only publication for deliberately constructed recovery states.
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     fn commit(&mut self, next: State) -> Result<()> {
         if self.state == next {
             return Ok(());

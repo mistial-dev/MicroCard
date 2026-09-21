@@ -3,7 +3,7 @@ use super::{layout, Hardware, Nvm, StagingNvm};
 use microcard_core::{
     hal::Entropy,
     image_store::Images,
-    jcvm_card::{Card, Storage},
+    jcvm_card::{JcvmEngine, Storage},
     jcvm_registry::{Registry, Store},
     jcvm_storage::{heap_root, HeapBanks},
     journal::JournalKey,
@@ -45,7 +45,7 @@ impl HeapBanks for Heaps {
 }
 
 type Staging = BoundedFlashStaging<StagingNvm, { microcard_core::jcvm_package::MAX_PACKAGE_BYTES }>;
-pub(super) type BoardCard = Card<Nvm, Nvm, Heaps, Hardware, Staging>;
+pub(super) type BoardCard = JcvmEngine<Nvm, Nvm, Heaps, Hardware, Staging>;
 
 pub(super) fn open(mut hardware: Hardware, key: JournalKey) -> Result<BoardCard> {
     let heap_key = heap_root(&mut hardware, &key)?;
@@ -62,7 +62,7 @@ pub(super) fn open(mut hardware: Hardware, key: JournalKey) -> Result<BoardCard>
         heaps: Heaps,
         heap_key,
     };
-    Card::open(
+    JcvmEngine::open(
         storage,
         hardware,
         Staging::new(StagingNvm::new()),

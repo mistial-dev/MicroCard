@@ -12,7 +12,7 @@ use core::cell::RefCell;
 use microcard_engine_jcvm::cap::LoadFile;
 
 type TestCard =
-    Card<MemoryFlash, MemoryFlash, Heaps, Provider, BoundedFlashStaging<Scratch, MAX_PACKAGE_BYTES>>;
+    JcvmEngine<MemoryFlash, MemoryFlash, Heaps, Provider, BoundedFlashStaging<Scratch, MAX_PACKAGE_BYTES>>;
 
 struct Host {
     key: [u8; 16],
@@ -111,7 +111,7 @@ fn lv(values: &[&[u8]]) -> Vec<u8> {
 
 fn endpoint(storage: Storage<MemoryFlash, MemoryFlash, Heaps>) -> Endpoint<TestCard> {
     Endpoint::new(
-        Card::open(
+        JcvmEngine::open(
             storage,
             Provider,
             BoundedFlashStaging::new(Scratch(vec![0xff; MAX_PACKAGE_BYTES])),

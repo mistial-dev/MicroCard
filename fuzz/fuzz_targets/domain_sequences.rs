@@ -4,7 +4,7 @@ use libfuzzer_sys::fuzz_target;
 use microcard_core::{
     Error, Result,
     apdu::Command,
-    domains::Card,
+    domains::Mc04Engine,
     hal::{Entropy, LogicalGpio},
     journal::MemoryFlash,
     package::{
@@ -319,11 +319,11 @@ fn consumer_package(incarnation: [u8; 16]) -> Vec<u8> {
     signed_package(&manifest, image, &private)
 }
 
-fn manage(card: &mut Card<MemoryFlash, FuzzPlatform>, ins: u8, data: Vec<u8>) -> Result<Vec<u8>> {
+fn manage(card: &mut Mc04Engine<MemoryFlash, FuzzPlatform>, ins: u8, data: Vec<u8>) -> Result<Vec<u8>> {
     card.manage_fuzz_authenticated(command(ins, data))
 }
 
-fn load(card: &mut Card<MemoryFlash, FuzzPlatform>, package: &[u8]) -> Result<()> {
+fn load(card: &mut Mc04Engine<MemoryFlash, FuzzPlatform>, package: &[u8]) -> Result<()> {
     manage(card, 0xe6, Vec::new())?;
     for (index, chunk) in package.chunks(200).enumerate() {
         let mut data = ((index * 200) as u32).to_le_bytes().to_vec();
@@ -333,7 +333,7 @@ fn load(card: &mut Card<MemoryFlash, FuzzPlatform>, package: &[u8]) -> Result<()
     manage(card, 0xea, Vec::new()).map(|_| ())
 }
 
-fn create_domain(card: &mut Card<MemoryFlash, FuzzPlatform>) -> Result<()> {
+fn create_domain(card: &mut Mc04Engine<MemoryFlash, FuzzPlatform>) -> Result<()> {
     let inc: [u8; 16] = manage(card, 0xe0, DOMAIN.as_bytes().to_vec())?
         .try_into()
         .unwrap();
@@ -346,7 +346,7 @@ fn create_domain(card: &mut Card<MemoryFlash, FuzzPlatform>) -> Result<()> {
     Ok(())
 }
 
-fn bootstrap(card: &mut Card<MemoryFlash, FuzzPlatform>) {
+fn bootstrap(card: &mut Mc04Engine<MemoryFlash, FuzzPlatform>) {
     let isd = manage(card, 0xe2, vec![0]).expect("query ISD");
     let incarnation_offset = 4 + usize::from(isd[3]);
     let isd_incarnation: [u8; 16] = isd[incarnation_offset..incarnation_offset + 16]
@@ -362,7 +362,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
     const STORAGE_KEY: [u8; 16] = [0x5a; 16];
-    let mut card = Card::open(MemoryFlash::new(65536), FuzzPlatform(0), STORAGE_KEY).unwrap();
+    let mut card = Mc04Engine::open(MemoryFlash::new(65536), FuzzPlatform(0), STORAGE_KEY).unwrap();
     bootstrap(&mut card);
     for chunk in data.chunks(5).take(64) {
         let op = chunk[0] % 12;
@@ -392,7 +392,7 @@ fuzz_target!(|data: &[u8]| {
                 let _ = card.process(&args);
             }
             5 => {
-                card = Card::open(card.into_flash(), FuzzPlatform(chunk[0]), STORAGE_KEY)
+                card = Mc04Engine::open(card.into_flash(), FuzzPlatform(chunk[0]), STORAGE_KEY)
                     .expect("reopen");
             }
             6 => {
@@ -406,12 +406,12 @@ fuzz_target!(|data: &[u8]| {
             8 => {
                 let mut flash = card.into_flash();
                 flash.fail_after = Some(u16::from_le_bytes([args[0], args[1]]) as usize);
-                let mut interrupted = Card::open(flash, FuzzPlatform(args[2]), STORAGE_KEY)
+                let mut interrupted = Mc04Engine::open(flash, FuzzPlatform(args[2]), STORAGE_KEY)
                     .expect("open before fault");
                 let _ = interrupted.invoke(AIDS[0], &args);
                 let mut flash = interrupted.into_flash();
                 flash.fail_after = None;
-                card = Card::open(flash, FuzzPlatform(args[2]), STORAGE_KEY)
+                card = Mc04Engine::open(flash, FuzzPlatform(args[2]), STORAGE_KEY)
                     .expect("recover after fault");
             }
             9 => {
@@ -443,5 +443,5 @@ fuzz_target!(|data: &[u8]| {
         }
     }
     let flash = card.into_flash();
-    let _ = Card::open(flash, FuzzPlatform(0), STORAGE_KEY).expect("final state must recover");
+    let _ = Mc04Engine::open(flash, FuzzPlatform(0), STORAGE_KEY).expect("final state must recover");
 });

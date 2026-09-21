@@ -1,6 +1,6 @@
 use microcard_core::{
     assembly::Assembly,
-    domains::Card,
+    domains::Mc04Engine,
     package::{Manifest, Package},
     scp03::Keys,
     *,
@@ -144,9 +144,9 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
    let mut flash=FileFlash { dir:directory.into() };
    flash.initialize().map_err(|e|format!("{e:?}"))?;
    #[cfg(feature = "heap-metrics")]
-   let opened=heap_metrics::Report::open()?.measure("open",None,||Card::open(flash,hardware,key));
+   let opened=heap_metrics::Report::open()?.measure("open",None,||Mc04Engine::open(flash,hardware,key));
    #[cfg(not(feature = "heap-metrics"))]
-   let opened=Card::open(flash,hardware,key);
+   let opened=Mc04Engine::open(flash,hardware,key);
    let card=opened.map_err(|e|format!("{e:?}"))?;
    serve_endpoint(microcard_core::transport::Endpoint::new(card,keys),binary)?;
   }
@@ -158,7 +158,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let block=fs::read(&a[2])?;
   let file=microcard_engine_jcvm::cap::LoadFile::parse(&block).map_err(|e|format!("{e:?}"))?;
   let sizes=microcard_engine_jcvm::applet::Sizes{heap_bytes:64*1024,frame_words:8192,..Default::default()};
-  let mut card=microcard_engine_jcvm::applet::Card::new(&file,sizes).map_err(|e|format!("{e:?}"))?;
+  let mut card=microcard_engine_jcvm::applet::AppletInstance::new(&file,sizes).map_err(|e|format!("{e:?}"))?;
   let mut hardware=Hardware;
   // This raw corpus runner is explicitly volatile. Durable acceptance uses
   // serve-jcvm-managed and its authenticated storage checkpoint callback.

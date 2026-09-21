@@ -8,7 +8,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 use microcard_engine_jcvm::{
-    applet::{Card, PersistentState, PersistentView, Sizes},
+    applet::{AppletInstance, PersistentState, PersistentView, Sizes},
     cap::LoadFile,
 };
 use zeroize::Zeroizing;
@@ -78,7 +78,7 @@ mod tests {
         .unwrap();
         assert!(empty.is_none());
         let file = LoadFile::parse(image).unwrap();
-        let mut card = Card::new(&file, sizes).unwrap();
+        let mut card = AppletInstance::new(&file, sizes).unwrap();
         let aid = file.applets().unwrap().iter().next().unwrap().aid;
         let parameters = crate::globalplatform::ApplicationInstall {
             load_aid: file.header().unwrap().package_aid,
@@ -106,9 +106,9 @@ mod tests {
         view.save_into(&mut expected).unwrap();
         assert_eq!(replayed, expected);
         let (instance, statics) = view.metadata();
-        Card::restore(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
-        Card::validate_persistent(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
-        assert_eq!(Card::validate_persistent(&file, Sizes { heap_bytes: replayed.len() - 1, ..sizes },
+        AppletInstance::restore(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
+        AppletInstance::validate_persistent(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
+        assert_eq!(AppletInstance::validate_persistent(&file, Sizes { heap_bytes: replayed.len() - 1, ..sizes },
             PersistentState { heap: &replayed, statics, instance }), Err(microcard_engine_jcvm::Error::Bounds));
         store.commit(&card, &mut SoftwareCrypto).unwrap();
         let flash = store.into_flash();
@@ -157,11 +157,11 @@ impl<F: Flash> Store<F> {
         installation: [u8; 16],
         sizes: Sizes,
         provider: &mut impl CryptoProvider,
-    ) -> Result<(Self, Option<Card>)> {
+    ) -> Result<(Self, Option<AppletInstance>)> {
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
         let (mut store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
         let card = decode_card(snapshot, &file, sizes, store.image, installation)?;
-        store.heap_length = card.as_ref().map(Card::persistent_heap_bytes);
+        store.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
         Ok((store, card))
     }
 
@@ -189,7 +189,7 @@ impl<F: Flash> Store<F> {
         verified_image: &[u8],
         sizes: Sizes,
         provider: &mut impl CryptoProvider,
-    ) -> Result<Option<Card>> {
+    ) -> Result<Option<AppletInstance>> {
         let mut digest = [0; 32];
         provider.sha256_into(verified_image, &mut digest)?;
         if digest != self.image {
@@ -205,13 +205,13 @@ impl<F: Flash> Store<F> {
             self.image,
             self.installation,
         )?;
-        self.heap_length = card.as_ref().map(Card::persistent_heap_bytes);
+        self.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
         Ok(card)
     }
 
     /// Commit state of the applet installed from the image passed to `open`.
     /// The caller must roll back live mutations if this operation fails.
-    pub fn commit(&mut self, card: &Card, provider: &mut impl CryptoProvider) -> Result<()> {
+    pub fn commit(&mut self, card: &AppletInstance, provider: &mut impl CryptoProvider) -> Result<()> {
         self.commit_view(card.persistent_view().map_err(|_| Error::Format)?, provider)
     }
 
@@ -287,14 +287,14 @@ fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {
 pub(crate) fn validate_seed_snapshot(snapshot: &[u8], file: &LoadFile, sizes: Sizes,
         image: [u8; 32], installation: [u8; 16]) -> Result<()> {
     let saved = decode_snapshot(snapshot, file, sizes, image, installation)?;
-    Card::validate_persistent(file, sizes, saved).map_err(|_| Error::Format)
+    AppletInstance::validate_persistent(file, sizes, saved).map_err(|_| Error::Format)
 }
 
 fn decode_card(snapshot: Option<Zeroizing<Vec<u8>>>, file: &LoadFile, sizes: Sizes,
-        image: [u8; 32], installation: [u8; 16]) -> Result<Option<Card>> {
+        image: [u8; 32], installation: [u8; 16]) -> Result<Option<AppletInstance>> {
     snapshot.map(|bytes| {
         let saved = decode_snapshot(&bytes, file, sizes, image, installation)?;
-        let mut card = Card::restore_without_frames(file, sizes, saved).map_err(|_| Error::Format)?;
+        let mut card = AppletInstance::restore_without_frames(file, sizes, saved).map_err(|_| Error::Format)?;
         drop(bytes);
         card.restore_execution_frames().map_err(|_| Error::Quota)?;
         Ok(card)

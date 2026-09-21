@@ -7,7 +7,7 @@ pub struct Session<F: Flash, I: CodeImage = Vec<u8>> {
     store: Store<F>,
     image: I,
     sizes: Sizes,
-    card: Option<Card>,
+    card: Option<AppletInstance>,
     recovery_required: bool,
     reset_requested: bool,
 }
@@ -106,7 +106,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
 
     pub fn selected(&self) -> Result<bool> {
         self.installed()?;
-        Ok(self.card.as_ref().is_some_and(Card::selected))
+        Ok(self.card.as_ref().is_some_and(AppletInstance::selected))
     }
 
     pub fn retain_volatile(&mut self, maximum: usize) -> Result<microcard_engine_jcvm::applet::VolatileState> {
@@ -137,7 +137,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             self.reset_requested |= services.reset_requested();
             result
         });
-        self.finish_apdu(result, provider, cancel)
+        self.finish_apdu(result, provider)
     }
 
     /// Also clears volatile applet data; transport must discard its selection.
@@ -200,7 +200,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         }
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            self.card = Some(Card::new(&file, self.sizes).map_err(engine_error)?);
+            self.card = Some(AppletInstance::new(&file, self.sizes).map_err(engine_error)?);
             let card = self.card.as_mut().unwrap();
             match instance {
                 Some(instance_aid) => card.install_instance_with_cancel(
@@ -281,7 +281,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             self.reset_requested |= services.reset_requested();
             result
         });
-        self.finish_apdu(result, provider, cancel)
+        self.finish_apdu(result, provider)
     }
 
     fn finish_install<T>(
@@ -312,12 +312,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         &mut self,
         result: Result<T>,
         provider: &mut impl CryptoProvider,
-        cancel: &mut dyn FnMut() -> bool,
     ) -> Result<T> {
-        let result = result.and_then(|value| {
-            if cancel() { return Err(Error::Cancelled); }
-            Ok(value)
-        });
         if result.is_err() { self.recover(provider)?; }
         result
     }
@@ -420,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_object_definition_survives_cancel_after_callback_return() {
+    fn ordinary_object_definition_commits_once_and_cancel_does_not_publish() {
         let mut last_poll = None;
         for failure in [None, Some(false), Some(true)] {
             let mut provider = Provider::default();
@@ -434,12 +429,12 @@ mod tests {
             let mut polls = 0;
             let result = session.process_command(&define, false, Some(3), &mut provider, &mut || {
                 polls += 1;
-                last_poll == Some(polls)
+                failure == Some(false) && last_poll == Some(polls)
             });
             match failure {
                 None => {
                     assert_eq!(result.unwrap().sw, 0x9000);
-                    assert!(provider.encryptions.get() > before + 1, "ordinary writes publish before the final boundary");
+                    assert_eq!(provider.encryptions.get(), before + 1, "ordinary writes commit once at the APDU boundary");
                     last_poll = Some(polls);
                 }
                 Some(false) => assert_eq!(result, Err(Error::Cancelled)),
@@ -452,8 +447,8 @@ mod tests {
             let mut rebooted = Session::open(flash, [3; 16], image, [4; 16], sizes, &mut provider).unwrap();
             rebooted.process(&select, true, &mut provider, &mut || false).unwrap();
             let duplicate = rebooted.process_command(&define, false, Some(3), &mut provider, &mut || false).unwrap();
-            assert_eq!(duplicate.sw, if failure == Some(true) { 0x9000 } else { 0x6e27 },
-                "completed ordinary definition must survive late cancellation");
+            assert_eq!(duplicate.sw, if failure.is_some() { 0x9000 } else { 0x6e27 },
+                "cancelled or failed definitions must not become durable");
         }
     }
 
@@ -523,7 +518,7 @@ mod tests {
         assert_eq!(before & 0xfff0, 0x63c0);
 
         // Handoff changes only persistence ownership, never the live engine object.
-        let live_card = session.card.as_ref().unwrap() as *const Card;
+        let live_card = session.card.as_ref().unwrap() as *const AppletInstance;
         let snapshot = session.renewal_snapshot([4; 16], session.store.image, [5; 16]).unwrap();
         let record = crate::journal::SeedRecord::seal_new_epoch(snapshot,
             JournalKey::from([6; 16]), &mut provider).unwrap();
@@ -539,7 +534,7 @@ mod tests {
         assert_eq!(changed.installed(), Err(Error::Storage), "authenticated but stale state cannot replace live state");
         drop(changed);
         session.adopt_renewed_store(bank, [6; 16], [5; 16], &mut provider).unwrap();
-        assert_eq!(session.card.as_ref().unwrap() as *const Card, live_card);
+        assert_eq!(session.card.as_ref().unwrap() as *const AppletInstance, live_card);
         assert_eq!(session.selected(), Ok(true));
         assert_eq!(session.store.installation, [5; 16]);
 

@@ -1,11 +1,11 @@
 //! Loader rejection must preserve durable state, not merely return an error.
 use super::*;
 
-fn snapshot(c: &Card<MemoryFlash, TestPlatform>) -> Vec<u8> {
+fn snapshot(c: &Mc04Engine<MemoryFlash, TestPlatform>) -> Vec<u8> {
     c.state.encode_snapshot().unwrap().to_vec()
 }
 
-fn rejected(c: &mut Card<MemoryFlash, TestPlatform>, raw: &[u8], expected: Option<Error>) {
+fn rejected(c: &mut Mc04Engine<MemoryFlash, TestPlatform>, raw: &[u8], expected: Option<Error>) {
     let before = snapshot(c);
     let result = load(c, raw);
     if let Some(error) = expected {
@@ -15,7 +15,7 @@ fn rejected(c: &mut Card<MemoryFlash, TestPlatform>, raw: &[u8], expected: Optio
     }
     assert_eq!(snapshot(c), before, "rejected load changed live state");
     let flash = core::mem::replace(c, card()).into_flash();
-    *c = Card::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+    *c = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(snapshot(c), before, "rejected load changed durable state");
 }
 
@@ -70,7 +70,7 @@ fn insert_table_row_count(image: &mut Vec<u8>, table: u8, count: u16) {
     }
 }
 
-fn fixture(bound: bool) -> (Card<MemoryFlash, TestPlatform>, [u8; 16]) {
+fn fixture(bound: bool) -> (Mc04Engine<MemoryFlash, TestPlatform>, [u8; 16]) {
     let mut c = card();
     let inc = create(&mut c, "a");
     if bound {
@@ -544,7 +544,7 @@ fn empty_domain_retains_versions_and_key_after_reboot() {
     c.manage(command(0xec, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
     c.manage(command(0xee, &management_names_wire("a", "F04D430001").unwrap())).unwrap();
     c.manage(command(0xf0, &management_names_wire("a", "one").unwrap())).unwrap();
-    let mut c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let mut c = Mc04Engine::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(c.state.domains["a"].image_refs.is_empty());
     assert!(c.state.domains["a"].instances.is_empty());
     rejected(
@@ -601,13 +601,13 @@ fn recovery_rejects_authenticated_but_inconsistent_snapshots() {
         journal.commit(&good).unwrap();
         journal.commit(&raw).unwrap(); // Writes a validly authenticated newer generation.
         assert!(
-            Card::open(journal.into_flash(), TestPlatform(10), STORAGE_KEY).is_err(),
+            Mc04Engine::open(journal.into_flash(), TestPlatform(10), STORAGE_KEY).is_err(),
             "accepted corruption {case}"
         );
     }
     let (mut journal, _) = Journal::open(base, STORAGE_KEY).unwrap();
     journal.commit(&good).unwrap();
-    Card::open(journal.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    Mc04Engine::open(journal.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
 }
 
 #[test]
@@ -646,6 +646,6 @@ fn inventory_is_bounded_authenticated_and_read_only() {
     plain.level = 0;
     assert_eq!(c.manage(plain), Err(Error::Unauthorized));
     assert_eq!(snapshot(&c), before);
-    let c = Card::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let c = Mc04Engine::open(c.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert_eq!(snapshot(&c), before);
 }

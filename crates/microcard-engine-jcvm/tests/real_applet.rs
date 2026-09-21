@@ -1,7 +1,7 @@
 //! Install and drive a real applet, to see how far the engine gets.
 //!
 //! The committed applet runs by default. An external corpus can extend that coverage.
-use microcard_engine_jcvm::applet::{Card, Sizes, PersistentState, PersistentView};
+use microcard_engine_jcvm::applet::{AppletInstance, Sizes, PersistentState, PersistentView};
 use microcard_engine_jcvm::cap::LoadFile;
 use microcard_engine_jcvm::host::Host;
 
@@ -92,7 +92,7 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
             frame_words: 8192,
             ..Sizes::default()
         };
-        let mut card = Card::new(&file, sizes)
+        let mut card = AppletInstance::new(&file, sizes)
             .unwrap_or_else(|error| panic!("{name}: sizes {error:?}"));
         // The parameters GlobalPlatform hands install: an instance AID, privileges and
         // applet data, each length prefixed.
@@ -129,7 +129,7 @@ fn the_real_applet_gets_as_far_as_the_engine_can_take_it() {
                 let (bytes, statics, instance) = host.checkpoint.take()
                     .expect("PIN check must publish its consumed attempt before returning");
                 drop(card);
-                let mut recovered = Card::restore(&file, sizes, PersistentState { heap: &bytes, statics: &statics, instance })
+                let mut recovered = AppletInstance::restore(&file, sizes, PersistentState { heap: &bytes, statics: &statics, instance })
                     .unwrap_or_else(|error| panic!("{name}: restore {error:?}"));
                 assert_eq!(recovered.process(&file, &mut host, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, 0x9000);
                 let after = recovered.process(&file, &mut host, &wrong_pin, false).unwrap();

@@ -3,7 +3,7 @@ use crate::{file_flash::Region, private_open_options, sim_hal::Hardware};
 use microcard_core::{
     hal::Entropy,
     image_store::Images,
-    jcvm_card::{Card, Storage},
+    jcvm_card::{JcvmEngine, Storage},
     jcvm_registry::{Registry, Store},
     jcvm_storage::{heap_root, HeapBanks},
     scp03::Keys,
@@ -22,7 +22,7 @@ type Metadata = Region<8192, 0, 0>;
 type Code = Region<0, 65536, 2>;
 type Heap = Region<65536, 0, 0>;
 type Staging = BoundedFlashStaging<crate::file_flash::Staging, { microcard_core::jcvm_package::MAX_PACKAGE_BYTES }>;
-pub(crate) type ManagedCard = Card<Metadata, Code, Heaps, Hardware, Staging>;
+pub(crate) type ManagedCard = JcvmEngine<Metadata, Code, Heaps, Hardware, Staging>;
 
 pub(crate) struct Heaps {
     root: PathBuf,
@@ -121,7 +121,7 @@ pub(crate) fn open(keys: Keys, root: &Path) -> Result<Endpoint<ManagedCard>> {
         heaps: Heaps { root: root.into() },
         heap_key,
     };
-    let card = Card::open(storage, provider, staging, vec![0; 16384])?;
+    let card = JcvmEngine::open(storage, provider, staging, vec![0; 16384])?;
     Ok(Endpoint::new(card, keys))
 }
 

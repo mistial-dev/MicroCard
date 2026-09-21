@@ -345,7 +345,7 @@ fn globalplatform_management_status(error: &Error) -> u16 {
 #[cfg(all(test, feature = "mc04"))]
 mod tests {
     use super::*;
-    use crate::{domains::Card, journal::MemoryFlash};
+    use crate::{domains::Mc04Engine, journal::MemoryFlash};
     use alloc::vec;
 
     struct TestPlatform;
@@ -362,9 +362,9 @@ mod tests {
         }
     }
 
-    fn endpoint() -> Endpoint<Card<MemoryFlash, TestPlatform>> {
+    fn endpoint() -> Endpoint<Mc04Engine<MemoryFlash, TestPlatform>> {
         Endpoint::new(
-            Card::open(MemoryFlash::new(16384), TestPlatform, [0x33; 16]).unwrap(),
+            Mc04Engine::open(MemoryFlash::new(16384), TestPlatform, [0x33; 16]).unwrap(),
             Keys {
                 enc: [0x11; 16],
                 mac: [0x22; 16],
@@ -409,7 +409,7 @@ mod tests {
     fn the_sequence_counter_advances_and_never_repeats_across_a_restart() {
         use crate::scp03::{CHALLENGE_BYTES, SEQUENCE_BYTES};
         let offset = 13 + 2 * CHALLENGE_BYTES;
-        let initialize_update = |endpoint: &mut Endpoint<Card<MemoryFlash, TestPlatform>>| {
+        let initialize_update = |endpoint: &mut Endpoint<Mc04Engine<MemoryFlash, TestPlatform>>| {
             let mut command = vec![0x80, 0x50, 0, 0, CHALLENGE_BYTES as u8];
             command.extend(core::iter::repeat_n(0x77, CHALLENGE_BYTES));
             command.push(0);
@@ -427,7 +427,7 @@ mod tests {
         let mut seen = alloc::vec::Vec::new();
         for _ in 0..3 {
             let mut endpoint = Endpoint::new(
-                Card::open(flash, TestPlatform, [0x33; 16]).unwrap(),
+                Mc04Engine::open(flash, TestPlatform, [0x33; 16]).unwrap(),
                 Keys {
                     enc: [0x11; 16],
                     mac: [0x22; 16],

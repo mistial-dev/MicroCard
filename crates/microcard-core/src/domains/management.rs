@@ -1,7 +1,7 @@
 //! Authenticated GlobalPlatform and MicroCard management command handling.
 use super::*;
 
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     pub(crate) fn globalplatform_load_active(&self) -> bool {
         self.globalplatform_load.is_some()
     }
@@ -681,4 +681,3 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         }
     }
 }
-

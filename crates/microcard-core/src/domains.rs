@@ -1223,7 +1223,7 @@ struct GlobalPlatformLoad {
     receiver: crate::globalplatform::LoadReceiver,
 }
 
-pub struct Card<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging = RamStaging> {
+pub struct Mc04Engine<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging = RamStaging> {
     journal: Journal<F>,
     state: State,
     platform: P,
@@ -1283,13 +1283,13 @@ impl TransactionDisposition {
         self != Self::Inactive
     }
 }
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform> Card<F, P, RamStaging> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform> Mc04Engine<F, P, RamStaging> {
     pub fn open(flash: F, platform: P, storage_key: impl Into<JournalKey>) -> Result<Self> {
         Self::open_with_staging(flash, platform, storage_key, RamStaging::default())
     }
 }
 
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     pub fn open_with_staging(
         flash: F,
         mut platform: P,

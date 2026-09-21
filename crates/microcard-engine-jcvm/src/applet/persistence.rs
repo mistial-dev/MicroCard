@@ -84,7 +84,7 @@ impl VolatileState {
     pub fn bytes(&self) -> usize { self.bytes.len() }
 }
 
-impl Card {
+impl AppletInstance {
     /// Retain only CLEAR_ON_RESET payloads after deselection, within a caller-owned quota.
     pub fn retain_volatile(&mut self, maximum: usize) -> Result<VolatileState> {
         let instance = self.instance.ok_or(Error::Missing)?;

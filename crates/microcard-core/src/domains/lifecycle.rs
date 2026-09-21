@@ -96,7 +96,7 @@ impl Owner {
     }
 }
 
-impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Card<F, P, S> {
+impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
     pub(super) fn with_lifecycle_retry_floors<T>(
         &mut self,
         callback: impl FnOnce(&mut Self, &mut LifecycleRetries) -> Result<T>,
