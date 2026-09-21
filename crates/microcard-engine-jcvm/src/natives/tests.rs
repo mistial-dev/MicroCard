@@ -188,8 +188,11 @@ fn random_data_methods_obey_return_contracts_and_reject_empty_requests() {
             frame.push_short(1).unwrap();
             frame.push_short(4).unwrap();
             let mut budget = allowance;
-            let result = test_call_with_budget(framework(ClassId::RandomData, method, false),
-                &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &mut []);
+            let result = test_call_with_budget(
+                framework(ClassId::RandomData, method, false),
+                NativeContext { heap: &mut heap, host: &mut host, frame: &mut frame,
+                    context: 1, jcre: &mut idle(), budget: &mut budget, statics: &mut [] },
+            );
             if allowance == 3 {
                 assert!(matches!(result, Err(Error::Quota)));
                 assert_eq!(budget, 3);
@@ -849,8 +852,11 @@ fn aes_cipher_streams_overlapping_buffers_and_preserves_output_on_failure() {
         if reference { frame.push_reference(value).unwrap(); } else { frame.push_short(value as i16).unwrap(); }
     }
     let mut budget = 31;
-    assert!(matches!(test_call_with_budget(framework(ClassId::Cipher, MethodId::doFinal, false),
-        &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &mut []), Err(Error::Quota)));
+    assert!(matches!(test_call_with_budget(
+        framework(ClassId::Cipher, MethodId::doFinal, false),
+        NativeContext { heap: &mut heap, host: &mut host, frame: &mut frame,
+            context: 1, jcre: &mut idle(), budget: &mut budget, statics: &mut [] },
+    ), Err(Error::Quota)));
     assert_eq!(host.calls, 2);
     assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
     host.fail_at = 4;
@@ -1204,7 +1210,9 @@ fn util_copies_within_one_array_without_overwriting_what_it_is_reading() {
         let mut budget = length as u32;
         test_call_with_budget(
             framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
-            &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut [],
+            NativeContext { heap: &mut heap, host: &mut crate::host::NoHost,
+                frame: &mut frame, context: 1, jcre: &mut idle(), budget: &mut budget,
+                statics: &mut [] },
         ).unwrap();
         assert_eq!(budget, 0);
         assert_eq!(frame.pop_short().unwrap(), destination + length);
@@ -1221,7 +1229,9 @@ fn util_copies_within_one_array_without_overwriting_what_it_is_reading() {
     let mut budget = 598;
     assert!(matches!(test_call_with_budget(
         framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
-        &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut [],
+        NativeContext { heap: &mut heap, host: &mut crate::host::NoHost,
+            frame: &mut frame, context: 1, jcre: &mut idle(), budget: &mut budget,
+            statics: &mut [] },
     ), Err(Error::Quota)));
     assert_eq!(budget, 598);
     assert_eq!(heap.byte_slice(array, 0, 600).unwrap(), before);
@@ -1298,8 +1308,10 @@ fn util_fills_and_compares() {
         frame.push_short(offset).unwrap();
         frame.push_short(length).unwrap();
         let mut budget = available;
-        let result = test_call_with_budget(compare, &mut heap, &mut crate::host::NoHost,
-            &mut frame, 1, &mut idle(), &mut budget, &mut []).and_then(|_| frame.pop_short());
+        let result = test_call_with_budget(compare, NativeContext { heap: &mut heap,
+            host: &mut crate::host::NoHost, frame: &mut frame, context: 1,
+            jcre: &mut idle(), budget: &mut budget, statics: &mut [] })
+            .and_then(|_| frame.pop_short());
         assert_eq!(result, expected);
         assert_eq!(budget, if expected.is_ok() { available - length as u32 } else { available });
     }
@@ -1313,8 +1325,12 @@ fn util_fills_and_compares() {
             frame.push_short(4).unwrap();
             frame.push_short(9).unwrap();
             let mut budget = available;
-            let result = test_call_with_budget(framework(ClassId::Util, method, true), &mut heap,
-                &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut []);
+            let result = test_call_with_budget(
+                framework(ClassId::Util, method, true),
+                NativeContext { heap: &mut heap, host: &mut crate::host::NoHost,
+                    frame: &mut frame, context: 1, jcre: &mut idle(), budget: &mut budget,
+                    statics: &mut [] },
+            );
             if available == 3 {
                 assert!(matches!(result, Err(Error::Quota)));
                 assert_eq!(budget, 3);

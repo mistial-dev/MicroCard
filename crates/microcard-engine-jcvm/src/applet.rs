@@ -1204,10 +1204,8 @@ mod tests {
                 assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
             }
             if let Some((heap, statics, instance)) = host.saved.last() {
-                let durable_field: u16 = if ending == "full-caught" { 9 }
-                    else if ending.starts_with("commit") { 12 }
-                    else if ending.starts_with("plain-") { 12 }
-                    else { 9 };
+                let durable_field: u16 = if ending.starts_with("commit")
+                    || ending.starts_with("plain-") { 12 } else { 9 };
                 let durable_static = if ending == "full-caught" { 3 } else { durable_field };
                 let mut restored = AppletInstance::restore(&file, card.sizes,
                     PersistentState { heap, statics, instance: *instance }).unwrap();

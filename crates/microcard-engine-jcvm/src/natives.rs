@@ -299,17 +299,10 @@ pub fn call_with_budget<H: crate::host::Host>(
 }
 
 #[cfg(test)]
-fn test_call_with_budget(
+fn test_call_with_budget<H: crate::host::Host>(
     target: ApiTarget,
-    heap: &mut Heap,
-    host: &mut impl crate::host::Host,
-    frame: &mut Frame,
-    context: heap::Context,
-    jcre: &mut Jcre,
-    budget: &mut u32,
-    statics: &mut [u8],
+    mut native: NativeContext<'_, '_, '_, H>,
 ) -> Result<Native> {
-    let mut native = NativeContext { heap, host, frame, context, jcre, budget, statics };
     call_with_budget(target, &mut native)
 }
 
