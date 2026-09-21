@@ -85,12 +85,18 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.card.as_mut().ok_or(Error::Missing)?.restore_idle_memory().map_err(engine_error)
     }
 
-    pub(crate) fn renewal_snapshot(&self, old_identity: [u8; 16], image: [u8; 32],
-            new_identity: [u8; 16]) -> Result<zeroize::Zeroizing<Vec<u8>>> {
+    pub(crate) fn prepare_epoch_record(
+        &self,
+        old_identity: [u8; 16],
+        image: [u8; 32],
+        new_identity: [u8; 16],
+        key: JournalKey,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         self.installed()?;
         if self.store.installation != old_identity || self.store.image != image { return Err(Error::KeyMismatch); }
         let view = self.card.as_ref().ok_or(Error::Missing)?.persistent_view().map_err(engine_error)?;
-        encode_snapshot(view, image, new_identity, self.store.maximum)
+        self.store.prepare_epoch_record(view, new_identity, key, provider)
     }
 
     pub(crate) fn take_security_reset(&mut self) -> bool {
@@ -520,8 +526,7 @@ mod tests {
 
         // Handoff changes only persistence ownership, never the live engine object.
         let live_card = session.card.as_ref().unwrap() as *const AppletInstance;
-        let snapshot = session.renewal_snapshot([4; 16], session.store.image, [5; 16]).unwrap();
-        let record = crate::journal::SeedRecord::seal_new_epoch(snapshot,
+        let record = session.prepare_epoch_record([4; 16], session.store.image, [5; 16],
             JournalKey::from([6; 16]), &mut provider).unwrap();
         let seed = crate::journal::SeedRecord::authenticate(&record, &JournalKey::from([6; 16]),
             &mut SoftwareCrypto, |_| Ok(())).unwrap();

@@ -244,6 +244,17 @@ impl<F: Flash> Store<F> {
         Ok(())
     }
 
+    fn prepare_epoch_record(
+        &self,
+        view: PersistentView<'_>,
+        installation: [u8; 16],
+        key: JournalKey,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<Zeroizing<Vec<u8>>> {
+        let snapshot = encode_snapshot(view, self.image, installation, self.maximum)?;
+        crate::journal::SeedRecord::seal_new_epoch(snapshot, key, provider)
+    }
+
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }

@@ -65,8 +65,7 @@ impl<F: crate::journal::Flash> Store<F> {
             let (image, sizes, digest) = Self::session_image_from(self.state()?, instance.load, images, scratch, provider, |_| Ok(()))?;
             let identity = self.reserve_heap_identity()?;
             let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &identity, &digest)?;
-            let snapshot = session.renewal_snapshot(instance.identity, digest, identity)?;
-            let record = crate::journal::SeedRecord::seal_new_epoch(snapshot, key, provider)?;
+            let record = session.prepare_epoch_record(instance.identity, digest, identity, key, provider)?;
             if record.len() > size - 3 || record.len() > staging.persistent_capacity() { return Err(Error::Quota); }
             staging.append(&record)?;
             if !staging.matches(0, &record)? { return Err(Error::Authentication); }
