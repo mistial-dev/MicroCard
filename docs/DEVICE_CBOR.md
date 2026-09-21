@@ -63,7 +63,8 @@ the signer, match the current domain/incarnation, enforce rollback and storage q
 and activate atomically. The [JCVM manifest vector](../format/jcvm-manifest-cbor-v1.json)
 is checked by Rust, Python, .NET, and Java. The shared GlobalPlatform loading path
 uses this contract for both managed simulator sessions and the separate JCVM board
-profile. Physical execution remains unverified; see [release readiness](READINESS.md).
+profile. The revision-bound MakerDiary smoke run loaded and installed the signed
+OpenFIPS201 package through this path; see [hardware smoke](HARDWARE_SMOKE.md).
 
 ## Internal state snapshot, version 2
 

@@ -393,7 +393,10 @@ previously it returned an empty `9000` response.
 
 The fixture is pinned to OpenFIPS201 `9f3b99bd0f2600beea7e5c053613d8baef2b7716`.
 Upstream tests mock the secure channel; this acceptance exercises the actual shared
-transport. Physical Makerdiary execution and interrupted provisioning remain unverified.
+transport.
+The revision-bound MakerDiary smoke run completed SCP03, signed loading, installation,
+PIV selection, and the NIST SelectCommand vector. Physical interrupted-write and
+interrupted-provisioning tests remain outstanding; see [hardware smoke](HARDWARE_SMOKE.md).
 
 ## Transactions and remaining durability work
 
