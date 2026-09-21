@@ -5,6 +5,18 @@ use crate::jcvm_api::{ClassId, MethodId};
 use crate::vm::{frame::Frame, heap::{self, Heap}};
 use crate::{Error, Result};
 
+fn pin_matches(material: &[u8], stored_length: usize, candidate: &[u8], blocked: bool) -> bool {
+    let mut different = stored_length ^ candidate.len();
+    different |= usize::from(blocked);
+    different |= usize::from(stored_length > material.len());
+    for (at, stored) in material.iter().copied().enumerate() {
+        let presented = candidate.get(at).copied().unwrap_or(0);
+        let active = 0u8.wrapping_sub(u8::from(at < stored_length));
+        different |= usize::from((stored ^ presented) & active);
+    }
+    different == 0
+}
+
 fn initialize(heap: &mut Heap, this: u16, tries: i16, max_size: i16,
     context: heap::Context) -> Result<Option<Native>> {
     if tries < 1 || max_size < 1 {
@@ -109,17 +121,13 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
             }
             let material = heap.get_word(this, MATERIAL)?;
             let stored = heap.get_word(this, SIZE)? as usize;
-            let matched = if tries == 0 || length as usize != stored {
-                false
-            } else {
-                let mut equal = true;
-                for at in 0..stored {
-                    let left = heap.byte_slice(material, at, 1)?[0];
-                    let right = heap.byte_slice(candidate, offset as usize + at, 1)?[0];
-                    equal &= left == right;
-                }
-                equal
-            };
+            let capacity = heap.info(material)?.length as usize;
+            let matched = pin_matches(
+                heap.byte_slice(material, 0, capacity)?,
+                stored,
+                heap.byte_slice(candidate, offset as usize, length as usize)?,
+                tries == 0,
+            );
             if matched {
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
@@ -163,4 +171,20 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
         _ => return Ok(Native::Unimplemented),
     }
     Ok(Native::Returned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pin_matches;
+
+    #[test]
+    fn pin_comparison_folds_content_length_and_blocked_state_over_full_capacity() {
+        let material = b"1234\0\0\0\0";
+        assert!(pin_matches(material, 4, b"1234", false));
+        for candidate in [b"0234".as_slice(), b"1230", b"123", b"12340"] {
+            assert!(!pin_matches(material, 4, candidate, false));
+        }
+        assert!(!pin_matches(material, 4, b"1234", true));
+        assert!(!pin_matches(material, 4, b"12340", true));
+    }
 }
