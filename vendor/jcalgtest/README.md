@@ -30,4 +30,7 @@ python3 scripts/jcvm_cap_inventory.py \
 | `jcalgtest-v1.8.2-jc305.cap` | `37a9bfa6d09fa145d3d9d3788b3186d311fbb75af79d9a46532ec1182aea195c` |
 | `jcalgtest-v1.8.2-jc305.lfdb` | `f11c20bb665d15b40b28b99707da7f0e007e2ca8877f20eca0bd860a30d01393` |
 
-Run it in the emulator with `python3 scripts/jcalgtest_acceptance.py`.
+Run it in the emulator with `python3 scripts/jcalgtest_acceptance.py`. The acceptance
+queries every contiguous Cipher, Signature, KeyAgreement, MessageDigest, and RandomData
+algorithm constant defined by this Java Card 3.0.5 applet build. It requires exact
+agreement with MicroCard's deliberately small provider profile.

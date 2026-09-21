@@ -107,8 +107,10 @@ beside it. `scripts/piv_vector_acceptance.py` replays them with no argument.
 
 The MIT-licensed JCAlgTest v1.8.2 applet is also vendored with source, the local
 portability patch, CAP, load file, and hashes. `scripts/jcalgtest_acceptance.py`
-checks its version and representative SHA-256, AES, ECDSA, and unsupported DES
-results. CI and the checkpoint build the simulator with native diagnostics and fail
+checks its version and all 104 contiguous Cipher, Signature, KeyAgreement,
+MessageDigest, and RandomData factory constants in the applet's 3.0.5 table. It
+requires exact agreement with the supported SHA-256, AES-128, ECDSA-SHA-256, P-256
+agreement, and pseudo/secure-random profile. CI and the checkpoint build the simulator with native diagnostics and fail
 either real-applet run if it reaches an unimplemented native method or rejected
 instruction. The checkpoint gate and CI run both applet tests.
 

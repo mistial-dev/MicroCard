@@ -87,7 +87,9 @@ board's reserved heap.
   cover rollback, allocation and undo exhaustion, partial construction, cancellation,
   failed providers, and failed persistence. OpenFIPS201 and the vendored JCAlgTest run
   under native diagnostics in CI and the checkpoint; any reached unimplemented native
-  method or rejected instruction fails their raw and managed acceptance paths. This
+  method or rejected instruction fails their raw and managed acceptance paths. JCAlgTest
+  also queries all 104 algorithm values in its contiguous 3.0.5 factory tables and
+  requires exact supported/unsupported results from the configured provider. This
   makes exercised gaps visible, but does not replace the remaining method-by-method
   audit. [JCVM semantics](JCVM_PROFILE.md) records the exact supported behavior and
   source clauses.
