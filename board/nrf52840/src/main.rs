@@ -2482,7 +2482,9 @@ fn main() -> ! {
                             && responder.respond(outgoing).is_ok()
                         {
                             // Give usbd-ccid time to drain the response before flash can stall USB.
-                            maintenance_at = Some(now().wrapping_add(250_000));
+                            if maintenance_at.is_none() {
+                                maintenance_at = Some(now().wrapping_add(250_000));
+                            }
                         }
                         #[cfg(feature = "dongle-layout")]
                         if endpoint.take_bootloader_request() {
@@ -2495,10 +2497,16 @@ fn main() -> ! {
                     if maintenance_at
                         .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
                     {
-                        let _ = endpoint.maintenance_with_cancel(&mut || {
-                            feed();
-                            false
-                        });
+                        if endpoint
+                            .maintenance_with_cancel(&mut || {
+                                feed();
+                                false
+                            })
+                            .is_err()
+                        {
+                            // Startup recovery owns an uncertain published renewal.
+                            cortex_m::peripheral::SCB::sys_reset();
+                        }
                         maintenance_at = None;
                     }
                     #[cfg(feature = "dongle-layout")]
@@ -2529,11 +2537,16 @@ fn main() -> ! {
         };
         let response = endpoint.exchange(&command[..length]);
         let deadline = transport.deadline_after(1_000_000);
-        let _ = send_response(&mut transport, &response, deadline);
-        let _ = endpoint.maintenance_with_cancel(&mut || {
-            feed();
-            false
-        });
+        if send_response(&mut transport, &response, deadline).is_ok()
+            && endpoint
+                .maintenance_with_cancel(&mut || {
+                    feed();
+                    false
+                })
+                .is_err()
+        {
+            cortex_m::peripheral::SCB::sys_reset();
+        }
     }
 }
 #[panic_handler]

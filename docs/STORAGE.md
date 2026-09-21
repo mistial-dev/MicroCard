@@ -90,12 +90,15 @@ the existing applet object, selection and transient state; mismatch prevents sta
 execution. Seed validation and normal restore share a read-only validator. Validation borrows
 the saved heap, allocating only the initial runtime layout and a reference bitmap.
 It checks the configured quota before constructing that layout; no execution frames
-or saved-heap copy are needed. After the transport delivers a response, its explicit
-idle hook renews a selected session when either counter has 1024 or fewer commits
-remaining. APDU selection and execution never start renewal. Active uploads defer
-maintenance without aborting the upload. A maintenance failure drops selection;
-pending ownership protects staging from transport reset. This threshold does not
-guarantee that every command fits the remaining counter space.
+or saved-heap copy are needed. The simulator invokes the explicit idle hook after
+flushing its response, and UART invokes it after a successful send. USB gives the
+`usbd-ccid` response a bounded drain interval while continuing to poll, then invokes
+the hook; the first pending deadline is retained under continuous traffic. The hook
+renews a selected session when either counter has 1024 or fewer commits remaining.
+APDU selection and execution never start renewal. Active uploads defer maintenance
+without aborting the upload. A maintenance failure drops selection; host processes
+exit and the board reboots so startup recovery can resolve pending ownership. This
+threshold does not guarantee that every command fits the remaining counter space.
 `SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,
