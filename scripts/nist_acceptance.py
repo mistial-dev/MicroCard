@@ -22,13 +22,30 @@ from wallet_acceptance import environment
 
 REVISION = "9f3b99bd0f2600beea7e5c053613d8baef2b7716"
 PACKAGE = "dev.mistial.tools.openfips201.nist"
+DEFAULT_DEVELOPMENT_MANAGEMENT_KEY = bytes(range(0x40, 0x50)) * 2
 
 
-def runtime_identity(simulator):
-    return dict(engine="MicroCard JCVM host",
-        microcard_revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-        microcard_dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
-        physical_execution=False, simulator_sha256=hashlib.sha256(simulator.read_bytes()).hexdigest(), simulator_isolated=True)
+def runtime_identity(simulator=None, reader=None):
+    identity = dict(
+        engine="MicroCard JCVM board" if reader else "MicroCard JCVM host",
+        microcard_revision=subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        microcard_dirty=bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=ROOT, text=True
+            ).strip()
+        ),
+        physical_execution=reader is not None,
+    )
+    if reader:
+        identity.update(reader=reader, simulator_isolated=False)
+    else:
+        identity.update(
+            simulator_sha256=hashlib.sha256(simulator.read_bytes()).hexdigest(),
+            simulator_isolated=True,
+        )
+    return identity
 
 
 def prepare_blank_seed(directory, simulator):
@@ -86,6 +103,9 @@ def main():
     parser.add_argument("--provision-config", action="store_true", help="Provision the upstream P-256 test keys, certificates, PIN/PUK and AES management key")
     parser.add_argument("--identity-folder", type=pathlib.Path, help="Complete P-256 ICAM-style identity matching --config; requires --provision-config")
     parser.add_argument("--seed", type=pathlib.Path, help="Closed simulator seed directory containing keys and state; default: blank applet")
+    parser.add_argument("--reader", help="Run vectors on this physical PC/SC reader")
+    parser.add_argument("--management-key", default=DEFAULT_DEVELOPMENT_MANAGEMENT_KEY.hex(),
+        help="32-byte board SCP03 ENC||MAC key in hex; defaults to the development key")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--test", help="One upstream vector identifier")
     selection.add_argument("--suite", help="Upstream suite selector, e.g. card-contact")
@@ -103,6 +123,16 @@ def main():
         parser.error("--config is required for NIST vectors")
     if args.identity_folder and not args.provision_config:
         parser.error("--identity-folder requires --provision-config")
+    if args.reader and args.seed:
+        parser.error("--seed is only valid for the host simulator")
+    if args.reader and (args.check_transport or args.check_objects):
+        parser.error("--reader currently supports NIST vectors only")
+    try:
+        management_key = bytes.fromhex(args.management_key)
+    except ValueError:
+        parser.error("--management-key must be hexadecimal")
+    if len(management_key) != 32:
+        parser.error("--management-key must contain exactly 32 bytes")
     upstream, output = args.upstream.resolve(), args.out.resolve()
     config = args.config.resolve() if args.config else None
     revision = subprocess.check_output(["git", "-C", upstream, "rev-parse", "HEAD"], text=True).strip()
@@ -110,7 +140,9 @@ def main():
         parser.error(f"upstream must be at {REVISION}")
     jars = upstream / "tools/piv_test_runner/local/install/TestRunnerFiles/jars"
     harness = upstream / "src/dev/mistial/tools/openfips201/nist"
-    required = [SIM, ROOT / "wallet/target/classes/dev/mistial/microcard/wallet/SimulatorTransport.class"]
+    required = [ROOT / "wallet/target/classes/dev/mistial/microcard/wallet/SimulatorTransport.class"]
+    if not args.reader:
+        required.append(SIM)
     if not args.check_transport:
         required.extend(([config] if config else []) + [jars / "PIV_TestRunner_modules-5.0.1.jar", upstream / "tools/jcard-v26.08.10.jar"])
     for path in required:
@@ -127,16 +159,19 @@ def main():
     env = environment()
     with tempfile.TemporaryDirectory(prefix="microcard-nist-build-") as temporary:
         staging = pathlib.Path(temporary)
-        # Seed creation and every reboot must execute the same build.
-        simulator = staging / "microcard-sim"
-        shutil.copy2(SIM, simulator)
-        seed = args.seed.resolve() if args.seed else staging / "seed"
-        if args.seed:
-            if not (seed / "keys").is_file() or not (seed / "state").is_dir():
-                parser.error("--seed must contain keys and a closed persistent state directory")
-        else:
-            seed.mkdir()
-            prepare_blank_seed(seed, simulator)
+        simulator = None
+        seed = None
+        if not args.reader:
+            # Seed creation and every reboot must execute the same build.
+            simulator = staging / "microcard-sim"
+            shutil.copy2(SIM, simulator)
+            seed = args.seed.resolve() if args.seed else staging / "seed"
+            if args.seed:
+                if not (seed / "keys").is_file() or not (seed / "state").is_dir():
+                    parser.error("--seed must contain keys and a closed persistent state directory")
+            else:
+                seed.mkdir()
+                prepare_blank_seed(seed, simulator)
         if args.check_transport:
             classes = staging / "classes"
             classes.mkdir()
@@ -188,18 +223,20 @@ def main():
         subprocess.run(["java", "-cp", str(classes) + os.pathsep + cp,
             PACKAGE + ".NistCompatibilityPatcher", jars / "PIV_TestRunner_modules-5.0.1.jar", compat],
             env=env, check=True)
-        manifest = dict(**runtime_identity(simulator), upstream_revision=revision,
+        manifest = dict(**runtime_identity(simulator, args.reader), upstream_revision=revision,
             upstream_harness_sha256=hashlib.sha256(committed.encode()).hexdigest(),
             adapter_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistTransport.java").read_bytes()).hexdigest(),
             profile_loader_sha256=hashlib.sha256((ROOT / "scripts/nist/MicroCardNistProfile.java").read_bytes()).hexdigest(),
             nist_modules_sha256=hashlib.sha256((jars / "PIV_TestRunner_modules-5.0.1.jar").read_bytes()).hexdigest(),
             config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
-            test=args.test, suite=args.suite, list_only=args.list_tests, blank_seed=args.seed is None,
+            test=args.test, suite=args.suite, list_only=args.list_tests,
+            blank_seed=not args.reader and args.seed is None,
             provision_config=args.provision_config,
             identity_folder=str(args.identity_folder.resolve()) if args.identity_folder else None,
             identity_sha256={str(p.relative_to(args.identity_folder)): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in sorted(args.identity_folder.rglob("*")) if p.is_file()} if args.identity_folder else None,
-            synthetic_atr=True,
+            synthetic_atr=not args.reader,
+            management_key_sha256=hashlib.sha256(management_key).hexdigest() if args.reader else None,
             unsupported=["contactless transport", "full GSA ICAM credential provisioning (RSA)", "VCI suites"],
             status="running")
         report = output / "microcard-run.json"
@@ -208,19 +245,27 @@ def main():
             started = time.perf_counter()
             personalized = staging / "personalized-seed"
             with (output / "provision.log").open("w") as log:
-                provision = subprocess.run(["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}",
-                    "-cp", str(classes) + os.pathsep + cp, PACKAGE + ".MicroCardNistProfile",
-                    config, upstream, personalized,
-                    *([args.identity_folder.resolve()] if args.identity_folder else [])], env=env, stdout=log, stderr=subprocess.STDOUT)
+                properties = ([f"-Dmicrocard.nist.reader={args.reader}",
+                    f"-Dmicrocard.nist.management-key={management_key.hex()}"] if args.reader else
+                    [f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}"])
+                provision = subprocess.run(["java", *properties, "-cp", str(classes) + os.pathsep + cp,
+                    PACKAGE + ".MicroCardNistProfile", config, upstream, personalized,
+                    *([args.identity_folder.resolve()] if args.identity_folder else [])],
+                    env=env, stdout=log, stderr=subprocess.STDOUT)
             manifest["provision_seconds"] = round(time.perf_counter() - started, 3)
             if provision.returncode:
                 manifest.update(status="provision_failed", exit_code=provision.returncode)
                 report.write_text(json.dumps(manifest, indent=2) + "\n")
                 raise SystemExit(f"Personalization failed; see {output / 'provision.log'}")
             seed = personalized
-        command = ["java", f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}",
-            "-cp", os.pathsep.join([str(compat), str(classes), cp]), PACKAGE + ".NistHarnessMain",
-            "--target", "microcard", "--config", config, "--out", output]
+        command = ["java", "-cp", os.pathsep.join([str(compat), str(classes), cp]),
+            PACKAGE + ".NistHarnessMain"]
+        if args.reader:
+            command.extend(["--target", "pcsc", "--reader", args.reader, "--shared-card"])
+        else:
+            command[1:1] = [f"-Dmicrocard.nist.seed={seed}", f"-Dmicrocard.nist.sim={simulator}"]
+            command.extend(["--target", "microcard"])
+        command.extend(["--config", config, "--out", output])
         if args.provision_config:
             command.insert(1, "-Dmicrocard.nist.verified9dprofile=true")
         if args.test:

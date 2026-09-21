@@ -12,7 +12,6 @@ import pro.javacard.gp.keys.PlaintextKeys;
 import java.io.*;
 import java.nio.file.Path;
 import java.util.*;
-import javax.smartcardio.TerminalFactory;
 
 /** GPPro owns every SCP03 cryptographic operation; adapters move APDU bytes only. */
 final class CardConnection implements AutoCloseable {
@@ -57,17 +56,7 @@ final class CardConnection implements AutoCloseable {
     }
 
     static BIBO reader(String name) throws Exception {
-        var terminals = TerminalFactory.getDefault().terminals().list();
-        var terminal = terminals.stream().filter(t -> t.getName().equals(name)).findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("Reader not found. Use readers to list exact names"));
-        var card = terminal.connect("*");
-        return new BIBO() {
-            public byte[] transceive(byte[] command) {
-                try { return card.getBasicChannel().transmit(new javax.smartcardio.CommandAPDU(command)).getBytes(); }
-                catch (javax.smartcardio.CardException e) { throw new BIBOException("PC/SC exchange failed", e); }
-            }
-            public void close() { try { card.disconnect(false); } catch (javax.smartcardio.CardException ignored) { } }
-        };
+        return PcscTransport.open(name);
     }
 
 }
