@@ -157,6 +157,9 @@ pub fn call(
     if class == ClassId::OwnerPIN {
         return pin::call(method, heap, host, frame, context, jcre, statics);
     }
+    if class == ClassId::OwnerPINBuilder && method == MethodId::buildOwnerPIN {
+        return pin::build(heap, frame, context);
+    }
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
     if class == ClassId::KeyAgreement {
         if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? { return Ok(result); }

@@ -1906,6 +1906,43 @@ mod tests {
     }
 
     #[test]
+    fn owner_pin_builder_constructs_the_supported_type_and_names_optional_types() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        reserve_runtime_exceptions(&mut heap, 1).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
+        let signature = framework(ClassId::OwnerPINBuilder, MethodId::buildOwnerPIN, true)
+            .method.signature;
+        let mut jcre = idle();
+        let mut budget = u32::MAX;
+        for value in [3, 8, 1] { frame.push_short(value).unwrap(); }
+        assert!(matches!(security::call(ClassId::OwnerPINBuilder, MethodId::buildOwnerPIN,
+            signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+            &mut budget, &[]), Ok(Native::Returned)));
+        let pin = frame.pop_reference().unwrap();
+        assert_eq!(api_class(heap.info(pin).unwrap().class).unwrap().id, ClassId::OwnerPIN);
+        frame.push_reference(pin).unwrap();
+        assert!(matches!(security::call(ClassId::OwnerPIN, MethodId::getTriesRemaining,
+            signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+            &mut budget, &[]), Ok(Native::Returned)));
+        assert_eq!(frame.pop_short(), Ok(3));
+
+        for (pin_type, class, reason) in [
+            (0, ClassId::PINException, 1),
+            (2, ClassId::SystemException, 6),
+            (3, ClassId::SystemException, 6),
+        ] {
+            for value in [3, 8, pin_type] { frame.push_short(value).unwrap(); }
+            let Native::Threw(exception) = security::call(ClassId::OwnerPINBuilder,
+                MethodId::buildOwnerPIN, signature, &mut heap, &mut crate::host::NoHost,
+                &mut frame, 1, &mut jcre, &mut budget, &[]).unwrap()
+                else { panic!("unsupported OwnerPIN type was accepted"); };
+            assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, class);
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(reason));
+        }
+    }
+
+    #[test]
     fn available_memory_supports_both_java_card_forms() {
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();

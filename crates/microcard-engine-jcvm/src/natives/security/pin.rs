@@ -1,9 +1,57 @@
 //! OwnerPIN state, transaction exceptions and durable retry checkpoints.
 use super::{COUNTER, KIND, MATERIAL, READY, SIZE, checkpoint_committed};
-use crate::natives::{Jcre, Native, new_exception, word_field, REASON_FIELD};
+use crate::natives::{Jcre, Native, new_exception, new_native, word_field, REASON_FIELD};
 use crate::jcvm_api::{ClassId, MethodId};
 use crate::vm::{frame::Frame, heap::{self, Heap}};
 use crate::{Error, Result};
+
+fn initialize(heap: &mut Heap, this: u16, tries: i16, max_size: i16,
+    context: heap::Context) -> Result<Option<Native>> {
+    if tries < 1 || max_size < 1 {
+        let exception = new_exception(heap, ClassId::PINException, context)?;
+        heap.put_word_unconditional(exception, REASON_FIELD, 1)?;
+        return Ok(Some(Native::Threw(exception)));
+    }
+    // A caught undo-capacity error must not publish a partially initialized PIN.
+    heap.check_allocations(&[(heap::KIND_BYTE, max_size as u16)])?;
+    heap.prepare_payload_writes(&[(this, 0, (COUNTER + 1) * 2)])?;
+    let material = heap.new_array(heap::KIND_BYTE, max_size as u16, context)?;
+    heap.put_word(this, KIND, tries as u16)?;
+    heap.put_word(this, SIZE, 0)?;
+    heap.put_word(this, MATERIAL, material)?;
+    heap.put_word(this, READY, 0)?;
+    heap.put_word(this, COUNTER, tries as u16)?;
+    Ok(None)
+}
+
+pub(super) fn build(heap: &mut Heap, frame: &mut Frame,
+    context: heap::Context) -> Result<Native> {
+    let pin_type = frame.pop_short()?;
+    let max_size = frame.pop_short()?;
+    let tries = frame.pop_short()?;
+    if pin_type != 1 {
+        let (class, reason) = if matches!(pin_type, 2 | 3) {
+            (ClassId::SystemException, 6) // Optional extended PIN types: ILLEGAL_USE.
+        } else {
+            (ClassId::PINException, 1) // Unknown type: ILLEGAL_VALUE.
+        };
+        let exception = new_exception(heap, class, context)?;
+        heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
+        return Ok(Native::Threw(exception));
+    }
+    if tries < 1 || max_size < 1 {
+        return initialize(heap, 0, tries, max_size, context)?
+            .ok_or(Error::Inconsistent);
+    }
+    heap.check_allocations(&[
+        (heap::KIND_OBJECT, super::STATE_WORDS),
+        (heap::KIND_BYTE, max_size as u16),
+    ])?;
+    let this = new_native(heap, ClassId::OwnerPIN, super::STATE_WORDS, context)?;
+    if let Some(result) = initialize(heap, this, tries, max_size, context)? { return Ok(result); }
+    frame.push_reference(this)?;
+    Ok(Native::Returned)
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host::Host,
@@ -13,20 +61,7 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
             let max_size = frame.pop_short()?;
             let tries = frame.pop_short()?;
             let this = frame.pop_reference()?;
-            if tries < 1 || max_size < 1 {
-                let exception = new_exception(heap, ClassId::PINException, context)?;
-                heap.put_word_unconditional(exception, REASON_FIELD, 1)?;
-                return Ok(Native::Threw(exception));
-            }
-            // A caught undo-capacity error must not publish a partially initialized PIN.
-            heap.check_allocations(&[(heap::KIND_BYTE, max_size as u16)])?;
-            heap.prepare_payload_writes(&[(this, 0, (COUNTER + 1) * 2)])?;
-            let material = heap.new_array(heap::KIND_BYTE, max_size as u16, context)?;
-            heap.put_word(this, KIND, tries as u16)?;
-            heap.put_word(this, SIZE, 0)?;
-            heap.put_word(this, MATERIAL, material)?;
-            heap.put_word(this, READY, 0)?;
-            heap.put_word(this, COUNTER, tries as u16)?;
+            if let Some(result) = initialize(heap, this, tries, max_size, context)? { return Ok(result); }
         }
         MethodId::update => {
             let length = frame.pop_short()?;

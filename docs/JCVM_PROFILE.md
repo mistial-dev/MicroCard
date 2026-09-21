@@ -463,6 +463,9 @@ PIN replacement and reboot validation honor the configured maximum without a
 separate 32-byte limit. It reserves the complete conditional update before changing PIN bytes or
 metadata; invalid constructor limits and oversized replacements report
 `PINException.ILLEGAL_VALUE`.
+`OwnerPINBuilder` constructs the legacy `OWNER_PIN` type. Unknown type identifiers
+throw `PINException.ILLEGAL_VALUE`; the optional `OWNER_PIN_X` variants explicitly
+throw `SystemException.ILLEGAL_USE` instead of reaching an unimplemented native.
 Invalid PIN presentations throw the API-specified null or bounds exception while
 retaining the consumed retry across transaction abort (3.0.5 `OwnerPIN.check`).
 PIN checks checkpoint their retry decrement before comparison and checkpoint a
