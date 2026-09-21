@@ -103,8 +103,9 @@ board's reserved heap.
   bytes, 148 data bytes, and 198,284 BSS bytes, within the 288 KiB firmware region.
   All seven profiles link, but seven flash optimization ceilings still fail; none
   were raised. [Board budgets](BOARD_BUDGETS.json) contain the exact measurements.
-  The current image was transferred through UF2 on 2026-09-20 but did not enumerate;
-  startup diagnostics are the next board blocker.
+  Earlier 2026-09-20 UF2 attempts used an invalid family and were ignored by the
+  bootloader. The corrected image is built but still needs physical transfer and
+  startup acceptance.
 - Bound complete personalization workloads, including failures and renewal. At clean
   revision `f1adbf4`, the full OpenFIPS transport workload peaks at **217,368 requested
   host allocation bytes** with a 4,096-byte certificate capacity, and **238,910 bytes**
