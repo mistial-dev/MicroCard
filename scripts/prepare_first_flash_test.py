@@ -1,12 +1,29 @@
 #!/usr/bin/env python3
 """Check bundle replacement and failure recovery without building or flashing."""
 import pathlib
+import struct
 import tempfile
 from unittest.mock import patch
-from prepare_first_flash import publish_bundle
+from prepare_first_flash import NRF52840_UF2_FAMILY, publish_bundle, write_uf2
 
 
 def main():
+    with tempfile.TemporaryDirectory() as root:
+        destination = pathlib.Path(root) / "firmware.uf2"
+        raw = bytes(index & 0xff for index in range(300))
+        write_uf2(raw, 0x27000, destination)
+        image = destination.read_bytes()
+        assert len(image) == 1024
+        for index, target in enumerate((0x27000, 0x27100)):
+            block = image[index * 512:(index + 1) * 512]
+            header = struct.unpack_from("<8I", block)
+            assert header == (0x0A324655, 0x9E5D5157, 0x2000, target, 256,
+                              index, 2, NRF52840_UF2_FAMILY)
+            assert struct.unpack_from("<I", block, 508)[0] == 0x0AB16F30
+        assert image[32:288] == raw[:256]
+        assert image[544:588] == raw[256:]
+        assert image[588:800] == bytes(212)
+
     for fail in (0, 1, 2):
         with tempfile.TemporaryDirectory() as root:
             root = pathlib.Path(root)
@@ -42,7 +59,7 @@ def main():
                 recovered = destination
             assert {p.name: p.read_bytes() for p in recovered.iterdir()} == expected
             assert staged.exists() == bool(fail)
-    print("PASS: complete firmware bundle replacement and failed-publication recovery")
+    print("PASS: nRF52840 UF2 encoding, complete bundle replacement and failed-publication recovery")
 
 
 if __name__ == "__main__":
