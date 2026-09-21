@@ -61,7 +61,7 @@ header, ciphertext, and tag use the existing 24-byte header, AES-CCM provider, a
 
 ## JCVM counter renewal
 
-Instruction checkpoints make the 32,768-attempt heap counters a service-life limit.
+Durable APDU, PIN, and transaction commits eventually exhaust the heap counters.
 Resetting them under the existing key would reuse nonces and remove the rollback
 anchor. Moving to a spare heap bank is insufficient: both supported board banks
 may contain installed applets. Both JCVM layouts already reserve a separate 64 KiB
@@ -81,18 +81,21 @@ final publication; the recovery provider refuses heap-key encryption. The writer
 now stages a live committed heap under a fresh reserved identity, verifies the
 written record, and publishes pending ownership. It leaves the old bank and live
 selection untouched. Encryption failure consumes its identity; an uncertain
-publication retains staging until registry recovery decides ownership. The session handoff primitive reopens the authenticated journal and compares its
+publication retains staging until registry recovery decides ownership. JCVM storage owns
+snapshot encoding and epoch-record encryption; registry renewal receives only a sealed
+record to stage. The session handoff primitive reopens the authenticated journal and compares its
 raw state with the live committed projection in bounded windows, then replaces only
 the journal. It does not construct a second applet. It retains
 the existing applet object, selection and transient state; mismatch prevents stale
 execution. Seed validation and normal restore share a read-only validator. Validation borrows
 the saved heap, allocating only the initial runtime layout and a reference bitmap.
 It checks the configured quota before constructing that layout; no execution frames
-or saved-heap copy are needed. Before applet callbacks, the card renews a live session when either counter has
-1024 or fewer commits remaining. Active uploads, including zero-byte uploads,
-prevent renewal. A maintenance failure drops selection; pending ownership protects
-staging from transport reset. This threshold does not guarantee that every command
-fits the remaining counter space.
+or saved-heap copy are needed. After the transport delivers a response, its explicit
+idle hook renews a selected session when either counter has 1024 or fewer commits
+remaining. APDU selection and execution never start renewal. Active uploads defer
+maintenance without aborting the upload. A maintenance failure drops selection;
+pending ownership protects staging from transport reset. This threshold does not
+guarantee that every command fits the remaining counter space.
 `SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,

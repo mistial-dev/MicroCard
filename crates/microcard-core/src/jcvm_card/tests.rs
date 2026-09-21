@@ -276,7 +276,8 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     card.upload = Some(Upload { load: old.load, domain: old.domain, hash: None,
         receiver: LoadReceiver::new(Payload::SignedPackage, MAX_PACKAGE_BYTES) });
     assert!(card.staging.is_empty());
-    assert_eq!(card.maintain_session(selected_aid, &mut live, &mut || false), Err(Error::Busy));
+    card.maintain_session(selected_aid, &mut live, &mut || false).unwrap();
+    assert_eq!(card.storage.heaps.preparations, preparations);
     card.upload = None;
     assert_eq!(card.maintain_session(selected_aid, &mut live, &mut || true), Err(Error::Cancelled));
     assert_eq!(card.storage.heaps.preparations, preparations);
@@ -284,6 +285,10 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let status = Command::parse(&[0, 0x20, 0, 0x80]).unwrap();
     let reply = card.process_plain_with_cancel(&status, &mut || false).unwrap();
     assert_eq!(u16::from_be_bytes(reply.try_into().unwrap()), before);
+    let unchanged = card.storage.registry.state().unwrap().instances()
+        .find(|instance| instance.aid == old.aid).unwrap();
+    assert_eq!(unchanged.identity, old.identity);
+    card.maintenance_with_cancel(&mut || false).unwrap();
     let current = card.storage.registry.state().unwrap().instances()
         .find(|instance| instance.aid == old.aid).unwrap();
     assert_ne!(current.identity, old.identity);

@@ -52,6 +52,21 @@ impl<C: CardEngine> Endpoint<C> {
         self.exchange_with_cancel(raw, &mut || false)
     }
 
+    pub fn maintenance(&mut self) -> Result<()> {
+        self.maintenance_with_cancel(&mut || false)
+    }
+
+    pub fn maintenance_with_cancel(
+        &mut self,
+        should_cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<()> {
+        let result = self.card.maintenance_with_cancel(should_cancel);
+        if result.is_err() {
+            self.reset();
+        }
+        result
+    }
+
     pub fn into_card(mut self) -> C {
         self.reset();
         self.card

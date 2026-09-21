@@ -2395,6 +2395,8 @@ fn main() -> ! {
     )> = None;
     #[cfg(feature = "usb-ccid")]
     let mut usb_was_powered = false;
+    #[cfg(feature = "usb-ccid")]
+    let mut maintenance_at = None;
     #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
     let mut usb_configuration_deadline = None;
     let mut command = [0; MAX_SHORT_COMMAND_BYTES];
@@ -2476,8 +2478,11 @@ fn main() -> ! {
                             false
                         });
                         let mut outgoing = heapless::Vec::new();
-                        if outgoing.extend_from_slice(&reply).is_ok() {
-                            let _ = responder.respond(outgoing);
+                        if outgoing.extend_from_slice(&reply).is_ok()
+                            && responder.respond(outgoing).is_ok()
+                        {
+                            // Give usbd-ccid time to drain the response before flash can stall USB.
+                            maintenance_at = Some(now().wrapping_add(250_000));
                         }
                         #[cfg(feature = "dongle-layout")]
                         if endpoint.take_bootloader_request() {
@@ -2487,6 +2492,15 @@ fn main() -> ! {
                         }
                     }
                     class.check_for_app_response();
+                    if maintenance_at
+                        .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
+                    {
+                        let _ = endpoint.maintenance_with_cancel(&mut || {
+                            feed();
+                            false
+                        });
+                        maintenance_at = None;
+                    }
                     #[cfg(feature = "dongle-layout")]
                     if enter_uf2_at
                         .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
@@ -2496,6 +2510,7 @@ fn main() -> ! {
                 } else if usb_was_powered {
                     endpoint.reset();
                     usb_was_powered = false;
+                    maintenance_at = None;
                     #[cfg(feature = "dongle-layout")]
                     {
                         led_color(LedColor::Blue);
@@ -2515,6 +2530,10 @@ fn main() -> ! {
         let response = endpoint.exchange(&command[..length]);
         let deadline = transport.deadline_after(1_000_000);
         let _ = send_response(&mut transport, &response, deadline);
+        let _ = endpoint.maintenance_with_cancel(&mut || {
+            feed();
+            false
+        });
     }
 }
 #[panic_handler]

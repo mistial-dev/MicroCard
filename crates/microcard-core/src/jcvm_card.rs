@@ -136,10 +136,10 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             session: &mut StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>,
             cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
-        // Renew between callbacks. This reserve is a maintenance threshold, not a
-        // promise that an arbitrary applet command fits the remaining counter space.
+        // Renew only through the explicit idle hook. This reserve is a maintenance
+        // threshold, not a promise that any applet command fits the remaining space.
         if session.remaining_commits()? > 1024 { return Ok(()); }
-        if self.upload.is_some() { return Err(Error::Busy); }
+        if self.upload.is_some() { return Ok(()); }
         session.release_idle_memory()?;
         self.storage.registry.begin_renewal(aid, session, &self.storage.images,
             &self.storage.heaps, &self.storage.heap_key, &mut self.staging,
@@ -165,7 +165,6 @@ impl<B: JcvmBackend> JcvmEngine<B> {
     }
 
     fn park_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
-        self.maintain_selected(cancel)?;
         let Some((aid, session)) = self.selected.as_mut() else { return Ok(()); };
         let instance = *self.storage.registry.state()?.instances()
             .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;
@@ -220,7 +219,6 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             le: request.le.or(Some(256)),
         }
         .encode()?;
-        self.maintain_selected(cancel)?;
         if self.selected.as_ref().is_some_and(|(selected, _)| *selected == aid) {
             let (_, session) = self.selected.as_mut().unwrap();
             let response = session.process(&command, true, &mut self.provider, cancel)?;
@@ -244,7 +242,6 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             session.restore_volatile(&cached.state)?;
             self.retained.remove(index);
         }
-        self.maintain_session(aid, &mut session, cancel)?;
         let response = session.process(&command, true, &mut self.provider, cancel)?;
         let selected = session.selected()?;
         self.selected = Some((aid, session));
@@ -511,7 +508,6 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
     }
 
     fn process_plain_with_cancel(&mut self, command: &Command<'_>, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
-        self.maintain_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
         let result = session.process(&command.encode()?, false, &mut self.provider, cancel);
         if session.take_security_reset() && self.storage.registry.state()?.instances()
@@ -525,6 +521,10 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
     }
 
     fn take_security_reset(&mut self) -> bool { core::mem::take(&mut self.reset_requested) }
+
+    fn maintenance_with_cancel(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        self.maintain_selected(cancel)
+    }
 
     fn manage_globalplatform_with_cancel(
         &mut self,
@@ -592,7 +592,6 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
         verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
-        self.maintain_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
         let instance = self.storage.registry.state()?.instances()
             .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;

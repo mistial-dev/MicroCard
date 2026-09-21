@@ -88,6 +88,9 @@ fn serve_endpoint<C: microcard_core::engine::CardEngine>(
                 io::stdout().write_all(&(response.len() as u16).to_le_bytes())?;
                 io::stdout().write_all(&response)?;
                 io::stdout().flush()?;
+                endpoint
+                    .maintenance()
+                    .map_err(|error| format!("maintenance failed: {error:?}"))?;
             }
         }
     } else {
@@ -99,6 +102,9 @@ fn serve_endpoint<C: microcard_core::engine::CardEngine>(
             let response = endpoint.exchange(&command);
             println!("{}", hex(&response)?);
             io::stdout().flush()?;
+            endpoint
+                .maintenance()
+                .map_err(|error| format!("maintenance failed: {error:?}"))?;
         }
     }
     Ok(())

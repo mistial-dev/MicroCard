@@ -27,6 +27,10 @@ pub trait CardEngine {
     fn next_secure_channel_sequence(&mut self) -> Result<u32>;
     fn abort_staging(&mut self);
     fn abort_transaction(&mut self);
+    /// Perform deferred storage work while no command is in flight.
+    fn maintenance_with_cancel(&mut self, _cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        Ok(())
+    }
     /// Clear prior authority before INITIALIZE UPDATE. Engines may restore the
     /// selected application from durable state without retaining its credentials.
     fn restart_secure_channel(&mut self, _cancel: &mut dyn FnMut() -> bool) -> Result<()> {
