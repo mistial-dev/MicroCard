@@ -85,8 +85,12 @@ board's reserved heap.
   internal failure boundaries. Instruction, transaction, PIN, and lifecycle changes
   checkpoint committed state while excluding open applet transactions. Existing tests
   cover rollback, allocation and undo exhaustion, partial construction, cancellation,
-  failed providers, and failed persistence. [JCVM semantics](JCVM_PROFILE.md) records
-  the exact supported behavior and source clauses.
+  failed providers, and failed persistence. OpenFIPS201 and the vendored JCAlgTest run
+  under native diagnostics in CI and the checkpoint; any reached unimplemented native
+  method or rejected instruction fails their raw and managed acceptance paths. This
+  makes exercised gaps visible, but does not replace the remaining method-by-method
+  audit. [JCVM semantics](JCVM_PROFILE.md) records the exact supported behavior and
+  source clauses.
 - Qualify journal renewal capacity and memory for all supported workloads. Automatic
   command-boundary renewal preserves the live applet and uses authenticated staging
   to recover interrupted bank replacement. Root registry counters remain finite;

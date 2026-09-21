@@ -27,7 +27,7 @@ def unaes(k,mode,data):
  d=Cipher(algorithms.AES(k),mode).decryptor(); return d.update(data)+d.finalize()
 class Client:
  def __init__(self,keys,state,mode='serve',*,simulator=None):
-  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode,keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode,keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
  def raw(self,b):
   self.p.stdin.write(b.hex()+'\n');self.p.stdin.flush();line=self.p.stdout.readline();assert line,'simulator terminated';return bytes.fromhex(line)
  def connect(self,level=None,*,select_isd=True):
@@ -89,11 +89,13 @@ class Client:
    iv=aes(self.enc,modes.ECB(),bytes([0x80])+self.counter.to_bytes(16,'big')[1:])
    plain=unaes(self.enc,modes.CBC(iv),body);body=plain[:plain.rindex(0x80)]
   return body
- def close(self): self.p.stdin.close();assert self.p.wait(timeout=5)==0
+ def close(self):
+  self.p.stdin.close();assert self.p.wait(timeout=5)==0
+  diagnostics=self.p.stderr.read();assert 'jcvm:' not in diagnostics,diagnostics
 
 class BinaryClient(Client):
  def __init__(self,keys,state,mode='serve',*,simulator=None):
-  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode+'-binary',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+  self.keys=keys.read_bytes();self.p=subprocess.Popen([simulator or SIM,mode+'-binary',keys,state],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
  def raw(self,b):
   self.p.stdin.write(len(b).to_bytes(2,'little')+b);self.p.stdin.flush()
   def read(n):
@@ -104,6 +106,9 @@ class BinaryClient(Client):
     chunk=os.read(self.p.stdout.fileno(),n-len(result));assert chunk,'simulator terminated';result+=chunk
    return result
   n=int.from_bytes(read(2),'little');assert 2<=n<=258;return read(n)
+ def close(self):
+  self.p.stdin.close();assert self.p.wait(timeout=5)==0
+  diagnostics=self.p.stderr.read();assert b'jcvm:' not in diagnostics,diagnostics
 if os.environ.get('MICROCARD_BINARY')=='1':Client=BinaryClient
 
 def domain_policy(identifier,capabilities,max_assemblies=4,max_instances=4,max_int_records=512,max_blob_records=64,max_blob_bytes=8192,max_key_slots=8,max_package_bytes=16384):

@@ -201,7 +201,7 @@ pub fn call_with_budget(
         } else { frame.push_short(heap.get_word(exception, REASON_FIELD)? as i16)?; }
         return Ok(if method == MethodId::throwIt { Native::Threw(exception) } else { Native::Returned });
     }
-    match (package, class, method) {
+    let result = match (package, class, method) {
         // Constructing an Object or any exception does nothing the engine has to model.
         // The allocation already happened, and the fields start zeroed.
         (PackageId::java_lang, _, MethodId::Constructor) => {
@@ -219,7 +219,7 @@ pub fn call_with_budget(
             apdu(name, heap, frame, jcre, context)
         }
         (PackageId::javacard_framework, ClassId::JCSystem, name) => {
-            jcsystem(name, heap, frame, context, jcre, statics, host)
+            jcsystem(name, target.method.token, heap, frame, context, jcre, statics, host)
         }
         (PackageId::javacard_framework, ClassId::Applet, MethodId::register) => {
             if jcre.instance.is_some() { return Err(Error::Unauthorized); }
@@ -270,13 +270,14 @@ pub fn call_with_budget(
                 budget,
                 statics,
             )?;
-            if let Native::Unimplemented = handled {
-                #[cfg(feature = "diagnostics")]
-                report(class.diagnostic_name(), method.diagnostic_name());
-            }
             Ok(handled)
         }
+    };
+    #[cfg(feature = "diagnostics")]
+    if matches!(result, Ok(Native::Unimplemented)) {
+        report(class.diagnostic_name(), method.diagnostic_name());
     }
+    result
 }
 
 /// Name what the card cannot answer, which is the difference between a usable diagnostic
@@ -429,6 +430,7 @@ fn apdu_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Resul
 #[allow(clippy::too_many_arguments)]
 fn jcsystem(
     name: MethodId,
+    token: u8,
     heap: &mut Heap,
     frame: &mut Frame,
     context: heap::Context,
@@ -480,6 +482,31 @@ fn jcsystem(
         MethodId::getTransactionDepth => frame.push_short(i16::from(heap.transaction_remaining().is_some()))?,
         MethodId::getMaxCommitCapacity => frame.push_short(TRANSACTION_CAPACITY as i16)?,
         MethodId::getUnusedCommitCapacity => frame.push_short(heap.transaction_remaining().unwrap_or(TRANSACTION_CAPACITY) as i16)?,
+        MethodId::getAvailableMemory => {
+            let memory_type = frame.pop_short()?;
+            if !matches!(memory_type, 0..=2) {
+                let exception = new_exception(heap, ClassId::SystemException, context)?;
+                heap.put_word_unconditional(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
+                return Ok(Native::Threw(exception));
+            }
+            let available = heap.available() as u32;
+            if token == 16 {
+                frame.push_short(available.min(i16::MAX as u32) as i16)?;
+            } else if token == 22 {
+                let offset = frame.pop_short()?;
+                let array = frame.pop_reference()?;
+                let info = heap.check_access(array, context)?;
+                if info.kind != heap::KIND_SHORT { return Err(Error::Type); }
+                let offset = usize::try_from(offset).map_err(|_| Error::ArrayBounds)?;
+                if offset.checked_add(2).is_none_or(|end| end > info.length as usize) {
+                    return Err(Error::ArrayBounds);
+                }
+                heap.array_put(array, offset, (available >> 16) as i16)?;
+                heap.array_put(array, offset + 1, available as i16)?;
+            } else {
+                return Err(Error::Unsupported);
+            }
+        }
         MethodId::beginTransaction => {
             if heap.transaction_remaining().is_some() {
                 return transaction_exception(heap, jcre, context, 1); // IN_PROGRESS
@@ -930,8 +957,8 @@ mod tests {
         }
         assert_eq!(heap.get_word(pin, 4), Ok(1));
         let mut jcre = idle();
-        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
-        let Native::Threw(exception) = jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
+        jcsystem(MethodId::beginTransaction, 0, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
+        let Native::Threw(exception) = jcsystem(MethodId::beginTransaction, 0, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
             else { panic!("nested transaction accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
         invoke_security(ClassId::OwnerPIN, MethodId::update,
@@ -969,21 +996,21 @@ mod tests {
         }
         util(MethodId::arrayCopyNonAtomic, &mut heap, &mut frame, 1, &mut 100).unwrap();
         assert_eq!(frame.pop_short(), Ok(4));
-        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
+        jcsystem(MethodId::abortTransaction, 0, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
         let material = heap.get_word(pin, 2).unwrap();
         assert_eq!(heap.byte_slice(material, 0, 4).unwrap(), b"1234");
         assert_eq!(heap.get_word(pin, 4), Ok(2), "PIN presentation must survive aborting its update");
         assert_eq!(heap.byte_slice(destination, 0, 4).unwrap(), b"9999");
         let used = heap.used();
-        jcsystem(MethodId::beginTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
+        jcsystem(MethodId::beginTransaction, 0, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
         invoke_security(ClassId::OwnerPIN, MethodId::check,
             &[(true, pin), (true, original), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
         assert_eq!(frame.pop_short(), Ok(1));
-        jcsystem(MethodId::abortTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
+        jcsystem(MethodId::abortTransaction, 0, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap();
         assert_eq!(heap.get_word(pin, 3), Ok(1));
         assert_eq!(heap.get_word(pin, 4), Ok(3));
         assert_eq!(heap.used(), used, "transaction exceptions are reused");
-        let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
+        let Native::Threw(exception) = jcsystem(MethodId::commitTransaction, 0, &mut heap, &mut frame, 1, &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
             else { panic!("commit without begin accepted"); };
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
         // Invalid presentations still consume a retry, including when their exception
@@ -1168,10 +1195,10 @@ mod tests {
             for (length, event) in [(0, 1), (2, 1), (2, 2), (2, 0), (2, 3)] {
                 frame.push_short(length).unwrap();
                 frame.push_short(event).unwrap();
-                let result = jcsystem(factory, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
+                let result = jcsystem(factory, 0, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
                 if matches!(event, 1 | 2) {
                     assert!(matches!(result, Native::Returned));
-                    jcsystem(MethodId::isTransient, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
+                    jcsystem(MethodId::isTransient, 0, &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap();
                     assert_eq!(frame.pop_short().unwrap(), event);
                 } else {
                     let Native::Threw(exception) = result else { panic!("invalid clear event accepted"); };
@@ -1194,7 +1221,7 @@ mod tests {
             ] {
                 frame.push_short(length).unwrap();
                 frame.push_short(event).unwrap();
-                let Native::Threw(exception) = jcsystem(factory, &mut heap, &mut frame, 1,
+                let Native::Threw(exception) = jcsystem(factory, 0, &mut heap, &mut frame, 1,
                     &mut idle(), &mut [], &mut crate::host::NoHost).unwrap()
                     else { panic!("invalid transient allocation accepted"); };
                 assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, expected);
@@ -1816,6 +1843,36 @@ mod tests {
             assert_eq!(heap.byte_slice(left, 0, 4).unwrap(),
                 [if method == MethodId::arrayFill { 7 } else { 9 }; 4]);
         }
+    }
+
+    #[test]
+    fn available_memory_supports_both_java_card_forms() {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        reserve_runtime_exceptions(&mut heap, 1).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+
+        let available = heap.available();
+        frame.push_short(0).unwrap();
+        assert!(matches!(jcsystem(MethodId::getAvailableMemory, 16, &mut heap, &mut frame,
+            1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap(), Native::Returned));
+        assert_eq!(frame.pop_short().unwrap(), available.min(i16::MAX as usize) as i16);
+
+        let output = heap.new_array(heap::KIND_SHORT, 2, 1).unwrap();
+        let available = heap.available() as u32;
+        frame.push_reference(output).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(2).unwrap();
+        assert!(matches!(jcsystem(MethodId::getAvailableMemory, 22, &mut heap, &mut frame,
+            1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap(), Native::Returned));
+        assert_eq!(heap.array_get(output, 0).unwrap() as u16, (available >> 16) as u16);
+        assert_eq!(heap.array_get(output, 1).unwrap() as u16, available as u16);
+
+        frame.push_short(3).unwrap();
+        let Native::Threw(exception) = jcsystem(MethodId::getAvailableMemory, 16,
+            &mut heap, &mut frame, 1, &mut idle(), &mut [], &mut crate::host::NoHost).unwrap()
+        else { panic!("invalid memory type accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
     }
 
     #[test]

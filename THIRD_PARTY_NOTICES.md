@@ -10,4 +10,8 @@ The Java wallet uses:
 - SLF4J, MIT license.
 - JUnit Jupiter for tests, EPL-2.0.
 
+The vendored JCAlgTest v1.8.2 Java Card applet is MIT licensed. Its source
+revision, local compatibility patch, artifact hashes, and license are recorded
+in `vendor/jcalgtest`.
+
 Rust and .NET dependency versions are fixed by `Cargo.lock` and NuGet lock files. Bundled Java archives retain their embedded manifests and notices. This file does not replace the license files or notices supplied with those dependencies.

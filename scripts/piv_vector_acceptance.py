@@ -38,6 +38,8 @@ def main() -> None:
         cwd=ROOT,
         check=True,
     )
+    if result.stderr:
+        raise SystemExit(f"JCVM diagnostics reported:\n{result.stderr}")
     answers = result.stdout.split()
     if len(answers) != len(exchanges):
         raise SystemExit(

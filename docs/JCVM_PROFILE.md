@@ -101,7 +101,16 @@ response protection; clients must establish a new SCP03 session for further mana
 
 ## Acceptance evidence
 
-One Load File Data Block is committed at `crates/microcard-engine-jcvm/tests/vectors`, with its MIT notice, the applet revision it was built from and the digests of both the CAP and the block. Twelve PIV commands and their expected status words are committed beside it. `scripts/piv_vector_acceptance.py` replays them with no argument, and the checkpoint gate and CI both run it.
+The committed OpenFIPS201 load file records its MIT notice, source revision, and
+artifact digests. Twelve PIV commands and their expected status words are committed
+beside it. `scripts/piv_vector_acceptance.py` replays them with no argument.
+
+The MIT-licensed JCAlgTest v1.8.2 applet is also vendored with source, the local
+portability patch, CAP, load file, and hashes. `scripts/jcalgtest_acceptance.py`
+checks its version and representative SHA-256, AES, ECDSA, and unsupported DES
+results. CI and the checkpoint build the simulator with native diagnostics and fail
+either real-applet run if it reaches an unimplemented native method or rejected
+instruction. The checkpoint gate and CI run both applet tests.
 
 Half of those commands are authentic encodings taken from NIST Special Database 33 contact captures. The captured responses are deliberately absent, because that card was personalised and the card under test is blank, so a captured response would disagree for a correct reason. What carries over is the command encoding. Every entry is the case 4 form a real host sends, carrying a trailing expected-length byte.
 

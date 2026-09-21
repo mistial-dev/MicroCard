@@ -1,5 +1,12 @@
 # Java Card engine vectors
 
+## JCAlgTest load file
+
+`jcalgtest-v1.8.2-jc305.lfdb` is generated from the licensed, patched source and
+CAP in `vendor/jcalgtest`. `scripts/jcalgtest_acceptance.py` installs it, reads
+the applet version, and checks representative supported and unsupported
+cryptographic algorithms through JCAlgTest's own APDU protocol.
+
 ## OpenFIPS201 load file
 
 `openfips201-standard-cs2.lfdb` is a Load File Data Block extracted from a build of the

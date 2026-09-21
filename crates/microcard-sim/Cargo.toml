@@ -8,6 +8,7 @@ license.workspace = true
 # which is what lets the host oracle be replayed across the whole matrix.
 default = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
 heap-metrics = []
+jcvm-diagnostics = ["microcard-engine-jcvm/diagnostics"]
 scp03-rmac = ["microcard-core/scp03-rmac"]
 scp03-renc = ["microcard-core/scp03-renc"]
 scp03-s16 = ["microcard-core/scp03-s16"]

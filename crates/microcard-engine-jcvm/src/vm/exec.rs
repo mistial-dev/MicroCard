@@ -490,6 +490,14 @@ pub fn run_body(
         }
         *budget = budget.checked_sub(1).ok_or(Error::Quota)?;
         let opcode = byte(code, pc)?;
+        #[cfg(feature = "diagnostics")]
+        if let Err(error) = machine.limits.allows(opcode) {
+            extern crate std;
+            std::eprintln!(
+                "jcvm: rejected opcode {opcode:#04x} at Method.cap offset {:#06x}: {error:?}",
+                body + pc
+            );
+        }
         machine.limits.allows(opcode)?;
         let length = instruction_length(code, pc)?;
         let mut next = pc + length;
@@ -1192,7 +1200,17 @@ pub fn run_body(
             }
             Ok(Some(outcome)) => return Ok(outcome),
             Ok(None) => {},
-            Err(error) => return Err(error),
+            Err(error) => {
+                #[cfg(feature = "diagnostics")]
+                {
+                    extern crate std;
+                    std::eprintln!(
+                        "jcvm: instruction {opcode:#04x} at Method.cap offset {:#06x} failed: {error:?}",
+                        body + pc
+                    );
+                }
+                return Err(error);
+            }
         }
         pc = next;
     }

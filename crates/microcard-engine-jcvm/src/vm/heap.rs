@@ -264,6 +264,11 @@ impl<'a> Heap<'a> {
         self.next
     }
 
+    /// Upper bound on bytes remaining in the shared object-memory slab.
+    pub fn available(&self) -> usize {
+        self.bytes.len() - self.next
+    }
+
     /// The bytes themselves, for sealing and writing back.
     pub fn image(&self) -> &[u8] {
         &self.bytes[..self.next]

@@ -5,8 +5,8 @@ The profile in docs/JCVM_PROFILE.md rests on numbers measured from real CAP file
 reads those numbers back out so the profile can be checked against its sources, and so the
 Rust loader has expected values to be tested against.
 
-CAP files are third-party build outputs and are not committed here, so this refuses to run
-without an explicit path in the manner of the other hardware and interop scripts.
+It accepts an explicit path so it can inspect either a vendored fixture or an external
+applet build without assuming where that build lives.
 """
 import argparse
 import hashlib

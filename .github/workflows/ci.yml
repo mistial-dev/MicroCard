@@ -42,8 +42,9 @@ jobs:
         run: python scripts/wallet_acceptance.py
       - name: Java Card applet acceptance
         run: |
-          cargo build --locked
+          cargo build --locked -p microcard-sim --features jcvm-diagnostics
           python scripts/piv_vector_acceptance.py
+          python scripts/jcalgtest_acceptance.py
           python scripts/jcvm_transport_acceptance.py
       - name: Rust lint
         run: cargo clippy --workspace --all-targets -- -D warnings

@@ -211,6 +211,8 @@ def main():
         client.command(0xdb, incomplete[:180], p1=0x3f, p2=0xff, cla=0x14)
         client.p.kill()
         assert client.p.wait(timeout=5) != 0
+        diagnostics = client.p.stderr.read()
+        assert "jcvm:" not in diagnostics, diagnostics
         client.p.stdin.close()
         client.p.stdout.close()
         mark_phase("interrupted_replacement_reboot")

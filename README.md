@@ -28,7 +28,9 @@ The **JCVM environment is functional host-side**. It installs and runs the
 [OpenPhysical OpenFIPS201 fork](https://github.com/OpenPhysical/OpenFIPS201), including
 selection, PIV commands, personalization, PIN handling, P-256 signing and key
 agreement, persistent storage, reboot recovery, and authenticated package loading.
-The committed OpenFIPS201 fixture runs from a clean checkout.
+The committed OpenFIPS201 fixture runs from a clean checkout. The repository also
+vendors the MIT-licensed JCAlgTest applet and uses it to check the Java Card API and
+cryptographic algorithm surface exposed by the emulator.
 
 The full derived P-256 host profile currently reports **61 passed, 0 failed, and
 2 not applicable among 63 NIST contact vectors**. Secure messaging is not advertised,
@@ -63,6 +65,7 @@ git clone https://github.com/mistial-dev/MicroCard.git
 cd MicroCard
 cargo build -p microcard-sim
 python3 scripts/piv_vector_acceptance.py
+python3 scripts/jcalgtest_acceptance.py
 ```
 
 This starts the JCVM simulator, installs the committed OpenFIPS201 applet, and replays
