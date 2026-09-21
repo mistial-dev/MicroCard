@@ -27,7 +27,7 @@ jobs:
           cache: maven
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.94.1
+          toolchain: stable
           targets: thumbv7em-none-eabihf
           components: llvm-tools
       - name: Install objcopy wrapper
