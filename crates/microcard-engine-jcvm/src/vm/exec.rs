@@ -35,10 +35,10 @@ pub enum Outcome {
 pub const MAX_DEPTH: u8 = 16;
 
 /// What a running method is allowed to touch.
-pub struct Machine<'a, 'h, 'p> {
+pub struct Machine<'a, 'h, 'p, H: Host> {
     pub heap: &'a mut Heap<'h>,
     /// The card, for anything the engine cannot compute itself.
-    pub host: &'a mut dyn Host,
+    pub host: &'a mut H,
     /// The package, for resolving what an instruction names.
     pub linked: &'a Linked<'p>,
     /// The Method component, which every method offset counts from.
@@ -54,13 +54,13 @@ pub struct Machine<'a, 'h, 'p> {
     cancel: Option<&'a mut dyn FnMut() -> bool>,
 }
 
-impl<'a, 'h, 'p> Machine<'a, 'h, 'p> {
+impl<'a, 'h, 'p, H: Host> Machine<'a, 'h, 'p, H> {
     /// Everything one command runs against. The pieces are unrelated to each other, which
     /// is why they arrive separately rather than as a struct that would only exist here.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         heap: &'a mut Heap<'h>,
-        host: &'a mut dyn Host,
+        host: &'a mut H,
         linked: &'a Linked<'p>,
         methods: Method<'p>,
         statics: &'a mut [u8],
@@ -264,7 +264,7 @@ fn byte(code: &[u8], at: usize) -> Result<u8> {
 /// reach is bounded by memory the caller set aside rather than by anything the bytecode
 /// says. Its result goes back on the caller's stack with the right tag.
 pub fn invoke(
-    machine: &mut Machine,
+    machine: &mut Machine<'_, '_, '_, impl Host>,
     method: u16,
     caller: &mut Frame,
     arena: &mut Arena,
@@ -328,7 +328,7 @@ pub fn invoke(
 /// makes the flat table behave like nested try blocks. Ignoring it lets an exception
 /// escape one scope too far and be caught by the wrong block, which is hard to see later.
 fn find_handler(
-    machine: &Machine,
+    machine: &Machine<'_, '_, '_, impl Host>,
     body: usize,
     code_len: usize,
     pc: usize,
@@ -357,7 +357,7 @@ fn find_handler(
 }
 
 /// Whether a handler's catch type matches the thrown class, following the chain up.
-fn catches(machine: &Machine, catch_type: u16, thrown: u16) -> Result<bool> {
+fn catches(machine: &Machine<'_, '_, '_, impl Host>, catch_type: u16, thrown: u16) -> Result<bool> {
     // Zero catches everything, which is what a finally block compiles to.
     if catch_type == 0 {
         return Ok(true);
@@ -370,7 +370,7 @@ fn catches(machine: &Machine, catch_type: u16, thrown: u16) -> Result<bool> {
 /// A catch and a cast ask the same question, so they are answered in one place. A class
 /// the card provides answers through the hierarchy its export file records, and an
 /// applet's own class answers by walking what it extends and implements.
-fn class_matches(machine: &Machine, class: u16, index: u16) -> Result<bool> {
+fn class_matches(machine: &Machine<'_, '_, '_, impl Host>, class: u16, index: u16) -> Result<bool> {
     machine.linked.class_matches(class, index)
 }
 
@@ -379,7 +379,7 @@ fn class_matches(machine: &Machine, class: u16, index: u16) -> Result<bool> {
 /// The type code decides what is being asked. For a primitive array the code is the whole
 /// answer. Otherwise the constant pool names a class.
 fn assignable(
-    machine: &Machine,
+    machine: &Machine<'_, '_, '_, impl Host>,
     object: Reference,
     atype: u8,
     named: Option<(usize, u16)>,
@@ -402,7 +402,7 @@ fn assignable(
     class_matches(machine, info.class, index)
 }
 
-fn reference_array_accepts(machine: &Machine, array: heap::Info,
+fn reference_array_accepts(machine: &Machine<'_, '_, '_, impl Host>, array: heap::Info,
         value: Reference) -> Result<bool> {
     if value == NULL || array.class == heap::ANY_REFERENCE_CLASS { return Ok(true); }
     let component = crate::cap::ClassRef::decode(array.class);
@@ -418,7 +418,7 @@ fn reference_array_accepts(machine: &Machine, array: heap::Info,
 
 /// Run a method body with no arena, which refuses any invocation it meets.
 pub fn run(
-    machine: &mut Machine,
+    machine: &mut Machine<'_, '_, '_, impl Host>,
     code: &[u8],
     frame: &mut Frame,
     budget: &mut u32,
@@ -432,7 +432,7 @@ pub fn run(
 
 /// Run a method body, using `arena` for anything it calls.
 pub fn run_with(
-    machine: &mut Machine,
+    machine: &mut Machine<'_, '_, '_, impl Host>,
     code: &[u8],
     frame: &mut Frame,
     arena: &mut Arena,
@@ -441,12 +441,30 @@ pub fn run_with(
     run_body(machine, code, 0, frame, arena, budget)
 }
 
+fn call_native(
+    machine: &mut Machine<'_, '_, '_, impl Host>,
+    target: crate::link::ApiTarget,
+    frame: &mut Frame,
+    budget: &mut u32,
+) -> Result<Native> {
+    let mut native = natives::NativeContext {
+        heap: machine.heap,
+        host: machine.host,
+        frame,
+        context: machine.context,
+        jcre: &mut machine.jcre,
+        budget,
+        statics: machine.statics,
+    };
+    natives::call_with_budget(target, &mut native)
+}
+
 /// Run a method body that starts at `body` in the Method component.
 ///
 /// The absolute offset is what the handler table records, so a method needs to know where
 /// it sits before it can find its own handlers.
 pub fn run_body(
-    machine: &mut Machine,
+    machine: &mut Machine<'_, '_, '_, impl Host>,
     code: &[u8],
     body: usize,
     frame: &mut Frame,
@@ -995,16 +1013,7 @@ pub fn run_body(
                 let outcome = match machine.linked.external_static_method(index) {
                     Ok(Some((package, class, method))) => {
                         let target = machine.linked.api_method(package, class, method, true)?;
-                        Some(natives::call_with_budget(
-                            target,
-                            machine.heap,
-                            machine.host,
-                            frame,
-                            machine.context,
-                            &mut machine.jcre,
-                            budget,
-                            machine.statics,
-                        )?)
+                        Some(call_native(machine, target, frame, budget)?)
                     }
                     _ => None,
                 };
@@ -1039,16 +1048,7 @@ pub fn run_body(
                     machine.linked.external_class_method(index)?
                 {
                     let target = machine.linked.api_method(package, class, method, false)?;
-                    match natives::call_with_budget(
-                        target,
-                        machine.heap,
-                        machine.host,
-                        frame,
-                        machine.context,
-                        &mut machine.jcre,
-                        budget,
-                        machine.statics,
-                    )? {
+                    match call_native(machine, target, frame, budget)? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
                         Native::Threw(exception) => {
@@ -1096,16 +1096,7 @@ pub fn run_body(
                         return Err(Error::Type);
                     };
                     let target = machine.linked.api_method(package, class, token, false)?;
-                    match natives::call_with_budget(
-                        target,
-                        machine.heap,
-                        machine.host,
-                        frame,
-                        machine.context,
-                        &mut machine.jcre,
-                        budget,
-                        machine.statics,
-                    )? {
+                    match call_native(machine, target, frame, budget)? {
                         Native::Returned => {}
                         Native::Unimplemented => return Err(Error::Unsupported),
                         Native::Threw(exception) => {
@@ -1217,7 +1208,7 @@ fn enter_handler(frame: &mut Frame, exception: Reference) -> Result<()> {
 }
 
 /// The constant pool index a field instruction names.
-fn field_index(code: &[u8], pc: usize, machine: &Machine) -> Result<u16> {
+fn field_index(code: &[u8], pc: usize, machine: &Machine<'_, '_, '_, impl Host>) -> Result<u16> {
     let (_, index) = constant_pool_index(code, pc)?.ok_or(Error::Format)?;
     machine.linked.instance_field(index)
 }
@@ -1228,7 +1219,7 @@ const KIND_BYTE: u8 = 1;
 const KIND_SHORT: u8 = 2;
 
 fn read_field(
-    machine: &mut Machine,
+    machine: &mut Machine<'_, '_, '_, impl Host>,
     frame: &mut Frame,
     object: Reference,
     index: u16,
@@ -1255,7 +1246,7 @@ fn take_field_value(frame: &mut Frame, kind: u8) -> Result<i32> {
     })
 }
 
-fn check_reference_store(machine: &Machine, reference: Reference) -> Result<()> {
+fn check_reference_store(machine: &Machine<'_, '_, '_, impl Host>, reference: Reference) -> Result<()> {
     if reference == NULL { return Ok(()); }
     let info = machine.heap.info(reference)?;
     if info.owner != machine.context || reference == machine.jcre.buffer
@@ -1266,7 +1257,7 @@ fn check_reference_store(machine: &Machine, reference: Reference) -> Result<()> 
 }
 
 fn put_field_value(
-    machine: &mut Machine,
+    machine: &mut Machine<'_, '_, '_, impl Host>,
     object: Reference,
     index: u16,
     kind: u8,
@@ -1284,7 +1275,7 @@ fn put_field_value(
     }
 }
 
-fn write_static(machine: &mut Machine, at: usize, kind: u8, value: i32) -> Result<()> {
+fn write_static(machine: &mut Machine<'_, '_, '_, impl Host>, at: usize, kind: u8, value: i32) -> Result<()> {
     if kind == KIND_REF { check_reference_store(machine, value as Reference)?; }
     let width = if kind == 3 { 4 } else { 2 };
     let bytes = machine.statics.get_mut(at..at + width).ok_or(Error::Bounds)?;
@@ -1298,7 +1289,7 @@ fn write_static(machine: &mut Machine, at: usize, kind: u8, value: i32) -> Resul
     Ok(())
 }
 
-fn read_static(machine: &mut Machine, frame: &mut Frame, at: usize, kind: u8) -> Result<()> {
+fn read_static(machine: &mut Machine<'_, '_, '_, impl Host>, frame: &mut Frame, at: usize, kind: u8) -> Result<()> {
     let width = if kind == 3 { 4 } else { 2 };
     let bytes = machine
         .statics

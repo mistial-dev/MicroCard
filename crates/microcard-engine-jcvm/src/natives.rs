@@ -161,30 +161,48 @@ pub enum Native {
     Unimplemented,
 }
 
+/// The complete state visible to one native call.
+///
+/// Keeping this as one typed value prevents dispatch layers from accidentally pairing
+/// a heap, host, frame, or applet context from different executions.
+pub struct NativeContext<'a, 'heap, 'frame, H: crate::host::Host> {
+    pub(crate) heap: &'a mut Heap<'heap>,
+    pub(crate) host: &'a mut H,
+    pub(crate) frame: &'a mut Frame<'frame>,
+    pub(crate) context: heap::Context,
+    pub(crate) jcre: &'a mut Jcre,
+    pub(crate) budget: &'a mut u32,
+    pub(crate) statics: &'a mut [u8],
+}
+
 #[cfg(test)]
 pub fn call(
-    target: ApiTarget, heap: &mut Heap, host: &mut dyn crate::host::Host,
+    target: ApiTarget, heap: &mut Heap, host: &mut impl crate::host::Host,
     frame: &mut Frame, context: heap::Context, jcre: &mut Jcre,
 ) -> Result<Native> {
     let mut budget = u32::MAX;
-    call_with_budget(target, heap, host, frame, context, jcre, &mut budget, &mut [])
+    let mut native = NativeContext {
+        heap,
+        host,
+        frame,
+        context,
+        jcre,
+        budget: &mut budget,
+        statics: &mut [],
+    };
+    call_with_budget(target, &mut native)
 }
 
 /// Call an API method.
 ///
 /// Arguments are on the frame's stack, receiver first as in any instance call, and a
 /// result is left there the same way.
-#[allow(clippy::too_many_arguments)]
-pub fn call_with_budget(
+pub fn call_with_budget<H: crate::host::Host>(
     target: ApiTarget,
-    heap: &mut Heap,
-    host: &mut dyn crate::host::Host,
-    frame: &mut Frame,
-    context: heap::Context,
-    jcre: &mut Jcre,
-    budget: &mut u32,
-    statics: &mut [u8],
+    native: &mut NativeContext<'_, '_, '_, H>,
 ) -> Result<Native> {
+    let NativeContext { heap, host, frame, context, jcre, budget, statics } = native;
+    let context = *context;
     let package = target.package.id;
     let class = target.class.id;
     let method = target.method.id;
@@ -219,7 +237,7 @@ pub fn call_with_budget(
             apdu(name, heap, frame, jcre, context)
         }
         (PackageId::javacard_framework, ClassId::JCSystem, name) => {
-            jcsystem(name, target.method.token, heap, frame, context, jcre, statics, host)
+            jcsystem(name, target.method.token, heap, frame, context, jcre, statics, &mut **host)
         }
         (PackageId::javacard_framework, ClassId::Applet, MethodId::register) => {
             if jcre.instance.is_some() { return Err(Error::Unauthorized); }
@@ -263,7 +281,7 @@ pub fn call_with_budget(
                 method,
                 target.method.signature,
                 heap,
-                host,
+                &mut **host,
                 frame,
                 context,
                 jcre,
@@ -278,6 +296,21 @@ pub fn call_with_budget(
         report(class.diagnostic_name(), method.diagnostic_name());
     }
     result
+}
+
+#[cfg(test)]
+fn test_call_with_budget(
+    target: ApiTarget,
+    heap: &mut Heap,
+    host: &mut impl crate::host::Host,
+    frame: &mut Frame,
+    context: heap::Context,
+    jcre: &mut Jcre,
+    budget: &mut u32,
+    statics: &mut [u8],
+) -> Result<Native> {
+    let mut native = NativeContext { heap, host, frame, context, jcre, budget, statics };
+    call_with_budget(target, &mut native)
 }
 
 /// Name what the card cannot answer, which is the difference between a usable diagnostic
@@ -905,7 +938,7 @@ mod tests {
                 frame.push_short(1).unwrap();
                 frame.push_short(4).unwrap();
                 let mut budget = allowance;
-                let result = call_with_budget(framework(ClassId::RandomData, method, false),
+                let result = test_call_with_budget(framework(ClassId::RandomData, method, false),
                     &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &mut []);
                 if allowance == 3 {
                     assert!(matches!(result, Err(Error::Quota)));
@@ -1566,7 +1599,7 @@ mod tests {
             if reference { frame.push_reference(value).unwrap(); } else { frame.push_short(value as i16).unwrap(); }
         }
         let mut budget = 31;
-        assert!(matches!(call_with_budget(framework(ClassId::Cipher, MethodId::doFinal, false),
+        assert!(matches!(test_call_with_budget(framework(ClassId::Cipher, MethodId::doFinal, false),
             &mut heap, &mut host, &mut frame, 1, &mut idle(), &mut budget, &mut []), Err(Error::Quota)));
         assert_eq!(host.calls, 2);
         assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
@@ -1919,7 +1952,7 @@ mod tests {
             frame.push_short(destination).unwrap();
             frame.push_short(length).unwrap();
             let mut budget = length as u32;
-            call_with_budget(
+            test_call_with_budget(
                 framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
                 &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut [],
             ).unwrap();
@@ -1936,7 +1969,7 @@ mod tests {
         frame.push_short(1).unwrap();
         frame.push_short(599).unwrap();
         let mut budget = 598;
-        assert!(matches!(call_with_budget(
+        assert!(matches!(test_call_with_budget(
             framework(ClassId::Util, MethodId::arrayCopyNonAtomic, true),
             &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut [],
         ), Err(Error::Quota)));
@@ -2015,7 +2048,7 @@ mod tests {
             frame.push_short(offset).unwrap();
             frame.push_short(length).unwrap();
             let mut budget = available;
-            let result = call_with_budget(compare, &mut heap, &mut crate::host::NoHost,
+            let result = test_call_with_budget(compare, &mut heap, &mut crate::host::NoHost,
                 &mut frame, 1, &mut idle(), &mut budget, &mut []).and_then(|_| frame.pop_short());
             assert_eq!(result, expected);
             assert_eq!(budget, if expected.is_ok() { available - length as u32 } else { available });
@@ -2030,7 +2063,7 @@ mod tests {
                 frame.push_short(4).unwrap();
                 frame.push_short(9).unwrap();
                 let mut budget = available;
-                let result = call_with_budget(framework(ClassId::Util, method, true), &mut heap,
+                let result = test_call_with_budget(framework(ClassId::Util, method, true), &mut heap,
                     &mut crate::host::NoHost, &mut frame, 1, &mut idle(), &mut budget, &mut []);
                 if available == 3 {
                     assert!(matches!(result, Err(Error::Quota)));

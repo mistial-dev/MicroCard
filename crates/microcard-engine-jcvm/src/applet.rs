@@ -198,7 +198,7 @@ impl AppletInstance {
     pub fn install(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         parameters: &[u8],
     ) -> Result<()> {
         let applets = file.applets()?;
@@ -210,7 +210,7 @@ impl AppletInstance {
     pub fn install_module(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         module_aid: &[u8],
         parameters: &[u8],
     ) -> Result<()> {
@@ -221,7 +221,7 @@ impl AppletInstance {
     pub fn install_module_with_cancel(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         module_aid: &[u8],
         parameters: &[u8],
         cancel: &mut dyn FnMut() -> bool,
@@ -233,7 +233,7 @@ impl AppletInstance {
     pub fn install_instance_with_cancel(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         installation: Installation<'_>,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
@@ -244,7 +244,7 @@ impl AppletInstance {
     fn run_install(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         installation: Installation<'_>,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
@@ -333,7 +333,7 @@ impl AppletInstance {
     pub fn process(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         command: &[u8],
         selecting: bool,
     ) -> Result<Response> {
@@ -345,7 +345,7 @@ impl AppletInstance {
     pub fn process_with_cancel(
         &mut self,
         file: &LoadFile,
-        host: &mut dyn Host,
+        host: &mut impl Host,
         command: &[u8],
         selecting: bool,
         cancel: &mut dyn FnMut() -> bool,
@@ -389,14 +389,14 @@ impl AppletInstance {
     /// Applet exceptions do not prevent deselection; engine and persistence failures
     /// still require caller recovery. Reset and power loss never run this callback.
     pub fn deselect_with_cancel(
-        &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
+        &mut self, file: &LoadFile, host: &mut impl Host, cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         self.deselect_inner(file, host, cancel, false)?;
         if cancel() { return Err(Error::Cancelled); }
         self.checkpoint_dirty(host)
     }
 
-    fn checkpoint_dirty(&mut self, host: &mut dyn Host) -> Result<()> {
+    fn checkpoint_dirty(&mut self, host: &mut impl Host) -> Result<()> {
         if !self.pending_writes.any() { return Ok(()); }
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
         heap.merge_pending_writes(self.pending_writes);
@@ -410,7 +410,7 @@ impl AppletInstance {
     }
 
     fn deselect_inner(
-        &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
+        &mut self, file: &LoadFile, host: &mut impl Host, cancel: &mut dyn FnMut() -> bool,
         reselecting: bool,
     ) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
@@ -429,7 +429,7 @@ impl AppletInstance {
 
     #[allow(clippy::too_many_arguments)]
     fn callback(
-        &mut self, file: &LoadFile, host: &mut dyn Host, callback: Callback,
+        &mut self, file: &LoadFile, host: &mut impl Host, callback: Callback,
         lengths: (u16, u16), budget: &mut u32, cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Invocation> {
         if self.transaction_aborted { return Err(Error::TransactionAborted); }
