@@ -137,7 +137,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             self.reset_requested |= services.reset_requested();
             result
         });
-        self.finish(result, provider, cancel)
+        self.finish_apdu(result, provider, cancel)
     }
 
     /// Also clears volatile applet data; transport must discard its selection.
@@ -223,7 +223,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             }
             .map_err(engine_error)
         });
-        self.finish(result, provider, cancel)
+        self.finish_install(result, provider, cancel)
     }
 
     pub fn process(
@@ -281,10 +281,10 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             self.reset_requested |= services.reset_requested();
             result
         });
-        self.finish(result, provider, cancel)
+        self.finish_apdu(result, provider, cancel)
     }
 
-    fn finish<T>(
+    fn finish_install<T>(
         &mut self,
         result: Result<T>,
         provider: &mut impl CryptoProvider,
@@ -305,6 +305,20 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             // guess whether an uncertain commit is old or new; the journal decides.
             self.recover(provider)?;
         }
+        result
+    }
+
+    fn finish_apdu<T>(
+        &mut self,
+        result: Result<T>,
+        provider: &mut impl CryptoProvider,
+        cancel: &mut dyn FnMut() -> bool,
+    ) -> Result<T> {
+        let result = result.and_then(|value| {
+            if cancel() { return Err(Error::Cancelled); }
+            Ok(value)
+        });
+        if result.is_err() { self.recover(provider)?; }
         result
     }
 

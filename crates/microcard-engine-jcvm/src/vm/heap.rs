@@ -165,6 +165,10 @@ impl<'a> Heap<'a> {
 
     pub fn pending_writes(&self) -> PendingWrites { self.pending_writes }
 
+    pub(crate) fn merge_pending_writes(&mut self, writes: PendingWrites) {
+        self.pending_writes.merge(writes);
+    }
+
     pub fn mark_checkpointed(&mut self) { self.pending_writes = PendingWrites::default(); }
 
     pub(crate) fn committed_bytes(&self) -> usize {

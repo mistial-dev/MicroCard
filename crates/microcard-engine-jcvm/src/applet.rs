@@ -64,6 +64,7 @@ pub struct Card {
     selected: bool,
     reselecting: bool,
     transaction_aborted: bool,
+    pending_writes: heap::PendingWrites,
     context: heap::Context,
     sizes: Sizes,
 }
@@ -144,6 +145,7 @@ impl Card {
             selected: false,
             reselecting: false,
             transaction_aborted: false,
+            pending_writes: heap::PendingWrites::default(),
             context: 1,
             sizes,
         };
@@ -368,6 +370,7 @@ impl Card {
         if selecting {
             let answer = self.callback(file, host, Callback::Select, (incoming, expected), &mut budget, cancel)?;
             if answer.aborted || answer.exception.is_some() || answer.returned == 0 {
+                self.checkpoint_dirty(host)?;
                 return Ok(Response { data: Vec::new(), sw: 0x6999 });
             }
             self.selected = true;
@@ -376,6 +379,8 @@ impl Card {
         let answer = self.callback(file, host, Callback::Process { selecting }, (incoming, expected), &mut budget, cancel)?;
         let heap = Heap::resume(&mut self.heap, self.heap_used)?;
         let sw = if answer.aborted { SW_UNKNOWN } else { answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception)) };
+        drop(heap);
+        self.checkpoint_dirty(host)?;
         Ok(Response { data: answer.data, sw })
     }
 
@@ -384,7 +389,21 @@ impl Card {
     pub fn deselect_with_cancel(
         &mut self, file: &LoadFile, host: &mut dyn Host, cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
-        self.deselect_inner(file, host, cancel, false)
+        self.deselect_inner(file, host, cancel, false)?;
+        self.checkpoint_dirty(host)
+    }
+
+    fn checkpoint_dirty(&mut self, host: &mut dyn Host) -> Result<()> {
+        if !self.pending_writes.any() { return Ok(()); }
+        let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        heap.merge_pending_writes(self.pending_writes);
+        host.checkpoint(PersistentView {
+            heap: heap.image(), statics: &self.statics,
+            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer,
+            projection: Some(&heap),
+        })?;
+        self.pending_writes = heap::PendingWrites::default();
+        Ok(())
     }
 
     fn deselect_inner(
@@ -415,14 +434,19 @@ impl Card {
         let instance = self.instance.ok_or(Error::Missing)?;
         let linked = Linked::new(file)?;
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        heap.merge_pending_writes(core::mem::take(&mut self.pending_writes));
         let class = heap.info(instance)?.class;
         let method = match linked.lookup(class, applet_token(callback.id())?) {
             Ok(method) => method,
             // Applet's inherited select accepts, and its inherited deselect is a no-op.
             Err(Error::Missing) if !matches!(callback, Callback::Process { .. }) => {
+                self.pending_writes = heap.pending_writes();
                 return Ok(Invocation { exception: None, returned: 1, data: Vec::new(), aborted: false });
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                self.pending_writes = heap.pending_writes();
+                return Err(error);
+            }
         };
         let mut jcre = Jcre::new(self.apdu, self.buffer);
         jcre.instance = Some(instance);
@@ -431,7 +455,7 @@ impl Card {
         jcre.incoming = lengths.0;
         jcre.expected = lengths.1;
         jcre.data_offset = 5;
-        let answer = {
+        let answer = (|| -> Result<Invocation> {
             let mut machine = Machine::new(
                 &mut heap, host, &linked, file.methods()?, &mut self.statics, self.context,
                 Limits { int: file.header()?.int(), ..Limits::IMPLEMENTED }, jcre,
@@ -466,10 +490,11 @@ impl Card {
                 data.try_reserve_exact(response.len()).map_err(|_| Error::Quota)?;
                 data.extend_from_slice(response);
             }
-            Invocation { exception, returned, data, aborted }
-        };
+            Ok(Invocation { exception, returned, data, aborted })
+        })();
         self.heap_used = heap.used();
-        Ok(answer)
+        self.pending_writes = heap.pending_writes();
+        answer
     }
 
 }
@@ -1084,7 +1109,7 @@ mod tests {
                 "abort" => process.extend_from_slice(&[op::INVOKESTATIC, 0, 8]),
                 "throw" => process.extend_from_slice(&[op::SSPUSH, 0x6a, 0x80, op::INVOKESTATIC, 0, 11]),
                 "allocate-abort" => process.extend_from_slice(&[op::NEW, 0, 3, op::ASTORE_0 + 2, op::INVOKESTATIC, 0, 8]),
-                "cancel" | "plain-cancel" | "plain-store-fail" => process.extend_from_slice(&[112, 0]), // goto itself until cancellation
+                "cancel" | "plain-cancel" => process.extend_from_slice(&[112, 0]), // goto itself until cancellation
                 "full" | "full-caught" => process.extend_from_slice(&[
                     op::ALOAD_0 + 2, op::SCONST_0, op::ALOAD_0 + 2, op::SCONST_0,
                     op::SSPUSH, 0x20, 0, op::INVOKESTATIC, 0, 12,
@@ -1127,12 +1152,12 @@ mod tests {
             let mut card = Card::new(&file, Sizes { heap_bytes: 16384, ..Sizes::default() }).unwrap();
             card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
             let mut polls = 0;
-            let mut host = CheckpointHost { fail_at: match ending { "commit-fail" => Some(3), "plain-store-fail" => Some(4), _ => None }, ..Default::default() };
+            let mut host = CheckpointHost { fail_at: match ending { "commit-fail" | "plain-store-fail" => Some(1), _ => None }, ..Default::default() };
             let result = card.process_with_cancel(&file, &mut host, &[0, 1, 0, 0], false, &mut || {
                 polls += 1;
                 ending.ends_with("cancel") && polls == 100
             });
-            if matches!(ending, "commit-fail" | "plain-store-fail") { assert_eq!(result, Err(Error::Storage)); }
+            if matches!(ending, "commit-fail" | "plain-store-fail") { assert_eq!(result, Err(Error::Storage), "{ending}"); }
             else if ending.ends_with("cancel") { assert_eq!(result, Err(Error::Cancelled)); }
             else {
                 assert_eq!(result.unwrap().sw, if matches!(ending, "commit" | "abort" | "full-caught") { SW_SUCCESS } else { SW_UNKNOWN }, "{ending}");
@@ -1141,24 +1166,30 @@ mod tests {
             assert_eq!(card.statics, if ending == "full-caught" { 3u16 } else { expected }.to_be_bytes(), "{ending}");
             let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
             assert_eq!(heap.get_word(card.instance.unwrap(), 0).unwrap(), expected, "{ending}");
-            assert_eq!(heap.array_get(card.buffer, 0), Ok(if ending == "plain-store-fail" { 0 } else { 42 }), "APDU bytes are transient: {ending}");
-            // The first two stores must survive independently, before beginTransaction.
-            assert!(host.saved.len() >= 2, "{ending}");
-            for (index, (heap, statics, instance)) in host.saved.iter().enumerate() {
+            assert_eq!(heap.array_get(card.buffer, 0), Ok(42), "APDU bytes are transient: {ending}");
+            if ending.ends_with("cancel") && ending != "commit-cancel"
+                || matches!(ending, "commit-fail" | "plain-store-fail") {
+                assert!(host.saved.is_empty(), "{ending}");
+            } else {
+                assert!(!host.saved.is_empty(), "{ending}");
+            }
+            for (heap, statics, instance) in &host.saved {
                 let mut restored = Card::restore(&file, card.sizes, PersistentState { heap, statics, instance: *instance }).unwrap();
                 let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
-                if index < 2 {
-                    assert_eq!(statics, &9u16.to_be_bytes(), "{ending}: store {index}");
-                    assert_eq!(heap.get_word(*instance, 0), Ok(if index == 0 { 0 } else { 9 }));
-                }
                 assert_eq!(heap.array_get(restored.buffer, 0), Ok(0));
             }
-            let (heap, statics, instance) = host.saved.last().unwrap();
-            let durable_field = if ending == "plain-store-fail" { 9 } else { expected };
-            let durable_static = if ending == "full-caught" { 3u16 } else { expected };
-            assert_eq!(statics, &durable_static.to_be_bytes(), "{ending}: durable static");
-            let mut restored = Card::restore(&file, card.sizes, PersistentState { heap, statics, instance: *instance }).unwrap();
-            assert_eq!(Heap::resume(&mut restored.heap, restored.heap_used).unwrap().get_word(*instance, 0), Ok(durable_field), "{ending}: durable field");
+            if let Some((heap, statics, instance)) = host.saved.last() {
+                let durable_field: u16 = if ending == "full-caught" { 9 }
+                    else if ending.starts_with("commit") { 12 }
+                    else if ending.starts_with("plain-") { 12 }
+                    else { 9 };
+                let durable_static = if ending == "full-caught" { 3 } else { durable_field };
+                let mut restored = Card::restore(&file, card.sizes,
+                    PersistentState { heap, statics, instance: *instance }).unwrap();
+                assert_eq!(statics, &durable_static.to_be_bytes(), "{ending}");
+                let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+                assert_eq!(heap.get_word(*instance, 0), Ok(durable_field), "{ending}");
+            }
             if let Some(failed) = host.fail_at { assert_eq!(host.calls, failed, "failed checkpoint must not retry"); }
             if !ending.ends_with("cancel") && ending != "commit-fail" {
                 let mut saved = vec![0; card.persistent_heap_bytes()];

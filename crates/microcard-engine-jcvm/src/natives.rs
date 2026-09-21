@@ -14,7 +14,7 @@ use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
 mod security;
-pub(crate) use security::{checkpoint_committed, native_volatile_range};
+pub(crate) use security::native_volatile_range;
 pub(crate) use security::{symmetric_key_clear_event, ec_key_clear_event, ec_key_kind};
 
 /// A class the card provides, encoded so it cannot collide with a class in a package.

@@ -36,7 +36,12 @@ impl PendingWrites {
         } else { self.snapshot = true; }
         self
     }
-    pub(super) fn any(self) -> bool { self.snapshot || self.heap.end != 0 || self.statics.end != 0 }
+    pub(crate) fn any(self) -> bool { self.snapshot || self.heap.end != 0 || self.statics.end != 0 }
+    pub(crate) fn merge(&mut self, other: Self) {
+        if let Some(range) = other.heap.range() { self.heap(range.start, range.len()); }
+        if let Some(range) = other.statics.range() { self.statics(range.start, range.len()); }
+        self.snapshot |= other.snapshot;
+    }
     pub(super) fn heap(&mut self, at: usize, length: usize) {
         if self.heap.include(at, length).is_none() { self.snapshot = true; }
     }
