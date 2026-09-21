@@ -35,6 +35,7 @@ const READY: usize = 3;
 const COUNTER: usize = 4;
 /// Reset-scoped cipher state: count/seen-input flag, fifteen pending bytes, then CBC IV.
 const PENDING: usize = 5;
+const RANDOM_STATE_BYTES: u16 = 33; // Seeded flag followed by a SHA-256 chain value.
 
 pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops::Range<usize>>> {
     if info.kind != heap::KIND_OBJECT { return Ok(None); }
@@ -323,7 +324,9 @@ pub fn call(
             let supported = match u8::try_from(algorithm) {
                 Ok(id) if !external => match class {
                     ClassId::MessageDigest => host.supports_digest(id),
-                    ClassId::RandomData => host.supports_random(id),
+                    // setSeed uses the same platform SHA-256 boundary as the rest of the
+                    // card, so a random holder is complete only when both services exist.
+                    ClassId::RandomData => host.supports_random(id) && host.supports_digest(4),
                     ClassId::Cipher => matches!(id, 13 | 14) && host.supports_cipher(id),
                     ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
                     ClassId::Signature => id == 33 && host.supports_signature(id),
@@ -337,7 +340,8 @@ pub fn call(
                 return Ok(Native::Threw(exception));
             }
             let pending_bytes = (class == ClassId::Cipher).then_some(if algorithm == 13 { 32 } else { 16 });
-            if let Some(bytes) = pending_bytes {
+            let random_state = (class == ClassId::RandomData).then_some(RANDOM_STATE_BYTES);
+            if let Some(bytes) = pending_bytes.or(random_state) {
                 heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS), (heap::KIND_BYTE, bytes)])?;
             }
             let instance = new_native(heap, class, STATE_WORDS, context)?;
@@ -345,6 +349,10 @@ pub fn call(
             if let Some(bytes) = pending_bytes {
                 let pending = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
                 heap.put_word(instance, PENDING, pending)?;
+            }
+            if let Some(bytes) = random_state {
+                let state = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
+                heap.put_word(instance, MATERIAL, state)?;
             }
             frame.push_reference(instance)?;
         }
@@ -506,7 +514,7 @@ pub fn call(
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
             let array = frame.pop_reference()?;
-            frame.pop_reference()?;
+            let this = frame.pop_reference()?;
             heap.check_access(array, context)?;
             if length < 0 || offset < 0 {
                 return Err(Error::Bounds);
@@ -514,11 +522,74 @@ pub fn call(
             if length == 0 { return crypto_exception(heap, context, 1); }
             heap.byte_slice(array, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            // Straight into the applet's array, so the bytes never sit anywhere else.
-            host.random(heap.byte_slice_mut(array, offset as usize, length as usize)?)?;
+            let mut result = Zeroizing::new(alloc::vec::Vec::new());
+            result.try_reserve_exact(length as usize).map_err(|_| Error::Quota)?;
+            result.resize(length as usize, 0);
+            let algorithm = word_field(heap, this, KIND)? as u8;
+            let state = heap.get_word(this, MATERIAL)?;
+            let seeded = state != NULL && heap.byte_slice(state, 0, RANDOM_STATE_BYTES as usize)?[0] != 0;
+            let mut next_chain = None;
+            if algorithm == 1 && seeded {
+                let mut chain = Zeroizing::new([0u8; 32]);
+                chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
+                for output in result.chunks_mut(32) {
+                    let mut next = Zeroizing::new([0u8; 32]);
+                    if host.digest(4, &chain[..], &mut next[..])? != 32 { return Err(Error::Format); }
+                    let count = output.len();
+                    output.copy_from_slice(&next[..count]);
+                    *chain = *next;
+                }
+                next_chain = Some(*chain);
+            } else {
+                host.random(&mut result)?;
+                // A secure generator always begins with fresh provider entropy. A seed
+                // contributes an additional mask; it can never replace that entropy or
+                // turn ALG_SECURE_RANDOM into an applet-controlled deterministic stream.
+                if algorithm == 2 && seeded {
+                    let mut chain = Zeroizing::new([0u8; 32]);
+                    chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
+                    for output in result.chunks_mut(32) {
+                        let mut next = Zeroizing::new([0u8; 32]);
+                        if host.digest(4, &chain[..], &mut next[..])? != 32 { return Err(Error::Format); }
+                        for (byte, mask) in output.iter_mut().zip(next.iter()) { *byte ^= mask; }
+                        *chain = *next;
+                    }
+                    next_chain = Some(*chain);
+                }
+            }
+            if let Some(chain) = next_chain {
+                heap.byte_slice_mut(state, 1, 32)?.copy_from_slice(&chain);
+            }
+            heap.byte_slice_mut(array, offset as usize, length as usize)?.copy_from_slice(&result);
             if method == MethodId::nextBytes {
                 frame.push_short(offset.wrapping_add(length))?;
             }
+        }
+        (ClassId::RandomData, MethodId::setSeed) => {
+            let length = frame.pop_short()?;
+            let offset = frame.pop_short()?;
+            let source = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            heap.check_access(source, context)?;
+            if length < 0 || offset < 0 { return Err(Error::Bounds); }
+            let seed = heap.byte_slice(source, offset as usize, length as usize)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
+            let algorithm = word_field(heap, this, KIND)? as u8;
+            let mut seed_digest = Zeroizing::new([0u8; 32]);
+            if host.digest(4, seed, &mut seed_digest[..])? != 32 { return Err(Error::Format); }
+            let mut chain = Zeroizing::new([0u8; 32]);
+            if algorithm == 2 {
+                let mut mixed = Zeroizing::new([0u8; 64]);
+                host.random(&mut mixed[..32])?;
+                mixed[32..].copy_from_slice(&seed_digest[..]);
+                if host.digest(4, &mixed[..], &mut chain[..])? != 32 { return Err(Error::Format); }
+            } else {
+                *chain = *seed_digest;
+            }
+            let state = heap.get_word(this, MATERIAL)?;
+            let destination = heap.byte_slice_mut(state, 0, RANDOM_STATE_BYTES as usize)?;
+            destination[0] = 1;
+            destination[1..].copy_from_slice(&chain[..]);
         }
         _ => return Ok(Native::Unimplemented),
     }

@@ -456,7 +456,13 @@ leave extra arguments on the operand stack.
 `RandomData.generateData` returns no value; `nextBytes` returns the ending offset.
 Both reject empty requests with `CryptoException.ILLEGAL_VALUE` before calling the
 entropy provider, as required by the 3.0.5 API. Both charge one work unit per output
-byte after validating the destination and before calling the provider.
+byte after validating the destination and before calling the provider. A seeded
+`ALG_PSEUDO_RANDOM` instance advances a reset-scoped SHA-256 chain. An
+`ALG_SECURE_RANDOM` instance obtains fresh platform entropy for every request;
+`setSeed` mixes applet input with fresh entropy and later output mixes the resulting
+chain into new entropy. Supplying a seed therefore cannot turn the secure generator
+into a deterministic stream. Provider failures publish neither output nor updated
+generator state.
 `MessageDigest.doFinal` similarly charges input bytes after validating both ranges.
 Insufficient work leaves the destination untouched and does not call either provider.
 

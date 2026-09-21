@@ -857,25 +857,40 @@ mod tests {
 
     #[test]
     fn random_data_methods_obey_return_contracts_and_reject_empty_requests() {
-        struct Entropy { calls: usize }
+        struct Entropy { random_calls: usize, digest_calls: usize, fail_random: bool, fail_digest: bool }
         impl crate::host::Host for Entropy {
+            fn supports_random(&self, algorithm: u8) -> bool { matches!(algorithm, 1 | 2) }
+            fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
             fn random(&mut self, output: &mut [u8]) -> Result<()> {
-                self.calls += 1;
+                self.random_calls += 1;
                 output.fill(0x42);
+                if self.fail_random { return Err(Error::Storage); }
                 Ok(())
+            }
+            fn digest(&mut self, algorithm: u8, _message: &[u8], output: &mut [u8]) -> Result<usize> {
+                assert_eq!(algorithm, 4);
+                self.digest_calls += 1;
+                if self.fail_digest { return Err(Error::Storage); }
+                output.fill(self.digest_calls as u8);
+                Ok(output.len())
             }
         }
         let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
         let mut frame = Frame::new(&mut words, &mut tags, 0, 16).unwrap();
-        let mut host = Entropy { calls: 0 };
-        let random = new_native(&mut heap, ClassId::RandomData, 6, 1).unwrap();
+        let mut host = Entropy { random_calls: 0, digest_calls: 0, fail_random: false, fail_digest: false };
+        invoke_security(ClassId::RandomData, MethodId::getInstance, &[(false, 2)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        let secure = frame.pop_reference().unwrap();
+        invoke_security(ClassId::RandomData, MethodId::getInstance, &[(false, 1)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        let pseudo = frame.pop_reference().unwrap();
         let output = heap.new_array(heap::KIND_BYTE, 6, 1).unwrap();
         for method in [MethodId::generateData, MethodId::nextBytes] {
             for allowance in [3, 4] {
                 let before = heap.image().to_vec();
-                let calls = host.calls;
-                frame.push_reference(random).unwrap();
+                let calls = host.random_calls;
+                frame.push_reference(secure).unwrap();
                 frame.push_reference(output).unwrap();
                 frame.push_short(1).unwrap();
                 frame.push_short(4).unwrap();
@@ -885,23 +900,69 @@ mod tests {
                 if allowance == 3 {
                     assert!(matches!(result, Err(Error::Quota)));
                     assert_eq!(budget, 3);
-                    assert_eq!(host.calls, calls);
+                    assert_eq!(host.random_calls, calls);
                     assert!(heap.image() == before);
                 } else { result.unwrap(); assert_eq!(budget, 0); }
             }
             if method == MethodId::nextBytes { assert_eq!(frame.pop_short(), Ok(5)); }
             assert_eq!(frame.depth(), 0);
             assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0, 0x42, 0x42, 0x42, 0x42, 0]);
-            let calls = host.calls;
+            let calls = host.random_calls;
             let Native::Threw(exception) = invoke_security(ClassId::RandomData, method,
-                &[(true, random), (true, output), (false, 1), (false, 0)],
+                &[(true, secure), (true, output), (false, 1), (false, 0)],
                 &mut heap, &mut frame, &mut host).unwrap()
                 else { panic!("empty random request accepted"); };
             assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
-            assert_eq!(host.calls, calls);
+            assert_eq!(host.random_calls, calls);
             assert_eq!(frame.depth(), 0);
         }
-        assert_eq!(host.calls, 2);
+        assert_eq!(host.random_calls, 2);
+
+        heap.byte_slice_mut(output, 0, 6).unwrap().copy_from_slice(b"seed!!");
+        invoke_security(ClassId::RandomData, MethodId::setSeed,
+            &[(true, pseudo), (true, output), (false, 0), (false, 4)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(host.digest_calls, 1);
+        for expected in [2, 3] {
+            invoke_security(ClassId::RandomData, MethodId::nextBytes,
+                &[(true, pseudo), (true, output), (false, 0), (false, 6)],
+                &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short(), Ok(6));
+            assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[expected; 6]);
+        }
+        assert_eq!(host.random_calls, 2, "seeded output must use the digest provider");
+        host.fail_digest = true;
+        heap.byte_slice_mut(output, 0, 6).unwrap().fill(0x55);
+        assert!(matches!(invoke_security(ClassId::RandomData, MethodId::nextBytes,
+            &[(true, pseudo), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host), Err(Error::Storage)));
+        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x55; 6]);
+        host.fail_digest = false;
+
+        invoke_security(ClassId::RandomData, MethodId::setSeed,
+            &[(true, secure), (true, output), (false, 0), (false, 4)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(host.random_calls, 3, "secure seeding must add provider entropy");
+        assert_eq!(host.digest_calls, 6);
+        invoke_security(ClassId::RandomData, MethodId::generateData,
+            &[(true, secure), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(host.random_calls, 4, "secure output must always use provider entropy");
+        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x45; 6]);
+        host.fail_random = true;
+        heap.byte_slice_mut(output, 0, 6).unwrap().fill(0x55);
+        assert!(matches!(invoke_security(ClassId::RandomData, MethodId::generateData,
+            &[(true, secure), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host), Err(Error::Storage)));
+        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x55; 6]);
+        host.fail_random = false;
+
+        heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
+        invoke_security(ClassId::RandomData, MethodId::generateData,
+            &[(true, pseudo), (true, output), (false, 0), (false, 6)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x42; 6]);
+        assert_eq!(host.random_calls, 6);
     }
 
     #[test]
