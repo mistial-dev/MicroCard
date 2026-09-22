@@ -271,7 +271,7 @@ sealed class Compiler : IDisposable
             foreach (var attributeHandle in type.GetCustomAttributes())
             {
                 var attribute = md.GetCustomAttribute(attributeHandle);
-                if (Attr(attribute) != "AssemblyAttribute") continue;
+                if (Attr(attribute) != "CardAssemblyAttribute") continue;
                 if (entry_points.Count >= 4) throw new Exception("Entry-point quota exceeded");
                 var reader = md.GetBlobReader(attribute.Value);
                 if (reader.ReadUInt16() != 1) throw new Exception("Attribute blob");
@@ -279,20 +279,21 @@ sealed class Compiler : IDisposable
                 var hooks = new Dictionary<string, int?> { { "install", null }, { "select", null }, { "deselect", null }, { "uninstall", null } };
                 foreach (var methodHandle in type.GetMethods())
                 {
-                    foreach (var lifecycleHandle in md.GetMethodDefinition(methodHandle).GetCustomAttributes())
-                    {
-                        var name = Attr(md.GetCustomAttribute(lifecycleHandle));
-                        if (!new[] { "InstallAttribute", "SelectAttribute", "DeselectAttribute", "ProcessAttribute", "UninstallAttribute" }.Contains(name)) continue;
-                        var key = name.Replace("Attribute", "").ToLowerInvariant();
-                        if (hooks.GetValueOrDefault(key) != null) throw new Exception("Duplicate lifecycle hook");
-                        var method = md.GetMethodDefinition(methodHandle);
-                        var signature = method.DecodeSignature(types, null);
-                        if (signature.Header.IsInstance || signature.ParameterTypes.Length != 0 || signature.ReturnType != "Void")
-                            throw new Exception("Lifecycle hooks must be static parameterless void methods");
-                        hooks[key] = ids[methodHandle];
-                    }
+                    var method = md.GetMethodDefinition(methodHandle);
+                    var name = md.GetString(method.Name);
+                    if (name is not ("Install" or "Select" or "Deselect" or "Process" or "Uninstall"))
+                        continue;
+                    var key = name.ToLowerInvariant();
+                    if (hooks.GetValueOrDefault(key) != null) throw new Exception("Duplicate lifecycle hook");
+                    var signature = method.DecodeSignature(types, null);
+                    if (signature.Header.IsInstance || signature.ParameterTypes.Length != 0 ||
+                        signature.ReturnType != "Void" ||
+                        (method.Attributes & System.Reflection.MethodAttributes.MemberAccessMask) !=
+                            System.Reflection.MethodAttributes.Public)
+                        throw new Exception("Lifecycle hooks must be public static parameterless void methods");
+                    hooks[key] = ids[methodHandle];
                 }
-                if (!hooks.ContainsKey("process")) throw new Exception("Missing Process");
+                if (hooks.GetValueOrDefault("process") is null) throw new Exception("Missing Process");
                 entry_points.Add(new { aid, process = hooks["process"], install = hooks["install"], select = hooks["select"], deselect = hooks["deselect"], uninstall = hooks["uninstall"] });
             }
         }

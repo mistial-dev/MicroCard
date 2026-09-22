@@ -74,10 +74,9 @@ using System.Transactions;
 
 namespace MicroCard.AnalyzerCases;
 
-[Assembly("F04D430020")]
+[CardAssembly("F04D430020")]
 public static class ValidAssembly
 {
-    [Process]
     public static void Process()
     {
         int value = SecurityDomain.Current.Store.GetInt32(1);
@@ -129,17 +128,15 @@ public static class InvalidAmbientTransactionWrite
 #endif
 
 #if CASE_TRANSACTION_LIFECYCLE
-[Assembly("F04D430022")]
+[CardAssembly("F04D430022")]
 public static class InvalidLifecycleTransaction
 {
-    [Install]
     public static void Install()
     {
         using var scope = new TransactionScope();
         scope.Complete();
     }
 
-    [Process]
     public static void Process() { }
 }
 #endif
@@ -153,23 +150,23 @@ public static class InvalidStorageAccess
 #endif
 
 #if CASE_ENTRY_LIMIT
-[Assembly("F04D430101")]
-public static class EntryOne { [Process] public static void Process() { } }
-[Assembly("F04D430102")]
-public static class EntryTwo { [Process] public static void Process() { } }
-[Assembly("F04D430103")]
-public static class EntryThree { [Process] public static void Process() { } }
-[Assembly("F04D430104")]
-public static class EntryFour { [Process] public static void Process() { } }
+[CardAssembly("F04D430101")]
+public static class EntryOne { public static void Process() { } }
+[CardAssembly("F04D430102")]
+public static class EntryTwo { public static void Process() { } }
+[CardAssembly("F04D430103")]
+public static class EntryThree { public static void Process() { } }
+[CardAssembly("F04D430104")]
+public static class EntryFour { public static void Process() { } }
 #endif
 
 #if CASE_ENTRY_BOUNDARY
-[Assembly("F04D430101")]
-public static class EntryOne { [Process] public static void Process() { } }
-[Assembly("F04D430102")]
-public static class EntryTwo { [Process] public static void Process() { } }
-[Assembly("F04D430103")]
-public static class EntryThree { [Process] public static void Process() { } }
+[CardAssembly("F04D430101")]
+public static class EntryOne { public static void Process() { } }
+[CardAssembly("F04D430102")]
+public static class EntryTwo { public static void Process() { } }
+[CardAssembly("F04D430103")]
+public static class EntryThree { public static void Process() { } }
 #endif
 
 #if CASE_TRANSACTION
@@ -871,10 +868,9 @@ public static class InvalidSystemRngOverload
 #endif
 
 #if CASE_LIFECYCLE
-[Assembly("F04D430021")]
+[CardAssembly("F04D430021")]
 public static class InvalidLifecycle
 {
-    [Process]
     public static int Process(int value) => value;
 }
 #endif

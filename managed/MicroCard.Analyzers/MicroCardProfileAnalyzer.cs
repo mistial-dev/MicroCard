@@ -287,17 +287,10 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
 
         var entry = type.GetAttributes().FirstOrDefault(IsAssemblyAttribute);
         var hooks = type.GetMembers().OfType<IMethodSymbol>()
-            .SelectMany(method => method.GetAttributes()
-                .Where(IsLifecycleAttribute)
-                .Select(attribute => (Method: method, Name: attribute.AttributeClass!.Name)))
+            .Where(method => IsLifecycleName(method.Name))
             .ToArray();
         if (entry is null)
-        {
-            foreach (var hook in hooks)
-                Report(context, Lifecycle, hook.Method.Locations[0],
-                    $"[{TrimAttribute(hook.Name)}] requires [Assembly] on '{type.Name}'");
             return;
-        }
 
         if (entry.ConstructorArguments.Length != 1 ||
             entry.ConstructorArguments[0].Value is not string aid || !ValidAid(aid))
@@ -305,9 +298,9 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         foreach (var group in hooks.GroupBy(static hook => hook.Name, StringComparer.Ordinal))
             if (group.Count() != 1)
                 Report(context, Lifecycle, location,
-                    $"Assembly '{type.Name}' has more than one [{TrimAttribute(group.Key)}] method");
-        if (!hooks.Any(static hook => hook.Name == "ProcessAttribute"))
-            Report(context, Lifecycle, location, $"Assembly '{type.Name}' requires one [Process] method");
+                    $"Assembly '{type.Name}' has more than one '{group.Key}' method");
+        if (!hooks.Any(static hook => hook.Name == "Process"))
+            Report(context, Lifecycle, location, $"Assembly '{type.Name}' requires a Process method");
     }
 
     private static void AnalyzeMethod(SymbolAnalysisContext context)
@@ -340,10 +333,11 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
                     $"Parameter '{parameter.Name}' cannot be passed by reference");
         }
 
-        foreach (var attribute in method.GetAttributes().Where(IsLifecycleAttribute))
-            if (!method.IsStatic || method.Parameters.Length != 0 || !method.ReturnsVoid || method.Arity != 0)
-                Report(context, Lifecycle, location,
-                    $"[{TrimAttribute(attribute.AttributeClass!.Name)}] method '{method.Name}' must be static parameterless void");
+        if (IsLifecycleMethod(method) &&
+            (!method.IsStatic || method.DeclaredAccessibility != Accessibility.Public ||
+             method.Parameters.Length != 0 || !method.ReturnsVoid || method.Arity != 0))
+            Report(context, Lifecycle, location,
+                $"Lifecycle method '{method.Name}' must be public static parameterless void");
     }
 
     private static void AnalyzeField(SymbolAnalysisContext context)
@@ -789,13 +783,13 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool IsAssemblyAttribute(AttributeData attribute) =>
-        IsFrameworkAttribute(attribute, "AssemblyAttribute");
+        IsFrameworkAttribute(attribute, "CardAssemblyAttribute");
 
-    private static bool IsLifecycleAttribute(AttributeData attribute) =>
-        attribute.AttributeClass?.Name is "InstallAttribute" or "SelectAttribute" or
-            "DeselectAttribute" or "ProcessAttribute" or "UninstallAttribute" &&
-        attribute.AttributeClass.ContainingAssembly?.Name == "MicroCard.Framework" &&
-        attribute.AttributeClass.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework";
+    private static bool IsLifecycleName(string name) =>
+        name is "Install" or "Select" or "Deselect" or "Process" or "Uninstall";
+
+    private static bool IsLifecycleMethod(IMethodSymbol method) =>
+        IsLifecycleName(method.Name) && method.ContainingType.GetAttributes().Any(IsAssemblyAttribute);
 
     private static bool IsFrameworkAttribute(AttributeData attribute, string name) =>
         attribute.AttributeClass?.Name == name &&
@@ -855,14 +849,11 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         ConcurrentDictionary<ISymbol, ConcurrentBag<CallSite>> calls)
     {
         foreach (var method in calls.Keys.OfType<IMethodSymbol>().Where(method =>
-                     method.DeclaredAccessibility == Accessibility.Public ||
-                     method.GetAttributes().Any(IsLifecycleAttribute)))
+                     method.DeclaredAccessibility == Accessibility.Public || IsLifecycleMethod(method)))
         {
             bool explicitControl = ReachesExplicitTransaction(context.Compilation, calls, method,
                 new HashSet<ISymbol>(SymbolEqualityComparer.Default));
-            if (explicitControl && method.GetAttributes().Any(attribute =>
-                    IsLifecycleAttribute(attribute) &&
-                    attribute.AttributeClass?.Name != "ProcessAttribute"))
+            if (explicitControl && IsLifecycleMethod(method) && method.Name != "Process")
                 context.ReportDiagnostic(Diagnostic.Create(Lifecycle,
                     method.Locations.First(static location => location.IsInSource),
                     $"Lifecycle method '{method.Name}' cannot open a transaction"));
@@ -918,8 +909,7 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         ConcurrentDictionary<ISymbol, ConcurrentBag<CallSite>> calls)
     {
         foreach (var root in calls.Keys.OfType<IMethodSymbol>().Where(method =>
-                     method.DeclaredAccessibility == Accessibility.Public ||
-                     method.GetAttributes().Any(IsLifecycleAttribute)))
+                     method.DeclaredAccessibility == Accessibility.Public || IsLifecycleMethod(method)))
         {
             var active = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
             AnalyzeCallGraph(context, calls, root, root, 1, active);
@@ -1148,11 +1138,6 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         (aid.Length & 1) == 0 && aid.All(Uri.IsHexDigit);
 
     private static bool IsHex32(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
-
-    private static string TrimAttribute(string name) =>
-        name.EndsWith("Attribute", StringComparison.Ordinal)
-            ? name.Substring(0, name.Length - "Attribute".Length)
-            : name;
 
     private static void Report(SymbolAnalysisContext context, DiagnosticDescriptor rule,
         Location location, params object[] arguments) =>

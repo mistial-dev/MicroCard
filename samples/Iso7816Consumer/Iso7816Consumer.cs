@@ -6,10 +6,9 @@ using MicroCard.Iso7816;
 
 namespace MicroCard.Iso7816.Consumer;
 
-[Assembly("F04D430781")]
+[CardAssembly("F04D430781")]
 public static class Iso7816Consumer
 {
-    [Process]
     public static void Process()
     {
         int commandLength = CommandApdu.Length;

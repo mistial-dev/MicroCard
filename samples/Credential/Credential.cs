@@ -15,17 +15,15 @@ using MicroCard.Security;
 
 namespace MicroCard.Samples.Credential;
 
-[Assembly("F04D4308C0")]
+[CardAssembly("F04D4308C0")]
 public static class Credential
 {
     private const int PinSlot = 1;
     private const int SigningKeySlot = 2;
     private const int PublicDataKey = 1;
 
-    [Install]
     public static void Install() => KeyFactory.GenerateP256(SigningKeySlot);
 
-    [Process]
     public static void Process()
     {
         int length = CommandApdu.Length;

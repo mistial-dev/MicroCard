@@ -528,37 +528,9 @@ sealed class Mc04Writer : IDisposable
 
     IEnumerable<(ushort Parent, CustomAttributeHandle Attribute)> RuntimeAttributes()
     {
-        foreach (var handle in md.GetAssemblyDefinition().GetCustomAttributes())
-            if (IsRuntimeAttribute(handle)) yield return (checked((ushort)(1 << 5 | 14)), handle);
-        foreach (var type in md.TypeDefinitions)
-            foreach (var handle in md.GetTypeDefinition(type).GetCustomAttributes())
-                if (IsRuntimeAttribute(handle)) yield return (checked((ushort)(typeDefs[type] << 5 | 3)), handle);
-        foreach (var method in md.MethodDefinitions)
-            foreach (var handle in md.GetMethodDefinition(method).GetCustomAttributes())
-                if (IsRuntimeAttribute(handle)) yield return (checked((ushort)(methods[method] << 5)), handle);
-        foreach (var field in fields.Keys)
-            foreach (var handle in md.GetFieldDefinition(field).GetCustomAttributes())
-                if (IsRuntimeAttribute(handle)) yield return (checked((ushort)(fields[field] << 5 | 1)), handle);
-    }
-
-    bool HasAttribute(CustomAttributeHandleCollection attributes, string name) =>
-        attributes.Any(handle => IsFrameworkAttribute(handle) && AttributeName(handle) == name);
-
-    bool IsFrameworkAttribute(CustomAttributeHandle handle) => AttributeName(handle) is not null;
-    bool IsRuntimeAttribute(CustomAttributeHandle handle) => AttributeName(handle) is
-        "AssemblyAttribute" or "InstallAttribute" or "SelectAttribute" or "DeselectAttribute" or
-        "ProcessAttribute" or "UninstallAttribute";
-    string? AttributeName(CustomAttributeHandle handle)
-    {
-        var value = md.GetCustomAttribute(handle);
-        if (value.Constructor.Kind != HandleKind.MemberReference) return null;
-        var member = md.GetMemberReference((MemberReferenceHandle)value.Constructor);
-        if (member.Parent.Kind != HandleKind.TypeReference) return null;
-        var type = md.GetTypeReference((TypeReferenceHandle)member.Parent);
-        if (type.ResolutionScope.Kind != HandleKind.AssemblyReference) return null;
-        var assembly = md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope);
-        return md.GetString(assembly.Name) == frameworkName && md.GetString(type.Namespace) == "MicroCard.Framework"
-            ? md.GetString(type.Name) : null;
+        // Authoring attributes are consumed into the signed package manifest. They are
+        // not runtime metadata and must not make the converted assembly larger.
+        yield break;
     }
 
     void CollectSignature(byte[] signature, HashSet<TypeReferenceHandle> usedTypes) =>

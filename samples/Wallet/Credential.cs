@@ -16,9 +16,9 @@ using MicroCard.Security;
 namespace MicroCard.Samples.Wallet;
 
 #if WORK
-[Assembly("F04D4309C1")]
+[CardAssembly("F04D4309C1")]
 #else
-[Assembly("F04D4309C0")]
+[CardAssembly("F04D4309C0")]
 #endif
 public static class Credential
 {
@@ -26,10 +26,8 @@ public static class Credential
     private const int SigningKeySlot = 2;
     private const int PublicDataKey = 1;
 
-    [Install]
     public static void Install() => KeyFactory.GenerateP256(SigningKeySlot);
 
-    [Process]
     public static void Process()
     {
         // Require command confidentiality, command integrity and response integrity.

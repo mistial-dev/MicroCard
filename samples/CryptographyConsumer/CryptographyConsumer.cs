@@ -7,14 +7,13 @@ using MicroCard.Framework;
 
 namespace MicroCard.Samples.CryptographyConsumer;
 
-[Assembly("F04D4306C0")]
+[CardAssembly("F04D4306C0")]
 public static class CryptographyConsumer
 {
     private const int HmacSlot = 5;
     private const int AesSlot = 6;
     private const int P256Slot = 7;
 
-    [Install]
     public static void Install()
     {
         KeyFactory.GenerateHmacSha256(HmacSlot);
@@ -22,7 +21,6 @@ public static class CryptographyConsumer
         KeyFactory.GenerateP256(P256Slot);
     }
 
-    [Uninstall]
     public static void Uninstall()
     {
         KeyFactory.Delete(HmacSlot);
@@ -30,7 +28,6 @@ public static class CryptographyConsumer
         KeyFactory.Delete(P256Slot);
     }
 
-    [Process]
     public static void Process()
     {
         int length = CommandApdu.Length;

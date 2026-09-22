@@ -4,16 +4,13 @@ using MicroCard.Framework;
 [assembly: Dependency("Kdf108", "=0.1.0", Scope = DependencyScope.IssuerSecurityDomain,
     SignerPublicKeyHex = "2bad0fd610d99eae443e932a26142bca1e5fa995b4518452827e78ef1f317ff0")]
 
-[Assembly("F04D430108")]
+[CardAssembly("F04D430108")]
 public static class Kdf108Consumer
 {
-    [Install]
     public static void Install() => SecurityDomain.Current.Keys.Generate(2, KeyAlgorithms.Aes128);
 
-    [Uninstall]
     public static void Uninstall() => SecurityDomain.Current.Keys.Delete(2);
 
-    [Process]
     public static void Process()
     {
         int inputLength = CommandApdu.Length;

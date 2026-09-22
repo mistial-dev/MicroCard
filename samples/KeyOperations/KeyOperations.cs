@@ -3,10 +3,10 @@ using MicroCard.Framework;
 [assembly: PersistentBytes(20, 3)]
 [assembly: PersistentBytes(21, 1)]
 [assembly: PersistentInt32(30)]
-[Assembly("F04D430010")]
+[CardAssembly("F04D430010")]
 public static class KeyOperations {
- [Install] public static void Install(){SecurityDomain.Current.Keys.Generate(0,KeyAlgorithms.HmacSha256);SecurityDomain.Current.Keys.Generate(1,KeyAlgorithms.Aes128);SecurityDomain.Current.Store.SetInt32(10,0);}
- [Process] public static void Process(){
+ public static void Install(){SecurityDomain.Current.Keys.Generate(0,KeyAlgorithms.HmacSha256);SecurityDomain.Current.Keys.Generate(1,KeyAlgorithms.Aes128);SecurityDomain.Current.Store.SetInt32(10,0);}
+ public static void Process(){
   var message=new byte[1];message[0]=97;int inputLength=CommandApdu.Length;if(inputLength<1){ResponseApdu.SetStatus(0x6700);return;}var input=new byte[inputLength];CommandApdu.CopyTo(input,0,0,input.Length);int command=input[0];
   if(command==0){Write(SecurityDomain.Current.Keys.Open(0).HmacSha256(message));return;}
   var key=SecurityDomain.Current.Keys.Open(1);
@@ -18,13 +18,13 @@ public static class KeyOperations {
  }
  public static void Write(byte[] data){ResponseApdu.Write(data,0,data.Length);}
 }
-[Assembly("F04D430011")]
+[CardAssembly("F04D430011")]
 public static class KeyReader {
- [Process] public static void Process(){var input=new byte[1];input[0]=97;SecurityDomain.Current.Store.SetInt32(10,checked(SecurityDomain.Current.Store.GetInt32(10)+1));KeyOperations.Write(SecurityDomain.Current.Keys.Open(0).HmacSha256(input));}
+ public static void Process(){var input=new byte[1];input[0]=97;SecurityDomain.Current.Store.SetInt32(10,checked(SecurityDomain.Current.Store.GetInt32(10)+1));KeyOperations.Write(SecurityDomain.Current.Keys.Open(0).HmacSha256(input));}
 }
-[Assembly("F04D430012")]
+[CardAssembly("F04D430012")]
 public static class BlobRecords {
- [Process] public static void Process(){
+ public static void Process(){
   int inputLength=CommandApdu.Length;if(inputLength<1){ResponseApdu.SetStatus(0x6700);return;}var input=new byte[inputLength];CommandApdu.CopyTo(input,0,0,input.Length);int command=input[0];
   if(command==0){var value=new byte[3];value[0]=98;value[1]=108;value[2]=111;SecurityDomain.Current.Store.SetBytes(20,value);return;}
   if(command==1){var value=SecurityDomain.Current.Store.GetBytes(20);ResponseApdu.Write(value,0,value.Length);return;}
@@ -36,7 +36,7 @@ public static class BlobRecords {
  }
 }
 
-[Assembly("F04D430013")]
+[CardAssembly("F04D430013")]
 public static class BudgetLoop {
- [Process] public static void Process(){SecurityDomain.Current.Store.SetInt32(30,1);for(;;){}}
+ public static void Process(){SecurityDomain.Current.Store.SetInt32(30,1);for(;;){}}
 }

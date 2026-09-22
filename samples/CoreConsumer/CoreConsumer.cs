@@ -9,10 +9,9 @@ using MicroCard.Core;
 
 namespace MicroCard.Samples.CoreConsumer;
 
-[Assembly("F04D4309C0")]
+[CardAssembly("F04D4309C0")]
 public static class CoreConsumer
 {
-    [Process]
     public static void Process()
     {
         int length = CommandApdu.Length;

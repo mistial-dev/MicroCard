@@ -5,10 +5,9 @@ using System.Transactions;
 
 namespace MicroCard.Tests.TransactionRuntimeNegative;
 
-[Assembly("F04D430022")]
+[CardAssembly("F04D430022")]
 public static class InvalidTransactionSequences
 {
-    [Process]
     public static void Process()
     {
         byte[] command = new byte[CommandApdu.Length];

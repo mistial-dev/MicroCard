@@ -7,10 +7,9 @@ using System.Transactions;
 
 namespace MicroCard.Samples.TransactionRecords;
 
-[Assembly("F04D430020")]
+[CardAssembly("F04D430020")]
 public static class Records
 {
-    [Process]
     public static void Process()
     {
         _ = Transaction.Current;

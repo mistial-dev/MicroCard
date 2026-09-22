@@ -6,10 +6,9 @@ using MicroCard.Encoding;
 
 namespace MicroCard.Encoding.Consumer;
 
-[Assembly("F04D430690")]
+[CardAssembly("F04D430690")]
 public static class EncodingConsumer
 {
-    [Process]
     public static void Process()
     {
         int length = CommandApdu.Length;

@@ -9,12 +9,11 @@ using MicroCard.Security;
 
 namespace MicroCard.Samples.SecurityConsumer;
 
-[Assembly("F04D4307C0")]
+[CardAssembly("F04D4307C0")]
 public static class SecurityConsumer
 {
     private const int Slot = 1;
 
-    [Process]
     public static void Process()
     {
         int length = CommandApdu.Length;
@@ -108,10 +107,10 @@ public static class SecurityConsumer
         ResponseApdu.SetStatus(0x6D00);
     }
 
-    [Select] public static void Select() => Lifecycle(1);
-    [Deselect] public static void Deselect() => Lifecycle(2);
-    [Install] public static void Install() => Lifecycle(3);
-    [Uninstall] public static void Uninstall() => Lifecycle(4);
+    public static void Select() => Lifecycle(1);
+    public static void Deselect() => Lifecycle(2);
+    public static void Install() => Lifecycle(3);
+    public static void Uninstall() => Lifecycle(4);
 
     private static void Lifecycle(int phase)
     {

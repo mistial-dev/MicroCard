@@ -1,10 +1,12 @@
 namespace MicroCard.Framework;
-[AttributeUsage(AttributeTargets.Class)] public sealed class AssemblyAttribute(string aid) : Attribute { public string Aid { get; } = aid; }
-[AttributeUsage(AttributeTargets.Method)] public sealed class InstallAttribute : Attribute { }
-[AttributeUsage(AttributeTargets.Method)] public sealed class SelectAttribute : Attribute { }
-[AttributeUsage(AttributeTargets.Method)] public sealed class DeselectAttribute : Attribute { }
-[AttributeUsage(AttributeTargets.Method)] public sealed class ProcessAttribute : Attribute { }
-[AttributeUsage(AttributeTargets.Method)] public sealed class UninstallAttribute : Attribute { }
+
+/// <summary>Declares the static class that implements one MC04 card assembly.</summary>
+[AttributeUsage(AttributeTargets.Class)]
+public sealed class CardAssemblyAttribute(string aid) : Attribute
+{
+    /// <summary>Gets the hexadecimal application identifier selected by the host.</summary>
+    public string Aid { get; } = aid;
+}
 public enum DependencyAccess { Private = 0, Any = 1, SameSigner = 2, SpecificPublicKey = 3 }
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false)]
 public sealed class DependencyExportAttribute : Attribute {
