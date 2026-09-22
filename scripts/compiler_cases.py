@@ -16,6 +16,7 @@ BOUNDARIES = [
     ('CASE_FIELD_ROWS_BOUNDARY', 'field-row-boundary'),
 ]
 REJECTIONS = [
+    ('CASE_TRANSACTION_CURRENT', 'ambient-transaction', 'Unsupported System.Transactions member'),
     ('CASE_TRANSACTION', 'unsafe-transaction', 'Transactional method reaches irreversible Hardware.Write'),
     ('CASE_STORAGE_SCHEMA', 'storage-schema-bypass', 'Persistent byte maximum'),
     ('CASE_SYSTEM_SHA256_OVERLOAD', 'system-sha256-overload-bypass', 'Unsupported System.Security.Cryptography member'),

@@ -104,6 +104,29 @@ public static class ValidTransactionScope
 }
 #endif
 
+#if CASE_TRANSACTION_CURRENT
+public static class InvalidAmbientTransaction
+{
+    public static void Run() { _ = Transaction.Current; }
+}
+#endif
+
+#if CASE_TRANSACTION_LIFECYCLE
+[Assembly("F04D430022")]
+public static class InvalidLifecycleTransaction
+{
+    [Install]
+    public static void Install()
+    {
+        using var scope = new TransactionScope();
+        scope.Complete();
+    }
+
+    [Process]
+    public static void Process() { }
+}
+#endif
+
 #if CASE_STORAGE_ACCESS
 public static class InvalidStorageAccess
 {

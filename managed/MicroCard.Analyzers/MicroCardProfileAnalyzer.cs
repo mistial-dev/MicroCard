@@ -828,6 +828,12 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         {
             bool explicitControl = ReachesExplicitTransaction(context.Compilation, calls, method,
                 new HashSet<ISymbol>(SymbolEqualityComparer.Default));
+            if (explicitControl && method.GetAttributes().Any(attribute =>
+                    IsLifecycleAttribute(attribute) &&
+                    attribute.AttributeClass?.Name != "ProcessAttribute"))
+                context.ReportDiagnostic(Diagnostic.Create(Lifecycle,
+                    method.Locations.First(static location => location.IsInSource),
+                    $"Lifecycle method '{method.Name}' cannot open a transaction"));
             if (explicitControl)
                 AnalyzeTransactionMethod(context, calls, method, method,
                     new HashSet<ISymbol>(SymbolEqualityComparer.Default));

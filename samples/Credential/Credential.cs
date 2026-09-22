@@ -1,5 +1,6 @@
 using MicroCard.Cryptography;
 using MicroCard.Framework;
+using System.Transactions;
 using MicroCard.Security;
 
 [assembly: PersistentBytes(1, 248)]
@@ -39,6 +40,11 @@ public static class Credential
         int operation = command[0];
         if (operation == 0)
         {
+            if (command.Length < 14)
+            {
+                ResponseApdu.SetStatus(0x6700);
+                return;
+            }
             Provision(command);
             return;
         }
@@ -78,16 +84,12 @@ public static class Credential
         ResponseApdu.SetStatus(0x6D00);
     }
 
-    [Transaction]
     private static void Provision(byte[] command)
     {
-        if (command.Length < 14)
-        {
-            ResponseApdu.SetStatus(0x6700);
-            return;
-        }
+        using var scope = new TransactionScope();
         Pin.Create(PinSlot, command, 1, 4, 3, command, 5, 8, 3);
         SecurityDomain.Current.Store.SetBytes(PublicDataKey, command, 13, command.Length - 13);
+        scope.Complete();
     }
 
     private static void Sign(byte[] command)

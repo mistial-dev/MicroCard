@@ -1,4 +1,5 @@
 using MicroCard.Framework;
+using System.Transactions;
 
 [assembly: PersistentInt32(1)]
 [assembly: PersistentInt32(2)]
@@ -21,31 +22,18 @@ public static class Records
 
         byte[] command = new byte[length];
         CommandApdu.CopyTo(command, 0, 0, length);
-        DomainStorage store = SecurityDomain.Current.Store;
         switch (command[0])
         {
             case 0:
-                store.BeginTransaction();
+                if (length != 4) { ResponseApdu.SetStatus(0x6700); return; }
+                CommitUpdate(command);
                 break;
             case 1:
-                if (length != 2) { ResponseApdu.SetStatus(0x6700); return; }
-                store.SetInt32(1, command[1]);
+                if (length != 4) { ResponseApdu.SetStatus(0x6700); return; }
+                AbortUpdate(command);
                 break;
             case 2:
-                if (length != 2) { ResponseApdu.SetStatus(0x6700); return; }
-                store.SetInt32(2, command[1]);
-                break;
-            case 3:
-                if (length != 2) { ResponseApdu.SetStatus(0x6700); return; }
-                store.SetBytes(3, [command[1]]);
-                break;
-            case 4:
-                store.CommitTransaction();
-                break;
-            case 5:
-                store.AbortTransaction();
-                break;
-            case 6:
+                DomainStorage store = SecurityDomain.Current.Store;
                 byte[] response =
                 [
                     (byte)store.GetInt32(1),
@@ -54,23 +42,30 @@ public static class Records
                 ];
                 ResponseApdu.Write(response, 0, response.Length);
                 break;
-            case 7:
-                store.BeginTransaction();
-                store.CommitTransaction();
-                break;
             default:
                 ResponseApdu.SetStatus(0x6D00);
                 break;
         }
     }
-}
 
-[Assembly("F04D430021")]
-public static class LifecycleTransaction
-{
-    [Install]
-    public static void Install() => SecurityDomain.Current.Store.BeginTransaction();
+    private static void CommitUpdate(byte[] command)
+    {
+        using var scope = new TransactionScope();
+        Write(command);
+        scope.Complete();
+    }
 
-    [Process]
-    public static void Process() { }
+    private static void AbortUpdate(byte[] command)
+    {
+        using var scope = new TransactionScope();
+        Write(command);
+    }
+
+    private static void Write(byte[] command)
+    {
+        DomainStorage store = SecurityDomain.Current.Store;
+        store.SetInt32(1, command[1]);
+        store.SetInt32(2, command[2]);
+        store.SetBytes(3, [command[3]]);
+    }
 }

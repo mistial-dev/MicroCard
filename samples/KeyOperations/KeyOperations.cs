@@ -1,4 +1,5 @@
 using MicroCard.Framework;
+using System.Transactions;
 [assembly: PersistentInt32(10)]
 [assembly: PersistentBytes(20, 3)]
 [assembly: PersistentBytes(21, 1)]
@@ -38,5 +39,5 @@ public static class BlobRecords {
 
 [Assembly("F04D430013")]
 public static class BudgetLoop {
- [Process, Transaction] public static void Process(){SecurityDomain.Current.Store.SetInt32(30,1);for(;;){}}
+ [Process] public static void Process(){using var scope=new TransactionScope();SecurityDomain.Current.Store.SetInt32(30,1);while(CommandApdu.Length>=0){}}
 }

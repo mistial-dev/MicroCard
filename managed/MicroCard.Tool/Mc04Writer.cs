@@ -87,6 +87,10 @@ sealed class Mc04Writer : IDisposable
         {
             var member = md.GetMemberReference(handle);
             if (member.Parent.Kind == HandleKind.TypeReference &&
+                IsSystemTransactions((TypeReferenceHandle)member.Parent) &&
+                !projectedTransactionMembers.ContainsKey(handle))
+                throw new Exception("Unsupported System.Transactions member");
+            if (member.Parent.Kind == HandleKind.TypeReference &&
                 IsProjectedSystemCryptography((TypeReferenceHandle)member.Parent) &&
                 !IsProjectedSystemCryptography(handle))
                 throw new Exception("Unsupported System.Security.Cryptography member");
@@ -430,6 +434,15 @@ sealed class Mc04Writer : IDisposable
 
     bool IsProjectedType(TypeReferenceHandle handle) =>
         IsProjectedSystemCryptography(handle) || projectedTransactionTypes.Contains(handle);
+
+    bool IsSystemTransactions(TypeReferenceHandle handle)
+    {
+        var type = md.GetTypeReference(handle);
+        return type.ResolutionScope.Kind == HandleKind.AssemblyReference &&
+               md.GetString(type.Namespace) == "System.Transactions" &&
+               md.GetString(md.GetAssemblyReference(
+                   (AssemblyReferenceHandle)type.ResolutionScope).Name) == "System.Transactions.Local";
+    }
 
     static void WriteVersion(BinaryWriter writer, Version version)
     {
