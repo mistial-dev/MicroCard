@@ -123,8 +123,11 @@ The DK release gate also needs sealed provisioning, secure boot/update policy,
 debug lockout, and independent cryptographic review before deployment as a
 production secure element. A robust USB DK test target is the nearer milestone.
 
-The connected PCA10056 DK's J-Link enumerates, but probe-rs and OpenOCD cannot
-read the target's SWD ID, including under reset. An authorized erase attempt
-failed before any erase began. The separately enumerated MicroCard CCID reader
-answers SELECT, but this does not establish access to the DK target. Physical DK
-flashing and the full JCAlgTest run remain pending debug-link recovery.
+The connected PCA10056 DK's J-Link enumerates and reports a 3.3 V target
+reference, but probe-rs, OpenOCD, and direct J-Link SWD commands cannot read
+the target's debug-port ID, including under reset. An authorized recovery
+attempt failed before erasure. The MicroCard CCID reader is connected to the
+DK's target USB port J3: the running target authenticates SCP03 with the local
+development key and reports the older MC04 discovery format. This proves the
+target is running, but the JCVM image has not been flashed. Physical DK JCVM
+acceptance and the full JCAlgTest run remain pending debug-link recovery.
