@@ -181,6 +181,7 @@ mod tests {
             (11, 256, 0, true), (12, 256, 0, true), (30, 256, 0, true), (31, 256, 0, true),
             (9, 256, 0, false), (10, 256, 0, false), (28, 256, 0, false),
             (29, 256, 0, false), (12, 384, 0, false), (12, 256, 1, false),
+            (16, 128, 0, false),
         ] {
             frame.push_short(kind).unwrap();
             frame.push_short(size).unwrap();

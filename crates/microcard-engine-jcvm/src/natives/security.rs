@@ -132,8 +132,8 @@ pub(crate) fn checkpoint_committed(heap: &mut Heap, host: &mut dyn crate::host::
 /// The class a `KeyBuilder` type code builds, JCRE Table 5-1.
 ///
 /// Transient symmetric keys keep their initialized flag with their transient bytes.
-fn key_class(key_type: i16) -> Result<ClassId> {
-    Ok(match key_type {
+fn key_class(key_type: i16) -> Option<ClassId> {
+    Some(match key_type {
         1..=3 => ClassId::DESKey,
         4 => ClassId::RSAPublicKey,
         5 | 22 | 23 => ClassId::RSAPrivateKey,
@@ -146,10 +146,7 @@ fn key_class(key_type: i16) -> Result<ClassId> {
         12 | 30 | 31 => ClassId::ECPrivateKey,
         13..=15 => ClassId::AESKey,
         19..=21 => ClassId::HMACKey,
-        _ => {
-            super::report("javacard/security/KeyBuilder", "buildKey of an unknown type");
-            return Err(Error::Unsupported);
-        }
+        _ => return None,
     })
 }
 
@@ -249,7 +246,9 @@ pub fn call(
             let _encryption = frame.pop_short()?;
             let length = frame.pop_short()?;
             let key_type = frame.pop_short()?;
-            let name = key_class(key_type)?;
+            let Some(name) = key_class(key_type) else {
+                return crypto_exception(heap, context, 3);
+            };
             if matches!(key_type, 9..=12 | 28..=31)
                 && (!ec::key_kind(key_type as u16) || length != 256 || _encryption != 0
                     || host.p256_parameter(0).is_none()) {
