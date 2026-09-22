@@ -112,9 +112,11 @@ portability patch, CAP, load file, and hashes. `scripts/jcalgtest_acceptance.py`
 checks its version and all 104 contiguous Cipher, Signature, KeyAgreement,
 MessageDigest, and RandomData factory constants in the applet's 3.0.5 table. It
 requires exact agreement with the supported SHA-256, AES-128, ECDSA-SHA-256, P-256
-agreement, and pseudo/secure-random profile. The same applet also runs SHA-256
-`update`, `doFinal`, and `reset` through its performance commands, proving more
-than factory construction. CI and the checkpoint build the simulator with native
+agreement, and pseudo/secure-random profile. The same applet runs 14 preparation
+and performance commands across these providers, including SHA-256 streaming,
+AES-128 CBC, P-256 signature and agreement, and both random services. These
+commands prove that the applet reaches each operation; independent vectors
+establish output correctness. CI and the checkpoint build the simulator with native
 diagnostics and fail either real-applet run if it reaches an unimplemented native
 method or rejected instruction. The checkpoint gate and CI run both applet tests.
 

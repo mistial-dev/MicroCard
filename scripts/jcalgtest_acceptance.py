@@ -31,10 +31,30 @@ FACTORIES = {
 }
 
 
-def digest_operation(method: int) -> str:
-    # JCAlgTest TestSettings: eleven big-endian shorts, one 16-byte operation.
-    settings = struct.pack(">11H", 0x15, 4, 0, 0, 0, method, 16, 0, 0, 1, 1)
-    return f"b0410000{len(settings):02x}{settings.hex()}"
+def performance_command(ins: int, profile: tuple[int, ...], method: int) -> str:
+    class_id, algorithm, key_class, key_type, key_bits, length, mode = profile
+    # JCAlgTest TestSettings: eleven big-endian shorts, one repeat per operation.
+    settings = struct.pack(">11H", class_id, algorithm, key_class, key_type,
+                           key_bits, method, length, 0, mode, 1, 1)
+    return f"b0{ins:02x}0000{len(settings):02x}{settings.hex()}"
+
+
+# Each row reaches a different claimed provider through the actual applet.
+# Method numbers and command codes are from the vendored JCAlgTest sources.
+PERFORMANCE = (
+    ("SHA-256", 0x34, 0x41, (0x15, 4, 0, 0, 0, 16, 0),
+     (("update", 2), ("doFinal", 6), ("reset", 4))),
+    ("AES-128 CBC", 0x31, 0x43, (0x11, 13, 0, 15, 128, 16, 1),
+     (("doFinal", 7),)),
+    ("ECDSA P-256", 0x32, 0x49, (0x12, 33, 5, 12, 256, 32, 0),
+     (("verify", 7),)),
+    ("ECDH P-256", 0x37, 0x47, (0x13, 3, 5, 12, 256, 32, 0),
+     (("generateSecret", 4),)),
+    ("secure random", 0x33, 0x42, (0x16, 1, 0, 0, 0, 16, 0),
+     (("generateData", 3),)),
+    ("pseudo random", 0x33, 0x42, (0x16, 2, 0, 0, 0, 16, 0),
+     (("generateData", 3),)),
+)
 
 
 def main() -> None:
@@ -58,7 +78,14 @@ def main() -> None:
     commands = [SELECT, GET_VERSION, *(
         f"b075{class_id:02x}0003{algorithm:02x}0000"
         for _, algorithm, class_id, _ in probes
-    ), "b03400000400150004", *(digest_operation(method) for method in (2, 6, 4))]
+    )]
+    performance = []
+    for name, prepare_ins, run_ins, profile, methods in PERFORMANCE:
+        performance.append((f"{name} prepare",
+                            performance_command(prepare_ins, profile, methods[0][1])))
+        performance.extend((f"{name} {label}", performance_command(run_ins, profile, method))
+                           for label, method in methods)
+    commands.extend(command for _, command in performance)
     result = subprocess.run(
         [str(SIM), "serve-jcvm", str(LOAD_FILE)],
         input="\n".join(commands) + "\n",
@@ -82,10 +109,10 @@ def main() -> None:
         expected = 0 if supported else 3
         assert response[1] == expected, f"{label} result was {response[1]}"
 
-    for operation, answer in zip(("prepare SHA-256", "update", "doFinal", "reset"), answers[2 + len(probes):]):
+    for (operation, _), answer in zip(performance, answers[2 + len(probes):]):
         assert answer == "AA9000", f"JCAlgTest {operation} answered {answer}"
 
-    print(f"PASS: JCAlgTest reports {len(probes)} factories and runs SHA-256 update/final/reset")
+    print(f"PASS: JCAlgTest reports {len(probes)} factories and runs {len(performance)} provider commands")
 
 
 if __name__ == "__main__":
