@@ -22,13 +22,14 @@ is the authoritative list of supported behavior, unfinished implementation, and 
 
 ## The .NET engine
 
+- [MC04 authoring](MC04_AUTHORING.md) — create, build, convert, and run an assembly from the project template.
+- [MC04 application API](MC04_API.md) — generated catalog of the calls recognized by the converter.
 - [Assembly format](ASSEMBLY_FORMAT.md) — the MC04 binary format.
 - [MC04 opcodes](MC04_OPCODES.md) and [MC04 tables](MC04_TABLES.md) — generated reference appendices.
 - [Profile](PROFILE.md) — the execution profile limits.
 - [Profile enforcement](PROFILE_ENFORCEMENT.md) — how host diagnostics map to runtime invariants.
 - [Image verification](IMAGE_VERIFICATION.md) — why the device check is independent of the signature.
 - [Default assemblies](DEFAULT_ASSEMBLIES.md) and [default bundle](DEFAULT_BUNDLE.md) — the supported set.
-- [Rider](RIDER.md) — analyzer package setup for authoring.
 - [Kdf108 profile](KDF108_PROFILE.md) — the demonstration assembly profile.
 - [Runtime budgets](RUNTIME_BUDGETS.md) — interpreter high-water marks.
 

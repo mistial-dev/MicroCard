@@ -1,8 +1,12 @@
 # Managed profile enforcement
 
-Rider diagnostics provide early feedback. The preprocessor and signed-image verifier enforce the corresponding lowered invariant without trusting analyzer output. Source-only warnings, such as allocation inside a loop, become authoritative runtime arena, object, instruction, and call-frame bounds because source structure is intentionally absent from MC04.
+IDE and build diagnostics provide early feedback through the SDK's Roslyn analyzer.
+The preprocessor and signed-image verifier enforce the corresponding lowered invariant
+without trusting analyzer output. Source-only warnings, such as allocation inside a
+loop, become authoritative runtime arena, object, instruction, and call-frame bounds
+because source structure is intentionally absent from MC04.
 
-| Diagnostic | Rider meaning | Independent host enforcement | Device or runtime enforcement |
+| Diagnostic | Authoring meaning | Independent host enforcement | Device or runtime enforcement |
 | --- | --- | --- | --- |
 | MCA0001 | Unsupported language construct | Rejects emitted exception regions, state-machine shapes, modified signatures, and unsupported CIL operands | Rejects unsupported metadata, signatures, and CIL operands |
 | MCA0002 | Unsupported managed type | Signature rewriting accepts only profile primitives, arrays, sealed local classes, and declared dependencies | Borrowed signature verifier accepts the same reduced type grammar |

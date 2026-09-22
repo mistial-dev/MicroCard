@@ -41,8 +41,9 @@ ECDH exchange. These results are development evidence rather than a conformance 
 [Java Card profile](docs/JCVM_PROFILE.md) records the exact supported API surface,
 test results, and known gaps.
 
-The **MC04 environment is also functional host-side**. It compiles annotated C#
-libraries into signed assemblies and runs them in isolated security domains. The
+The **MC04 environment is also functional host-side**. It compiles conventional C#
+assembly lifecycle methods into signed MC04 images and runs them in isolated security
+domains. The
 credential-wallet acceptance flow covers provisioning, P-256 signing, PIN recovery,
 package rejection, and persistence across restart.
 
@@ -127,7 +128,7 @@ configuration hashes, simulator hashes, timings, skips, and failures.
 
 ## Run the MC04 wallet
 
-The wallet requires .NET SDK **10.0.302**, Java **21**, Maven, and the Python
+The wallet requires a .NET **10** SDK, Java **21**, Maven, and the Python
 dependencies above.
 
 ```sh
@@ -158,7 +159,10 @@ dotnet build CredentialCard
 
 The converted `.mca` image and manifest are written below the project's
 `obj/<configuration>/<framework>/microcard` directory. Run the isolated packaging and
-conversion check with `python3 scripts/sdk_template_smoke.py`.
+conversion check with `python3 scripts/sdk_template_smoke.py`. The
+[MC04 authoring guide](docs/MC04_AUTHORING.md) explains lifecycle methods,
+`AssemblyContext`, typed services, explicit transactions, host execution, and why the
+SDK reference does not become a device dependency.
 
 ## Architecture and security boundaries
 

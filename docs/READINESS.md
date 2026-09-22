@@ -8,7 +8,7 @@ This page is the authoritative list of supported behavior and release blockers.
 
 ## Supported behavior
 
-- **MC04:** annotated C# compilation, analysis, independent device verification,
+- **MC04:** conventional C# assembly lifecycle methods, analysis, independent device verification,
   signed loading, installation, selection, execution, and reboot recovery. The Java
   wallet acceptance covers isolated credentials, P-256 signing, PIN recovery,
   package rejection, and persistence. See [the execution profile](PROFILE.md).
@@ -57,6 +57,11 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
+- Add a project-local host command that packages, installs, selects, and invokes an
+  arbitrary `microcard-assembly` template project. The current low-level `run-mc04`
+  command accepts a numeric MethodDef row and intentionally lacks native
+  `AssemblyContext` services; signed end-to-end behavior is covered by repository
+  acceptance scripts rather than a generated-project command.
 - Complete physical interruption coverage for personalized OpenFIPS201 provisioning.
   The original ICAM object-only workflow passes exact readback of 11 objects after
   reopening.

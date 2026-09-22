@@ -21,7 +21,7 @@ The .NET build pipeline, reduced CIL interpreter, signed loading, security domai
 
 ```mermaid
 flowchart TB
-    CSharp[C# source in Rider] --> Compiler[Normal .NET compiler + Roslyn diagnostics]
+    CSharp[C# source in an IDE] --> Compiler[Normal .NET compiler + Roslyn diagnostics]
     Compiler --> Reducer[Metadata-only preprocessor]
     Reducer --> Image[MC04 assembly + manifest]
     Image --> Signer[Explicit P-256 packaging]
@@ -50,7 +50,12 @@ The managed-code boundary assumes trusted Rust firmware. Resistance to attackers
 
 ## What .NET owns
 
-The desktop compiler creates ordinary .NET assemblies. Roslyn analyzers provide early diagnostics in Rider and builds, including unsupported language features, invalid lifecycle declarations, unsafe transaction effects and resource limits. Analyzers improve feedback. Disabling them cannot authorize device execution.
+The desktop compiler creates ordinary .NET assemblies. The
+`OpenPhysical.MicroCard.Sdk` package supplies the compile-time app model, XML
+documentation, Roslyn analyzer, conversion target, and converter through one private
+package reference. Visual Studio, Rider, and other C# editors therefore use the same
+completion and diagnostics as command-line builds. Disabling the analyzer cannot
+authorize device execution.
 
 The preprocessor reads metadata and CIL without executing the input assembly. It validates the supported reachable program, retains compact ECMA-335-style tables, tokens, signatures and CIL, and emits MC04. Unneeded desktop structures are removed. MC04 defines a reduced .NET execution profile with its own runtime.
 
@@ -58,7 +63,7 @@ Signing is an explicit host step. The signature covers the executable image and 
 
 Two kinds of managed code participate at execution time:
 
-- **Application assemblies** provide annotated lifecycle handlers and credential behavior.
+- **Application assemblies** provide conventional lifecycle methods and credential behavior.
 - **Shared library assemblies** provide reusable operations such as encoding and typed cryptographic facades. Their managed instructions execute in the same bounded interpreter.
 
 Only the authenticated framework can introduce native bindings. A namespace, a lookalike attribute, or an application signature does not confer native privilege. Framework cryptographic facades invoke Rust services. They leave AES and elliptic-curve private-key arithmetic to native code.
@@ -94,7 +99,10 @@ These rules define the **MicroCard security-domain profile**. Full GlobalPlatfor
 3. For a load, Rust stages the complete package, checks its signature and executable structure, verifies dependencies and quotas, then activates it atomically. Partial uploads cannot execute.
 4. For an invocation, Rust establishes trusted domain identity, resolves the selected instance and executes its verified entry point.
 5. Managed code uses bounded framework calls. Rust checks ownership, arguments and work budgets before performing native operations.
-6. Successful ordinary changes commit transactionally. The response returns through secure messaging. Host signature verification gives the wallet an independent check of the credential result.
+6. Ordinary changes commit once at the safe command boundary without rollback state.
+   Code that explicitly opened a `TransactionScope` receives rollback and synchronous
+   commit. The response then returns through secure messaging. Host signature
+   verification gives the wallet an independent check of the credential result.
 
 A signature authorizes an assembly's identity. SCP03 authorizes management traffic. Neither replaces the other.
 
@@ -121,8 +129,9 @@ changes checkpoint storage during execution; remaining durability gaps are track
 in [release readiness](READINESS.md). Direct calls between engines are unsupported.
 
 Board profiles select exactly one engine. The raw `serve-jcvm` host runner is volatile;
-`serve-jcvm-managed` exercises authenticated loading and persistent recovery. Physical
-execution of the current JCVM firmware remains a separate acceptance gate.
+`serve-jcvm-managed` exercises authenticated loading and persistent recovery. The
+Makerdiary board has completed the recorded development smoke sequence. Full physical
+durability, fault-injection, and production acceptance remain separate gates.
 
 Image storage provides scoped range guards: nRF52840 and memory backends borrow
 slot bytes, while the file backend owns the requested range. Multiple read guards
@@ -137,13 +146,15 @@ each referenced provider once per pass.
 Activation validates the already-verified candidate with flash-backed dependencies
 before staging writes; its new root does not require an existing image descriptor.
 
-MC04 domain internals separate application staging, lifecycle execution, metadata
-mutations, snapshot encoding, and linking. `domains/linking.rs` owns dependency
-resolution, executable-unit assembly, and whole-program call-graph validation;
-`domains.rs` owns domain state, storage and recovery. `domains/management.rs` handles
-authenticated management commands. `domains/execution.rs` owns selection,
-invocation and execution transaction boundaries; `domains/native.rs` owns native
-service dispatch, authorization and bounded output handling.
+MC04 domain internals separate the state model, bounded collections, registry
+encoding, storage sessions, application storage, lifecycle execution, snapshot
+encoding, dependency linking, management, and native dispatch. `domains/model.rs`,
+`collections.rs`, `registry.rs`, `session.rs`, and `snapshot.rs` own those data
+invariants. `domains/management.rs` handles authenticated management commands;
+`execution.rs` owns selection and invocation boundaries; `lifecycle.rs` owns package
+lifecycle callbacks; and `native.rs` owns service dispatch, authorization, and bounded
+output handling. The top-level `domains.rs` composes these modules rather than owning
+their implementations.
 
 ## Design references
 

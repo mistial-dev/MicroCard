@@ -11,7 +11,7 @@ REFERENCES = (
 
 
 def schemas():
-    for name in ("mc04_schema", "mc04_opcodes", "mc04_abi", "jcvm_opcodes", "jcvm_api"):
+    for name in ("mc04_schema", "mc04_opcodes", "mc04_abi", "mc04_api", "jcvm_opcodes", "jcvm_api"):
         run("python3", f"scripts/generate_{name}.py", "--check")
     for name in ("package_envelope_test", "device_cbor_test", "prepare_first_flash_test", "doc_links", "jcvm_cap_inventory_test", "copy_audit", "profile_enforcement_audit"):
         run("python3", f"scripts/{name}.py")

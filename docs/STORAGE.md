@@ -2,11 +2,33 @@
 
 Each SSD owns one persistent application store shared by all assemblies loaded into that SSD. The runtime derives the SSD from trusted execution context. Managed code cannot name another domain. Deleting the SSD revokes the store with the rest of that domain.
 
-`DomainStorage` supports `GetInt32` and `SetInt32` for up to 512 integer records. It also supports `GetBytes`, `SetBytes`, `ContainsBytes` and `DeleteBytes` with integer keys. Byte records are limited to 64 entries, 1,024 bytes per value and 8,192 bytes total per SSD. A missing byte record reads as an empty array, so callers use `ContainsBytes` when absence differs from an empty value. Deleting a missing byte record faults the invocation.
+`AssemblyContext.Current.Storage` exposes `GetInt32` and `SetInt32` for up to
+512 integer records. It also exposes `GetBytes`, `SetBytes`, `ContainsBytes`, and
+`DeleteBytes` through typed `StorageId` values. Byte records are limited to 64 entries,
+1,024 bytes per value, and 8,192 bytes total per SSD. A missing byte record reads as an
+empty array, so callers use `ContainsBytes` when absence differs from an empty value.
+Deleting a missing byte record faults the invocation.
 
-Every assembly invocation operates on a private state copy. The complete mutation set commits only after successful execution and journal persistence. Explicit `DomainStorage` transaction controls may retain that candidate across at most sixteen basic-channel commands. The candidate remains volatile until commit. Abort, fault, reset, selection change, management traffic or reboot discards it. A journal interruption exposes either the old complete state or the new complete state after recovery.
+Ordinary execution mutates the live command state without allocating a transaction
+snapshot. A no-op writes no journal record. Changed state commits once when command
+processing reaches a safe boundary, including an application-generated managed error
+response. Cancellation, runtime corruption, unsafe termination, or persistence failure
+reloads the last authenticated durable state. A journal interruption exposes either
+the previous complete state or the new complete state after recovery.
 
-Discarded state copies and deleted domains zeroize application Int32 records and byte-record allocations before releasing their memory. Replacing or deleting one byte record wipes its released allocation immediately. Byte-record copies reserve their exact length before state mutation. Native private-key entries and credential verifier material have independent drop zeroization. Canonical serialization and decrypted journal plaintext remain in zeroizing, fallibly reserved buffers.
+An application allocates rollback state only by entering a
+`System.Transactions.TransactionScope`. Disposing a completed scope publishes and
+persists the candidate synchronously. Disposing without `Complete()`, reset,
+deselection, expiry, or an unhandled application failure restores the saved state.
+Transactions are lexical to one `Process` invocation, reject nesting, and cannot be
+controlled by another applet. See [transactions](TRANSACTIONS.md).
+
+Aborted transaction candidates and deleted domains zeroize application Int32 records
+and byte-record allocations before releasing their memory. Replacing or deleting one
+byte record wipes its released allocation immediately. Byte-record copies reserve
+their exact length before state mutation. Native private-key entries and credential
+verifier material have independent drop zeroization. Canonical serialization and
+decrypted journal plaintext remain in zeroizing, fallibly reserved buffers.
 
 The MJ03 journal encrypts and authenticates each snapshot with AES-CCM. The storage key is derived from both device-specific SCP03 management keys through a domain-separated AES-CMAC operation. Recovery rejects a wrong key and any changed authenticated header, ciphertext or tag, then revalidates all state invariants and stored package signatures.
 

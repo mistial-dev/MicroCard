@@ -31,20 +31,16 @@ catch an exception to control durability.
 
 Projected scope controls and ambient queries use internal native IDs 55 through 60.
 Packages retain the stable transaction capability bits 46 through 48; runtime
-authorization aliases the query calls to capability 46. The retired public
-`DomainStorage` transaction methods and
-`[Transaction]` annotation are not part of the managed API.
+authorization aliases the query calls to capability 46.
 
 The public scope is lexical: it begins and ends inside one `Process` invocation. The
-runtime retains a device-side compatibility shim for already-installed signed packages
-that used the retired `DomainStorage` controls. The current framework no longer exposes
-those methods, so new source cannot create that state. Reset, transport teardown,
+scope cannot escape the method or cross a command boundary. Reset, transport teardown,
 selection, management, cancellation, runtime failure, or command-budget exhaustion
-discards it. Credential retry floors remain monotonic and persist separately.
+aborts it. Credential retry floors remain monotonic and persist separately.
 
 Lifecycle hooks cannot open a transaction. Response construction remains buffered, and
 the analyzer plus preprocessor reject an explicit transaction path that can reach
-irreversible `Hardware.Write`.
+irreversible `AssemblyContext.Current.Runtime.WriteHardware`.
 
 ## Ordinary-path measurement
 

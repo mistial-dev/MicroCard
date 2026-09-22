@@ -16,7 +16,17 @@ The 28-method assembly occupies 2,161 bytes as MC04 and 2,585 bytes as a represe
 
 ### `MicroCard.Framework`
 
-Provide the only general native ABI facade. It owns command and response APDU views, lifecycle context, caller security context, transactions, domain storage, randomness, opaque key handles and capability-checked hardware access. `CommandApdu.Length` and `CommandApdu.CopyTo` copy one validated range into the invocation arena. `ResponseApdu.Write` borrows one validated caller range and appends it to the bounded response. `ResponseApdu.SetStatus` sets the status word. Native IDs 11, 12 and 13 implement the bulk operations, ID 2 sets status, and IDs 46 through 48 implement domain-storage begin, commit and abort. IDs 0 and 1 are invalid, so packages built for the retired bytewise ABI are rejected. No public method accepts a domain identifier or raw native handle.
+Provide the compile-time application model for the native ABI. Applications enter
+through `AssemblyContext.Current`, whose typed services own the command and response
+views, secure-channel context, persistent storage, randomness, credentials, opaque
+keys, and capability-checked runtime operations. `CommandService.Length` and
+`CommandService.CopyTo` copy one validated APDU range into the invocation arena.
+`ResponseService.Write` borrows one validated caller range and appends it to the
+bounded response, and `ResponseService.SetStatus` accepts a typed `StatusWord`.
+`System.Transactions.TransactionScope` is the only public rollback API. The converter
+lowers recognized calls directly from the generated ABI catalog, so the app-model
+reference is absent from device dependencies. No public method accepts a domain
+identifier or raw native handle.
 
 ### `MicroCard.Iso7816`
 
