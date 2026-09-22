@@ -1,75 +1,62 @@
 #![no_std]
 #![no_main]
 extern crate alloc;
+mod diagnostics;
 #[cfg(feature = "engine-jcvm")]
 mod jcvm;
+mod platform;
+mod recovery;
+mod storage;
 #[cfg(feature = "usb-ccid")]
 mod usb_ccid;
 use cortex_m_rt::entry;
-use nrf52840_pac as pac;
 #[cfg(feature = "development-recovery")]
 use cortex_m_rt::{exception, ExceptionFrame};
 #[cfg(feature = "usb-ccid")]
-use microcard_core::transport::ENTER_BOOTLOADER_APDU;
+use microcard_core::transport::Endpoint;
 use microcard_core::{
-    hal::{
-        DeviceIdentity, Entropy, LogicalGpio, ResetReason, ResetReport, StagingFlash, Watchdog,
-    },
-    journal::{decode_program_once_words, next_program_once_word, Flash},
-    provisioning::{ownership_marker_action, OwnershipMarkerAction, PROGRAMMED_OWNERSHIP_MARKER},
+    hal::{DeviceIdentity, Entropy, LogicalGpio, ResetReport, Watchdog},
+    provisioning::{ownership_marker_action, OwnershipMarkerAction},
     scp03::Keys,
     Error, Result,
 };
-#[cfg(feature = "usb-ccid")]
-use microcard_core::transport::Endpoint;
 #[cfg(feature = "usb-ccid")]
 use nrf52840_hal::{
     clocks::{Clocks, ExternalOscillator, Internal, LfOscStopped},
     usbd::UsbPeripheral,
 };
+use nrf52840_pac as pac;
+#[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
+use usb_device::device::UsbDeviceState;
 #[cfg(feature = "usb-ccid")]
 use usb_device::{
     bus::UsbBusAllocator,
     device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
     LangID,
 };
-#[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
-use usb_device::device::UsbDeviceState;
 #[global_allocator]
 static HEAP: embedded_alloc::LlffHeap = embedded_alloc::LlffHeap::empty();
 static mut HEAP_MEMORY: [u8; 196608] = [0; 196608];
-// Register offsets follow nRF52840 Product Specification peripheral register tables.
-unsafe fn read(a: usize) -> u32 {
-    core::ptr::read_volatile(a as *const u32)
-}
-unsafe fn write(a: usize, v: u32) {
-    core::ptr::write_volatile(a as *mut u32, v)
-}
-
-fn enable_instruction_cache() {
-    let nvmc = unsafe { &*pac::NVMC::ptr() };
-    nvmc.icachecnf.write(|w| w.cacheen().enabled());
-}
-
-fn start_hfxo() -> Result<()> {
-    // Leave EVENTS_HFCLKSTARTED set. The HAL consumes and clears it when it later takes
-    // ownership of CLOCK for USB, while storage and CC310 already run from the crystal.
-    let clock = unsafe { &*pac::CLOCK::ptr() };
-    clock
-        .tasks_hfclkstart
-        .write(|w| w.tasks_hfclkstart().set_bit());
-    let start = now();
-    while clock.events_hfclkstarted.read().bits() == 0 {
-        feed();
-        if now().wrapping_sub(start) > 1_000_000 {
-            return Err(Error::Native);
-        }
-    }
-    Ok(())
-}
+use diagnostics::halt_with_diagnostic;
+#[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
+use diagnostics::report_usb_failure;
+#[cfg(feature = "dongle-layout")]
+use diagnostics::{led_color, led_init, LedColor};
+#[cfg(any(feature = "development-debug", not(feature = "cc310-entropy")))]
+use platform::read;
+use platform::{
+    enable_instruction_cache, start_hfxo, write, BoardIdentity, BoardResetReport, BoardWatchdog,
+};
+#[cfg(feature = "usb-ccid")]
+use platform::{feed, now};
 #[cfg(not(feature = "cc310-entropy"))]
-const RNG: usize = 0x4000D000;
-const TIMER: usize = 0x40008000;
+use platform::{wait, RNG};
+#[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
+use recovery::set_uf2_recovery_marker;
+#[cfg(feature = "dongle-layout")]
+use recovery::{ensure_clean_bootloader_handoff, enter_uf2};
+pub(crate) use storage::Nvm;
+pub(crate) use storage::StagingNvm;
 // The flash region map the linker used, so the firmware and the linker cannot disagree.
 mod layout {
     // Generated for every region. A given build reads the ones its configuration needs.
@@ -88,135 +75,19 @@ unsafe extern "C" {
     static _microcard_flash_origin: u8;
 }
 use layout::{KEYS_BASE, KEYS_BYTES};
-const OWNERSHIP_MARKER_OFFSET: usize = 32;
-
-#[cfg(feature = "dongle-layout")]
-const LED_MASK: u32 = (1 << 22) | (1 << 23) | (1 << 24);
-
-#[cfg(feature = "dongle-layout")]
-const CLEAN_BOOT_MAGIC: u8 = 0xa5;
-
-#[cfg(feature = "dongle-layout")]
-#[derive(Clone, Copy)]
-enum LedColor {
-    Off,
-    Red,
-    Green,
-    Blue,
-    Cyan,
-    Yellow,
-    Magenta,
-}
-
-#[cfg(feature = "dongle-layout")]
-fn led_init() {
-    let gpio = unsafe { &*pac::P0::ptr() };
-    // The common-anode RGB LED is active low. Set every output high before changing
-    // direction so startup cannot produce a misleading flash.
-    gpio.outset.write(|w| unsafe { w.bits(LED_MASK) });
-    gpio.dirset.write(|w| unsafe { w.bits(LED_MASK) });
-}
-
-#[cfg(feature = "dongle-layout")]
-fn led_color(color: LedColor) {
-    let gpio = unsafe { &*pac::P0::ptr() };
-    gpio.outset.write(|w| unsafe { w.bits(LED_MASK) });
-    let active = match color {
-        LedColor::Off => 0,
-        LedColor::Red => 1 << 23,
-        LedColor::Green => 1 << 22,
-        LedColor::Blue => 1 << 24,
-        LedColor::Cyan => (1 << 22) | (1 << 24),
-        LedColor::Yellow => (1 << 22) | (1 << 23),
-        LedColor::Magenta => (1 << 23) | (1 << 24),
-    };
-    gpio.outclr.write(|w| unsafe { w.bits(active) });
-}
-
-#[cfg(feature = "dongle-layout")]
-fn enter_uf2() -> ! {
-    // The Makerdiary bootloader documents 0x57 in GPREGRET as its application-to-UF2
-    // handoff. Use the generated peripheral API so the register address and field width
-    // continue to come from Nordic's device description.
-    unsafe {
-        (&*pac::POWER::ptr())
-            .gpregret
-            .write(|w| w.gpregret().bits(0x57));
-    }
-    cortex_m::peripheral::SCB::sys_reset()
-}
-
-#[cfg(feature = "dongle-layout")]
-fn ensure_clean_bootloader_handoff() {
-    let power = unsafe { &*pac::POWER::ptr() };
-    if power.gpregret2.read().gpregret().bits() != CLEAN_BOOT_MAGIC {
-        // Makerdiary UF2 transfers control with a direct branch, so active USB state can survive
-        // into the application. One ordinary system reset gives the bootloader a clean run that
-        // skips DFU and tears its board state down before branching back to us. GPREGRET2 is not
-        // used by the installed bootloader and prevents a reset loop.
-        power
-            .gpregret2
-            .write(|w| unsafe { w.gpregret().bits(CLEAN_BOOT_MAGIC) });
-        cortex_m::asm::dsb();
-        cortex_m::peripheral::SCB::sys_reset();
-    }
-    power.gpregret2.write(|w| unsafe { w.gpregret().bits(0) });
-}
+pub(crate) const OWNERSHIP_MARKER_OFFSET: usize = 32;
 
 #[cfg(feature = "usb-ccid")]
-fn is_enter_uf2_command(command: &[u8]) -> bool {
-    cfg!(feature = "development-recovery") && command == ENTER_BOOTLOADER_APDU
-}
-
+pub(crate) type BoardUsbDevice = UsbDevice<'static, usb_ccid::UsbBus>;
 #[cfg(feature = "usb-ccid")]
-type BoardUsbDevice = UsbDevice<'static, usb_ccid::UsbBus>;
-#[cfg(feature = "usb-ccid")]
-type BoardCcidClass = usb_ccid::CcidClass<'static>;
+pub(crate) type BoardCcidClass = usb_ccid::CcidClass<'static>;
 /// APDUs cross between the CCID class and the runtime through this channel. It is
 /// static because both halves are held for the lifetime of the USB stack.
 #[cfg(feature = "usb-ccid")]
 static APDU_CHANNEL: usb_ccid::ApduChannel = interchange::Channel::new();
 
-#[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
-fn report_usb_failure(code: u8) -> ! {
-    for _ in 0..2 {
-        led_color(LedColor::Red);
-        let deadline = now().wrapping_add(400_000);
-        while now().wrapping_sub(deadline) >= 0x8000_0000 {
-            feed();
-        }
-        led_color(LedColor::Off);
-        let deadline = now().wrapping_add(150_000);
-        while now().wrapping_sub(deadline) >= 0x8000_0000 {
-            feed();
-        }
-        for _ in 0..code {
-            led_color(LedColor::Blue);
-            let deadline = now().wrapping_add(150_000);
-            while now().wrapping_sub(deadline) >= 0x8000_0000 {
-                feed();
-            }
-            led_color(LedColor::Off);
-            let deadline = now().wrapping_add(150_000);
-            while now().wrapping_sub(deadline) >= 0x8000_0000 {
-                feed();
-            }
-        }
-    }
-    enter_uf2()
-}
-
-#[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
-fn set_uf2_recovery_marker(value: u8) {
-    unsafe {
-        (&*pac::POWER::ptr())
-            .gpregret
-            .write(|w| w.gpregret().bits(value));
-    }
-}
-
 #[cfg(feature = "usb-ccid")]
-fn initialize_usb() -> Option<(
+pub(crate) fn initialize_usb() -> Option<(
     BoardUsbDevice,
     BoardCcidClass,
     usb_ccid::ApduResponder<'static>,
@@ -262,116 +133,6 @@ fn initialize_usb() -> Option<(
     initialized
 }
 
-/// Keep a USB-only board observable when startup cannot safely open card state.
-///
-/// These failures remain terminal and never erase or repair storage. Returning a
-/// proprietary `6Fxx` status lets unattended hardware tests distinguish the failure
-/// boundary after the ordinary CCID power-on and ATR exchange succeeds.
-fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> ! {
-    #[cfg(feature = "usb-ccid")]
-    let mut usb_stack = None;
-    #[cfg(feature = "usb-ccid")]
-    let mut attempted = false;
-    #[cfg(feature = "dongle-layout")]
-    led_init();
-    #[cfg(feature = "dongle-layout")]
-    let (blink_color, blink_count) = match _code {
-        0x41..=0x44 => (LedColor::Blue, _code - 0x40),
-        0x45 => (LedColor::Cyan, 1),
-        0x46..=0x4a => (LedColor::Yellow, _code - 0x45),
-        0x4b..=0x4d => (LedColor::Magenta, _code - 0x4a),
-        _ => (LedColor::Blue, _code.clamp(1, 8)),
-    };
-    #[cfg(feature = "dongle-layout")]
-    let mut blinks_remaining = 0;
-    #[cfg(feature = "dongle-layout")]
-    let mut blink_on = false;
-    #[cfg(feature = "dongle-layout")]
-    let mut led_deadline = now();
-    loop {
-        let _ = watchdog.feed();
-        #[cfg(feature = "dongle-layout")]
-        if now().wrapping_sub(led_deadline) < 0x8000_0000 {
-            if blinks_remaining == 0 {
-                led_color(LedColor::Red);
-                blinks_remaining = blink_count;
-                blink_on = false;
-                led_deadline = now().wrapping_add(800_000);
-            } else if blink_on {
-                led_color(LedColor::Off);
-                blink_on = false;
-                blinks_remaining -= 1;
-                led_deadline = now().wrapping_add(150_000);
-            } else {
-                led_color(blink_color);
-                blink_on = true;
-                led_deadline = now().wrapping_add(150_000);
-            }
-        }
-        #[cfg(feature = "usb-ccid")]
-        {
-            let powered = usb_ccid::power_ready();
-            if powered && !attempted {
-                attempted = true;
-                usb_stack = initialize_usb();
-            }
-            if let Some((device, class, responder)) = usb_stack.as_mut() {
-                if powered {
-                    let _ = device.poll(&mut [class]);
-                    #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
-                    if device.state() == UsbDeviceState::Configured {
-                        set_uf2_recovery_marker(0);
-                    }
-                    if let Some(request) = responder.take_request() {
-                        let mut response = heapless::Vec::new();
-                        let uf2_requested = is_enter_uf2_command(&request);
-                        let status = if uf2_requested {
-                            [0x90, 0x00]
-                        } else {
-                            [0x6f, _code]
-                        };
-                        let _ = response.extend_from_slice(&status);
-                        let _ = responder.respond(response);
-                        #[cfg(feature = "dongle-layout")]
-                        if uf2_requested {
-                            // The card cannot establish SCP03 in diagnostic mode. This exact
-                            // command only resets an already unusable development dongle into
-                            // its bootloader, and remains unavailable during normal operation.
-                            let deadline = now().wrapping_add(250_000);
-                            while now().wrapping_sub(deadline) >= 0x8000_0000 {
-                                feed();
-                                let _ = device.poll(&mut [class]);
-                                class.check_for_app_response();
-                            }
-                            enter_uf2();
-                        }
-                    }
-                    class.check_for_app_response();
-                }
-            }
-        }
-    }
-}
-const WDT: usize = 0x40010000;
-fn now() -> u32 {
-    unsafe {
-        write(TIMER + 0x040, 1);
-        read(TIMER + 0x540)
-    }
-}
-#[cfg(not(feature = "cc310-entropy"))]
-fn wait(a: usize) -> Result<()> {
-    let start = now();
-    while unsafe { read(a) } == 0 {
-        if now().wrapping_sub(start) > 1_000_000 {
-            return Err(Error::Native);
-        }
-    }
-    Ok(())
-}
-fn feed() {
-    unsafe { write(WDT + 0x600, 0x6E524635) }
-}
 #[cfg(feature = "cc310-sha256")]
 mod cc310 {
     use core::ffi::{c_char, c_void};
@@ -1691,436 +1452,6 @@ impl LogicalGpio for Hardware {
         Ok(())
     }
 }
-struct Nvm {
-    slots: [usize; 3],
-    count: usize,
-    size: usize,
-    monotonic: usize,
-    nonces: usize,
-}
-impl Nvm {
-    const COUNTER_BYTES: usize = 4096;
-    fn new() -> Self {
-        Self {
-            slots: [layout::JOURNAL0_BASE, layout::JOURNAL1_BASE, {
-                #[cfg(feature = "engine-mc04")]
-                {
-                    layout::JOURNAL2_BASE
-                }
-                #[cfg(not(feature = "engine-mc04"))]
-                {
-                    0
-                }
-            }],
-            count: if cfg!(feature = "engine-mc04") { 3 } else { 2 },
-            size: layout::JOURNAL0_BYTES,
-            monotonic: layout::MONOTONIC_BASE,
-            nonces: layout::NONCES_BASE,
-        }
-    }
-
-    fn base(&self, slot: usize) -> Result<usize> {
-        if slot >= self.count {
-            return Err(Error::Bounds);
-        }
-        Ok(self.slots[slot])
-    }
-
-    fn persistent_storage_erased() -> Result<bool> {
-        let flash = Self::new();
-        for slot in 0..flash.slot_count() {
-            if !flash.is_erased(slot)? {
-                return Ok(false);
-            }
-        }
-        if unsafe {
-            core::slice::from_raw_parts(
-                crate::layout::IMAGES_BASE as *const u8,
-                crate::layout::IMAGES_BYTES,
-            )
-        }
-        .iter()
-        .any(|byte| *byte != 0xff)
-        {
-            return Ok(false);
-        }
-        #[cfg(feature = "engine-jcvm")]
-        for bank in 0..2 {
-            let heap = jcvm::Heaps::region(bank)?;
-            for slot in 0..heap.slot_count() {
-                if !heap.is_erased(slot)? {
-                    return Ok(false);
-                }
-            }
-            if heap.monotonic_generation()? != 0 || heap.nonce_generation()? != 0 {
-                return Ok(false);
-            }
-        }
-        Ok(
-            Self::word_counter(layout::MONOTONIC_BASE, layout::MONOTONIC_BYTES)? == 0
-                && Self::word_counter(crate::layout::NONCES_BASE, crate::layout::NONCES_BYTES)? == 0,
-        )
-    }
-
-    fn ownership_marker() -> u32 {
-        unsafe { read(KEYS_BASE + OWNERSHIP_MARKER_OFFSET) }
-    }
-
-    fn program_ownership_marker() -> Result<()> {
-        Self::program_region(
-            KEYS_BASE,
-            KEYS_BYTES,
-            OWNERSHIP_MARKER_OFFSET,
-            &PROGRAMMED_OWNERSHIP_MARKER.to_le_bytes(),
-        )
-    }
-    fn ready() -> Result<()> {
-        let nvmc = unsafe { &*pac::NVMC::ptr() };
-        let start = now();
-        while nvmc.ready.read().ready().is_busy() {
-            if now().wrapping_sub(start) > 1_000_000 {
-                return Err(Error::Native);
-            }
-        }
-        Ok(())
-    }
-    fn read_region(base: usize, size: usize, offset: usize, output: &mut [u8]) -> Result<()> {
-        let end = offset.checked_add(output.len()).ok_or(Error::Bounds)?;
-        if end > size {
-            return Err(Error::Bounds);
-        }
-        output.copy_from_slice(unsafe {
-            core::slice::from_raw_parts((base + offset) as *const u8, output.len())
-        });
-        Ok(())
-    }
-    fn erase_region(base: usize, size: usize) -> Result<()> {
-        if !size.is_multiple_of(4096) {
-            return Err(Error::Bounds);
-        }
-        let nvmc = unsafe { &*pac::NVMC::ptr() };
-        nvmc.config.write(|w| w.wen().een());
-        let result = (|| {
-            for page in (base..base + size).step_by(4096) {
-                nvmc.erasepage()
-                    .write(|w| unsafe { w.erasepage().bits(page as u32) });
-                Self::ready()?;
-                feed();
-            }
-            Ok(())
-        })();
-        nvmc.config.write(|w| w.wen().ren());
-        result
-    }
-    fn program_region(base: usize, size: usize, offset: usize, bytes: &[u8]) -> Result<()> {
-        if offset.checked_add(bytes.len()).is_none_or(|end| end > size) {
-            return Err(Error::Bounds);
-        }
-        if bytes.is_empty() {
-            return Ok(());
-        }
-        let nvmc = unsafe { &*pac::NVMC::ptr() };
-        nvmc.config.write(|w| w.wen().wen());
-        let result = (|| {
-            let end = offset + bytes.len();
-            for pos in ((offset & !3)..((end + 3) & !3)).step_by(4) {
-                let current = unsafe { read(base + pos) };
-                let mut word = current.to_le_bytes();
-                for (index, byte) in word.iter_mut().enumerate() {
-                    let location = pos + index;
-                    if location >= offset && location < end {
-                        let new = bytes[location - offset];
-                        if *byte & new != new {
-                            return Err(Error::Storage);
-                        }
-                        *byte = new;
-                    }
-                }
-                let word = u32::from_le_bytes(word);
-                if word == current {
-                    continue;
-                }
-                unsafe { write(base + pos, word) }
-                Self::ready()?;
-                feed();
-            }
-            Ok(())
-        })();
-        nvmc.config.write(|w| w.wen().ren());
-        result
-    }
-}
-
-struct StagingNvm {
-    bank: Option<usize>,
-    next_bank: usize,
-}
-impl StagingNvm {
-    const BASE: usize = crate::layout::STAGING_BASE;
-    const BANK_BYTES: usize = if cfg!(feature = "engine-jcvm") {
-        64 * 1024
-    } else {
-        16 * 1024
-    };
-    const BANKS: usize = layout::STAGING_BYTES / Self::BANK_BYTES;
-
-    const fn new() -> Self {
-        Self {
-            bank: None,
-            next_bank: 0,
-        }
-    }
-    fn bank_base(&self) -> Result<usize> {
-        self.bank
-            .map(|bank| Self::BASE + bank * Self::BANK_BYTES)
-            .ok_or(Error::Storage)
-    }
-    fn bank_is_erased(bank: usize) -> bool {
-        unsafe {
-            core::slice::from_raw_parts(
-                (Self::BASE + bank * Self::BANK_BYTES) as *const u8,
-                Self::BANK_BYTES,
-            )
-        }
-        .iter()
-        .all(|byte| *byte == 0xff)
-    }
-}
-impl StagingFlash for StagingNvm {
-    fn mapped(&self, offset: usize, length: usize) -> Result<Option<&[u8]>> {
-        if offset
-            .checked_add(length)
-            .is_none_or(|end| end > Self::BANK_BYTES)
-        {
-            return Err(Error::Bounds);
-        }
-        let base = self.bank_base()?;
-        // This bank is exclusively owned by staging. Mutations require &mut self,
-        // and registry/heap writes use disjoint flash regions.
-        Ok(Some(unsafe {
-            core::slice::from_raw_parts((base + offset) as *const u8, length)
-        }))
-    }
-    fn capacity(&self) -> usize {
-        Self::BANK_BYTES
-    }
-    fn read(&self, offset: usize, output: &mut [u8]) -> Result<()> {
-        Nvm::read_region(self.bank_base()?, Self::BANK_BYTES, offset, output)
-    }
-    fn erase(&mut self) -> Result<()> {
-        let selected = (0..Self::BANKS)
-            .map(|offset| {
-                let bank = self.next_bank + offset;
-                if bank < Self::BANKS {
-                    bank
-                } else {
-                    bank - Self::BANKS
-                }
-            })
-            .find(|bank| Self::bank_is_erased(*bank))
-            .unwrap_or(self.next_bank);
-        let base = Self::BASE + selected * Self::BANK_BYTES;
-        if !Self::bank_is_erased(selected) {
-            Nvm::erase_region(base, Self::BANK_BYTES)?;
-        }
-        self.bank = Some(selected);
-        self.next_bank = if selected + 1 == Self::BANKS {
-            0
-        } else {
-            selected + 1
-        };
-        Ok(())
-    }
-    fn program(&mut self, offset: usize, bytes: &[u8]) -> Result<()> {
-        Nvm::program_region(self.bank_base()?, Self::BANK_BYTES, offset, bytes)
-    }
-}
-impl Nvm {
-    const IMAGE_SLOT_BYTES: usize = if cfg!(feature = "engine-jcvm") {
-        64 * 1024
-    } else {
-        16 * 1024
-    };
-    const IMAGE_SLOTS: usize = crate::layout::IMAGES_BYTES / Self::IMAGE_SLOT_BYTES;
-
-    fn image_base(index: usize) -> Result<usize> {
-        if index >= Self::IMAGE_SLOTS {
-            return Err(Error::Bounds);
-        }
-        Ok(crate::layout::IMAGES_BASE + index * Self::IMAGE_SLOT_BYTES)
-    }
-}
-struct NvmImageReader;
-impl microcard_core::image_store::ImageReader for NvmImageReader {
-    fn slot_count(&self) -> usize {
-        Nvm::IMAGE_SLOTS
-    }
-    fn slot_size(&self) -> usize {
-        Nvm::IMAGE_SLOT_BYTES
-    }
-    type Image<'a> = &'a [u8];
-    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
-        let base = Nvm::image_base(index)?;
-        if range.start > range.end || range.end > Nvm::IMAGE_SLOT_BYTES {
-            return Err(Error::Bounds);
-        }
-        // MC04 retains this read-only handle while journal writes use disjoint flash pages.
-        Ok(unsafe { core::slice::from_raw_parts((base + range.start) as *const u8, range.len()) })
-    }
-}
-impl microcard_core::image_store::ImageReader for Nvm {
-    fn slot_count(&self) -> usize { Nvm::IMAGE_SLOTS }
-    fn slot_size(&self) -> usize { Nvm::IMAGE_SLOT_BYTES }
-    type Image<'a> = &'a [u8];
-    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
-        NvmImageReader.read_range(index, range)
-    }
-}
-impl microcard_core::image_store::ImageFlash for Nvm {
-    type Reader = NvmImageReader;
-    fn image_reader(&self) -> Result<Self::Reader> { Ok(NvmImageReader) }
-    fn erase(&mut self, index: usize) -> Result<()> {
-        Nvm::erase_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES)
-    }
-    fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
-        Nvm::program_region(
-            Self::image_base(index)?,
-            Self::IMAGE_SLOT_BYTES,
-            offset,
-            bytes,
-        )
-    }
-}
-impl Nvm {
-    fn word_counter(base: usize, capacity: usize) -> Result<u64> {
-        decode_program_once_words(unsafe {
-            core::slice::from_raw_parts(base as *const u8, capacity)
-        })
-    }
-    fn advance_word_counter(base: usize, capacity: usize, generation: u64) -> Result<()> {
-        let counter = unsafe { core::slice::from_raw_parts(base as *const u8, capacity) };
-        let word_offset = next_program_once_word(counter, generation)?;
-        let address = base + word_offset;
-        if unsafe { read(address) } != u32::MAX {
-            return Err(Error::Storage);
-        }
-        let nvmc = unsafe { &*pac::NVMC::ptr() };
-        nvmc.config.write(|w| w.wen().wen());
-        unsafe { write(address, 0) };
-        let result = Self::ready();
-        nvmc.config.write(|w| w.wen().ren());
-        result?;
-        if unsafe { read(address) } != 0 {
-            return Err(Error::Storage);
-        }
-        Ok(())
-    }
-}
-impl Flash for Nvm {
-    fn slot_count(&self) -> usize {
-        self.count
-    }
-    fn slot_size(&self) -> usize {
-        self.size
-    }
-    fn monotonic_capacity(&self) -> u64 {
-        (Self::COUNTER_BYTES / 4) as u64
-    }
-    fn monotonic_generation(&self) -> Result<u64> {
-        Self::word_counter(self.monotonic, Self::COUNTER_BYTES)
-    }
-    fn advance_monotonic(&mut self, generation: u64) -> Result<()> {
-        Self::advance_word_counter(self.monotonic, Self::COUNTER_BYTES, generation)
-    }
-    fn nonce_capacity(&self) -> u64 {
-        (Self::COUNTER_BYTES / 4) as u64
-    }
-    fn nonce_generation(&self) -> Result<u64> {
-        Self::word_counter(self.nonces, Self::COUNTER_BYTES)
-    }
-    fn reserve_nonce(&mut self) -> Result<u64> {
-        let next = self
-            .nonce_generation()?
-            .checked_add(1)
-            .ok_or(Error::Quota)?;
-        Self::advance_word_counter(self.nonces, Self::COUNTER_BYTES, next)?;
-        Ok(next)
-    }
-    fn is_erased(&self, slot: usize) -> Result<bool> {
-        Ok(
-            unsafe { core::slice::from_raw_parts(self.base(slot)? as *const u8, self.size) }
-                .iter()
-                .all(|byte| *byte == 0xff),
-        )
-    }
-    fn read(&self, slot: usize, offset: usize, output: &mut [u8]) -> Result<()> {
-        Self::read_region(self.base(slot)?, self.size, offset, output)
-    }
-    fn erase(&mut self, slot: usize) -> Result<()> {
-        Self::erase_region(self.base(slot)?, self.size)
-    }
-    fn program(&mut self, slot: usize, offset: usize, bytes: &[u8]) -> Result<()> {
-        Self::program_region(self.base(slot)?, self.size, offset, bytes)
-    }
-}
-struct BoardWatchdog;
-impl Watchdog for BoardWatchdog {
-    fn arm(&mut self, timeout_ticks: u64) -> Result<()> {
-        if timeout_ticks == 0 {
-            return Err(Error::Bounds);
-        }
-        let counter = timeout_ticks
-            .checked_mul(32_768)
-            .and_then(|value| value.checked_div(1_000_000))
-            .and_then(|value| value.checked_sub(1))
-            .and_then(|value| u32::try_from(value).ok())
-            .ok_or(Error::Bounds)?;
-        unsafe {
-            write(WDT + 0x504, counter);
-            write(WDT + 0x508, 1);
-            write(WDT + 0x50C, 1);
-            write(WDT, 1);
-        }
-        Ok(())
-    }
-
-    fn feed(&mut self) -> Result<()> {
-        feed();
-        Ok(())
-    }
-}
-
-struct BoardIdentity;
-impl DeviceIdentity for BoardIdentity {
-    fn read_identity(&self, output: &mut [u8]) -> Result<usize> {
-        if output.len() < 8 {
-            return Err(Error::Bounds);
-        }
-        output[..4].copy_from_slice(&unsafe { read(0x10000060) }.to_le_bytes());
-        output[4..8].copy_from_slice(&unsafe { read(0x10000064) }.to_le_bytes());
-        Ok(8)
-    }
-}
-
-struct BoardResetReport(u32);
-impl BoardResetReport {
-    fn capture() -> Self {
-        Self(unsafe { read(0x40000400) })
-    }
-}
-impl ResetReport for BoardResetReport {
-    fn reset_reason(&self) -> ResetReason {
-        if self.0 & (1 << 1) != 0 {
-            ResetReason::Watchdog
-        } else if self.0 & 1 != 0 {
-            ResetReason::Pin
-        } else if self.0 & (1 << 2) != 0 {
-            ResetReason::Software
-        } else {
-            ResetReason::Unknown
-        }
-    }
-}
 #[entry]
 fn main() -> ! {
     #[cfg(feature = "dongle-layout")]
@@ -2213,7 +1544,11 @@ fn main() -> ! {
     let card = match opened {
         Ok(c) => c,
         Err(error) => {
-            let code = if error == Error::IncompatibleState { 0x07 } else { 0x08 };
+            let code = if error == Error::IncompatibleState {
+                0x07
+            } else {
+                0x08
+            };
             halt_with_diagnostic(&mut watchdog, code);
         }
     };
@@ -2229,7 +1564,12 @@ fn main() -> ! {
     let firmware_end = layout::FLASH_BASE + layout::FLASH_BYTES;
     for (slot, start, size, block_read) in [
         (0, 0, firmware_end.min(0x80000) as u32, false),
-        (1, 0x80000, firmware_end.saturating_sub(0x80000) as u32, false),
+        (
+            1,
+            0x80000,
+            firmware_end.saturating_sub(0x80000) as u32,
+            false,
+        ),
         (2, KEYS_BASE as u32, KEYS_BYTES as u32, true),
     ] {
         if size == 0 {
