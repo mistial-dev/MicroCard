@@ -138,14 +138,11 @@ fn key_class(key_type: i16) -> Option<ClassId> {
         4 => ClassId::RSAPublicKey,
         5 | 22 | 23 => ClassId::RSAPrivateKey,
         6 | 24 | 25 => ClassId::RSAPrivateCrtKey,
-        7 => ClassId::DSAPublicKey,
-        8 | 26 | 27 => ClassId::DSAPrivateKey,
         9 => ClassId::ECPublicKey,
         10 | 28 | 29 => ClassId::ECPrivateKey,
         11 => ClassId::ECPublicKey,
         12 | 30 | 31 => ClassId::ECPrivateKey,
         13..=15 => ClassId::AESKey,
-        19..=21 => ClassId::HMACKey,
         _ => return None,
     })
 }
@@ -249,6 +246,10 @@ pub fn call(
             let Some(name) = key_class(key_type) else {
                 return crypto_exception(heap, context, 3);
             };
+            if matches!(key_type, 4..=6 | 22..=25)
+                && !matches!(length, 512 | 736 | 768 | 896 | 1024 | 1280 | 1536 | 1984 | 2048) {
+                return crypto_exception(heap, context, 3);
+            }
             if matches!(key_type, 9..=12 | 28..=31)
                 && (!ec::key_kind(key_type as u16) || length != 256 || _encryption != 0
                     || host.p256_parameter(0).is_none()) {
