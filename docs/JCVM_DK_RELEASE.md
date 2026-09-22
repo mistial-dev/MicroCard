@@ -54,7 +54,7 @@ crash, or unfinished mode as an invalid measurement, never as an algorithmic
 ## Tiny-crypto-c backfill
 
 The upstream `tiny-crypto-c` review branch is pinned for evaluation at
-[`257481303899b834723be15db48b617ae247799f`](https://github.com/mistial-dev/tiny-crypto-c/commit/257481303899b834723be15db48b617ae247799f). It adds
+[`e5bf501735a36bcf9581754a3ef7717486dbc3da`](https://github.com/mistial-dev/tiny-crypto-c/commit/e5bf501735a36bcf9581754a3ef7717486dbc3da). It adds
 caller-workspace ECDSA digest signing and bounded key-pair generation for the
 library's P-192, P-256, and P-384 curves with injected entropy. The signing
 change passed RFC 6979 sample vectors, negative cases, sanitizer runs, and all
