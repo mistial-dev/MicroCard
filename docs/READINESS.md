@@ -152,9 +152,11 @@ not a prerequisite for finishing these implementation tasks.
 reference builds, with profile-specific ceilings and engine/provider isolation checks.
 [Assembly budgets](ASSEMBLY_BUDGETS.json) record managed image sizes;
 [runtime budgets](RUNTIME_BUDGETS.md) record logical work. Final-tree measurements remain
-required. Static RAM includes the reserved heap. Clean revision `d13e4af` produced
-development-only Makerdiary bundles for both engines without accessing hardware. The
-MC04 UF2 SHA-256 is `1cf089bb3a1fff58144b6fb98b601bd57ced22a1979d05230b423b9bc374aad6`;
+required. Static RAM includes the reserved heap. The clean tree now signed as
+`a481518` produced development-only Makerdiary bundles for both engines without
+accessing hardware; their manifests record its byte-identical pre-signing revision,
+`d13e4af`. The MC04 UF2 SHA-256 is
+`1cf089bb3a1fff58144b6fb98b601bd57ced22a1979d05230b423b9bc374aad6`;
 the JCVM UF2 SHA-256 is `9886b74b3504dd5a5425089ab52c5d75cfd73f462622315bf2b8635f5b3fc240`.
 Both manifests record `hardware_flashed: false` and their exact layouts, ELF hashes,
 features, link inspection, and revision.
@@ -175,15 +177,16 @@ comparisons remain in Git history; reproduce current results before using them a
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. .NET builds share a graph, the Java wallet builds once before acceptance,
 compiler cases run in process, and acceptance reuses outputs with bounded workers and
-isolated logs/state. A clean revision `11e83f4` checkpoint rebuilt Rust, .NET, and Java
-outputs and took 55.467 seconds with four workers
+isolated logs/state. The clean tree now signed as `edf75a3` rebuilt Rust, .NET, and
+Java outputs and took 55.467 seconds with four workers
 (`work/checkpoint-explicit-transactions-fully-cold.json`). Host, Java wallet, recovery,
 generated artifacts, and affected fuzz-target builds passed; workspace and both
 dongle-profile Clippy runs also passed. All seven firmware profiles linked with
 engine/provider isolation. The checkpoint exits nonzero only because three unchanged
-flash optimization ceilings remain exceeded; none were raised. The full OpenFIPS201
-NIST contact run at the same clean revision reported 61 passed, 0 failed, and 2
-documented not applicable cases out of 63
+flash optimization ceilings remain exceeded; none were raised. Retained NIST metadata
+records the byte-identical pre-signing revision, `11e83f4`. The full OpenFIPS201 NIST
+contact run at that clean tree reported 61 passed, 0 failed, and 2 documented not
+applicable cases out of 63
 (`work/nist-explicit-transactions-final/nist-results.xml`). Physical command latency
 remains a release measurement.
 
@@ -204,9 +207,9 @@ Makerdiary and cover both engine builds, CC310 independent vectors and
 forced failures, buffer aliasing, stack/heap peaks, latency and sustained throughput,
 USB abort/disconnect/suspend, and power interruption during ownership, activation,
 commit, credential retries, sequence reservation, and deletion. Four five-minute
-AddressSanitizer campaigns completed without findings at clean revision `205b88a`,
-with revision-bound evidence archived as described in
-[fuzzing](FUZZING.md#sustained-sanitizer-checkpoint). Verify Linux and Windows release
+AddressSanitizer campaigns completed without findings at the clean tree now signed as
+`d09d0ae`; the evidence records its byte-identical pre-signing revision, `205b88a`, as
+described in [fuzzing](FUZZING.md#sustained-sanitizer-checkpoint). Verify Linux and Windows release
 bundles in CI before claiming those distributions are supported.
 
 Production additionally requires provisioning and sealed root keys, debug lockout,

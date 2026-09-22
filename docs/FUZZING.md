@@ -116,9 +116,10 @@ validation loop.
 
 ## Sustained sanitizer checkpoint
 
-At clean revision `205b88a`, all four targets completed five-minute
+At the clean tree now signed as `d09d0ae`, all four targets completed five-minute
 AddressSanitizer campaigns with `nightly-2026-09-19` and no crash or sanitizer
-finding:
+finding. The retained `result.json` files record its byte-identical pre-signing
+revision, `205b88a`:
 
 - `boundaries`: 18,008,843 executions, 1,935 coverage edges, 5,343 features,
   324 new units, and 478 MiB peak RSS. Evidence:
