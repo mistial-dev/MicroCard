@@ -113,3 +113,26 @@ replayed all 1,165 retained inputs
 took 87 seconds to initialize, so that run did not reach mutation despite a
 30-second libFuzzer limit. Sustained campaigns remain separate from the ordinary
 validation loop.
+
+## Sustained sanitizer checkpoint
+
+At clean revision `205b88a`, all four targets completed five-minute
+AddressSanitizer campaigns with `nightly-2026-09-19` and no crash or sanitizer
+finding:
+
+- `boundaries`: 18,008,843 executions, 1,935 coverage edges, 5,343 features,
+  324 new units, and 478 MiB peak RSS. Evidence:
+  `artifacts/fuzz/boundaries-1790058420939172000`.
+- `signed_packages`: 147,099 executions, 2,349 coverage edges, 4,629 features,
+  240 new units, and 428 MiB peak RSS. Evidence:
+  `artifacts/fuzz/signed_packages-1790058424203910000`.
+- `crypto_arguments`: 103,080 executions, 1,041 coverage edges, 2,564 features,
+  349 new units, and 471 MiB peak RSS. Evidence:
+  `artifacts/fuzz/crypto_arguments-1790058430039865000`.
+- `domain_sequences`: 3,596 executions, 6,880 coverage edges, 34,248 features,
+  221 new units, and 472 MiB peak RSS. Evidence:
+  `artifacts/fuzz/domain_sequences-1790058429642291000`.
+
+Together the campaigns executed 18,262,618 inputs over 1,204 libFuzzer seconds.
+Every `result.json` records the clean revision, target and lock hashes, exact
+command, input corpora, sanitizer, elapsed time, and successful exit status.

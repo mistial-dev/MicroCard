@@ -203,9 +203,11 @@ Further physical acceptance must prove the personalized OpenFIPS201 NIST workflo
 Makerdiary and cover both engine builds, CC310 independent vectors and
 forced failures, buffer aliasing, stack/heap peaks, latency and sustained throughput,
 USB abort/disconnect/suspend, and power interruption during ownership, activation,
-commit, credential retries, sequence reservation, and deletion. Complete a bounded
-release fuzz campaign and archive revision-bound results. Verify Linux and Windows
-release bundles in CI before claiming those distributions are supported.
+commit, credential retries, sequence reservation, and deletion. Four five-minute
+AddressSanitizer campaigns completed without findings at clean revision `205b88a`,
+with revision-bound evidence archived as described in
+[fuzzing](FUZZING.md#sustained-sanitizer-checkpoint). Verify Linux and Windows release
+bundles in CI before claiming those distributions are supported.
 
 Production additionally requires provisioning and sealed root keys, debug lockout,
 verified boot/update policy, MPU and rollback policy, secure recovery/disposal,
