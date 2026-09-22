@@ -45,3 +45,27 @@ discards it. Credential retry floors remain monotonic and persist separately.
 Lifecycle hooks cannot open a transaction. Response construction remains buffered, and
 the analyzer plus preprocessor reject an explicit transaction path that can reach
 irreversible `Hardware.Write`.
+
+## Ordinary-path measurement
+
+Run the focused host measurement with:
+
+```sh
+cargo test -p microcard-core --features mc04,software-crypto \
+  ordinary_commands_avoid_rollback_state_and_commit_only_changes -- --nocapture
+```
+
+The post-change debug build measured the following on the host. Latency is diagnostic,
+not a device budget.
+
+| Command | Rollback snapshots | Journal commits | Programmed | Erased | Host latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No-op | 0 | 0 | 0 B | 0 B | 1.34 ms |
+| Integer write | 0 | 1 | 951 B | 16 KiB | 1.86 ms |
+| Blob write | 0 | 1 | 957 B | 16 KiB | 2.12 ms |
+
+Zero snapshot reservations also means zero bytes allocated for transaction rollback.
+The measurements prove that implicit staging is gone. They also expose the remaining
+cost: the current two-slot snapshot journal erases a slot for every changed command.
+No comparable pre-change counter trace was retained, so this document does not invent a
+historical delta. Physical flash latency remains a board measurement.

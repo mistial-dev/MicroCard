@@ -566,8 +566,22 @@ pub struct MemoryFlash {
     monotonic: Vec<u8>,
     nonces: Vec<u8>,
     pub fail_after: Option<usize>,
+    #[cfg(test)]
+    metrics: FlashMetrics,
+}
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FlashMetrics {
+    pub(crate) program_calls: usize,
+    pub(crate) programmed_bytes: usize,
+    pub(crate) erase_calls: usize,
+    pub(crate) erased_bytes: usize,
 }
 impl MemoryFlash {
+    #[cfg(test)]
+    pub(crate) fn reset_metrics(&mut self) { self.metrics = FlashMetrics::default(); }
+    #[cfg(test)]
+    pub(crate) fn metrics(&self) -> FlashMetrics { self.metrics }
     #[cfg(all(test, feature = "jcvm", feature = "software-crypto"))]
     pub(crate) fn leave_nonce_reservations_for_test(&mut self, remaining: usize) {
         let end = self.nonces.len().checked_sub(remaining.checked_mul(4).unwrap()).unwrap();
@@ -594,6 +608,8 @@ impl MemoryFlash {
             monotonic: vec![255; size],
             nonces: vec![255; size],
             fail_after: None,
+            #[cfg(test)]
+            metrics: FlashMetrics::default(),
         }
     }
     fn tick(&mut self) -> Result<()> {
@@ -618,9 +634,13 @@ impl MemoryFlash {
         if word.iter().any(|byte| *byte != 0xff) {
             return Err(Error::Storage);
         }
+        #[cfg(test)]
+        { self.metrics.program_calls += 1; }
         for byte in offset..offset + 4 {
             self.tick()?;
             if nonce { self.nonces[byte] = 0; } else { self.monotonic[byte] = 0; }
+            #[cfg(test)]
+            { self.metrics.programmed_bytes += 1; }
         }
         Ok(())
     }
@@ -660,9 +680,13 @@ impl crate::image_store::ImageFlash for MemoryFlash {
             image.try_reserve_exact(self.image_size).map_err(|_| Error::Quota)?;
             image.resize(self.image_size, 255);
         }
+        #[cfg(test)]
+        { self.metrics.erase_calls += 1; }
         for offset in 0..image.len() {
             self.tick()?;
             self.images[index][offset] = 255;
+            #[cfg(test)]
+            { self.metrics.erased_bytes += 1; }
         }
         Ok(())
     }
@@ -670,9 +694,13 @@ impl crate::image_store::ImageFlash for MemoryFlash {
         let end = offset.checked_add(bytes.len()).ok_or(Error::Bounds)?;
         let old = self.images.get(index).and_then(|image| image.get(offset..end)).ok_or(Error::Bounds)?;
         if old.iter().zip(bytes).any(|(old, new)| old & new != *new) { return Err(Error::Storage); }
+        #[cfg(test)]
+        if !bytes.is_empty() { self.metrics.program_calls += 1; }
         for (at, byte) in bytes.iter().enumerate() {
             self.tick()?;
             self.images[index][offset + at] = *byte;
+            #[cfg(test)]
+            { self.metrics.programmed_bytes += 1; }
         }
         Ok(())
     }
@@ -714,9 +742,13 @@ impl Flash for MemoryFlash {
         Ok(())
     }
     fn erase(&mut self, s: usize) -> Result<()> {
+        #[cfg(test)]
+        { self.metrics.erase_calls += 1; }
         for i in 0..self.slot_size() {
             self.tick()?;
             self.slots[s][i] = 255;
+            #[cfg(test)]
+            { self.metrics.erased_bytes += 1; }
         }
         Ok(())
     }
@@ -724,12 +756,16 @@ impl Flash for MemoryFlash {
         if o.checked_add(b.len()).is_none_or(|n| n > self.slot_size()) {
             return Err(Error::Bounds);
         }
+        #[cfg(test)]
+        if !b.is_empty() { self.metrics.program_calls += 1; }
         for (i, v) in b.iter().enumerate() {
             self.tick()?;
             if self.slots[s][o + i] & v != *v {
                 return Err(Error::Storage);
             }
             self.slots[s][o + i] = *v;
+            #[cfg(test)]
+            { self.metrics.programmed_bytes += 1; }
         }
         Ok(())
     }

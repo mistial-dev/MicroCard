@@ -1,5 +1,6 @@
 use super::*;
 use core::cell::{Cell, RefCell};
+extern crate std;
 mod vm {
     pub(super) use super::super::{BufferResult, NativeArgument};
 }
@@ -1966,29 +1967,57 @@ fn cooperative_cancellation_rolls_back_all_writes() {
 }
 
 #[test]
-fn ordinary_idempotent_blob_write_does_not_publish_a_journal_record() {
+fn ordinary_commands_avoid_rollback_state_and_commit_only_changes() {
     let mut card = card();
-    let incarnation = create(&mut card, "idem");
+    let incarnation = create(&mut card, "ordinary");
     load(
         &mut card,
-        &key_operations_package("idem", incarnation, 1, 7),
+        &counter_package("ordinary", incarnation, 1, 7),
     )
     .unwrap();
-    card.manage(command(
-        0xec,
-        &management_names_wire("idem", "F04D430012").unwrap(),
-    ))
+    load(
+        &mut card,
+        &key_operations_package("ordinary", incarnation, 1, 7),
+    )
     .unwrap();
-
-    card.invoke("F04D430012", &[0]).unwrap();
-    let generation = card.journal.generation();
-    let (_, metrics) = card
-        .invoke_context_with_metrics("F04D430012", &[0], 0)
+    for aid in ["F04D430001", "F04D430012"] {
+        card.manage(command(
+            0xec,
+            &management_names_wire("ordinary", aid).unwrap(),
+        ))
         .unwrap();
+    }
 
-    assert_eq!(card.journal.generation(), generation);
-    assert_eq!(metrics.transaction_snapshots, 0);
-    assert_eq!(metrics.transaction_clone_allocations, 0);
+    for (name, aid, data, expected_commits) in [
+        ("no-op", "F04D430012", &[2][..], 0),
+        ("integer-write", "F04D430001", &[][..], 1),
+        ("blob-write", "F04D430012", &[0][..], 1),
+    ] {
+        card.journal.flash_mut().reset_metrics();
+        let generation = card.journal.generation();
+        let started = std::time::Instant::now();
+        let (_, execution) = card.invoke_context_with_metrics(aid, data, 0).unwrap();
+        let elapsed = started.elapsed();
+        let flash = card.journal.flash_mut().metrics();
+        let commits = card.journal.generation() - generation;
+
+        std::eprintln!(
+            "{name}: commits={commits} program_calls={} programmed_bytes={} erase_calls={} erased_bytes={} elapsed_us={}",
+            flash.program_calls,
+            flash.programmed_bytes,
+            flash.erase_calls,
+            flash.erased_bytes,
+            elapsed.as_micros()
+        );
+        assert_eq!(commits, expected_commits);
+        assert_eq!(execution.transaction_snapshots, 0);
+        assert_eq!(execution.transaction_clone_allocations, 0);
+        assert_eq!(flash.programmed_bytes == 0, expected_commits == 0);
+        if expected_commits == 0 {
+            assert_eq!(flash.erase_calls, 0);
+            assert_eq!(flash.erased_bytes, 0);
+        }
+    }
 }
 
 // Primitive tests sweep every flash byte. Domain tests exercise both sides of each
