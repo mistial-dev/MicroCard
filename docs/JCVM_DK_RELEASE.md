@@ -54,15 +54,19 @@ crash, or unfinished mode as an invalid measurement, never as an algorithmic
 ## Tiny-crypto-c backfill
 
 The upstream `tiny-crypto-c` review branch is pinned for evaluation at
-[`e0b94d7f18653196edf310af5505c606a59f07a4`](https://github.com/mistial-dev/tiny-crypto-c/commit/e0b94d7f18653196edf310af5505c606a59f07a4). It adds
-caller-workspace ECDSA digest signing for the library's P-192, P-256, and P-384
-curves with an injected nonce source. Its RFC 6979 sample vectors, negative
-cases, sanitizer runs, and all 179 configured CTest cases pass; optional
-external vector corpora were not supplied. This is upstream library work only:
-the DK firmware does not link this branch yet, and Java Card P-192/P-384
-signing remains unsupported. Before enabling it, pin the full commit in the
-build, review license and source provenance, connect a fail-closed board
-provider, and pass key import, operation, failure, and reboot acceptance.
+[`257481303899b834723be15db48b617ae247799f`](https://github.com/mistial-dev/tiny-crypto-c/commit/257481303899b834723be15db48b617ae247799f). It adds
+caller-workspace ECDSA digest signing and bounded key-pair generation for the
+library's P-192, P-256, and P-384 curves with injected entropy. The signing
+change passed RFC 6979 sample vectors, negative cases, sanitizer runs, and all
+179 configured CTest cases; the subsequent key-generation change passed focused
+EC and sanitizer suites. Optional external vector corpora were not supplied.
+For a Cortex-M4 `-Os` object with these three curves enabled, `ec.c` grew from
+4,827 to 6,045 text bytes before link-time dead-code elimination. This is
+upstream library work only. The DK firmware does not link this branch yet, and
+Java Card P-192/P-384 signing and key generation remain unsupported. Before
+enabling it, pin the full commit in the build, review license and source
+provenance, connect a fail-closed board provider, and pass key import,
+operation, failure, and reboot acceptance.
 
 ## Baseline before unsigned loading
 
