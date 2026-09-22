@@ -26,6 +26,16 @@ impl crate::hal::LogicalGpio for TestPlatform {
         Err(Error::Native)
     }
 }
+struct AcceptCredentialCheckpoint;
+impl CredentialCheckpoint<TestPlatform> for AcceptCredentialCheckpoint {
+    fn checkpoint(
+        &mut self,
+        _: &mut TestPlatform,
+        _: &CredentialRetryFloors,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
 struct FailingEntropy;
 impl crate::crypto::CryptoProvider for FailingEntropy {}
 impl crate::hal::Entropy for FailingEntropy {
@@ -86,14 +96,20 @@ impl crate::hal::StagingFlash for TestStagingFlash {
 }
 #[derive(Clone)]
 struct SharedJournalFlash(Rc<RefCell<MemoryFlash>>);
-impl crate::image_store::ImageFlash for SharedJournalFlash {
-    fn slot_count(&self) -> usize { crate::image_store::ImageFlash::slot_count(&*self.0.borrow()) }
-    fn slot_size(&self) -> usize { crate::image_store::ImageFlash::slot_size(&*self.0.borrow()) }
+impl crate::image_store::ImageReader for SharedJournalFlash {
+    fn slot_count(&self) -> usize { crate::image_store::ImageReader::slot_count(&*self.0.borrow()) }
+    fn slot_size(&self) -> usize { crate::image_store::ImageReader::slot_size(&*self.0.borrow()) }
     type Image<'a> = core::cell::Ref<'a, [u8]>;
     fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
         let flash = self.0.try_borrow().map_err(|_| Error::Busy)?;
         flash.read_range(index, range.clone())?;
         Ok(core::cell::Ref::map(flash, |flash| flash.read_range(index, range).expect("validated image range")))
+    }
+}
+impl crate::image_store::ImageFlash for SharedJournalFlash {
+    type Reader = crate::journal::MemoryImageReader;
+    fn image_reader(&self) -> Result<Self::Reader> {
+        crate::image_store::ImageFlash::image_reader(&*self.0.borrow())
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         crate::image_store::ImageFlash::erase(&mut *self.0.borrow_mut(), index)
@@ -2263,6 +2279,7 @@ fn issuer_dependency_code_cannot_reach_caller_domain_storage() {
         credentials: &mut credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint: None,
         owner: [1; 16],
         data: &[],
         out: Vec::new(),
@@ -2678,6 +2695,7 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
         credentials: &mut credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint: None,
         owner: [1; 16],
         data: b"abcdef",
         out: Vec::new(),
@@ -2780,6 +2798,7 @@ fn bulk_random_and_fixed_time_comparison_validate_ranges() {
         credentials: &mut credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint: None,
         owner: [1; 16],
         data: &[],
         out: Vec::new(),
@@ -2859,6 +2878,7 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
     let mut platform = TestPlatform(9);
     let capabilities = [40, 41, 42, 43, 44, 45];
     {
+        let mut checkpoint = AcceptCredentialCheckpoint;
         let mut transaction = TransactionDisposition::Inactive;
         let mut transaction_snapshot = None;
         let mut persistent_dirty = false;
@@ -2871,6 +2891,7 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
             credentials: &mut credentials,
             authorized_credentials: CredentialAuthorizations::default(),
             credential_retry_floor: CredentialRetryFloors::default(),
+            credential_checkpoint: Some(&mut checkpoint),
             owner: [1; 16],
             data: &[],
             out: Vec::new(),
@@ -2970,6 +2991,7 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
         );
     }
     let mut transaction = TransactionDisposition::Inactive;
+    let mut checkpoint = AcceptCredentialCheckpoint;
     let mut transaction_snapshot = None;
     let mut persistent_dirty = false;
     let mut transaction_snapshots = 0;
@@ -2981,6 +3003,7 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
         credentials: &mut credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint: Some(&mut checkpoint),
         owner: [1; 16],
         data: &[],
         out: Vec::new(),
@@ -3125,6 +3148,118 @@ fn credential_retry_floor_power_loss_recovers_prior_or_consumed_count() {
     }
 }
 
+fn failed_pin_native_checkpoint(
+    card: &mut Mc04Engine<MemoryFlash, TestPlatform>,
+    domain_name: &str,
+    slot: i32,
+) -> (Result<BufferResult>, bool) {
+    let registry_aid = card.state.domains[domain_name].registry_aid;
+    let incarnation = card.state.domains[domain_name].incarnation;
+    let (journal, state, platform) = (&mut card.journal, &mut card.state, &mut card.platform);
+    let domain = state.domains.get_mut(domain_name).unwrap();
+    let mut checkpoint = JournalCredentialCheckpoint::new(journal, registry_aid);
+    let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    let mut transaction_snapshots = 0;
+    let mut transaction_clone_allocations = 0;
+    let mut host = Host {
+        store: &mut domain.store,
+        blobs: &mut domain.blobs,
+        keys: &mut domain.keys,
+        credentials: &mut domain.credentials,
+        authorized_credentials: CredentialAuthorizations::default(),
+        credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint: Some(&mut checkpoint),
+        owner: incarnation,
+        data: &[],
+        out: Vec::new(),
+        sw: 0x9000,
+        platform,
+        budget: 1024,
+        capabilities: &[41],
+        domain_schema: &[],
+        max_int_records: 512,
+        max_blob_records: 64,
+        max_blob_bytes: 8192,
+        max_key_slots: 8,
+        level: 0,
+        units: None,
+        transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        transaction_snapshots: &mut transaction_snapshots,
+        transaction_clone_allocations: &mut transaction_clone_allocations,
+        irreversible_output: false,
+    };
+    let result = host.credential_call(
+        41,
+        &[
+            NativeArgument::Int(slot),
+            NativeArgument::Bytes(b"9999"),
+            NativeArgument::Int(0),
+            NativeArgument::Int(4),
+        ],
+    );
+    drop(host);
+    (result, persistent_dirty)
+}
+
+#[test]
+fn failed_pin_native_returns_only_after_its_retry_floor_is_durable() {
+    let mut card = card();
+    let incarnation = create(&mut card, "native-retry");
+    load(
+        &mut card,
+        &counter_package("native-retry", incarnation, 1, 7),
+    )
+    .unwrap();
+    let mut initial = card.state.clone();
+    initial.domains.get_mut("native-retry").unwrap().credentials
+        .create(
+            incarnation,
+            4,
+            b"1234",
+            b"12345678",
+            (3, 2),
+            &mut card.platform,
+        )
+        .unwrap();
+    card.commit(initial).unwrap();
+    let base = card.into_flash();
+    let snapshot_bytes = Mc04Engine::open(base.clone(), TestPlatform(10), STORAGE_KEY)
+        .unwrap()
+        .state
+        .encode_snapshot()
+        .unwrap()
+        .len();
+
+    for cut in commit_cuts(snapshot_bytes, 0) {
+        let mut interrupted =
+            Mc04Engine::open(base.clone(), TestPlatform(10), STORAGE_KEY).unwrap();
+        interrupted.journal.flash_mut().fail_after = Some(cut);
+        let (result, dirty) = failed_pin_native_checkpoint(&mut interrupted, "native-retry", 4);
+        let mut flash = interrupted.into_flash();
+        flash.fail_after = None;
+        let recovered = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
+        let retries = recovered.state.domains["native-retry"]
+            .credentials
+            .retries(incarnation, 4)
+            .unwrap();
+        match result {
+            Ok(BufferResult::Scalar(0)) => {
+                assert_eq!(retries.0, 2, "successful native checkpoint at cut {cut}");
+                assert!(!dirty, "successful checkpoint must restore ordinary dirty state");
+            }
+            Err(Error::Storage) => {
+                assert_eq!(retries.0, 3, "failed native checkpoint at cut {cut}");
+                assert!(dirty, "failed checkpoint must force unsafe-exit recovery");
+            }
+            other => panic!("unexpected native result at cut {cut}: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn byte_storage_native_api_enforces_ownership_and_quotas() {
     let mut store = IntStore::new();
@@ -3145,6 +3280,7 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         credentials: &mut credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint: None,
         owner: [1; 16],
         data: &[],
         out: Vec::new(),

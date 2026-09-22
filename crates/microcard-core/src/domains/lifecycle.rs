@@ -167,8 +167,9 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let schema = core::mem::replace(&mut domain.storage_schema, schema);
         let result = (|| {
             {
+                let image_reader = self.journal.flash().image_reader()?;
                 let images = linking::BorrowedExecution::with_candidate(&self.state,
-                    self.journal.flash(), &mut self.platform, id, &name, &raw)?;
+                    &image_reader, &mut self.platform, id, &name, &raw)?;
                 images.units()?;
             }
             if cancel() {
@@ -300,7 +301,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         let source = self.state.domain(id).ok_or(Error::Domain)?;
         let owner = source.registry_aid;
         let assembly = source.instances.get(aid).ok_or(Error::Missing)?;
-        let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+        let image_reader = self.journal.flash().image_reader()?;
+        let images = linking::BorrowedExecution::new(&self.state, &image_reader,
             &mut self.platform, id, assembly)?;
         let units = images.units()?;
         let package = &units[0].package;
@@ -321,12 +323,13 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 staged.view(source),
                 package,
                 Some(&units),
-                method,
                 InvocationInput {
+                    entry: method,
                     data: &[],
                     level: 0,
                 },
                 &mut self.platform,
+                Some(&mut JournalCredentialCheckpoint::new(&mut self.journal, owner)),
                 &mut retries.control(owner, cancel)?,
             )?;
             application = Some(staged);

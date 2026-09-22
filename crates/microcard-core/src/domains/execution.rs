@@ -23,6 +23,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
     ) -> Result<()> {
         self.abort_transaction();
         let (next, selected) = {
+            let image_reader = self.journal.flash().image_reader()?;
             let old = self
                 .selected
                 .as_ref()
@@ -32,7 +33,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                         return Ok(None);
                     }
                     let assembly = domain.instances.get(old_aid).ok_or(Error::Missing)?;
-                    let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+                    let images = linking::BorrowedExecution::new(&self.state, &image_reader,
                         &mut self.platform, id, assembly)?;
                     let entry = domain.package_metadata(assembly)?
                         .manifest
@@ -52,7 +53,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 .find(|(_, domain)| domain.instances.contains_key(aid))
                 .ok_or(Error::Missing)?;
             let assembly = domain.instances.get(aid).ok_or(Error::Missing)?;
-            let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+            let images = linking::BorrowedExecution::new(&self.state, &image_reader,
                 &mut self.platform, id, assembly)?;
             let units = images.units()?;
             let entry = units[0]
@@ -75,12 +76,16 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     next.view(old_domain)?,
                     &old_units[0].package,
                     Some(&old_units),
-                    old_entry,
                     InvocationInput {
+                        entry: old_entry,
                         data: &[],
                         level: 0,
                     },
                     &mut self.platform,
+                    Some(&mut JournalCredentialCheckpoint::new(
+                        &mut self.journal,
+                        old_domain.registry_aid,
+                    )),
                     &mut retries.control(old_domain.registry_aid, should_cancel)?,
                 )?;
             }
@@ -89,12 +94,16 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     next.view(domain)?,
                     &units[0].package,
                     Some(&units),
-                    entry,
                     InvocationInput {
+                        entry,
                         data: &[],
                         level: 0,
                     },
                     &mut self.platform,
+                    Some(&mut JournalCredentialCheckpoint::new(
+                        &mut self.journal,
+                        domain.registry_aid,
+                    )),
                     &mut retries.control(domain.registry_aid, should_cancel)?,
                 )?;
             }
@@ -223,9 +232,10 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         };
         let started_active = transaction == TransactionDisposition::Active;
         let (domain_id, source) = &self.state.domains.0[source_index];
+        let image_reader = self.journal.flash().image_reader()?;
         let images_result = linking::BorrowedExecution::new(
             &self.state,
-            self.journal.flash(),
+            &image_reader,
             &mut self.platform,
             domain_id,
             &source_assembly,
@@ -287,9 +297,16 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             next.view(source),
             p,
             Some(&units),
-            process,
-            InvocationInput { data, level },
+            InvocationInput {
+                entry: process,
+                data,
+                level,
+            },
             &mut self.platform,
+            Some(&mut JournalCredentialCheckpoint::new(
+                &mut self.journal,
+                domain_registry_aid,
+            )),
             &mut control,
         );
         let (out, metrics) = match execution {
@@ -310,13 +327,15 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                         let _ = self.recover_committed_state()?;
                     }
                 }
-                if !retry_floor.is_empty() {
-                    self.commit_credential_retry_floor(domain_registry_aid, &retry_floor)?;
+                if !retry_floor.is_empty()
+                    && (started_active || transaction.transaction_involved())
+                {
+                    self.apply_credential_retry_floor(domain_registry_aid, &retry_floor)?;
                 }
                 return Err(error);
             }
         };
-        let retry_commit = !retry_floor.is_empty()
+        let retry_reconcile = !retry_floor.is_empty()
             && matches!(
                 transaction,
                 TransactionDisposition::Active
@@ -331,8 +350,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 transaction_snapshot.take().ok_or(Error::Storage)?,
             )?;
         }
-        if retry_commit {
-            self.commit_credential_retry_floor(domain_registry_aid, &retry_floor)?;
+        if retry_reconcile {
+            self.apply_credential_retry_floor(domain_registry_aid, &retry_floor)?;
         }
         let begun_aid = (transaction == TransactionDisposition::Begun)
             .then(|| fallible_string(aid))
@@ -388,19 +407,19 @@ pub(super) fn run_context(
         d.application_view(),
         p,
         units,
-        entry,
-        InvocationInput { data, level },
+        InvocationInput { entry, data, level },
         platform,
+        None,
         &mut lifecycle::LifecycleControl { retry_floor: &mut retry_floor, should_cancel: &mut || false },
     ).map(|(output, _)| output)
 }
-pub(super) fn run_lifecycle(
+pub(super) fn run_lifecycle<P: Platform>(
     d: ApplicationView<'_>,
     p: &impl PackageData,
     units: Option<&[ExecutionUnit]>,
-    entry: u16,
     input: InvocationInput<'_>,
-    platform: &mut impl Platform,
+    platform: &mut P,
+    credential_checkpoint: Option<&mut dyn CredentialCheckpoint<P>>,
     lifecycle: &mut lifecycle::LifecycleControl<'_>,
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut retry_floor = CredentialRetryFloors::default();
@@ -423,7 +442,15 @@ pub(super) fn run_lifecycle(
         transaction_clone_allocations: &mut transaction_clone_allocations,
     };
     let result =
-        run_application_with_metrics_and_retry_floor(d, p, units, entry, input, platform, &mut control);
+        run_application_with_metrics_and_retry_floor(
+            d,
+            p,
+            units,
+            input,
+            platform,
+            credential_checkpoint,
+            &mut control,
+        );
     for (slot, remaining) in retry_floor.iter() {
         lifecycle.retry_floor.record(slot, remaining)?;
     }
@@ -434,6 +461,7 @@ pub(super) fn run_lifecycle(
 }
 #[derive(Clone, Copy)]
 pub(super) struct InvocationInput<'a> {
+    pub entry: u16,
     pub data: &'a [u8],
     pub level: u8,
 }
@@ -457,13 +485,13 @@ fn managed_response_buffer() -> Result<Vec<u8>> {
     Ok(response)
 }
 
-fn run_application_with_metrics_and_retry_floor(
+fn run_application_with_metrics_and_retry_floor<P: Platform>(
     d: ApplicationView<'_>,
     p: &impl PackageData,
     units: Option<&[ExecutionUnit]>,
-    entry: u16,
     input: InvocationInput<'_>,
-    platform: &mut impl Platform,
+    platform: &mut P,
+    credential_checkpoint: Option<&mut dyn CredentialCheckpoint<P>>,
     control: &mut InvocationControl<'_>,
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut host = Host {
@@ -473,6 +501,7 @@ fn run_application_with_metrics_and_retry_floor(
         credentials: d.credentials,
         authorized_credentials: CredentialAuthorizations::default(),
         credential_retry_floor: CredentialRetryFloors::default(),
+        credential_checkpoint,
         owner: d.incarnation,
         data: input.data,
         out: managed_response_buffer()?,
@@ -516,7 +545,7 @@ fn run_application_with_metrics_and_retry_floor(
     let execution = crate::mc04_vm::execute_program_with_metrics_and_cancel(
         &vm_units,
         0,
-        entry,
+        input.entry,
         &[],
         &mut host,
         control.should_cancel,

@@ -56,7 +56,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 return Ok(());
             }
             let assembly = domain.instances.get(aid).ok_or(Error::Missing)?;
-            let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+            let image_reader = self.journal.flash().image_reader()?;
+            let images = linking::BorrowedExecution::new(&self.state, &image_reader,
                 &mut self.platform, id, assembly)?;
             let units = images.units()?;
             let deselect = units[0]
@@ -73,12 +74,16 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                     next.view(domain)?,
                     &units[0].package,
                     Some(&units),
-                    entry,
                     InvocationInput {
+                        entry,
                         data: &[],
                         level: 0,
                     },
                     &mut self.platform,
+                    Some(&mut JournalCredentialCheckpoint::new(
+                        &mut self.journal,
+                        domain.registry_aid,
+                    )),
                     &mut retries.control(domain.registry_aid, should_cancel)?,
                 )?;
                 drop(units);
@@ -325,7 +330,8 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if count >= MAX_TOTAL_INSTANCES {
             return Err(Error::Quota);
         }
-        let images = linking::BorrowedExecution::new(&self.state, self.journal.flash(),
+        let image_reader = self.journal.flash().image_reader()?;
+        let images = linking::BorrowedExecution::new(&self.state, &image_reader,
             &mut self.platform, domain_id, assembly)?;
         let units = images.units()?;
         let package = &units[0].package;
@@ -343,8 +349,11 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if let Some(method) = entry.install {
             let mut staged = StagedApplication::new(source)?;
             run_lifecycle(
-                staged.view(source), package, Some(&units), method,
-                InvocationInput { data: &[], level: 0 }, &mut self.platform, &mut retries.control(source.registry_aid, should_cancel)?,
+                staged.view(source), package, Some(&units),
+                InvocationInput { entry: method, data: &[], level: 0 },
+                &mut self.platform,
+                Some(&mut JournalCredentialCheckpoint::new(&mut self.journal, owner)),
+                &mut retries.control(source.registry_aid, should_cancel)?,
             )?;
             application = Some(staged);
         }

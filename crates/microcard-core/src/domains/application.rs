@@ -11,6 +11,63 @@ pub(super) struct ApplicationView<'a> {
     pub(super) policy: &'a DomainPolicy,
 }
 
+pub(super) trait CredentialCheckpoint<P: Platform> {
+    fn checkpoint(
+        &mut self,
+        platform: &mut P,
+        retry_floor: &CredentialRetryFloors,
+    ) -> Result<()>;
+}
+
+pub(super) struct JournalCredentialCheckpoint<'a, F: Flash> {
+    journal: &'a mut Journal<F>,
+    owner: RegistryAid,
+}
+
+impl<'a, F: Flash> JournalCredentialCheckpoint<'a, F> {
+    pub(super) fn new(journal: &'a mut Journal<F>, owner: RegistryAid) -> Self {
+        Self { journal, owner }
+    }
+}
+
+impl<F: Flash, P: Platform> CredentialCheckpoint<P> for JournalCredentialCheckpoint<'_, F> {
+    fn checkpoint(
+        &mut self,
+        platform: &mut P,
+        retry_floor: &CredentialRetryFloors,
+    ) -> Result<()> {
+        let data = self
+            .journal
+            .recover_with(platform)?
+            .ok_or(Error::Storage)?;
+        let mut durable = State::decode_snapshot(&data).map_err(|error| match error {
+            Error::IncompatibleState => error,
+            _ => Error::Storage,
+        })?;
+        let owner = lifecycle::Owner::resolve(&durable, self.owner)?;
+        let domain = owner.domain(&mut durable);
+        if !domain
+            .credentials
+            .apply_retry_floor(domain.incarnation, retry_floor.iter())?
+        {
+            return Ok(());
+        }
+        let intended = durable.encode_snapshot()?;
+        if let Err(error) = self.journal.commit_owned_with(intended, platform) {
+            let intended = durable.encode_snapshot()?;
+            let recovered = self
+                .journal
+                .recover_selected_with(platform)?
+                .ok_or(Error::Storage)?;
+            if intended.as_slice() == recovered.as_slice() {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 impl Domain {
     pub(super) fn application_view(&mut self) -> ApplicationView<'_> {
@@ -212,6 +269,19 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         }
         core::mem::swap(&mut domain.credentials, &mut next);
         self.commit_application_snapshot()
+    }
+
+    pub(super) fn apply_credential_retry_floor(
+        &mut self,
+        aid: RegistryAid,
+        retry_floor: &CredentialRetryFloors,
+    ) -> Result<()> {
+        let owner = lifecycle::Owner::resolve(&self.state, aid)?;
+        let domain = owner.domain(&mut self.state);
+        domain
+            .credentials
+            .apply_retry_floor(domain.incarnation, retry_floor.iter())?;
+        Ok(())
     }
 
     /// Resolve a failed publication before reporting its outcome. The commit marker may

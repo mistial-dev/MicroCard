@@ -6,15 +6,24 @@ use alloc::{rc::Rc, vec::Vec};
 use core::cell::{Cell, RefCell};
 use core::ops::Range;
 
-/// A stable set of independently erasable, memory-mapped slots owned by the image store.
-/// Reads must reflect completed writes; programming only clears bits and reports failure.
-pub trait ImageFlash {
+/// Read-only image access that can outlive the handle used for journal writes.
+/// Implementations must keep returned mappings stable for the reader's lifetime.
+pub trait ImageReader {
     /// Scoped image storage: a mapped slice, owned file buffer, or shared read guard.
     type Image<'a>: core::ops::Deref<Target = [u8]> where Self: 'a;
     /// Raw bytes only. Executable consumers must authenticate the image descriptor.
     fn read_range(&self, index: usize, range: Range<usize>) -> Result<Self::Image<'_>>;
     fn slot_count(&self) -> usize;
     fn slot_size(&self) -> usize;
+}
+
+/// A stable set of independently erasable, memory-mapped slots owned by the image store.
+/// Reads must reflect completed writes; programming only clears bits and reports failure.
+pub trait ImageFlash: ImageReader {
+    /// A read-only handle independent from journal ownership. MC04 keeps this handle while
+    /// a native checkpoint writes the disjoint journal region.
+    type Reader: ImageReader;
+    fn image_reader(&self) -> Result<Self::Reader>;
     fn with_slot<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
         self.with_range(index, 0..self.slot_size(), read)
     }
@@ -53,7 +62,7 @@ mod tests {
             Ok(())
         }
     }
-    impl ImageFlash for Memory {
+    impl ImageReader for Memory {
         fn slot_count(&self) -> usize {
             self.slots.len()
         }
@@ -64,6 +73,10 @@ mod tests {
         fn read_range(&self, index: usize, range: Range<usize>) -> Result<Self::Image<'_>> {
             self.slots.get(index).and_then(|slot| slot.get(range)).ok_or(Error::Bounds)
         }
+    }
+    impl ImageFlash for Memory {
+        type Reader = Self;
+        fn image_reader(&self) -> Result<Self::Reader> { Ok(self.clone()) }
         fn erase(&mut self, index: usize) -> Result<()> {
             for byte in &mut self.slots[index] {
                 Self::change(&mut self.remaining, byte, 255)?;
@@ -296,7 +309,7 @@ impl Descriptor {
 
     /// Authenticate the complete descriptor before lending its scoped storage guard.
     /// The provider is released after verification so execution can use it independently.
-    pub fn read_verified<'a, F: ImageFlash, P: CryptoProvider>(
+    pub fn read_verified<'a, F: ImageReader, P: CryptoProvider>(
         &self, flash: &'a F, provider: &mut P,
     ) -> Result<F::Image<'a>> {
         self.validate(flash.slot_count(), flash.slot_size())?;
@@ -579,7 +592,7 @@ impl<F: ImageFlash> Images<F> {
     }
 }
 
-impl<F: ImageFlash> ImageFlash for &mut F {
+impl<F: ImageFlash> ImageReader for &mut F {
     fn slot_count(&self) -> usize {
         F::slot_count(self)
     }
@@ -590,6 +603,10 @@ impl<F: ImageFlash> ImageFlash for &mut F {
     fn read_range(&self, index: usize, range: Range<usize>) -> Result<Self::Image<'_>> {
         F::read_range(self, index, range)
     }
+}
+impl<F: ImageFlash> ImageFlash for &mut F {
+    type Reader = F::Reader;
+    fn image_reader(&self) -> Result<Self::Reader> { F::image_reader(self) }
     fn erase(&mut self, index: usize) -> Result<()> {
         F::erase(self, index)
     }

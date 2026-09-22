@@ -1948,22 +1948,35 @@ impl Nvm {
         Ok(crate::layout::IMAGES_BASE + index * Self::IMAGE_SLOT_BYTES)
     }
 }
-impl microcard_core::image_store::ImageFlash for Nvm {
+struct NvmImageReader;
+impl microcard_core::image_store::ImageReader for NvmImageReader {
     fn slot_count(&self) -> usize {
-        Self::IMAGE_SLOTS
+        Nvm::IMAGE_SLOTS
     }
     fn slot_size(&self) -> usize {
-        Self::IMAGE_SLOT_BYTES
+        Nvm::IMAGE_SLOT_BYTES
     }
     type Image<'a> = &'a [u8];
     fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
-        let base = Self::image_base(index)?;
-        if range.start > range.end || range.end > Self::IMAGE_SLOT_BYTES {
+        let base = Nvm::image_base(index)?;
+        if range.start > range.end || range.end > Nvm::IMAGE_SLOT_BYTES {
             return Err(Error::Bounds);
         }
-        // The borrow prevents programming or erasing through this Nvm handle.
+        // MC04 retains this read-only handle while journal writes use disjoint flash pages.
         Ok(unsafe { core::slice::from_raw_parts((base + range.start) as *const u8, range.len()) })
     }
+}
+impl microcard_core::image_store::ImageReader for Nvm {
+    fn slot_count(&self) -> usize { Nvm::IMAGE_SLOTS }
+    fn slot_size(&self) -> usize { Nvm::IMAGE_SLOT_BYTES }
+    type Image<'a> = &'a [u8];
+    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
+        NvmImageReader.read_range(index, range)
+    }
+}
+impl microcard_core::image_store::ImageFlash for Nvm {
+    type Reader = NvmImageReader;
+    fn image_reader(&self) -> Result<Self::Reader> { Ok(NvmImageReader) }
     fn erase(&mut self, index: usize) -> Result<()> {
         Nvm::erase_region(Self::image_base(index)?, Self::IMAGE_SLOT_BYTES)
     }

@@ -29,7 +29,7 @@ pub(super) enum CallTarget {
     },
 }
 
-pub(super) fn resolve_calls<F: crate::image_store::ImageFlash>(
+pub(super) fn resolve_calls<F: crate::image_store::ImageReader>(
     state: &State,
     package: &impl PackageData,
     bindings: &[ResolvedDependency],
@@ -168,29 +168,29 @@ fn execution_sources<'a>(state: &'a State, domain: &str, assembly: &str) -> Resu
     Ok(sources)
 }
 
-enum PackageBytes<'a, F: crate::image_store::ImageFlash + 'a> {
+enum PackageBytes<'a, F: crate::image_store::ImageReader + 'a> {
     Stored(F::Image<'a>),
     Candidate(&'a [u8]),
 }
-impl<F: crate::image_store::ImageFlash> core::ops::Deref for PackageBytes<'_, F> {
+impl<F: crate::image_store::ImageReader> core::ops::Deref for PackageBytes<'_, F> {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         match self { Self::Stored(bytes) => bytes, Self::Candidate(bytes) => bytes }
     }
 }
 
-struct BorrowedPackage<'a, F: crate::image_store::ImageFlash + 'a> {
+struct BorrowedPackage<'a, F: crate::image_store::ImageReader + 'a> {
     metadata: &'a StoredPackage,
     raw: PackageBytes<'a, F>,
     bindings: &'a [ResolvedDependency],
     calls: &'a [ResolvedCall],
 }
 
-pub(super) struct BorrowedExecution<'a, F: crate::image_store::ImageFlash + 'a> {
+pub(super) struct BorrowedExecution<'a, F: crate::image_store::ImageReader + 'a> {
     packages: Vec<BorrowedPackage<'a, F>>,
 }
 
-impl<'a, F: crate::image_store::ImageFlash + 'a> BorrowedExecution<'a, F> {
+impl<'a, F: crate::image_store::ImageReader + 'a> BorrowedExecution<'a, F> {
     pub(super) fn new(state: &'a State, flash: &'a F, provider: &mut impl crate::crypto::CryptoProvider,
         domain: &str, assembly: &str) -> Result<Self> {
         Self::load(state, flash, provider, domain, assembly, None)

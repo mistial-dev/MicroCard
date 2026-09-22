@@ -28,6 +28,9 @@ pub(crate) type FileFlash = Region<65536, 16384, 64>;
 pub(crate) struct Region<const SLOT: usize, const IMAGE: usize, const COUNT: usize> {
     pub(crate) dir: std::path::PathBuf,
 }
+pub(crate) struct FileImageReader<const IMAGE: usize, const COUNT: usize> {
+    dir: std::path::PathBuf,
+}
 impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Region<SLOT, IMAGE, COUNT> {
     pub(crate) fn path(&self, s: usize) -> std::path::PathBuf {
         self.dir.join(format!("slot{s}.bin"))
@@ -161,8 +164,8 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize> Region<SLOT, IMA
         Ok(self.dir.join(format!("image{index}.bin")))
     }
 }
-impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
-    microcard_core::image_store::ImageFlash for Region<SLOT, IMAGE, COUNT>
+impl<const IMAGE: usize, const COUNT: usize> microcard_core::image_store::ImageReader
+    for FileImageReader<IMAGE, COUNT>
 {
     fn slot_count(&self) -> usize {
         COUNT
@@ -180,8 +183,29 @@ impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
             .try_reserve_exact(range.len())
             .map_err(|_| Error::Quota)?;
         bytes.resize(range.len(), 0);
-        Self::read_file(&self.image_path(index)?, IMAGE, range.start, &mut bytes)?;
+        if index >= COUNT { return Err(Error::Bounds); }
+        Region::<1, IMAGE, COUNT>::read_file(
+            &self.dir.join(format!("image{index}.bin")), IMAGE, range.start, &mut bytes,
+        )?;
         Ok(bytes)
+    }
+}
+impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
+    microcard_core::image_store::ImageReader for Region<SLOT, IMAGE, COUNT>
+{
+    fn slot_count(&self) -> usize { COUNT }
+    fn slot_size(&self) -> usize { IMAGE }
+    type Image<'a> = Vec<u8>;
+    fn read_range(&self, index: usize, range: std::ops::Range<usize>) -> Result<Self::Image<'_>> {
+        FileImageReader::<IMAGE, COUNT> { dir: self.dir.clone() }.read_range(index, range)
+    }
+}
+impl<const SLOT: usize, const IMAGE: usize, const COUNT: usize>
+    microcard_core::image_store::ImageFlash for Region<SLOT, IMAGE, COUNT>
+{
+    type Reader = FileImageReader<IMAGE, COUNT>;
+    fn image_reader(&self) -> Result<Self::Reader> {
+        Ok(FileImageReader { dir: self.dir.clone() })
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         Self::erase_file(&self.image_path(index)?, IMAGE)

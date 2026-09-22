@@ -32,7 +32,10 @@ use linking::{CallTarget, ExecutionUnit, PackageData, ResolvedCall, ResolvedDepe
     resolve_calls, resolve_dependency};
 #[cfg(test)]
 use linking::{validate_program_graph, push_execution_source, validate_linked_program, push_link_edge};
-use application::{ApplicationChanges, ApplicationView, StagedApplication};
+use application::{
+    ApplicationChanges, ApplicationView, CredentialCheckpoint, JournalCredentialCheckpoint,
+    StagedApplication,
+};
 
 const MAX_TOTAL_PACKAGE_BYTES: usize = 24 * 1024;
 const MAX_SSDS: usize = 8;
@@ -1597,13 +1600,14 @@ impl CredentialRetryFloors {
     }
 }
 
-struct Host<'a, P: Platform> {
+struct Host<'a, 'checkpoint, P: Platform> {
     store: &'a mut IntStore,
     blobs: &'a mut BlobStore,
     keys: &'a mut crate::key_store::KeyStore,
     credentials: &'a mut crate::credential_store::CredentialStore,
     authorized_credentials: CredentialAuthorizations,
     credential_retry_floor: CredentialRetryFloors,
+    credential_checkpoint: Option<&'checkpoint mut dyn CredentialCheckpoint<P>>,
     owner: [u8; 16],
     data: &'a [u8],
     out: Vec<u8>,

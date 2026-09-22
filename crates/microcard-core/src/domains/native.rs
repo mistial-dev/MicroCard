@@ -37,7 +37,7 @@ pub(super) enum BufferResult {
     Scalar(i32),
 }
 
-impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
+impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
     fn resolve(&self, unit: usize, member: u16) -> Result<crate::mc04_vm::LinkedTarget> {
         let units = self.units.ok_or(Error::Unauthorized)?;
         let target = &units
@@ -360,7 +360,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
         }
     }
 }
-impl<P: Platform> Host<'_, P> {
+impl<P: Platform> Host<'_, '_, P> {
     pub(super) fn begin_transaction(&mut self) -> Result<()> {
         if self.irreversible_output || *self.persistent_dirty {
             return Err(Error::Unauthorized);
@@ -473,11 +473,13 @@ impl<P: Platform> Host<'_, P> {
                         )?;
                 if verified {
                     self.authorized_credentials.insert(slot)?;
+                    *self.persistent_dirty |= changed;
                 } else {
                     self.authorized_credentials.remove(slot);
-                    self.record_credential_retry_floor(slot)?;
+                    if changed {
+                        self.checkpoint_credential_retry_floor(slot)?;
+                    }
                 }
-                *self.persistent_dirty |= changed;
                 BufferResult::Scalar(i32::from(verified))
             }
             42 => BufferResult::Scalar(i32::from(
@@ -508,10 +510,12 @@ impl<P: Platform> Host<'_, P> {
                 )?;
                 if unblocked {
                     self.authorized_credentials.insert(slot)?;
+                    *self.persistent_dirty |= changed;
                 } else {
-                    self.record_credential_retry_floor(slot)?;
+                    if changed {
+                        self.checkpoint_credential_retry_floor(slot)?;
+                    }
                 }
-                *self.persistent_dirty |= changed;
                 BufferResult::Scalar(i32::from(unblocked))
             }
             45 => {
@@ -530,6 +534,20 @@ impl<P: Platform> Host<'_, P> {
     pub(super) fn record_credential_retry_floor(&mut self, slot: i32) -> Result<()> {
         let remaining = self.credentials.retries(self.owner, slot)?;
         self.credential_retry_floor.record(slot, remaining)
+    }
+
+    fn checkpoint_credential_retry_floor(&mut self, slot: i32) -> Result<()> {
+        self.record_credential_retry_floor(slot)?;
+        let ordinary_dirty = *self.persistent_dirty;
+        // A failed checkpoint must take the unsafe-exit recovery path so RAM and reboot
+        // select the same authoritative generation.
+        *self.persistent_dirty = true;
+        self.credential_checkpoint
+            .as_deref_mut()
+            .ok_or(Error::Storage)?
+            .checkpoint(self.platform, &self.credential_retry_floor)?;
+        *self.persistent_dirty = ordinary_dirty;
+        Ok(())
     }
 
     pub(super) fn key_call(&mut self, id: u8, args: &[NativeArgument<'_>]) -> Result<BufferResult> {

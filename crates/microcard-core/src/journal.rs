@@ -625,7 +625,11 @@ impl MemoryFlash {
         Ok(())
     }
 }
-impl crate::image_store::ImageFlash for MemoryFlash {
+pub struct MemoryImageReader {
+    images: Vec<Vec<u8>>,
+    image_size: usize,
+}
+impl crate::image_store::ImageReader for MemoryImageReader {
     fn slot_count(&self) -> usize { self.images.len() }
     fn slot_size(&self) -> usize { self.image_size }
     type Image<'a> = &'a [u8];
@@ -633,6 +637,22 @@ impl crate::image_store::ImageFlash for MemoryFlash {
         let image = self.images.get(index).ok_or(Error::Bounds)?;
         if image.is_empty() { return Err(Error::Storage); }
         image.get(range).ok_or(Error::Bounds)
+    }
+}
+impl crate::image_store::ImageReader for MemoryFlash {
+    fn slot_count(&self) -> usize { self.images.len() }
+    fn slot_size(&self) -> usize { self.image_size }
+    type Image<'a> = &'a [u8];
+    fn read_range(&self, index: usize, range: core::ops::Range<usize>) -> Result<Self::Image<'_>> {
+        let image = self.images.get(index).ok_or(Error::Bounds)?;
+        if image.is_empty() { return Err(Error::Storage); }
+        image.get(range).ok_or(Error::Bounds)
+    }
+}
+impl crate::image_store::ImageFlash for MemoryFlash {
+    type Reader = MemoryImageReader;
+    fn image_reader(&self) -> Result<Self::Reader> {
+        Ok(MemoryImageReader { images: self.images.clone(), image_size: self.image_size })
     }
     fn erase(&mut self, index: usize) -> Result<()> {
         let image = self.images.get_mut(index).ok_or(Error::Bounds)?;
