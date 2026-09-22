@@ -180,8 +180,11 @@ outputs (`work/checkpoint-explicit-transactions-final.json`). Host, Java wallet,
 recovery, generated artifacts, and affected fuzz-target builds passed; workspace and
 both dongle-profile Clippy runs also passed. All seven firmware profiles linked with
 engine/provider isolation. The checkpoint exits nonzero only because three unchanged
-flash optimization ceilings remain exceeded; none were raised. A cold host timing and
-physical command latency remain release measurements.
+flash optimization ceilings remain exceeded; none were raised. A second clean run at
+`6fe95b2` rebuilt Rust and fuzz outputs in an isolated target directory while reusing
+managed outputs; it took 62.801 seconds with four workers
+(`work/checkpoint-explicit-transactions-rust-cold.json`). A fully cold managed build
+and physical command latency remain release measurements.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.
