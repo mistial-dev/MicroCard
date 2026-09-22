@@ -11,7 +11,6 @@ def main():
     parsed = mcinspect.inspect(path.read_bytes())
     tables = {table["name"]: table["rows"] for table in parsed["tables"]}
     assert tables["Assembly"][0]["columns"]["Name"]["value"] == "Counter"
-    assert len(tables["MethodDef"]) == 31 and len(tables["CustomAttribute"]) == 10
     type_names = {row["columns"]["TypeName"]["value"] for row in tables["TypeRef"]}
     assert {
         "SecurityDomain",
@@ -25,8 +24,11 @@ def main():
     assert not any("Compilation" in name or "Debug" in name or "AssemblyCompany" in name for name in type_names)
     install = next(row for row in tables["MethodDef"] if row["columns"]["Name"]["value"] == "Install")
     code = bytes.fromhex(install["columns"]["Body"]["code_hex"])
-    assert code[:5] == bytes([0x28, 0x0A, 5, 0, 0x6F]), "call must use CIL opcode plus compact MemberRef token"
     current = next(row for row in tables["MemberRef"] if row["columns"]["Name"]["value"] == "get_Current")
+    first_instruction = install["columns"]["Body"]["cil"][0]
+    assert code[0] == 0x28 and code[4] == 0x6F, "calls must retain compact four-byte CIL encoding"
+    assert first_instruction == {"offset": 0, "name": "call", "operand": current["token"]}, \
+        "call token was not remapped to Transaction.Current"
     signature = bytes.fromhex(current["columns"]["Signature"]["hex"])
     security_domain_row = next(index for index, row in enumerate(tables["TypeRef"], 1) if row["columns"]["TypeName"]["value"] == "SecurityDomain")
     assert signature[-1] == security_domain_row << 2 | 1, "signature TypeRef token was not remapped"

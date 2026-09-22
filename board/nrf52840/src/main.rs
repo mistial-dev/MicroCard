@@ -30,9 +30,11 @@ use nrf52840_hal::{
 #[cfg(feature = "usb-ccid")]
 use usb_device::{
     bus::UsbBusAllocator,
-    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
+    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
     LangID,
 };
+#[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
+use usb_device::device::UsbDeviceState;
 #[global_allocator]
 static HEAP: embedded_alloc::LlffHeap = embedded_alloc::LlffHeap::empty();
 static mut HEAP_MEMORY: [u8; 196608] = [0; 196608];
@@ -278,7 +280,7 @@ fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> ! {
         0x45 => (LedColor::Cyan, 1),
         0x46..=0x4a => (LedColor::Yellow, _code - 0x45),
         0x4b..=0x4d => (LedColor::Magenta, _code - 0x4a),
-        _ => (LedColor::Blue, _code.min(8).max(1)),
+        _ => (LedColor::Blue, _code.clamp(1, 8)),
     };
     #[cfg(feature = "dongle-layout")]
     let mut blinks_remaining = 0;

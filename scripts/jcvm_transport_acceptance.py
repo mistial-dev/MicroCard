@@ -258,10 +258,15 @@ def main():
         # A normal PIV client can select and read after boot without ever opening SCP03.
         piv(client, 0xa4, second, p1=4, le=256)
         assert piv(client, 0xa4, instance, p1=4, le=256) == selected
-        assert nonces.read_bytes()[reserve - 4:] == b"\xff" * (len(counter) - reserve + 4)
+        # The simulator delivers the APDU response before running the same idle
+        # maintenance hook as the board. A following command proves renewal finished.
+        read_certificate(client, certificate_object)
+        renewed_nonces = nonces.read_bytes()
+        expected_erased = b"\xff" * (len(counter) - reserve + 4)
+        assert renewed_nonces[reserve - 4:] == expected_erased, (
+            len(counter), reserve, renewed_nonces[reserve - 8:reserve + 8].hex())
         assert files(state / "registry") != registry_before, "renewal must publish its new identity"
         mark_phase("post_renewal")
-        read_certificate(client, certificate_object)
         client.connect()
         assert decode(client.command(0xe2, b"\0"))[5] == discovery[5]
         assert client.command(0xa4, instance, p1=4) == selected

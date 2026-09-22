@@ -25,7 +25,11 @@ def measure(extra_arguments, engine, target):
     )
     symbols = subprocess.run(["arm-none-eabi-nm", "-C", str(binary)],
         check=True, capture_output=True, text=True).stdout
-    required = "microcard_core::mc04_vm::" if engine == "mc04" else "microcard_engine_jcvm::"
+    # Transportless profiles stop after opening storage, so the optimizer can remove
+    # their execution loop. Operational USB profiles must retain the interpreter.
+    has_transport = any("usb-ccid" in value or "dongle" in value for value in extra_arguments)
+    required = ("microcard_core::mc04_vm::" if has_transport else "microcard_core::domains::") \
+        if engine == "mc04" else "microcard_engine_jcvm::"
     forbidden = ["microcard_engine_jcvm", "microcard_core::jcvm_"] if engine == "mc04" else ["microcard_core::mc04_vm::", "microcard_core::domains::"]
     if required not in symbols or any(name in symbols for name in forbidden):
         raise SystemExit(f"{engine}: linked interpreter selection is incorrect")

@@ -102,9 +102,9 @@ board's reserved heap.
   to recover interrupted bank replacement. Root registry counters remain finite;
   host memory bounds remain required, with physical service-life testing later.
   See [renewal and recovery invariants](STORAGE.md#jcvm-counter-renewal).
-- Qualify the Makerdiary JCVM memory bound. Its current image links at 226,616 text
-  bytes, 148 data bytes, and 198,284 BSS bytes, within the 288 KiB firmware region.
-  All seven profiles link, but seven flash optimization ceilings still fail; none
+- Qualify the Makerdiary JCVM memory bound. Its current image links at 232,240 text
+  bytes, 148 data bytes, and 198,284 BSS bytes, within the 440 KiB firmware region.
+  All seven profiles link, but three flash optimization ceilings still fail; none
   were raised. [Board budgets](BOARD_BUDGETS.json) contain the exact measurements.
   Earlier 2026-09-20 UF2 attempts used an invalid family and were ignored by the
   bootloader. The corrected image later booted, enumerated over USB CCID, passed its

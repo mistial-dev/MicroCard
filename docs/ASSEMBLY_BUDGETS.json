@@ -68,33 +68,33 @@
     },
     {
       "assembly": "Counter",
-      "source_pe_bytes": 6656,
-      "mc04_bytes": 2513,
+      "source_pe_bytes": 6144,
+      "mc04_bytes": 2476,
       "sections": {
         "header": 56,
-        "tables": 727,
-        "strings": 692,
+        "tables": 711,
+        "strings": 671,
         "blob": 224,
         "code": 814
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 15,
+        "TypeRef": 14,
         "TypeDef": 7,
         "Field": 1,
         "MethodDef": 31,
-        "MemberRef": 15,
-        "CustomAttribute": 10,
+        "MemberRef": 14,
+        "CustomAttribute": 9,
         "Assembly": 1,
         "AssemblyRef": 2
       },
       "method_defs": 31,
-      "member_refs": 15,
+      "member_refs": 14,
       "build_metadata_bytes": 581,
       "debug_map_bytes": 1533,
       "representative_manifest_bytes": 124,
       "package_fixed_bytes": 201,
-      "representative_package_bytes": 2838,
+      "representative_package_bytes": 2801,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -103,31 +103,31 @@
     {
       "assembly": "KeyOperations",
       "source_pe_bytes": 6144,
-      "mc04_bytes": 2167,
+      "mc04_bytes": 2128,
       "sections": {
         "header": 56,
-        "tables": 516,
-        "strings": 523,
+        "tables": 498,
+        "strings": 502,
         "blob": 285,
         "code": 787
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 13,
+        "TypeRef": 12,
         "TypeDef": 5,
         "MethodDef": 6,
-        "MemberRef": 27,
-        "CustomAttribute": 10,
+        "MemberRef": 26,
+        "CustomAttribute": 9,
         "Assembly": 1,
         "AssemblyRef": 2
       },
       "method_defs": 6,
-      "member_refs": 27,
+      "member_refs": 26,
       "build_metadata_bytes": 723,
       "debug_map_bytes": 296,
       "representative_manifest_bytes": 152,
       "package_fixed_bytes": 201,
-      "representative_package_bytes": 2520,
+      "representative_package_bytes": 2481,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 4096
@@ -494,31 +494,31 @@
     {
       "assembly": "Credential",
       "source_pe_bytes": 6144,
-      "mc04_bytes": 1527,
+      "mc04_bytes": 1490,
       "sections": {
         "header": 56,
-        "tables": 399,
-        "strings": 498,
+        "tables": 383,
+        "strings": 477,
         "blob": 208,
         "code": 366
       },
       "table_rows": {
         "Module": 1,
-        "TypeRef": 14,
+        "TypeRef": 13,
         "TypeDef": 2,
         "MethodDef": 5,
-        "MemberRef": 20,
-        "CustomAttribute": 4,
+        "MemberRef": 19,
+        "CustomAttribute": 3,
         "Assembly": 1,
         "AssemblyRef": 4
       },
       "method_defs": 5,
-      "member_refs": 20,
+      "member_refs": 19,
       "build_metadata_bytes": 876,
       "debug_map_bytes": 238,
       "representative_manifest_bytes": 233,
       "package_fixed_bytes": 201,
-      "representative_package_bytes": 1961,
+      "representative_package_bytes": 1924,
       "ceilings": {
         "mc04_bytes": 3072,
         "package_bytes": 5120
@@ -550,8 +550,8 @@
         "MicroCard.Security",
         "Credential"
       ],
-      "aggregate_mc04_bytes": 6538,
-      "aggregate_representative_package_bytes": 7810,
+      "aggregate_mc04_bytes": 6501,
+      "aggregate_representative_package_bytes": 7773,
       "ceilings": {
         "aggregate_mc04_bytes": 7168,
         "aggregate_representative_package_bytes": 10240
