@@ -35,6 +35,48 @@ region is 440 KiB. The key pages are 0xF8000 and 0xE7000 respectively. Switching
 engine layouts requires explicit fresh provisioning; there is no state migration.
 The build checks every region's size, alignment, overlap, and protected boundaries.
 
+### Dongle space audit (2026-09-22)
+
+The JCVM dongle link occupies 232,288 bytes of `.vector_table`, `.text`, and
+`.rodata`, plus 148 initialized bytes in flash. Its 440 KiB firmware partition
+ends at `0x6F000`; the last loadable byte is below `0x3A000`. Thus 212 KiB of
+whole flash pages inside the firmware partition are unused by this image. This
+is growth allowance imposed by the fixed partition, not applet capacity. The
+MC04 dongle link similarly leaves 304 KiB of whole pages inside its 536 KiB
+firmware partition; loadable data ends at `0x3AFC0`. Its separate
+applet image area is 128 KiB across eight 16 KiB slots. The
+224,000-byte MC04 USB and 178,000-byte JCVM dongle ceilings in
+`scripts/board_budgets.py` are historical regression targets, not physical
+limits. Both engines still link inside their respective firmware partitions.
+
+The JCVM persistent layout uses all remaining writable pages for a 64 KiB
+staging area, two 64 KiB image slots, two 136 KiB heap banks, two 8 KiB
+registry slots, and three 4 KiB key/counter pages. Staging and the paired heap
+slots protect interrupted uploads, renewal, and committed state. The board
+has only two physical heap banks even though the host registry allows eight
+instances. Two installed applets can consume both image slots, leaving no free
+slot for atomic replacement; a third image slot has a concrete use before
+additional installed-app capacity does.
+
+The CC310 link contributes about 37 KiB of code and constants across its
+platform archive, PSA archive, and local bridge. It includes 5,856 bytes of
+curve tables, of which this profile uses P-256, and about 3 KiB of
+ChaCha/Poly1305-named routines even though the public JCVM crypto profile does
+not expose that algorithm. These are linked vendor dependencies, not proven
+independently removable sections. Inspecting their call chain and measuring an
+isolated replacement build is necessary before changing the provider.
+
+The board also reserves a 192 KiB runtime allocator in RAM. Existing host
+OpenFIPS201 workloads report peaks above that amount, but host allocation
+totals do not establish a physical-board peak. Measure board heap and stack
+high-water before reclaiming RAM or promising larger applet heaps.
+
+Before changing persistent addresses, select a firmware growth reserve from
+measured release profiles, add at least one replacement image slot, and test
+old-layout rejection plus interrupted update/recovery. A partition change
+requires explicit reprovisioning or a tested migration; it must not silently
+reinterpret installed applets.
+
 ## Build and measurements
 
 ```sh
