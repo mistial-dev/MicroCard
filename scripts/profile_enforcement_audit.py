@@ -36,14 +36,20 @@ def main() -> None:
         "Unsupported method flags",
         "Method parameter quota exceeded",
         "Persistent storage declaration quota exceeded",
-        '("DomainStorage", "AbortTransaction") => 48,',
+        "Mc04Abi.Find(assembly, ns, owner, name",
     ))
     require("managed/MicroCard.Tool/Mc04Writer.cs", (
         "MC04 metadata row quota exceeded",
         "MC04 custom attribute quota exceeded",
-        "MC04 exception handlers unsupported",
+    ))
+    require("managed/MicroCard.Tool/Mc04Writer.Metadata.cs", (
         "MC04 local-variable quota exceeded",
+    ))
+    require("managed/MicroCard.Tool/Mc04Writer.Cil.cs", (
         "Switch quota",
+    ))
+    require("managed/MicroCard.Tool/Mc04Writer.Transactions.cs", (
+        "MC04 exception handlers unsupported",
     ))
     require("crates/microcard-core/src/package/manifest_cbor.rs", (
         "let entry_points = list(&mut d, 4,",

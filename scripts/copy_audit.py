@@ -15,7 +15,7 @@ AUDITED = {
         "raw.extend_from_slice(verified.raw);",
         "&self.raw[self.image.clone()]",
     ],
-    "crates/microcard-core/src/assembly.rs": [
+    "crates/microcard-core/src/assembly/validation.rs": [
         "copied.extend_from_slice(incoming);",
         "stack.extend_from_slice(initial);",
     ],
@@ -71,7 +71,8 @@ def main() -> None:
         total += len(actual)
         if Counter(actual) != Counter(expected):
             failures.append((relative, Counter(actual) - Counter(expected), Counter(expected) - Counter(actual)))
-    tool = (ROOT / "managed/MicroCard.Tool/Mc04Writer.cs").read_text()
+    tool = "\n".join(path.read_text() for path in
+                     sorted((ROOT / "managed/MicroCard.Tool").glob("Mc04Writer*.cs")))
     forbidden = [
         "tables.ToArray()",
         "strings.ToArray()",
