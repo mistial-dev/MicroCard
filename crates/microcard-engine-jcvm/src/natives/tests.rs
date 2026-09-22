@@ -993,6 +993,93 @@ fn digest_borrows_overlapping_input_and_publishes_only_complete_results() {
 }
 
 #[test]
+fn sha256_digest_streams_only_after_update_and_reset_discards_pending_input() {
+    use sha2::{Digest, Sha256};
+
+    struct DigestHost { one_shots: usize, streams: usize, fail: bool }
+    impl crate::host::Host for DigestHost {
+        fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
+        fn digest(&mut self, algorithm: u8, message: &[u8], output: &mut [u8]) -> Result<usize> {
+            assert_eq!(algorithm, 4);
+            self.one_shots += 1;
+            output[..32].copy_from_slice(&Sha256::digest(message));
+            Ok(32)
+        }
+        fn sha256_stream(&mut self, state: &mut [u8; crate::host::SHA256_STATE_BYTES],
+                input: &[u8], output: Option<&mut [u8; 32]>) -> Result<()> {
+            self.streams += 1;
+            let prior = state[0] as usize;
+            state[1 + prior..1 + prior + input.len()].copy_from_slice(input);
+            state[0] = (prior + input.len()) as u8;
+            if self.fail { return Err(Error::Unauthorized); }
+            if let Some(output) = output {
+                output.copy_from_slice(&Sha256::digest(&state[1..1 + state[0] as usize]));
+                state.fill(0);
+            }
+            Ok(())
+        }
+    }
+
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let input = heap.new_array(heap::KIND_BYTE, 6, 1).unwrap();
+    heap.byte_slice_mut(input, 0, 6).unwrap().copy_from_slice(b"abcdef");
+    let output = heap.new_array(heap::KIND_BYTE, 32, 1).unwrap();
+    let mut host = DigestHost { one_shots: 0, streams: 0, fail: false };
+    invoke_security(ClassId::MessageDigest, MethodId::getInstance,
+        &[(false, 4), (false, 0)], &mut heap, &mut frame, &mut host).unwrap();
+    let digest = frame.pop_reference().unwrap();
+    let final_part = |offset, length, heap: &mut Heap, frame: &mut Frame,
+                          host: &mut DigestHost| {
+        invoke_security(ClassId::MessageDigest, MethodId::doFinal,
+            &[(true, digest), (true, input), (false, offset), (false, length),
+              (true, output), (false, 0)], heap, frame, host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 32);
+    };
+    invoke_security(ClassId::MessageDigest, MethodId::update,
+        &[(true, digest), (true, input), (false, 0), (false, 0)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    final_part(0, 3, &mut heap, &mut frame, &mut host);
+    assert_eq!(heap.byte_slice(output, 0, 32).unwrap(), Sha256::digest(b"abc").as_slice());
+    assert_eq!((host.one_shots, host.streams), (1, 0));
+
+    for offset in [0, 2] {
+        invoke_security(ClassId::MessageDigest, MethodId::update,
+            &[(true, digest), (true, input), (false, offset), (false, 2)],
+            &mut heap, &mut frame, &mut host).unwrap();
+    }
+    final_part(4, 2, &mut heap, &mut frame, &mut host);
+    assert_eq!(heap.byte_slice(output, 0, 32).unwrap(), Sha256::digest(b"abcdef").as_slice());
+    assert_eq!((host.one_shots, host.streams), (1, 3));
+
+    invoke_security(ClassId::MessageDigest, MethodId::update,
+        &[(true, digest), (true, input), (false, 0), (false, 2)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    invoke_security(ClassId::MessageDigest, MethodId::reset,
+        &[(true, digest)], &mut heap, &mut frame, &mut host).unwrap();
+    final_part(4, 2, &mut heap, &mut frame, &mut host);
+    assert_eq!(heap.byte_slice(output, 0, 32).unwrap(), Sha256::digest(b"ef").as_slice());
+
+    invoke_security(ClassId::MessageDigest, MethodId::update,
+        &[(true, digest), (true, input), (false, 0), (false, 2)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    let before_failure = heap.byte_slice(output, 0, 32).unwrap().to_vec();
+    host.fail = true;
+    assert!(invoke_security(ClassId::MessageDigest, MethodId::update,
+        &[(true, digest), (true, input), (false, 2), (false, 2)],
+        &mut heap, &mut frame, &mut host).is_err());
+    assert!(invoke_security(ClassId::MessageDigest, MethodId::doFinal,
+        &[(true, digest), (true, input), (false, 4), (false, 2),
+          (true, output), (false, 0)],
+        &mut heap, &mut frame, &mut host).is_err());
+    assert_eq!(heap.byte_slice(output, 0, 32).unwrap(), before_failure);
+    host.fail = false;
+    final_part(4, 2, &mut heap, &mut frame, &mut host);
+    assert_eq!(heap.byte_slice(output, 0, 32).unwrap(), Sha256::digest(b"abef").as_slice());
+}
+
+#[test]
 fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
     struct Capabilities;
     impl crate::host::Host for Capabilities {

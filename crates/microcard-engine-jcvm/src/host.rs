@@ -27,6 +27,7 @@ pub trait Host {
         Err(Error::Unauthorized)
     }
 
+    /// Report support only when both one-shot and streaming digest calls work.
     fn supports_digest(&self, _algorithm: u8) -> bool { false }
     fn supports_random(&self, _algorithm: u8) -> bool { false }
     fn supports_cipher(&self, _algorithm: u8) -> bool { false }

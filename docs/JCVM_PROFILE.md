@@ -484,8 +484,11 @@ byte after validating the destination and before calling the provider. A seeded
 chain into new entropy. Supplying a seed therefore cannot turn the secure generator
 into a deterministic stream. Provider failures publish neither output nor updated
 generator state.
-`MessageDigest.doFinal` similarly charges input bytes after validating both ranges.
-Insufficient work leaves the destination untouched and does not call either provider.
+`MessageDigest.update` allocates transient SHA-256 state only on the first
+nonempty update. `reset` and a successful `doFinal` clear it; a one-shot
+`doFinal` needs no state allocation. Both update and finalization charge input
+bytes after validating their ranges. Insufficient work or provider failure
+leaves the destination and pending digest state unchanged.
 
 The protected `OwnerPIN` validation-flag accessors share the public validation
 state. `setValidatedFlag` follows the default conditional-state rule in JCRE §9.3;

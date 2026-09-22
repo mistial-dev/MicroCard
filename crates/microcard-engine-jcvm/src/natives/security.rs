@@ -8,6 +8,7 @@ use crate::jcvm_api::{ClassId, MethodId, Signature};
 use super::{Jcre, Native, new_native, word_field};
 use crate::vm::frame::{Frame, NULL};
 use crate::vm::heap::{self, Heap};
+use crate::host::SHA256_STATE_BYTES;
 use crate::{Error, Result};
 extern crate alloc;
 use zeroize::Zeroizing;
@@ -439,6 +440,45 @@ pub fn call(
             if accepted { checkpoint_committed(heap, host, jcre, context, statics)?; }
             frame.push_short(i16::from(accepted))?;
         }
+        (ClassId::MessageDigest, MethodId::reset) => {
+            let this = frame.pop_reference()?;
+            heap.check_access(this, context)?;
+            if word_field(heap, this, KIND)? != 4 { return Err(Error::Unsupported); }
+            let pending = heap.get_word(this, PENDING)?;
+            if pending != NULL {
+                heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.fill(0);
+            }
+        }
+        (ClassId::MessageDigest, MethodId::update) => {
+            let length = frame.pop_short()?;
+            let offset = frame.pop_short()?;
+            let input = frame.pop_reference()?;
+            let this = frame.pop_reference()?;
+            heap.check_access(this, context)?;
+            heap.check_access(input, context)?;
+            if word_field(heap, this, KIND)? != 4 { return Err(Error::Unsupported); }
+            if length < 0 || offset < 0 { return Err(Error::Bounds); }
+            heap.byte_slice(input, offset as usize, length as usize)?;
+            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
+            if length == 0 { return Ok(Native::Returned); }
+            let pending = heap.get_word(this, PENDING)?;
+            let mut state = Zeroizing::new([0u8; SHA256_STATE_BYTES]);
+            if pending == NULL {
+                heap.check_allocations(&[(heap::KIND_BYTE, SHA256_STATE_BYTES as u16)])?;
+                heap.prepare_payload_writes(&[(this, PENDING * 2, 2)])?;
+            } else {
+                state.copy_from_slice(heap.byte_slice(pending, 0, SHA256_STATE_BYTES)?);
+            }
+            let message = heap.byte_slice(input, offset as usize, length as usize)?;
+            host.sha256_stream(&mut state, message, None)?;
+            let pending = if pending == NULL {
+                let array = heap.new_transient_array(heap::KIND_BYTE, SHA256_STATE_BYTES as u16,
+                    context, heap::CLEAR_ON_RESET)?;
+                heap.put_word(this, PENDING, array)?;
+                array
+            } else { pending };
+            heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.copy_from_slice(&state[..]);
+        }
         (ClassId::MessageDigest, MethodId::doFinal) => {
             let out_offset = frame.pop_short()?;
             let output = frame.pop_reference()?;
@@ -447,6 +487,7 @@ pub fn call(
             let input = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             let algorithm = word_field(heap, this, KIND)? as u8;
+            heap.check_access(this, context)?;
             heap.check_access(input, context)?;
             heap.check_access(output, context)?;
             if length < 0 || offset < 0 || out_offset < 0 {
@@ -459,12 +500,24 @@ pub fn call(
             let message = heap.byte_slice(input, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             let mut digest = Zeroizing::new([0u8; 64]);
-            let written = host.digest(algorithm, message, &mut digest[..expected])?;
+            let pending = heap.get_word(this, PENDING)?;
+            let written = if algorithm == 4 && pending != NULL {
+                let mut state = Zeroizing::new([0u8; SHA256_STATE_BYTES]);
+                state.copy_from_slice(heap.byte_slice(pending, 0, SHA256_STATE_BYTES)?);
+                let output: &mut [u8; 32] = (&mut digest[..32]).try_into().unwrap();
+                host.sha256_stream(&mut state, message, Some(output))?;
+                32
+            } else {
+                host.digest(algorithm, message, &mut digest[..expected])?
+            };
             if written != expected {
                 return Err(Error::Format);
             }
             heap.byte_slice_mut(output, out_offset as usize, written)?
                 .copy_from_slice(&digest[..written]);
+            if pending != NULL {
+                heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.fill(0);
+            }
             frame.push_short(written as i16)?;
         }
         (ClassId::MessageDigest, MethodId::getLength) => {
