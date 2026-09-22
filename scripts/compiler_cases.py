@@ -18,7 +18,7 @@ BOUNDARIES = [
 ]
 REJECTIONS = [
     ('CASE_TRANSACTION_CURRENT_SET', 'ambient-transaction-write', 'Unsupported System.Transactions member'),
-    ('CASE_TRANSACTION', 'unsafe-transaction', 'Transactional method reaches irreversible Hardware.Write'),
+    ('CASE_TRANSACTION', 'unsafe-transaction', 'Transactional method reaches irreversible AssemblyContext.Current.Runtime.WriteHardware'),
     ('CASE_STORAGE_SCHEMA', 'storage-schema-bypass', 'Persistent byte maximum'),
     ('CASE_SYSTEM_SHA256_OVERLOAD', 'system-sha256-overload-bypass', 'Unsupported System.Security.Cryptography member'),
     ('CASE_SYSTEM_RNG_OVERLOAD', 'system-rng-overload-bypass', 'Unsupported System.Security.Cryptography member'),
@@ -75,7 +75,7 @@ def run_compiler_cases(jobs=1, prebuilt=False):
     cases = [(outputs[symbol], name, None) for symbol, name in BOUNDARIES]
     cases += [(outputs[symbol], name, error) for symbol, name, error in REJECTIONS]
     cases.append((ROOT / "tests/TransactionRuntimeNegative/bin/Release/net10.0/TransactionRuntimeNegative.dll",
-                  "unsafe-explicit-transaction", "Transactional method reaches irreversible Hardware.Write"))
+                  "unsafe-explicit-transaction", "Transactional method reaches irreversible AssemblyContext.Current.Runtime.WriteHardware"))
 
     def check(case):
         assembly, name, error = case

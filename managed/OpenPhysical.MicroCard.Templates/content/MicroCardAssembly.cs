@@ -11,7 +11,7 @@ public static class MicroCardAssembly
 
     public static void Process()
     {
-        ResponseApdu.SetStatus(0x9000);
+        AssemblyContext.Current.Response.SetStatus(StatusWord.Success);
     }
 
     public static void Uninstall() { }

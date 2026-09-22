@@ -276,7 +276,7 @@ sealed partial class Mc04Writer
             if (!ReachesExplicitControl(handle)) continue;
             transactionalMethods.Add(handle);
             if (ReachesIrreversibleOutput(handle))
-                throw new Exception("Transactional method reaches irreversible Hardware.Write");
+                throw new Exception("Transactional method reaches irreversible AssemblyContext.Current.Runtime.WriteHardware");
         }
     }
 
@@ -289,10 +289,10 @@ sealed partial class Mc04Writer
     bool IsIrreversibleOutput(MemberReferenceHandle handle)
     {
         var member = md.GetMemberReference(handle);
-        if (md.GetString(member.Name) != "Write" || member.Parent.Kind != HandleKind.TypeReference)
+        if (md.GetString(member.Name) != "WriteHardware" || member.Parent.Kind != HandleKind.TypeReference)
             return false;
         var type = md.GetTypeReference((TypeReferenceHandle)member.Parent);
-        if (md.GetString(type.Name) != "Hardware" ||
+        if (md.GetString(type.Name) != "RuntimeService" ||
             md.GetString(type.Namespace) != "MicroCard.Framework" ||
             type.ResolutionScope.Kind != HandleKind.AssemblyReference)
             return false;
@@ -325,4 +325,3 @@ sealed partial class Mc04Writer
         }
     }
 }
-

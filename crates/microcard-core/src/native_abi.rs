@@ -2,7 +2,7 @@
 //! Stable native capability identifiers shared by package and domain validation.
 use crate::{Error, Result};
 
-pub const CATALOG_SHA256: &str = "fb91d13b52460aae3f399480b8f112716837379042e872f84581f3492b19c75a";
+pub const CATALOG_SHA256: &str = "fbf27e9a7355a1d62755412dfad24122b24708b1c0c76dbbef17936d8ed0cad0";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Signature {
@@ -25,31 +25,29 @@ pub const fn capability(id: u8) -> u8 {
 pub fn signature(id: u8) -> Result<Signature> {
     let (arguments, returns) = match id {
         2 => (1, false),
-        3 => (1, true),
-        4 => (2, false),
         5 => (0, true),
         6 => (2, false),
-        7 => (2, true),
-        8 => (3, false),
+        7 => (1, true),
+        8 => (2, false),
         9 => (0, true),
         10 => (0, true),
         11 => (0, true),
         12 => (4, false),
         13 => (3, false),
         20 => (1, true),
-        22 => (3, true),
-        23 => (2, true),
-        24 => (2, false),
+        22 => (2, true),
+        23 => (1, true),
+        24 => (1, false),
         25 => (2, true),
         26 => (2, true),
         27 => (3, true),
         28 => (3, true),
         29 => (4, true),
         30 => (4, true),
-        31 => (2, true),
-        32 => (3, false),
-        33 => (2, false),
-        34 => (2, true),
+        31 => (1, true),
+        32 => (2, false),
+        33 => (1, false),
+        34 => (1, true),
         35 => (1, true),
         36 => (4, true),
         37 => (3, true),
@@ -61,13 +59,10 @@ pub fn signature(id: u8) -> Result<Signature> {
         43 => (4, false),
         44 => (7, true),
         45 => (2, true),
-        46 => (1, false),
-        47 => (1, false),
-        48 => (1, false),
         49 => (5, true),
         50 => (1, true),
         51 => (6, true),
-        52 => (5, false),
+        52 => (4, false),
         53 => (5, true),
         54 => (6, true),
         55 => (0, false),
@@ -88,9 +83,9 @@ mod tests {
     #[test]
     fn generated_capability_table_is_exact() {
         const VALID: &[u8] = &[
-            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
-            55, 56, 57, 58, 59, 60,
+            2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+            34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
+            59, 60,
         ];
         for id in 0..=u8::MAX {
             assert_eq!(

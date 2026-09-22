@@ -16,34 +16,34 @@ public static class CryptographyConsumer
 
     public static void Install()
     {
-        KeyFactory.GenerateHmacSha256(HmacSlot);
-        KeyFactory.GenerateAes128(AesSlot);
-        KeyFactory.GenerateP256(P256Slot);
+        KeyFactory.GenerateHmacSha256((KeySlot)HmacSlot);
+        KeyFactory.GenerateAes128((KeySlot)AesSlot);
+        KeyFactory.GenerateP256((KeySlot)P256Slot);
     }
 
     public static void Uninstall()
     {
-        KeyFactory.Delete(HmacSlot);
-        KeyFactory.Delete(AesSlot);
-        KeyFactory.Delete(P256Slot);
+        KeyFactory.Delete((KeySlot)HmacSlot);
+        KeyFactory.Delete((KeySlot)AesSlot);
+        KeyFactory.Delete((KeySlot)P256Slot);
     }
 
     public static void Process()
     {
-        int length = CommandApdu.Length;
+        int length = AssemblyContext.Current.Command.Length;
         if (length < 1)
         {
-            ResponseApdu.SetStatus(0x6700);
+            AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
             return;
         }
         var command = new byte[length];
-        CommandApdu.CopyTo(command, 0, 0, length);
+        AssemblyContext.Current.Command.CopyTo(command, 0, 0, length);
         int operation = command[0];
         if (operation == 0)
         {
             var digest = new byte[40];
             SHA256.HashData(command, 1, length - 1, digest, 4);
-            ResponseApdu.Write(digest, 4, 32);
+            AssemblyContext.Current.Response.Write(digest, 4, 32);
             return;
         }
         if (operation == 12)
@@ -59,12 +59,12 @@ public static class CryptographyConsumer
         if (operation == 14)
         {
             SHA256.HashData(command, 1, length - 1, command, 0);
-            ResponseApdu.Write(command, 0, 32);
+            AssemblyContext.Current.Response.Write(command, 0, 32);
             return;
         }
         if (operation == 15)
         {
-            ResponseApdu.Write(System.Security.Cryptography.SHA256.HashData(
+            AssemblyContext.Current.Response.Write(System.Security.Cryptography.SHA256.HashData(
                 Copy(command, 1, length - 1)), 0, 32);
             return;
         }
@@ -82,7 +82,7 @@ public static class CryptographyConsumer
         {
             if (length != 65)
             {
-                ResponseApdu.SetStatus(0x6700);
+                AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
                 return;
             }
             byte[] result = [CryptographicOperations.FixedTimeEquals(command, 1, 32,
@@ -100,7 +100,7 @@ public static class CryptographyConsumer
         {
             if (data.Length < 129)
             {
-                ResponseApdu.SetStatus(0x6700);
+                AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
                 return;
             }
             var publicKey = Copy(data, 0, 65);
@@ -112,18 +112,18 @@ public static class CryptographyConsumer
         }
         if (operation == 2)
         {
-            Write(HmacSha256.HashData(KeyFactory.Open(HmacSlot), data));
+            Write(HmacSha256.HashData(KeyFactory.Open((KeySlot)HmacSlot), data));
             return;
         }
         if (operation == 3)
         {
-            Write(AesCmac.Compute(KeyFactory.Open(AesSlot), data));
+            Write(AesCmac.Compute(KeyFactory.Open((KeySlot)AesSlot), data));
             return;
         }
         if (operation == 4)
         {
             var iv = new byte[16];
-            var key = KeyFactory.Open(AesSlot);
+            var key = KeyFactory.Open((KeySlot)AesSlot);
             Write(AesCbc.Decrypt(key, iv, AesCbc.Encrypt(key, iv, data)));
             return;
         }
@@ -131,7 +131,7 @@ public static class CryptographyConsumer
         {
             var nonce = new byte[13];
             var associatedData = new byte[0];
-            var key = KeyFactory.Open(AesSlot);
+            var key = KeyFactory.Open((KeySlot)AesSlot);
             Write(AesCcm.Decrypt(key, nonce, associatedData,
                 AesCcm.Encrypt(key, nonce, associatedData, data)));
             return;
@@ -145,19 +145,19 @@ public static class CryptographyConsumer
         }
         if (operation == 7)
         {
-            Write(P256.ExportPublicKey(KeyFactory.Open(P256Slot)));
+            Write(P256.ExportPublicKey(KeyFactory.Open((KeySlot)P256Slot)));
             return;
         }
         if (operation == 8)
         {
-            Write(P256.SignData(KeyFactory.Open(P256Slot), data));
+            Write(P256.SignData(KeyFactory.Open((KeySlot)P256Slot), data));
             return;
         }
         if (operation == 9)
         {
             if (data.Length < 129)
             {
-                ResponseApdu.SetStatus(0x6700);
+                AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
                 return;
             }
             var publicKey = Copy(data, 0, 65);
@@ -169,7 +169,7 @@ public static class CryptographyConsumer
         }
         if (operation == 10)
         {
-            Write(P256.DeriveKeyMaterial(KeyFactory.Open(P256Slot), data));
+            Write(P256.DeriveKeyMaterial(KeyFactory.Open((KeySlot)P256Slot), data));
             return;
         }
         if (operation == 11)
@@ -179,7 +179,7 @@ public static class CryptographyConsumer
             Write(random);
             return;
         }
-        ResponseApdu.SetStatus(0x6D00);
+        AssemblyContext.Current.Response.SetStatus((StatusWord)0x6D00);
     }
 
     private static byte[] Copy(byte[] source, int offset, int length)
@@ -190,5 +190,5 @@ public static class CryptographyConsumer
         return result;
     }
 
-    private static void Write(byte[] data) => ResponseApdu.Write(data, 0, data.Length);
+    private static void Write(byte[] data) => AssemblyContext.Current.Response.Write(data, 0, data.Length);
 }

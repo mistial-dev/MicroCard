@@ -79,9 +79,9 @@ public static class ValidAssembly
 {
     public static void Process()
     {
-        int value = SecurityDomain.Current.Store.GetInt32(1);
+        int value = AssemblyContext.Current.Storage.GetInt32((StorageId)1);
         byte[] response = [(byte)value];
-        ResponseApdu.Write(response, 0, response.Length);
+        AssemblyContext.Current.Response.Write(response, 0, response.Length);
     }
 }
 
@@ -93,14 +93,14 @@ public static class ValidTransactionScope
     private static void Commit()
     {
         using var scope = new TransactionScope();
-        SecurityDomain.Current.Store.SetInt32(1, 1);
+        AssemblyContext.Current.Storage.SetInt32((StorageId)1, 1);
         scope.Complete();
     }
 
     public static void Abort()
     {
         using var scope = new TransactionScope();
-        SecurityDomain.Current.Store.SetInt32(1, 2);
+        AssemblyContext.Current.Storage.SetInt32((StorageId)1, 2);
     }
 }
 #endif
@@ -112,8 +112,8 @@ public static class ValidAmbientTransaction
     {
         _ = Transaction.Current;
         using var scope = new TransactionScope();
-        SecurityDomain.Current.Store.SetInt32(
-            1,
+        AssemblyContext.Current.Storage.SetInt32(
+            (StorageId)1,
             (int)Transaction.Current!.TransactionInformation.Status);
         scope.Complete();
     }
@@ -144,8 +144,8 @@ public static class InvalidLifecycleTransaction
 #if CASE_STORAGE_ACCESS
 public static class InvalidStorageAccess
 {
-    public static int DynamicKey(int key) => SecurityDomain.Current.Store.GetInt32(key);
-    public static byte[] WrongKind() => SecurityDomain.Current.Store.GetBytes(1);
+    public static int DynamicKey(int key) => AssemblyContext.Current.Storage.GetInt32((StorageId)key);
+    public static byte[] WrongKind() => AssemblyContext.Current.Storage.GetBytes((StorageId)1);
 }
 #endif
 
@@ -175,7 +175,7 @@ public static class InvalidTransaction
     public static void Run()
     {
         using var scope = new TransactionScope();
-        Hardware.Write(0, 1);
+        AssemblyContext.Current.Runtime.WriteHardware(0, 1);
         scope.Complete();
     }
 }
@@ -788,7 +788,7 @@ public static class InvalidLanguage
 {
     public static void Run()
     {
-        try { ResponseApdu.Write([1], 0, 1); } catch { }
+        try { AssemblyContext.Current.Response.Write([1], 0, 1); } catch { }
     }
 }
 #endif
@@ -796,7 +796,7 @@ public static class InvalidLanguage
 #if CASE_ASYNC_METHOD
 public static class InvalidAsyncMethod
 {
-    public static async void Run() => ResponseApdu.Write([1], 0, 1);
+    public static async void Run() => AssemblyContext.Current.Response.Write([1], 0, 1);
 }
 #endif
 
@@ -817,7 +817,7 @@ public static class InvalidType
     public static void Run()
     {
         long value = 1;
-        ResponseApdu.Write([(byte)value], 0, 1);
+        AssemblyContext.Current.Response.Write([(byte)value], 0, 1);
     }
 }
 #endif

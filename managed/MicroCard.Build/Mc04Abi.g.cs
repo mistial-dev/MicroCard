@@ -30,87 +30,103 @@ namespace MicroCard.Build
 
     internal static class Mc04Abi
     {
-        internal const string CatalogSha256 = "fb91d13b52460aae3f399480b8f112716837379042e872f84581f3492b19c75a";
+        internal const string CatalogSha256 = "fbf27e9a7355a1d62755412dfad24122b24708b1c0c76dbbef17936d8ed0cad0";
         internal const string FrameworkAssembly = "MicroCard.Framework";
         internal const string FrameworkNamespace = "MicroCard.Framework";
-        internal const string FrameworkIdentitySha256 = "E9B276DC4459E6FFB37F9119874B5053B14CD0B3484A01C70316DD80FB08365A";
+        internal const string FrameworkIdentitySha256 = "89311954345F8652190CF4EF9F24F04AE5EF771E6F4840B831EC44FC4FFFA7F7";
         private static readonly Mc04AbiMember[] Members =
         {
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "SecurityDomain", "get_Current",
-                false, Array.Empty<string>(), "ref:MicroCard.Framework.SecurityDomain", -1,
-                "current-domain", "read", new[] { "mc04-1.0" }),
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Current",
+                false, Array.Empty<string>(), "ref:MicroCard.Framework.AssemblyContext", -1,
+                "current-context", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "SecurityDomain", "get_Keys",
-                true, Array.Empty<string>(), "ref:MicroCard.Framework.DomainKeys", -1,
-                "domain-keys", "read", new[] { "mc04-1.0" }),
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Command",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.CommandService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "SecurityDomain", "get_Store",
-                true, Array.Empty<string>(), "ref:MicroCard.Framework.DomainStorage", -1,
-                "domain-storage", "read", new[] { "mc04-1.0" }),
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Response",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.ResponseService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "ResponseApdu", "SetStatus",
-                false, new[] { "int32" }, "void", 2,
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Storage",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.StorageService", -1,
+                "storage-service", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Keys",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.KeyService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Random",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.RandomService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_SecureChannel",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.SecureChannelService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Credentials",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.CredentialService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "AssemblyContext", "get_Runtime",
+                true, Array.Empty<string>(), "ref:MicroCard.Framework.RuntimeService", -1,
+                "service", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "ResponseService", "SetStatus",
+                true, new[] { "enum:MicroCard.Framework.StatusWord" }, "void", 2,
                 "native", "irreversible", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStore", "GetInt32",
-                false, new[] { "int32" }, "int32", 3,
-                "native", "read", new[] { "mc04-1.0" }),
-            new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStore", "SetInt32",
-                false, new[] { "int32", "int32" }, "void", 4,
-                "native", "transactional", new[] { "mc04-1.0" }),
-            new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "RandomNumber", "GetInt32",
-                false, Array.Empty<string>(), "int32", 5,
+                "MicroCard.Framework", "MicroCard.Framework", "RandomService", "GetInt32",
+                true, Array.Empty<string>(), "int32", 5,
                 "native", "random", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Hardware", "Write",
-                false, new[] { "int32", "int32" }, "void", 6,
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeService", "WriteHardware",
+                true, new[] { "int32", "int32" }, "void", 6,
                 "native", "irreversible", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "GetInt32",
-                true, new[] { "int32" }, "int32", 7,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "GetInt32",
+                true, new[] { "enum:MicroCard.Framework.StorageId" }, "int32", 7,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "SetInt32",
-                true, new[] { "int32", "int32" }, "void", 8,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "SetInt32",
+                true, new[] { "enum:MicroCard.Framework.StorageId", "int32" }, "void", 8,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "SecureChannel", "get_SecurityLevel",
-                false, Array.Empty<string>(), "int32", 9,
+                "MicroCard.Framework", "MicroCard.Framework", "SecureChannelService", "get_SecurityLevel",
+                true, Array.Empty<string>(), "enum:MicroCard.Framework.SecurityLevel", 9,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "SecureChannel", "get_IsAuthenticated",
-                false, Array.Empty<string>(), "bool", 10,
+                "MicroCard.Framework", "MicroCard.Framework", "SecureChannelService", "get_IsAuthenticated",
+                true, Array.Empty<string>(), "bool", 10,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CommandApdu", "get_Length",
-                false, Array.Empty<string>(), "int32", 11,
+                "MicroCard.Framework", "MicroCard.Framework", "CommandService", "get_Length",
+                true, Array.Empty<string>(), "int32", 11,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CommandApdu", "CopyTo",
-                false, new[] { "byte[]", "int32", "int32", "int32" }, "void", 12,
+                "MicroCard.Framework", "MicroCard.Framework", "CommandService", "CopyTo",
+                true, new[] { "byte[]", "int32", "int32", "int32" }, "void", 12,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "ResponseApdu", "Write",
-                false, new[] { "byte[]", "int32", "int32" }, "void", 13,
+                "MicroCard.Framework", "MicroCard.Framework", "ResponseService", "Write",
+                true, new[] { "byte[]", "int32", "int32" }, "void", 13,
                 "native", "irreversible", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Cryptography", "Sha256",
-                false, new[] { "byte[]" }, "byte[]", 20,
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeService", "Sha256",
+                true, new[] { "byte[]" }, "byte[]", 20,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainKeys", "Generate",
-                true, new[] { "int32", "int32" }, "ref:MicroCard.Framework.KeyHandle", 22,
+                "MicroCard.Framework", "MicroCard.Framework", "KeyService", "Generate",
+                true, new[] { "enum:MicroCard.Framework.KeySlot", "enum:MicroCard.Framework.KeyAlgorithm" }, "ref:MicroCard.Framework.KeyHandle", 22,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainKeys", "Open",
-                true, new[] { "int32" }, "ref:MicroCard.Framework.KeyHandle", 23,
+                "MicroCard.Framework", "MicroCard.Framework", "KeyService", "Open",
+                true, new[] { "enum:MicroCard.Framework.KeySlot" }, "ref:MicroCard.Framework.KeyHandle", 23,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainKeys", "Delete",
-                true, new[] { "int32" }, "void", 24,
+                "MicroCard.Framework", "MicroCard.Framework", "KeyService", "Delete",
+                true, new[] { "enum:MicroCard.Framework.KeySlot" }, "void", 24,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "MicroCard.Framework", "MicroCard.Framework", "KeyHandle", "HmacSha256",
@@ -137,20 +153,20 @@ namespace MicroCard.Build
                 true, new[] { "byte[]", "byte[]", "byte[]" }, "byte[]", 30,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "GetBytes",
-                true, new[] { "int32" }, "byte[]", 31,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "GetBytes",
+                true, new[] { "enum:MicroCard.Framework.StorageId" }, "byte[]", 31,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "SetBytes",
-                true, new[] { "int32", "byte[]" }, "void", 32,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "SetBytes",
+                true, new[] { "enum:MicroCard.Framework.StorageId", "byte[]" }, "void", 32,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "DeleteBytes",
-                true, new[] { "int32" }, "void", 33,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "DeleteBytes",
+                true, new[] { "enum:MicroCard.Framework.StorageId" }, "void", 33,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "ContainsBytes",
-                true, new[] { "int32" }, "bool", 34,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "ContainsBytes",
+                true, new[] { "enum:MicroCard.Framework.StorageId" }, "bool", 34,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "MicroCard.Framework", "MicroCard.Framework", "KeyHandle", "ExportP256PublicKey",
@@ -161,68 +177,56 @@ namespace MicroCard.Build
                 true, new[] { "byte[]", "int32", "int32" }, "byte[]", 36,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Cryptography", "VerifyP256",
-                false, new[] { "byte[]", "byte[]", "byte[]" }, "bool", 37,
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeService", "VerifyP256",
+                true, new[] { "byte[]", "byte[]", "byte[]" }, "bool", 37,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "MicroCard.Framework", "MicroCard.Framework", "KeyHandle", "DeriveP256",
                 true, new[] { "byte[]" }, "byte[]", 38,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Cryptography", "FillRandom",
-                false, new[] { "byte[]", "int32", "int32" }, "void", 39,
+                "MicroCard.Framework", "MicroCard.Framework", "RandomService", "Fill",
+                true, new[] { "byte[]", "int32", "int32" }, "void", 39,
                 "native", "random", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CredentialNative", "Create",
-                false, new[] { "int32", "byte[]", "int32", "int32", "int32", "byte[]", "int32", "int32", "int32" }, "void", 40,
+                "MicroCard.Framework", "MicroCard.Framework", "CredentialService", "Create",
+                true, new[] { "enum:MicroCard.Framework.CredentialSlot", "byte[]", "int32", "int32", "int32", "byte[]", "int32", "int32", "int32" }, "void", 40,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CredentialNative", "Verify",
-                false, new[] { "int32", "byte[]", "int32", "int32" }, "bool", 41,
+                "MicroCard.Framework", "MicroCard.Framework", "CredentialService", "Verify",
+                true, new[] { "enum:MicroCard.Framework.CredentialSlot", "byte[]", "int32", "int32" }, "bool", 41,
                 "native", "security-state", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CredentialNative", "IsVerified",
-                false, new[] { "int32" }, "bool", 42,
+                "MicroCard.Framework", "MicroCard.Framework", "CredentialService", "IsVerified",
+                true, new[] { "enum:MicroCard.Framework.CredentialSlot" }, "bool", 42,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CredentialNative", "Change",
-                false, new[] { "int32", "byte[]", "int32", "int32" }, "void", 43,
+                "MicroCard.Framework", "MicroCard.Framework", "CredentialService", "Change",
+                true, new[] { "enum:MicroCard.Framework.CredentialSlot", "byte[]", "int32", "int32" }, "void", 43,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CredentialNative", "Unblock",
-                false, new[] { "int32", "byte[]", "int32", "int32", "byte[]", "int32", "int32" }, "bool", 44,
+                "MicroCard.Framework", "MicroCard.Framework", "CredentialService", "Unblock",
+                true, new[] { "enum:MicroCard.Framework.CredentialSlot", "byte[]", "int32", "int32", "byte[]", "int32", "int32" }, "bool", 44,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "CredentialNative", "RetriesRemaining",
-                false, new[] { "int32", "int32" }, "int32", 45,
+                "MicroCard.Framework", "MicroCard.Framework", "CredentialService", "RetriesRemaining",
+                true, new[] { "enum:MicroCard.Framework.CredentialSlot", "int32" }, "int32", 45,
                 "native", "read", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "BeginTransaction",
-                true, Array.Empty<string>(), "void", 46,
-                "native", "transaction-control", new[] { "mc04-1.0" }),
-            new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "CommitTransaction",
-                true, Array.Empty<string>(), "void", 47,
-                "native", "transaction-control", new[] { "mc04-1.0" }),
-            new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "AbortTransaction",
-                true, Array.Empty<string>(), "void", 48,
-                "native", "transaction-control", new[] { "mc04-1.0" }),
-            new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Cryptography", "Sha256Into",
-                false, new[] { "byte[]", "int32", "int32", "byte[]", "int32" }, "int32", 49,
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeService", "Sha256Into",
+                true, new[] { "byte[]", "int32", "int32", "byte[]", "int32" }, "int32", 49,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Cryptography", "RandomBytes",
-                false, new[] { "int32" }, "byte[]", 50,
+                "MicroCard.Framework", "MicroCard.Framework", "RandomService", "GetBytes",
+                true, new[] { "int32" }, "byte[]", 50,
                 "native", "random", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "Cryptography", "FixedTimeEquals",
-                false, new[] { "byte[]", "int32", "int32", "byte[]", "int32", "int32" }, "bool", 51,
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeService", "FixedTimeEquals",
+                true, new[] { "byte[]", "int32", "int32", "byte[]", "int32", "int32" }, "bool", 51,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
-                "MicroCard.Framework", "MicroCard.Framework", "DomainStorage", "SetBytes",
-                true, new[] { "int32", "byte[]", "int32", "int32" }, "void", 52,
+                "MicroCard.Framework", "MicroCard.Framework", "StorageService", "SetBytes",
+                true, new[] { "enum:MicroCard.Framework.StorageId", "byte[]", "int32", "int32" }, "void", 52,
                 "native", "transactional", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "MicroCard.Framework", "MicroCard.Framework", "Buffers", "Copy",
@@ -230,7 +234,7 @@ namespace MicroCard.Build
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "MicroCard.Framework", "MicroCard.Framework", "Tlv", "TryRead",
-                false, new[] { "byte[]", "int32", "int32", "int32[]", "int32", "int32" }, "bool", 54,
+                false, new[] { "byte[]", "int32", "int32", "int32[]", "int32", "bool" }, "bool", 54,
                 "native", "none", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "MicroCard.Framework", "MicroCard.Framework", "TransactionScopeRuntime", "Begin",
@@ -256,6 +260,14 @@ namespace MicroCard.Build
                 "MicroCard.Framework", "MicroCard.Framework", "TransactionInformationRuntime", "Status",
                 true, Array.Empty<string>(), "int32", 46,
                 "native", "read", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeIntrinsics", "Sha256",
+                false, new[] { "byte[]" }, "byte[]", 20,
+                "native", "none", new[] { "mc04-1.0" }),
+            new Mc04AbiMember(
+                "MicroCard.Framework", "MicroCard.Framework", "RuntimeIntrinsics", "RandomBytes",
+                false, new[] { "int32" }, "byte[]", 50,
+                "native", "random", new[] { "mc04-1.0" }),
             new Mc04AbiMember(
                 "System.Security.Cryptography", "System.Security.Cryptography", "SHA256", "HashData",
                 false, new[] { "byte[]" }, "byte[]", 20,

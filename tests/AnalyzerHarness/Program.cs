@@ -22,7 +22,7 @@ if (emission is not null && emission.Outputs.Keys.Any(symbol => !cases.ContainsK
     throw new InvalidDataException("Emission requested an unknown analyzer case");
 var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")
     ?? throw new InvalidOperationException("Runtime references unavailable"))
-    .Split(Path.PathSeparator).Append(typeof(MicroCard.Framework.Host).Assembly.Location)
+    .Split(Path.PathSeparator).Append(typeof(MicroCard.Framework.AssemblyContext).Assembly.Location)
     .Distinct(StringComparer.Ordinal).Select(path => MetadataReference.CreateFromFile(path)).ToImmutableArray();
 var analyzers = ImmutableArray.Create<DiagnosticAnalyzer>(new MicroCardProfileAnalyzer());
 var elapsed = Stopwatch.StartNew();

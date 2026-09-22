@@ -15,7 +15,7 @@ RUST = ROOT / "crates/microcard-core/src/mc04_abi.rs"
 NATIVE = ROOT / "crates/microcard-core/src/native_abi.rs"
 
 TYPES = {"void", "bool", "int32", "byte[]", "int32[]"}
-LOWERINGS = {"native", "current-domain", "domain-keys", "domain-storage"}
+LOWERINGS = {"native", "current-context", "service", "storage-service"}
 EFFECTS = {
     "none", "read", "random", "transactional", "transaction-control",
     "security-state", "irreversible",
@@ -43,7 +43,7 @@ def load():
         if member["kind"] not in {"static", "instance"}:
             raise ValueError(f"invalid member kind: {member['kind']}")
         for value in [*member["parameters"], member["result"]]:
-            if value not in TYPES and not re.fullmatch(r"ref:[A-Za-z_][A-Za-z0-9_.]*", value):
+            if value not in TYPES and not re.fullmatch(r"(?:ref|enum):[A-Za-z_][A-Za-z0-9_.]*", value):
                 raise ValueError(f"invalid ABI type: {value}")
         if member["lowering"] not in LOWERINGS:
             raise ValueError(f"invalid lowering: {member['lowering']}")
@@ -53,7 +53,8 @@ def load():
             raise ValueError(f"unknown profile on {member['owner']}.{member['name']}")
         if member["lowering"] == "native":
             native = member["native"]
-            shape = (len(member["parameters"]) + (member["kind"] == "instance"),
+            runtime_receiver = member.get("runtime_receiver", member["kind"] == "instance")
+            shape = (len(member["parameters"]) + runtime_receiver,
                      member["result"] != "void", member["capability"])
             if native in natives and natives[native] != shape:
                 raise ValueError(f"conflicting native identity {native}")
@@ -162,13 +163,15 @@ def rust_type(value):
     names = {"bool": "Bool", "int32": "Int32", "byte[]": "ByteArray", "int32[]": "Int32Array"}
     if value in names:
         return f"Some(AbiType::{names[value]})"
+    if value.startswith("enum:"):
+        return "Some(AbiType::Int32)"
     return f'Some(AbiType::Reference("{value[4:]}"))'
 
 
 def rust(abi, members, digest):
     lowerings = {
-        "current-domain": "CurrentDomain", "domain-keys": "DomainKeys",
-        "domain-storage": "DomainStorage",
+        "current-context": "CurrentDomain", "service": "DomainKeys",
+        "storage-service": "DomainStorage",
     }
     effects = {name: "".join(part.title() for part in name.split("-")) for name in EFFECTS}
     lines = [

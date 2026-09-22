@@ -95,7 +95,8 @@ public sealed partial class MicroCardProfileAnalyzer
         if (field.IsImplicitlyDeclared || !field.Locations.Any(static location => location.IsInSource))
             return;
         var location = field.Locations.First(static item => item.IsInSource);
-        if (field.IsConst && field.Type.SpecialType == SpecialType.System_Int32)
+        if (field.IsConst && (field.Type.SpecialType == SpecialType.System_Int32 ||
+            field.Type.TypeKind == TypeKind.Enum))
             return;
         if (field.IsStatic || field.Type.SpecialType != SpecialType.System_Int32)
             Report(context, ShapeRule, location,
@@ -234,7 +235,10 @@ public sealed partial class MicroCardProfileAnalyzer
         if (type is IArrayTypeSymbol { IsSZArray: true, ElementType.SpecialType: SpecialType.System_Int32 })
             return "int32[]";
         if (type is INamedTypeSymbol { Arity: 0 } named)
-            return "ref:" + named.ContainingNamespace.ToDisplayString() + "." + named.Name;
+        {
+            var prefix = named.TypeKind == TypeKind.Enum ? "enum:" : "ref:";
+            return prefix + named.ContainingNamespace.ToDisplayString() + "." + named.Name;
+        }
         return null;
     }
 
@@ -257,7 +261,10 @@ public sealed partial class MicroCardProfileAnalyzer
             return false;
         if (named.ContainingAssembly?.Name == "MicroCard.Framework" &&
             named.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework" &&
-            named.Name is "SecurityDomain" or "DomainStorage" or "DomainKeys" or "KeyHandle")
+            named.Name is "AssemblyContext" or "CommandService" or "ResponseService" or
+                "StorageService" or "KeyService" or "RandomService" or "SecureChannelService" or
+                "CredentialService" or "RuntimeService" or "KeyHandle" or "StorageId" or
+                "KeySlot" or "CredentialSlot" or "KeyAlgorithm" or "StatusWord" or "SecurityLevel")
             return true;
         if (IsTransactionScope(named))
             return true;

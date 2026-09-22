@@ -145,6 +145,17 @@ sealed partial class Mc04Writer
                "System.Security.Cryptography";
     }
 
+    bool IsFrameworkEnum(TypeReferenceHandle handle)
+    {
+        var type = md.GetTypeReference(handle);
+        if (type.ResolutionScope.Kind != HandleKind.AssemblyReference ||
+            md.GetString(type.Namespace) != "MicroCard.Framework" ||
+            md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) != frameworkName)
+            return false;
+        return md.GetString(type.Name) is "StorageId" or "KeySlot" or "CredentialSlot" or
+            "KeyAlgorithm" or "StatusWord" or "SecurityLevel";
+    }
+
     bool IsProjectedSystemCryptography(MemberReferenceHandle handle)
     {
         var member = md.GetMemberReference(handle);
@@ -163,7 +174,7 @@ sealed partial class Mc04Writer
     }
 
     string TypeReferenceName(TypeReferenceHandle handle) =>
-        IsProjectedSystemCryptography(handle) ? "Cryptography" :
+        IsProjectedSystemCryptography(handle) ? "RuntimeIntrinsics" :
         projectedTransactionTypes.TryGetValue(handle, out var transactionName) ? transactionName :
         md.GetString(md.GetTypeReference(handle).Name);
 
@@ -326,8 +337,8 @@ sealed partial class Mc04Writer
         }
         void Type()
         {
-            byte kind = input[cursor++]; output.WriteByte(kind);
-            if (kind == 0x1d) { Type(); return; }
+            byte kind = input[cursor++];
+            if (kind == 0x1d) { output.WriteByte(kind); Type(); return; }
             if (kind is 0x11 or 0x12)
             {
                 uint coded = Compressed(); uint tag = coded & 3; uint row = coded >> 2;
@@ -337,6 +348,13 @@ sealed partial class Mc04Writer
                     1 when row != 0 => MetadataTokens.TypeReferenceHandle(checked((int)row)),
                     _ => throw new Exception("Unsupported signature TypeDefOrRef")
                 };
+                if (kind == 0x11 && handle.Kind == HandleKind.TypeReference &&
+                    IsFrameworkEnum((TypeReferenceHandle)handle))
+                {
+                    output.WriteByte(0x08);
+                    return;
+                }
+                output.WriteByte(kind);
                 if (handle.Kind == HandleKind.TypeReference) usedTypes?.Add((TypeReferenceHandle)handle);
                 uint rewritten = handle.Kind switch
                 {
@@ -347,6 +365,7 @@ sealed partial class Mc04Writer
                 };
                 WriteCompressed(rewritten); return;
             }
+            output.WriteByte(kind);
             if (kind is not (0x01 or 0x02 or 0x04 or 0x05 or 0x06 or 0x07 or 0x08 or 0x09 or 0x0e or 0x1c))
                 throw new Exception($"Unsupported signature element 0x{kind:X2}");
         }
@@ -403,4 +422,3 @@ sealed class BlobHeap
     }
     public ReadOnlyMemory<byte> Bytes => data.GetBuffer().AsMemory(0, Length);
 }
-

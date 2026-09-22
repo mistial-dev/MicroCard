@@ -10,8 +10,13 @@ catch (Exception e) { Console.Error.WriteLine(e.Message); return 1; }
 sealed class Types : ISignatureTypeProvider<string, object?>, ICustomAttributeTypeProvider<string>
 {
     public string GetPrimitiveType(PrimitiveTypeCode c) => c switch { PrimitiveTypeCode.Void => "void", PrimitiveTypeCode.Boolean => "bool", PrimitiveTypeCode.Int32 => "int32", PrimitiveTypeCode.Byte => "byte", _ => c.ToString() };
-    public string GetTypeFromDefinition(MetadataReader r, TypeDefinitionHandle h, byte k) { var t = r.GetTypeDefinition(h); return "ref:" + r.GetString(t.Namespace) + "." + r.GetString(t.Name); }
-    public string GetTypeFromReference(MetadataReader r, TypeReferenceHandle h, byte k) { var t = r.GetTypeReference(h); return "ref:" + r.GetString(t.Namespace) + "." + r.GetString(t.Name); }
+    static string Named(string ns, string name, byte kind) =>
+        kind == 0x11 && ns == "MicroCard.Framework" && name is
+            "StorageId" or "KeySlot" or "CredentialSlot" or "KeyAlgorithm" or "StatusWord" or "SecurityLevel"
+            ? "enum:" + ns + "." + name
+            : "ref:" + ns + "." + name;
+    public string GetTypeFromDefinition(MetadataReader r, TypeDefinitionHandle h, byte k) { var t = r.GetTypeDefinition(h); return Named(r.GetString(t.Namespace), r.GetString(t.Name), k); }
+    public string GetTypeFromReference(MetadataReader r, TypeReferenceHandle h, byte k) { var t = r.GetTypeReference(h); return Named(r.GetString(t.Namespace), r.GetString(t.Name), k); }
     public string GetTypeFromSpecification(MetadataReader r, object? c, TypeSpecificationHandle h, byte k) => throw new NotSupportedException("Type specification");
     public string GetSZArrayType(string t) => t + "[]";
     public string GetArrayType(string t, ArrayShape s) => throw new NotSupportedException();

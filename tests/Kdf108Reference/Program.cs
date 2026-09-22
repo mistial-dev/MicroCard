@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using MicroCard.Framework;
+using MicroCard.Framework.Testing;
 
 var host = new ReferenceHost(Convert.FromHexString("404142434445464748494A4B4C4D4E4F"));
-Host.Current = host;
+AssemblyContextTesting.Use(host);
 Kdf108Consumer.Install();
 host.Command = Convert.FromHexString("04080102030405060708");
 Kdf108Consumer.Process();
@@ -19,7 +20,7 @@ if (!host.OpenedOpaqueKey || host.ExposedKey)
     throw new Exception("The entry must use an opaque SSD-owned key handle");
 Console.WriteLine("PASS: SCP03 SP800-108 AES-CMAC, opaque key handle and APDU boundary");
 
-sealed class ReferenceHost(byte[] key) : IHost
+sealed class ReferenceHost(byte[] key) : IAssemblyContextTestHost
 {
     static readonly byte[] Token = Convert.FromHexString("4D434B48000000010000000100000001");
     public byte[] Command { get; set; } = [];
@@ -38,7 +39,7 @@ sealed class ReferenceHost(byte[] key) : IHost
         for (int index = 0; index < length; index++) ResponseBytes.Add(source[sourceOffset + index]);
     }
     public void Status(int value) => StatusWord = value;
-    public byte[] GenerateKey(int slot, int algorithm) => slot == 2 && algorithm == KeyAlgorithms.Aes128 ? Token : throw new Exception();
+    public byte[] GenerateKey(int slot, int algorithm) => slot == 2 && algorithm == (int)KeyAlgorithm.Aes128 ? Token : throw new Exception();
     public byte[] OpenKey(int slot) { if (slot != 2) throw new Exception(); OpenedOpaqueKey = true; return Token; }
     public byte[] KeyOperation(int operation, byte[] token, byte[][] data)
     {

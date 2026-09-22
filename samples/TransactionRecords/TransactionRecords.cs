@@ -13,37 +13,37 @@ public static class Records
     public static void Process()
     {
         _ = Transaction.Current;
-        int length = CommandApdu.Length;
+        int length = AssemblyContext.Current.Command.Length;
         if (length < 1)
         {
-            ResponseApdu.SetStatus(0x6700);
+            AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
             return;
         }
 
         byte[] command = new byte[length];
-        CommandApdu.CopyTo(command, 0, 0, length);
+        AssemblyContext.Current.Command.CopyTo(command, 0, 0, length);
         switch (command[0])
         {
             case 0:
-                if (length != 4) { ResponseApdu.SetStatus(0x6700); return; }
+                if (length != 4) { AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700); return; }
                 CommitUpdate(command);
                 break;
             case 1:
-                if (length != 4) { ResponseApdu.SetStatus(0x6700); return; }
+                if (length != 4) { AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700); return; }
                 AbortUpdate(command);
                 break;
             case 2:
-                DomainStorage store = SecurityDomain.Current.Store;
+                StorageService store = AssemblyContext.Current.Storage;
                 byte[] response =
                 [
-                    (byte)store.GetInt32(1),
-                    (byte)store.GetInt32(2),
-                    store.ContainsBytes(3) ? store.GetBytes(3)[0] : (byte)0
+                    (byte)store.GetInt32((StorageId)1),
+                    (byte)store.GetInt32((StorageId)2),
+                    store.ContainsBytes((StorageId)3) ? store.GetBytes((StorageId)3)[0] : (byte)0
                 ];
-                ResponseApdu.Write(response, 0, response.Length);
+                AssemblyContext.Current.Response.Write(response, 0, response.Length);
                 break;
             default:
-                ResponseApdu.SetStatus(0x6D00);
+                AssemblyContext.Current.Response.SetStatus((StatusWord)0x6D00);
                 break;
         }
     }
@@ -65,9 +65,9 @@ public static class Records
 
     private static void Write(byte[] command)
     {
-        DomainStorage store = SecurityDomain.Current.Store;
-        store.SetInt32(1, command[1]);
-        store.SetInt32(2, command[2]);
-        store.SetBytes(3, [command[3]]);
+        StorageService store = AssemblyContext.Current.Storage;
+        store.SetInt32((StorageId)1, command[1]);
+        store.SetInt32((StorageId)2, command[2]);
+        store.SetBytes((StorageId)3, [command[3]]);
     }
 }

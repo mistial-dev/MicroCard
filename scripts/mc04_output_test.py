@@ -13,14 +13,15 @@ def main():
     assert tables["Assembly"][0]["columns"]["Name"]["value"] == "Counter"
     type_names = {row["columns"]["TypeName"]["value"] for row in tables["TypeRef"]}
     assert {
-        "SecurityDomain",
-        "DomainStorage",
-        "CommandApdu",
-        "ResponseApdu",
+        "AssemblyContext",
+        "StorageService",
+        "CommandService",
+        "ResponseService",
         "Object",
         "Byte",
         "Int32",
     } <= type_names
+    assert not {"Host", "IAssemblyContextTestHost", "AssemblyContextTesting"} & type_names
     assert not any("Compilation" in name or "Debug" in name or "AssemblyCompany" in name for name in type_names)
     install = next(row for row in tables["MethodDef"] if row["columns"]["Name"]["value"] == "Install")
     code = bytes.fromhex(install["columns"]["Body"]["code_hex"])
@@ -28,10 +29,10 @@ def main():
     first_instruction = install["columns"]["Body"]["cil"][0]
     assert code[0] == 0x28 and code[4] == 0x6F, "calls must retain compact four-byte CIL encoding"
     assert first_instruction == {"offset": 0, "name": "call", "operand": current["token"]}, \
-        "call token was not remapped to Transaction.Current"
+        "call token was not remapped to AssemblyContext.Current"
     signature = bytes.fromhex(current["columns"]["Signature"]["hex"])
-    security_domain_row = next(index for index, row in enumerate(tables["TypeRef"], 1) if row["columns"]["TypeName"]["value"] == "SecurityDomain")
-    assert signature[-1] == security_domain_row << 2 | 1, "signature TypeRef token was not remapped"
+    context_row = next(index for index, row in enumerate(tables["TypeRef"], 1) if row["columns"]["TypeName"]["value"] == "AssemblyContext")
+    assert signature[-1] == context_row << 2 | 1, "signature TypeRef token was not remapped"
     for method_name in ("EmptyBytes", "EmptyIntegers"):
         method = next(row for row in tables["MethodDef"] if row["columns"]["Name"]["value"] == method_name)
         code = bytes.fromhex(method["columns"]["Body"]["code_hex"])

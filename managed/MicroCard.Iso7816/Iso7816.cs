@@ -7,24 +7,24 @@ namespace MicroCard.Iso7816;
 // ISO/IEC 7816-4:2020, 5.1-5.2: command-response pairs, status words and APDU structure.
 public static class StatusWords
 {
-    public const int Success = 0x9000;
-    public const int WarningStateUnchanged = 0x6200;
-    public const int WarningStateChanged = 0x6300;
-    public const int WrongLength = 0x6700;
-    public const int SecurityStatusNotSatisfied = 0x6982;
-    public const int AuthenticationMethodBlocked = 0x6983;
-    public const int ConditionsNotSatisfied = 0x6985;
-    public const int IncorrectData = 0x6A80;
-    public const int FunctionNotSupported = 0x6A81;
-    public const int FileNotFound = 0x6A82;
-    public const int RecordNotFound = 0x6A83;
-    public const int NotEnoughMemory = 0x6A84;
-    public const int IncorrectParameters = 0x6A86;
-    public const int ReferenceDataNotFound = 0x6A88;
-    public const int WrongParameters = 0x6B00;
-    public const int InstructionNotSupported = 0x6D00;
-    public const int ClassNotSupported = 0x6E00;
-    public const int UnknownError = 0x6F00;
+    public const StatusWord Success = StatusWord.Success;
+    public const StatusWord WarningStateUnchanged = StatusWord.WarningStateUnchanged;
+    public const StatusWord WarningStateChanged = StatusWord.WarningStateChanged;
+    public const StatusWord WrongLength = StatusWord.WrongLength;
+    public const StatusWord SecurityStatusNotSatisfied = StatusWord.SecurityStatusNotSatisfied;
+    public const StatusWord AuthenticationMethodBlocked = StatusWord.AuthenticationMethodBlocked;
+    public const StatusWord ConditionsNotSatisfied = StatusWord.ConditionsNotSatisfied;
+    public const StatusWord IncorrectData = StatusWord.IncorrectData;
+    public const StatusWord FunctionNotSupported = StatusWord.FunctionNotSupported;
+    public const StatusWord FileNotFound = StatusWord.FileNotFound;
+    public const StatusWord RecordNotFound = StatusWord.RecordNotFound;
+    public const StatusWord NotEnoughMemory = StatusWord.NotEnoughMemory;
+    public const StatusWord IncorrectParameters = StatusWord.IncorrectParameters;
+    public const StatusWord ReferenceDataNotFound = StatusWord.ReferenceDataNotFound;
+    public const StatusWord WrongParameters = StatusWord.WrongParameters;
+    public const StatusWord InstructionNotSupported = StatusWord.InstructionNotSupported;
+    public const StatusWord ClassNotSupported = StatusWord.ClassNotSupported;
+    public const StatusWord UnknownError = StatusWord.UnknownError;
 }
 
 public static class Instructions

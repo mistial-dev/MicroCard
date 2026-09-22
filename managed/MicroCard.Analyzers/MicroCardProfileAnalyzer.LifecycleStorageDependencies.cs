@@ -25,7 +25,7 @@ public sealed partial class MicroCardProfileAnalyzer
         var method = operation.TargetMethod;
         if (method.ContainingAssembly?.Name != "MicroCard.Framework" ||
             method.ContainingNamespace?.ToDisplayString() != "MicroCard.Framework" ||
-            method.ContainingType?.Name is not ("DomainStorage" or "DomainStore"))
+            method.ContainingType?.Name != "StorageService")
             return;
         var kind = method.Name switch
         {
@@ -259,4 +259,3 @@ public sealed partial class MicroCardProfileAnalyzer
 
     private static bool IsHex32(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
 }
-

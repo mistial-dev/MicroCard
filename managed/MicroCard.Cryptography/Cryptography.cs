@@ -6,28 +6,28 @@ namespace MicroCard.Cryptography;
 
 public static class SHA256
 {
-    public static byte[] HashData(byte[] data) => Framework.Cryptography.Sha256(data);
+    public static byte[] HashData(byte[] data) => AssemblyContext.Current.Runtime.Sha256(data);
 
     public static int HashData(byte[] source, int sourceOffset, int sourceLength,
         byte[] destination, int destinationOffset) =>
-        Framework.Cryptography.Sha256Into(source, sourceOffset, sourceLength, destination,
+        AssemblyContext.Current.Runtime.Sha256Into(source, sourceOffset, sourceLength, destination,
             destinationOffset);
 }
 
 public static class KeyFactory
 {
-    public static KeyHandle GenerateHmacSha256(int slot) =>
-        SecurityDomain.Current.Keys.Generate(slot, KeyAlgorithms.HmacSha256);
+    public static KeyHandle GenerateHmacSha256(KeySlot slot) =>
+        AssemblyContext.Current.Keys.Generate(slot, KeyAlgorithm.HmacSha256);
 
-    public static KeyHandle GenerateAes128(int slot) =>
-        SecurityDomain.Current.Keys.Generate(slot, KeyAlgorithms.Aes128);
+    public static KeyHandle GenerateAes128(KeySlot slot) =>
+        AssemblyContext.Current.Keys.Generate(slot, KeyAlgorithm.Aes128);
 
-    public static KeyHandle GenerateP256(int slot) =>
-        SecurityDomain.Current.Keys.Generate(slot, KeyAlgorithms.P256);
+    public static KeyHandle GenerateP256(KeySlot slot) =>
+        AssemblyContext.Current.Keys.Generate(slot, KeyAlgorithm.P256);
 
-    public static KeyHandle Open(int slot) => SecurityDomain.Current.Keys.Open(slot);
+    public static KeyHandle Open(KeySlot slot) => AssemblyContext.Current.Keys.Open(slot);
 
-    public static void Delete(int slot) => SecurityDomain.Current.Keys.Delete(slot);
+    public static void Delete(KeySlot slot) => AssemblyContext.Current.Keys.Delete(slot);
 }
 
 public static class HmacSha256
@@ -69,7 +69,7 @@ public static class P256
         key.SignP256(data, offset, length);
 
     public static bool VerifyData(byte[] signature, byte[] data, byte[] publicKey) =>
-        Framework.Cryptography.VerifyP256(publicKey, data, signature);
+        AssemblyContext.Current.Runtime.VerifyP256(publicKey, data, signature);
 
     public static byte[] DeriveKeyMaterial(KeyHandle key, byte[] peerPublicKey) =>
         key.DeriveP256(peerPublicKey);
@@ -78,18 +78,18 @@ public static class P256
 public static class RandomNumberGenerator
 {
     public static void Fill(byte[] destination, int offset, int length) =>
-        Framework.Cryptography.FillRandom(destination, offset, length);
+        AssemblyContext.Current.Random.Fill(destination, offset, length);
 
-    public static byte[] GetBytes(int length) => Framework.Cryptography.RandomBytes(length);
+    public static byte[] GetBytes(int length) => AssemblyContext.Current.Random.GetBytes(length);
 }
 
 public static class CryptographicOperations
 {
     public static bool FixedTimeEquals(byte[] left, byte[] right) =>
-        Framework.Cryptography.FixedTimeEquals(left, 0, left.Length, right, 0, right.Length);
+        AssemblyContext.Current.Runtime.FixedTimeEquals(left, 0, left.Length, right, 0, right.Length);
 
     public static bool FixedTimeEquals(byte[] left, int leftOffset, int leftLength,
         byte[] right, int rightOffset, int rightLength) =>
-        Framework.Cryptography.FixedTimeEquals(left, leftOffset, leftLength, right, rightOffset,
+        AssemblyContext.Current.Runtime.FixedTimeEquals(left, leftOffset, leftLength, right, rightOffset,
             rightLength);
 }

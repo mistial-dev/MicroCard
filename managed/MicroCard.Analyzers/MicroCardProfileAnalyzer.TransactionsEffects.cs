@@ -30,7 +30,7 @@ public sealed partial class MicroCardProfileAnalyzer
     }
 
     private static bool IsIrreversibleFrameworkCall(IMethodSymbol method) =>
-        method.Name == "Write" && method.ContainingType?.Name == "Hardware" &&
+        method.Name == "WriteHardware" && method.ContainingType?.Name == "RuntimeService" &&
         method.ContainingAssembly?.Name == "MicroCard.Framework" &&
         method.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework";
 

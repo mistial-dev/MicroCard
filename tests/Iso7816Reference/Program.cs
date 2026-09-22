@@ -1,4 +1,5 @@
 using System;
+using MicroCard.Framework;
 using MicroCard.Iso7816;
 
 namespace MicroCard.Iso7816.Tests;
@@ -53,7 +54,8 @@ internal static class Program
             Instructions.Select, 0x04, CommandRouting.Any));
         Check(!CommandRouting.Matches(select, 0, select.Length, 0, 0xFF,
             Instructions.GetData, CommandRouting.Any, CommandRouting.Any));
-        Check(StatusWords.Success == 0x9000 && StatusWords.WrongLength == 0x6700);
+        Check(StatusWords.Success == StatusWord.Success &&
+            StatusWords.WrongLength == StatusWord.WrongLength);
     }
 
     private static void ReadTlv()

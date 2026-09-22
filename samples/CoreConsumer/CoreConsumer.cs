@@ -14,14 +14,14 @@ public static class CoreConsumer
 {
     public static void Process()
     {
-        int length = CommandApdu.Length;
+        int length = AssemblyContext.Current.Command.Length;
         if (length < 1)
         {
-            ResponseApdu.SetStatus(0x6700);
+            AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
             return;
         }
         var command = new byte[length];
-        CommandApdu.CopyTo(command, 0, 0, length);
+        AssemblyContext.Current.Command.CopyTo(command, 0, 0, length);
         int operation = command[0];
         if (operation == 0)
         {
@@ -46,7 +46,7 @@ public static class CoreConsumer
         {
             if (length != 5)
             {
-                ResponseApdu.SetStatus(0x6700);
+                AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
                 return;
             }
             var response = new byte[4];
@@ -60,7 +60,7 @@ public static class CoreConsumer
             int dataLength = length - 1;
             if ((dataLength & 1) != 0)
             {
-                ResponseApdu.SetStatus(0x6700);
+                AssemblyContext.Current.Response.SetStatus((StatusWord)0x6700);
                 return;
             }
             int half = dataLength / 2;
@@ -77,8 +77,8 @@ public static class CoreConsumer
             Write(response);
             return;
         }
-        ResponseApdu.SetStatus(0x6D00);
+        AssemblyContext.Current.Response.SetStatus((StatusWord)0x6D00);
     }
 
-    private static void Write(byte[] data) => ResponseApdu.Write(data, 0, data.Length);
+    private static void Write(byte[] data) => AssemblyContext.Current.Response.Write(data, 0, data.Length);
 }

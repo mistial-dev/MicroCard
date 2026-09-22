@@ -11,19 +11,19 @@ public static class Iso7816Consumer
 {
     public static void Process()
     {
-        int commandLength = CommandApdu.Length;
+        int commandLength = AssemblyContext.Current.Command.Length;
         if (commandLength < 2)
         {
-            ResponseApdu.SetStatus(StatusWords.WrongLength);
+            AssemblyContext.Current.Response.SetStatus(StatusWords.WrongLength);
             return;
         }
         var command = new byte[commandLength];
-        CommandApdu.CopyTo(command, 0, 0, command.Length);
+        AssemblyContext.Current.Command.CopyTo(command, 0, 0, command.Length);
         int mode = command[0];
         int length = command[1];
         if (length != commandLength - 2)
         {
-            ResponseApdu.SetStatus(StatusWords.WrongLength);
+            AssemblyContext.Current.Response.SetStatus(StatusWords.WrongLength);
             return;
         }
 
@@ -36,7 +36,7 @@ public static class Iso7816Consumer
         else if (mode == 1)
             ParseTlv(input);
         else
-            ResponseApdu.SetStatus(StatusWords.IncorrectParameters);
+            AssemblyContext.Current.Response.SetStatus(StatusWords.IncorrectParameters);
     }
 
     private static void ParseSelect(byte[] input)
@@ -47,14 +47,14 @@ public static class Iso7816Consumer
                 Instructions.Select, 0x04, CommandRouting.Any) ||
             !Aid.IsValid(input, parsed[ShortCommand.DataOffsetIndex], parsed[ShortCommand.DataLengthIndex]))
         {
-            ResponseApdu.SetStatus(StatusWords.IncorrectData);
+            AssemblyContext.Current.Response.SetStatus(StatusWords.IncorrectData);
             return;
         }
 
         int expected = parsed[ShortCommand.ExpectedLengthIndex];
         byte[] response = [(byte)parsed[ShortCommand.CaseIndex], (byte)parsed[ShortCommand.DataLengthIndex],
             (byte)(expected >> 8), (byte)expected];
-        ResponseApdu.Write(response, 0, response.Length);
+        AssemblyContext.Current.Response.Write(response, 0, response.Length);
     }
 
     private static void ParseTlv(byte[] input)
@@ -63,7 +63,7 @@ public static class Iso7816Consumer
         if (!BerTlv.TryRead(input, 0, input.Length, parsed, 0) ||
             parsed[BerTlv.NextOffsetIndex] != input.Length)
         {
-            ResponseApdu.SetStatus(StatusWords.IncorrectData);
+            AssemblyContext.Current.Response.SetStatus(StatusWords.IncorrectData);
             return;
         }
 
@@ -71,6 +71,6 @@ public static class Iso7816Consumer
         int valueLength = parsed[BerTlv.ValueLengthIndex];
         byte[] response = [(byte)(tag >> 16), (byte)(tag >> 8), (byte)tag,
             (byte)(valueLength >> 8), (byte)valueLength];
-        ResponseApdu.Write(response, 0, response.Length);
+        AssemblyContext.Current.Response.Write(response, 0, response.Length);
     }
 }

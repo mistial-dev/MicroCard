@@ -713,7 +713,7 @@ fn multi_entry_package(
             })
             .collect(),
         dependencies: Vec::new(),
-        capabilities: alloc::vec![3, 4],
+        capabilities: alloc::vec![7, 8],
         storage: Vec::new(),
         limits: Limits {
             arena: 16384,
@@ -822,7 +822,7 @@ fn signed_package_with_storage(
             Vec::new()
         },
         dependencies: Vec::new(),
-        capabilities: alloc::vec![3, 4],
+        capabilities: alloc::vec![7, 8],
         storage,
         limits: Limits {
             arena: 16384,
@@ -1612,7 +1612,7 @@ fn domain_policy_is_immutable_and_enforced() {
     let mut c = card();
     let inc = create(&mut c, "a");
     let mut policy = DomainPolicy {
-        capabilities: alloc::vec![3],
+        capabilities: alloc::vec![7],
         max_assemblies: 1,
         max_instances: 1,
         max_int_records: 1,
