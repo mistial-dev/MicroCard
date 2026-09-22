@@ -15,6 +15,7 @@ def run_checkpoint(jobs=1):
  build_managed(CHECKPOINT_PROJECTS, jobs)
  run(*wallet_build_command(), env=wallet_environment())
  managed_checks()
+ run('python3','scripts/sdk_template_smoke.py')
  packages=ROOT/'work/packages';packages.mkdir(parents=True,exist_ok=True)
  run('dotnet','pack','managed/MicroCard.Analyzers','-c','Release','--no-build','--nologo','--output',str(packages))
  run('dotnet','restore','tests/AnalyzerBridge','--source',str(packages),'--packages',str(ROOT/'work/nuget-packages'),'--nologo','--force-evaluate')
@@ -71,7 +72,7 @@ def run_checkpoint(jobs=1):
  run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CryptographyConsumer/bin/Release/net10.0/CryptographyConsumer.dll'),str(ROOT/'work/cryptography-consumer'))
  run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Iso7816Consumer/bin/Release/net10.0/Iso7816Consumer.dll'),str(ROOT/'work/iso7816-consumer'))
  iso_manifest=json.loads((ROOT/'work/iso7816.json').read_text())
- assert iso_manifest['assembly']=='MicroCard.Iso7816' and iso_manifest['capabilities']==[54] and iso_manifest['entry_points']==[]
+ assert iso_manifest['assembly']=='MicroCard.Iso7816' and iso_manifest['capabilities']==[53,54] and iso_manifest['entry_points']==[]
  encoding_manifest=json.loads((ROOT/'work/encoding.json').read_text())
  assert encoding_manifest['assembly']=='MicroCard.Encoding' and encoding_manifest['capabilities']==[53,54] and encoding_manifest['entry_points']==[]
  encoding_consumer=json.loads((ROOT/'work/encoding-consumer.json').read_text())
