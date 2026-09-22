@@ -3,6 +3,7 @@ import hashlib,json,subprocess
 from validation_common import ROOT, build_managed, run, run_acceptance
 from compiler_cases import run_compiler_cases
 from validation_quick import PROJECTS, managed_checks
+from wallet_acceptance import build_command as wallet_build_command, environment as wallet_environment
 
 CHECKPOINT_PROJECTS = PROJECTS + ['samples/WalletPersonal', 'samples/WalletWork', 'samples/EncodingConsumer', 'samples/Iso7816Consumer', 'samples/Kdf108', 'samples/Kdf108Consumer', 'samples/KeyOperations', 'samples/SigningAcceptance', 'tests/AnalyzerCases', 'tests/AnalyzerHarness', 'tests/Kdf108Reference', 'tests/Reference', 'tests/TransactionRuntimeNegative', 'tests/VersionConstraints']
 
@@ -12,6 +13,7 @@ def run_checkpoint(jobs=1):
  # The exhaustive journal power-cut sweep is intentionally byte-granular.
  run('cargo','test','--locked','--release')
  build_managed(CHECKPOINT_PROJECTS, jobs)
+ run(*wallet_build_command(), env=wallet_environment())
  managed_checks()
  packages=ROOT/'work/packages';packages.mkdir(parents=True,exist_ok=True)
  run('dotnet','pack','managed/MicroCard.Analyzers','-c','Release','--no-build','--nologo','--output',str(packages))

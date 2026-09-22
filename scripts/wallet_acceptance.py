@@ -11,6 +11,16 @@ from validation_common import prebuilt, require_artifacts
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+def build_command() -> list[object]:
+    wrapper_name = "mvnw.cmd" if os.name == "nt" else "mvnw"
+    return [ROOT / "wallet" / wrapper_name, "-f", ROOT / "wallet/pom.xml",
+            f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"]
+
+
+def main_class() -> pathlib.Path:
+    return ROOT / "wallet/target/classes/dev/mistial/microcard/wallet/Main.class"
+
+
 def environment() -> dict[str, str]:
     result = os.environ.copy()
     result.setdefault("MAVEN_USER_HOME", str(ROOT / "work/maven-home"))
@@ -36,14 +46,11 @@ def run(arguments: list[object], *, env: dict[str, str], capture: bool = False,
 def main() -> None:
     env = environment()
     simulator_name = "microcard-sim.exe" if os.name == "nt" else "microcard-sim"
-    wrapper_name = "mvnw.cmd" if os.name == "nt" else "mvnw"
     if prebuilt():
-        require_artifacts(ROOT / "target/debug" / simulator_name)
+        require_artifacts(ROOT / "target/debug" / simulator_name, main_class())
     else:
         run(["cargo", "build", "-p", "microcard-sim"], env=env)
-    run([ROOT / "wallet" / wrapper_name, "-f", ROOT / "wallet/pom.xml",
-         f"-Dmaven.repo.local={ROOT / 'work/maven-repository'}", "package"],
-        env=env, cwd=ROOT / "wallet")
+        run(build_command(), env=env, cwd=ROOT / "wallet")
     with tempfile.TemporaryDirectory(prefix="MicroCard acceptance with spaces ") as directory_name:
         directory = pathlib.Path(directory_name)
         assets = directory / "wallet assets"
