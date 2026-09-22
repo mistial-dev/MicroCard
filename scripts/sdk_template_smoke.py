@@ -96,7 +96,22 @@ def main() -> None:
         if list((project / "bin").rglob("MicroCard.AppModel.dll")):
             raise RuntimeError("Compile-time application model was copied to the build output")
 
-        print("PASS: SDK package and microcard-assembly template")
+        executed = subprocess.run(
+            [
+                "python3", str(ROOT / "scripts/run_mc04_assembly.py"),
+                str(prefix.with_suffix(".mca")), str(prefix.with_suffix(".json")),
+                "A000000001",
+            ],
+            cwd=ROOT,
+            env=pack_environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if executed.stdout.strip().splitlines()[-1] != "9000":
+            raise RuntimeError(f"Generated assembly returned {executed.stdout.strip()!r}")
+
+        print("PASS: SDK package, microcard-assembly template and signed host execution")
 
 
 if __name__ == "__main__":

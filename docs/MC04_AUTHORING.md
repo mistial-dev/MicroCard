@@ -118,9 +118,13 @@ persistence through the host acceptance path:
 python3 scripts/wallet_acceptance.py
 ```
 
-The [wallet guide](WALLET.md) describes that flow. A project-local command that signs
-and runs an arbitrary template assembly through the same path remains a release
-readiness item.
+The [wallet guide](WALLET.md) describes that flow. To run any converted template
+assembly through signed loading, installation, selection, and invocation on the host:
+
+```sh
+python3 scripts/run_mc04_assembly.py \
+  path/to/MyAssembly.mca path/to/MyAssembly.json A000000001 [COMMAND_HEX]
+```
 
 ## What the SDK contributes
 
