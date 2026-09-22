@@ -29,7 +29,7 @@ the older v1.8.2 release JAR.
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
 | API | 104 JCAlgTest factory probes | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
-| GlobalPlatform | Host SCP03 unsigned load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
+| GlobalPlatform | Host SCP03 unsigned OpenFIPS201 and JCAlgTest load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
 Optional Java Card features must be declared explicitly. They cannot be inferred
@@ -50,7 +50,7 @@ Flash operations, device install/selection timing, heap high-water, and power
 loss behavior have no current-DK measurement. Do not fill those cells from the
 MakerDiary or host figures.
 
-After the host unsigned-load change, the DK USB/CCID profile links at **229,184
+After the host unsigned-load change, the DK USB/CCID profile links at **229,192
 text, 148 data, and 198,284 BSS bytes**. This is a link measurement, not a
 physical timing result.
 

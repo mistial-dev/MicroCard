@@ -34,3 +34,8 @@ Run it in the emulator with `python3 scripts/jcalgtest_acceptance.py`. The accep
 queries every contiguous Cipher, Signature, KeyAgreement, MessageDigest, and RandomData
 algorithm constant defined by this Java Card 3.0.5 applet build. It requires exact
 agreement with MicroCard's deliberately small provider profile.
+
+`python3 scripts/jcalgtest_gp_acceptance.py` checks the separate management path:
+SCP03 loads the unsigned CAP, installs the applet, and its version and digest probe
+still work after a simulator restart. JCAlgTest uses proprietary CLA `B0` for
+applet probes; it carries no GlobalPlatform management authority.

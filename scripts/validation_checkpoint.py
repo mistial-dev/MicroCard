@@ -133,6 +133,7 @@ def run_checkpoint(jobs=1):
  run('cargo','build','--locked','--quiet','-p','microcard-sim','--features','jcvm-diagnostics')
  run('python3','scripts/piv_vector_acceptance.py')
  run('python3','scripts/jcalgtest_acceptance.py')
+ run('python3','scripts/jcalgtest_gp_acceptance.py')
  run('python3','scripts/jcvm_transport_acceptance.py')
  run('python3','scripts/framework_identity_test.py')
  run('python3','scripts/mc04_output_test.py')

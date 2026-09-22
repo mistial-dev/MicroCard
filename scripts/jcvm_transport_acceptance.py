@@ -20,6 +20,16 @@ def lv(*values):
     return b"".join(bytes([len(value)]) + value for value in values)
 
 
+def load_cap(client, domain, package, image):
+    """Transfer one raw CAP load file through authenticated GP commands."""
+    client.command(0xe6, lv(package, domain, hashlib.sha256(image).digest(), b"", b""), p1=2)
+    wire = b"\xc4\x82" + len(image).to_bytes(2, "big") + image
+    blocks = [wire[offset:offset + 220] for offset in range(0, len(wire), 220)]
+    assert len(blocks) <= 256
+    for index, block in enumerate(blocks):
+        client.command(0xe8, block, p1=0x80 if index + 1 == len(blocks) else 0, p2=index)
+
+
 def files(directory):
     return {str(path.relative_to(directory)): hashlib.sha256(path.read_bytes()).digest()
             for path in directory.rglob("*") if path.is_file() and path.name != ".lock"}
@@ -122,13 +132,7 @@ def install_openfips(client, discovery):
     module = bytes.fromhex("A000000308000010000100")
     instance = module
     image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
-    raw = image
-    client.command(0xe6, lv(package, discovery[4], hashlib.sha256(raw).digest(), b"", b""), p1=2)
-    wire = b"\xc4\x82" + len(raw).to_bytes(2, "big") + raw
-    blocks = [wire[offset:offset + 220] for offset in range(0, len(wire), 220)]
-    assert len(blocks) <= 256
-    for index, block in enumerate(blocks):
-        client.command(0xe8, block, p1=0x80 if index + 1 == len(blocks) else 0, p2=index)
+    load_cap(client, discovery[4], package, image)
     install = lv(package, module, instance, b"\0", b"\xc9\0", b"")
     client.command(0xe6, install, p1=0x0c)
     selected = client.command(0xa4, instance, p1=4, cla=0x04)

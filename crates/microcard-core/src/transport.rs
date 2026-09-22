@@ -111,7 +111,9 @@ impl<C: CardEngine> Endpoint<C> {
             result?;
             return globalplatform::isd_fci();
         }
-        if C::DIRECT_APDUS && matches!(c.cla, 0x00 | 0x10) {
+        // JCAlgTest uses proprietary CLA B0 for its applet commands. It carries
+        // no GP authority; management remains behind authenticated class 80.
+        if C::DIRECT_APDUS && matches!(c.cla, 0x00 | 0x10 | 0xB0) {
             self.card.abort_staging();
             self.status_cursor = None;
             let result = if c.ins == 0xa4 && c.p1 == 4 {
