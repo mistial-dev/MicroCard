@@ -6,16 +6,19 @@
 //! A native class has no Class component entry to be an instance of, so its objects carry
 //! a class word with the high bit set, which no internal class reference can have. That is
 //! what lets one heap hold both kinds of object and one catch clause match either.
-use crate::jcvm_api::{ClassId, MethodId, PackageId};
 use crate::jcvm_api::{ApiClass, PACKAGES};
+use crate::jcvm_api::{ClassId, MethodId, PackageId};
 use crate::link::ApiTarget;
 use crate::vm::frame::{Frame, Reference};
 use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
+mod framework;
 mod security;
+#[cfg(test)]
+use framework::{apdu_call as apdu, jcsystem_call as jcsystem, util_call as util};
 pub(crate) use security::native_volatile_range;
-pub(crate) use security::{symmetric_key_clear_event, ec_key_clear_event, ec_key_kind};
+pub(crate) use security::{ec_key_clear_event, ec_key_kind, symmetric_key_clear_event};
 
 /// A class the card provides, encoded so it cannot collide with a class in a package.
 ///
@@ -65,8 +68,9 @@ pub(crate) fn is_exception_class(class: &ApiClass) -> bool {
 
 /// Runtime APDU and exception objects may be used locally but never retained by applets.
 pub(crate) fn is_temporary_native(class: u16, words: u16) -> bool {
-    words == 1 && api_class(class).is_some_and(|class|
-        class.id == ClassId::APDU || is_exception_class(class))
+    words == 1
+        && api_class(class)
+            .is_some_and(|class| class.id == ClassId::APDU || is_exception_class(class))
 }
 
 /// Clear reset-scoped native fields in live state or a persistence staging buffer.
@@ -112,10 +116,15 @@ pub struct Jcre {
 
 impl Jcre {
     pub(crate) fn response_data(&self) -> Result<&[u8]> {
-        if self.outgoing_length.is_some_and(|declared| declared != self.outgoing) {
+        if self
+            .outgoing_length
+            .is_some_and(|declared| declared != self.outgoing)
+        {
             return Err(Error::Bounds);
         }
-        self.response.get(..usize::from(self.outgoing)).ok_or(Error::Bounds)
+        self.response
+            .get(..usize::from(self.outgoing))
+            .ok_or(Error::Bounds)
     }
 
     pub fn new(apdu: Reference, buffer: Reference) -> Self {
@@ -177,8 +186,12 @@ pub struct NativeContext<'a, 'heap, 'frame, H: crate::host::Host> {
 
 #[cfg(test)]
 pub fn call(
-    target: ApiTarget, heap: &mut Heap, host: &mut impl crate::host::Host,
-    frame: &mut Frame, context: heap::Context, jcre: &mut Jcre,
+    target: ApiTarget,
+    heap: &mut Heap,
+    host: &mut impl crate::host::Host,
+    frame: &mut Frame,
+    context: heap::Context,
+    jcre: &mut Jcre,
 ) -> Result<Native> {
     let mut budget = u32::MAX;
     let mut native = NativeContext {
@@ -201,81 +214,69 @@ pub fn call_with_budget<H: crate::host::Host>(
     target: ApiTarget,
     native: &mut NativeContext<'_, '_, '_, H>,
 ) -> Result<Native> {
-    let NativeContext { heap, host, frame, context, jcre, budget, statics } = native;
-    let context = *context;
     let package = target.package.id;
     let class = target.class.id;
     let method = target.method.id;
-    if matches!(method, MethodId::Constructor | MethodId::throwIt | MethodId::getReason | MethodId::setReason)
-        && (matches!(class, ClassId::CardException | ClassId::CardRuntimeException)
-            || target.class.supers.iter().any(|base| matches!(base, ClassId::CardException | ClassId::CardRuntimeException))) {
-        let reason = if method == MethodId::getReason { None } else { Some(frame.pop_short()? as u16) };
-        let exception = if method == MethodId::throwIt { new_exception(heap, class, context)? }
-            else { frame.pop_reference()? };
+    if matches!(
+        method,
+        MethodId::Constructor | MethodId::throwIt | MethodId::getReason | MethodId::setReason
+    ) && (matches!(
+        class,
+        ClassId::CardException | ClassId::CardRuntimeException
+    ) || target
+        .class
+        .supers
+        .iter()
+        .any(|base| matches!(base, ClassId::CardException | ClassId::CardRuntimeException)))
+    {
+        let NativeContext {
+            heap,
+            frame,
+            context,
+            ..
+        } = native;
+        let context = *context;
+        let reason = if method == MethodId::getReason {
+            None
+        } else {
+            Some(frame.pop_short()? as u16)
+        };
+        let exception = if method == MethodId::throwIt {
+            new_exception(heap, class, context)?
+        } else {
+            frame.pop_reference()?
+        };
         heap.check_access(exception, context)?;
         if let Some(reason) = reason {
             // Java Card exception reasons do not participate in transactions.
             heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
-        } else { frame.push_short(heap.get_word(exception, REASON_FIELD)? as i16)?; }
-        return Ok(if method == MethodId::throwIt { Native::Threw(exception) } else { Native::Returned });
+        } else {
+            frame.push_short(heap.get_word(exception, REASON_FIELD)? as i16)?;
+        }
+        return Ok(if method == MethodId::throwIt {
+            Native::Threw(exception)
+        } else {
+            Native::Returned
+        });
     }
     let result = match (package, class, method) {
         // Constructing an Object or any exception does nothing the engine has to model.
         // The allocation already happened, and the fields start zeroed.
         (PackageId::java_lang, _, MethodId::Constructor) => {
-            frame.pop_reference()?;
+            native.frame.pop_reference()?;
             Ok(Native::Returned)
         }
-        (PackageId::javacard_framework, ClassId::Util, name) => {
-            match util(name, heap, frame, context, budget) {
-                Err(Error::Bounds) => Ok(Native::Threw(new_exception(heap, ClassId::ArrayIndexOutOfBoundsException, context)?)),
-                Err(Error::Null) => Ok(Native::Threw(new_exception(heap, ClassId::NullPointerException, context)?)),
-                result => result,
-            }
-        }
-        (PackageId::javacard_framework, ClassId::APDU, name) => {
-            apdu(name, heap, frame, jcre, context)
-        }
-        (PackageId::javacard_framework, ClassId::JCSystem, name) => {
-            jcsystem(name, target.method.token, heap, frame, context, jcre, statics, &mut **host)
-        }
-        (PackageId::javacard_framework, ClassId::Applet, MethodId::register) => {
-            if jcre.instance.is_some() { return Err(Error::Unauthorized); }
-            // Two forms, JCRE §3.1. One registers under the AID the installer gave, the
-            // other under an AID the applet chose out of a byte array it holds.
-            if !target.method.signature.empty_parameters() {
-                let length = frame.pop_short()?;
-                let offset = frame.pop_short()?;
-                let array = frame.pop_reference()?;
-                heap.check_access(array, context)?;
-                if !(5..=16).contains(&length) || offset < 0 {
-                    return Err(Error::Bounds);
-                }
-                let bytes = heap.byte_slice(array, offset as usize, length as usize)?;
-                jcre.aid[..length as usize].copy_from_slice(bytes);
-                jcre.aid_length = length as u8;
-            }
-            // The applet hands itself to the runtime. Everything after this command can
-            // select it.
-            let instance = frame.pop_reference()?;
-            heap.check_access(instance, context)?;
-            jcre.instance = Some(instance);
-            Ok(Native::Returned)
-        }
-        (PackageId::javacard_framework, ClassId::Applet, MethodId::reSelectingApplet) => {
-            frame.push_short(jcre.reselecting as i16)?;
-            Ok(Native::Returned)
-        }
-        (PackageId::javacard_framework, ClassId::Applet, MethodId::selectingApplet) => {
-            frame.pop_reference()?;
-            frame.push_short(jcre.selecting as i16)?;
-            Ok(Native::Returned)
-        }
-        (PackageId::javacard_framework, ClassId::Applet, MethodId::Constructor) => {
-            frame.pop_reference()?;
-            Ok(Native::Returned)
-        }
+        (PackageId::javacard_framework, _, _) => framework::call(target, native),
         _ => {
+            let NativeContext {
+                heap,
+                host,
+                frame,
+                context,
+                jcre,
+                budget,
+                statics,
+            } = native;
             let handled = security::call(
                 class,
                 method,
@@ -283,7 +284,7 @@ pub fn call_with_budget<H: crate::host::Host>(
                 heap,
                 &mut **host,
                 frame,
-                context,
+                *context,
                 jcre,
                 budget,
                 statics,
@@ -335,7 +336,11 @@ pub fn new_api_object(
         .iter()
         .position(|package| package.classes.iter().any(|entry| entry == class))
         .ok_or(Error::Missing)?;
-    heap.new_object(native_class(index, class.token), security::STATE_WORDS, context)
+    heap.new_object(
+        native_class(index, class.token),
+        security::STATE_WORDS,
+        context,
+    )
 }
 
 /// Allocate an instance of a class the card provides, with room for its state.
@@ -353,247 +358,15 @@ fn new_native(
     Err(Error::Missing)
 }
 
-/// `javacard.framework.APDU`, JCRE §4. The buffer is an ordinary byte array on the heap,
-/// so an applet reading it goes through the same bounds and firewall checks as any array.
-fn apdu(name: MethodId, heap: &mut Heap, frame: &mut Frame, jcre: &mut Jcre, context: heap::Context) -> Result<Native> {
-    match name {
-        // The host presents contacted T=1 semantics. A 254-byte information field plus
-        // the seven-byte extended header fits the runtime's 261-byte APDU buffer.
-        MethodId::getInBlockSize | MethodId::getOutBlockSize => {
-            frame.push_short(254)?;
-        }
-        MethodId::getBuffer => {
-            frame.pop_reference()?;
-            frame.push_reference(jcre.buffer)?;
-        }
-        MethodId::getNAD => {
-            frame.pop_reference()?;
-            // NAD is optional in T=1 and zero when it is not used.
-            frame.push_short(0)?;
-        }
-        MethodId::getIncomingLength => {
-            frame.pop_reference()?;
-            if !jcre.incoming_started || jcre.outgoing_started { return apdu_exception(heap, context, 1); }
-            frame.push_short(jcre.incoming as i16)?;
-        }
-        MethodId::getOffsetCdata => {
-            frame.pop_reference()?;
-            if !jcre.incoming_started || jcre.outgoing_started { return apdu_exception(heap, context, 1); }
-            frame.push_short(jcre.data_offset as i16)?;
-        }
-        MethodId::setIncomingAndReceive => {
-            frame.pop_reference()?;
-            if jcre.incoming_started || jcre.outgoing_started { return apdu_exception(heap, context, 1); }
-            jcre.incoming_started = true;
-            // The whole command is already in the buffer, so there is nothing to wait for
-            // and the answer is everything that arrived.
-            frame.push_short(jcre.incoming as i16)?;
-        }
-        MethodId::receiveBytes => {
-            let offset = frame.pop_short()?;
-            frame.pop_reference()?;
-            if !jcre.incoming_started || jcre.outgoing_started {
-                return apdu_exception(heap, context, 1); // ILLEGAL_USE
-            }
-            if offset < 0 { return apdu_exception(heap, context, 2); }
-            let offset = offset as usize;
-            let buffer = heap.info(jcre.buffer)?;
-            if offset.checked_add(254).is_none_or(|end| end > buffer.length as usize) {
-                return apdu_exception(heap, context, 2); // BUFFER_BOUNDS
-            }
-            // Commands are fully framed before the VM is entered, so the primary receive
-            // consumed every byte and a legal follow-up receive has nothing left to copy.
-            frame.push_short(0)?;
-        }
-        MethodId::setOutgoing | MethodId::setOutgoingNoChaining => {
-            frame.pop_reference()?;
-            if jcre.outgoing_started { return apdu_exception(heap, context, 1); }
-            jcre.outgoing_started = true;
-            frame.push_short(jcre.expected as i16)?;
-        }
-        MethodId::setOutgoingLength => {
-            let length = frame.pop_short()?;
-            frame.pop_reference()?;
-            if !jcre.outgoing_started || jcre.outgoing_length.is_some() { return apdu_exception(heap, context, 1); }
-            if length < 0 || length as usize > jcre.response.len() { return apdu_exception(heap, context, 3); }
-            jcre.outgoing_length = Some(length as u16);
-        }
-        MethodId::setOutgoingAndSend | MethodId::sendBytes | MethodId::sendBytesLong => {
-            let length = frame.pop_short()?;
-            let offset = frame.pop_short()?;
-            let source = if name == MethodId::sendBytesLong { frame.pop_reference()? } else { jcre.buffer };
-            frame.pop_reference()?;
-            let combined = name == MethodId::setOutgoingAndSend;
-            let declared = if combined {
-                if jcre.outgoing_started { return apdu_exception(heap, context, 1); }
-                if length < 0 || length as usize > jcre.response.len() { return apdu_exception(heap, context, 3); }
-                length as u16
-            } else {
-                if jcre.outgoing_combined { return apdu_exception(heap, context, 1); }
-                let Some(declared) = jcre.outgoing_length else { return apdu_exception(heap, context, 1); };
-                declared
-            };
-            if offset < 0 || length < 0 { return apdu_exception(heap, context, 2); }
-            let start = usize::from(jcre.outgoing);
-            let end = start + length as usize;
-            if end > usize::from(declared) { return apdu_exception(heap, context, 1); }
-            heap.check_access(source, context)?;
-            let bytes = match heap.byte_slice(source, offset as usize, length as usize) {
-                Ok(bytes) => bytes,
-                Err(Error::Bounds) => return apdu_exception(heap, context, 2),
-                Err(error) => return Err(error),
-            };
-            // Publish output state only after the source and destination are admitted.
-            jcre.response[start..end].copy_from_slice(bytes);
-            if combined {
-                jcre.outgoing_started = true;
-                jcre.outgoing_combined = true;
-                jcre.outgoing_length = Some(declared);
-            }
-            jcre.outgoing = end as u16;
-        }
-        MethodId::isCommandChainingCLA | MethodId::isSecureMessagingCLA => {
-            frame.pop_reference()?;
-            let cla = heap.byte_slice(jcre.buffer, 0, 1)?[0];
-            // Further-channel encoding uses b6 for secure messaging; b4/b3
-            // are channel bits. Reserved and invalid CLA values report neither flag.
-            let valid = cla & 0xe0 != 0x20 && cla != 0xff;
-            let bit = if name == MethodId::isCommandChainingCLA { 0x10 }
-                else if cla & 0x40 != 0 { 0x20 } else { 0x0c };
-            frame.push_short((valid && cla & bit != 0) as i16)?;
-        }
-        MethodId::getProtocol => {
-            // A contacted card. An applet that refuses contactless selection reads this,
-            // so answering with a contactless value would make it refuse every session.
-            frame.push_short(0x01)?;
-        }
-        _ => return Ok(Native::Unimplemented),
-    }
-    Ok(Native::Returned)
-}
-
-fn apdu_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Result<Native> {
-    let exception = new_exception(heap, ClassId::APDUException, context)?;
-    heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
-    Ok(Native::Threw(exception))
-}
-
-/// `javacard.framework.JCSystem`, JCRE §7.
-#[allow(clippy::too_many_arguments)]
-fn jcsystem(
-    name: MethodId,
-    token: u8,
-    heap: &mut Heap,
-    frame: &mut Frame,
-    context: heap::Context,
-    jcre: &mut Jcre,
-    statics: &mut [u8],
-    host: &mut dyn crate::host::Host,
-) -> Result<Native> {
-    match name {
-        MethodId::makeTransientByteArray | MethodId::makeTransientBooleanArray | MethodId::makeTransientShortArray
-        | MethodId::makeTransientObjectArray => {
-            let event = frame.pop_short()?;
-            let length = frame.pop_short()?;
-            if length < 0 {
-                return Ok(Native::Threw(new_exception(heap, ClassId::NegativeArraySizeException, context)?));
-            }
-            let kind = match name {
-                MethodId::makeTransientByteArray => heap::KIND_BYTE,
-                MethodId::makeTransientBooleanArray => heap::KIND_BOOLEAN,
-                MethodId::makeTransientShortArray => heap::KIND_SHORT,
-                _ => heap::KIND_REFERENCE,
-            };
-            let event = match event {
-                1 => heap::CLEAR_ON_RESET,
-                2 => heap::CLEAR_ON_DESELECT,
-                _ => {
-                    let exception = new_exception(heap, ClassId::SystemException, context)?;
-                    heap.put_word_unconditional(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
-                    return Ok(Native::Threw(exception));
-                }
-            };
-            match heap.new_transient_array(kind, length as u16, context, event) {
-                Ok(array) => frame.push_reference(array)?,
-                Err(Error::Quota) => {
-                    let exception = new_exception(heap, ClassId::SystemException, context)?;
-                    heap.put_word_unconditional(exception, REASON_FIELD, 2)?; // NO_TRANSIENT_SPACE
-                    return Ok(Native::Threw(exception));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        MethodId::isTransient => {
-            let reference = frame.pop_reference()?;
-            frame.push_short(i16::from(heap.transient_event(reference)?))?;
-        }
-        MethodId::isObjectDeletionSupported => frame.push_short(0)?,
-        MethodId::getVersion => frame.push_short(0x0305)?,
-        MethodId::requestObjectDeletion => {
-            // Legal to do nothing, JCRE §7.4. An applet that depends on it asks first.
-        }
-        MethodId::getTransactionDepth => frame.push_short(i16::from(heap.transaction_remaining().is_some()))?,
-        MethodId::getMaxCommitCapacity => frame.push_short(TRANSACTION_CAPACITY as i16)?,
-        MethodId::getUnusedCommitCapacity => frame.push_short(heap.transaction_remaining().unwrap_or(TRANSACTION_CAPACITY) as i16)?,
-        MethodId::getAvailableMemory => {
-            let memory_type = frame.pop_short()?;
-            if !matches!(memory_type, 0..=2) {
-                let exception = new_exception(heap, ClassId::SystemException, context)?;
-                heap.put_word_unconditional(exception, REASON_FIELD, 1)?; // ILLEGAL_VALUE
-                return Ok(Native::Threw(exception));
-            }
-            let available = heap.available() as u32;
-            if token == 16 {
-                frame.push_short(available.min(i16::MAX as u32) as i16)?;
-            } else if token == 22 {
-                let offset = frame.pop_short()?;
-                let array = frame.pop_reference()?;
-                let info = heap.check_access(array, context)?;
-                if info.kind != heap::KIND_SHORT { return Err(Error::Type); }
-                let offset = usize::try_from(offset).map_err(|_| Error::ArrayBounds)?;
-                if offset.checked_add(2).is_none_or(|end| end > info.length as usize) {
-                    return Err(Error::ArrayBounds);
-                }
-                heap.array_put(array, offset, (available >> 16) as i16)?;
-                heap.array_put(array, offset + 1, available as i16)?;
-            } else {
-                return Err(Error::Unsupported);
-            }
-        }
-        MethodId::beginTransaction => {
-            if heap.transaction_remaining().is_some() {
-                return transaction_exception(heap, jcre, context, 1); // IN_PROGRESS
-            }
-            if jcre.transaction_exception.is_none() {
-                jcre.transaction_exception = Some(new_exception(heap, ClassId::TransactionException, context)?);
-            }
-            heap.begin_transaction(TRANSACTION_CAPACITY)?;
-        }
-        MethodId::commitTransaction | MethodId::abortTransaction => {
-            if heap.transaction_remaining().is_none() {
-                return transaction_exception(heap, jcre, context, 2); // NOT_IN_PROGRESS
-            }
-            if name == MethodId::commitTransaction {
-                if !jcre.installing {
-                    let instance = jcre.instance.ok_or(Error::Missing)?;
-                    host.checkpoint(crate::applet::PersistentView {
-                        heap: heap.image(), statics, instance, buffer: jcre.buffer, projection: None,
-                    })?;
-                }
-                heap.commit_transaction()?;
-                if !jcre.installing { heap.mark_checkpointed(); }
-            }
-            else if heap.abort_transaction(statics)? { return Err(Error::TransactionAborted); }
-        }
-        _ => return Ok(Native::Unimplemented),
-    }
-    Ok(Native::Returned)
-}
-
 /// Shared logical bound for payload before-images and their metadata.
 pub const TRANSACTION_CAPACITY: usize = 8192;
 
-pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: heap::Context, reason: u16) -> Result<Native> {
+pub(crate) fn transaction_exception(
+    heap: &mut Heap,
+    jcre: &mut Jcre,
+    context: heap::Context,
+    reason: u16,
+) -> Result<Native> {
     let exception = match jcre.transaction_exception {
         Some(reference) => reference,
         None => {
@@ -609,16 +382,34 @@ pub(crate) fn transaction_exception(heap: &mut Heap, jcre: &mut Jcre, context: h
 /// Reserve VM and native API failure objects before applet allocations can exhaust
 /// the heap. The runtime prefix keeps them outside applet transactions.
 pub(crate) fn runtime_exception_classes() -> impl Iterator<Item = ClassId> {
-    [ClassId::ArithmeticException, ClassId::ArrayIndexOutOfBoundsException,
-        ClassId::ClassCastException, ClassId::NegativeArraySizeException,
-        ClassId::NullPointerException, ClassId::SecurityException].into_iter().chain(
-        PACKAGES.iter().flat_map(|package| package.classes).filter(|class|
-            is_exception_class(class) && class.methods.iter().any(|method| method.id == MethodId::throwIt))
-            .map(|class| class.id))
+    [
+        ClassId::ArithmeticException,
+        ClassId::ArrayIndexOutOfBoundsException,
+        ClassId::ClassCastException,
+        ClassId::NegativeArraySizeException,
+        ClassId::NullPointerException,
+        ClassId::SecurityException,
+    ]
+    .into_iter()
+    .chain(
+        PACKAGES
+            .iter()
+            .flat_map(|package| package.classes)
+            .filter(|class| {
+                is_exception_class(class)
+                    && class
+                        .methods
+                        .iter()
+                        .any(|method| method.id == MethodId::throwIt)
+            })
+            .map(|class| class.id),
+    )
 }
 
 pub(crate) fn reserve_runtime_exceptions(heap: &mut Heap, context: heap::Context) -> Result<()> {
-    for class in runtime_exception_classes() { new_exception(heap, class, context)?; }
+    for class in runtime_exception_classes() {
+        new_exception(heap, class, context)?;
+    }
     Ok(())
 }
 
@@ -636,107 +427,14 @@ pub fn new_exception(heap: &mut Heap, name: ClassId, context: heap::Context) -> 
                 if info.class == native && info.owner == context && info.length == 1 {
                     return Ok(at as Reference);
                 }
-                at = (at + heap::HEADER + info.length as usize * info.element_size()).next_multiple_of(2);
+                at = (at + heap::HEADER + info.length as usize * info.element_size())
+                    .next_multiple_of(2);
             }
             // One word, which every exception uses for its reason.
             return heap.new_object(native, 1, context);
         }
     }
     Err(Error::Missing)
-}
-
-/// `javacard.framework.Util`, JCRE §3. Every method here works on arrays the applet owns,
-/// so every access goes through the firewall like any other.
-fn util(name: MethodId, heap: &mut Heap, frame: &mut Frame, context: heap::Context, budget: &mut u32) -> Result<Native> {
-    match name {
-        MethodId::makeShort => {
-            let low = frame.pop_short()?;
-            let high = frame.pop_short()?;
-            frame.push_short((((high as u16) << 8) | (low as u8 as u16)) as i16)?;
-        }
-        MethodId::getShort => {
-            let offset = frame.pop_short()?;
-            let array = frame.pop_reference()?;
-            heap.check_access(array, context)?;
-            let bytes = heap.byte_slice(array, index(offset)?, 2)?;
-            frame.push_short(i16::from_be_bytes([bytes[0], bytes[1]]))?;
-        }
-        MethodId::setShort => {
-            let value = frame.pop_short()?;
-            let offset = frame.pop_short()?;
-            let array = frame.pop_reference()?;
-            heap.check_access(array, context)?;
-            heap.byte_slice_mut(array, index(offset)?, 2)?
-                .copy_from_slice(&value.to_be_bytes());
-            // It answers the offset one past the short it wrote.
-            frame.push_short(offset.wrapping_add(2))?;
-        }
-        MethodId::arrayCopy | MethodId::arrayCopyNonAtomic => {
-            let length = frame.pop_short()?;
-            let destination_offset = frame.pop_short()?;
-            let destination = frame.pop_reference()?;
-            let source_offset = frame.pop_short()?;
-            let source = frame.pop_reference()?;
-            heap.check_access(source, context)?;
-            heap.check_access(destination, context)?;
-            let length = index(length)?;
-            heap.byte_slice(source, index(source_offset)?, length)?;
-            heap.byte_slice(destination, index(destination_offset)?, length)?;
-            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            if name == MethodId::arrayCopy {
-                heap.copy_bytes(source, index(source_offset)?, destination, index(destination_offset)?, length)?;
-            } else {
-                heap.copy_bytes_unconditional(source, index(source_offset)?, destination, index(destination_offset)?, length)?;
-            }
-            frame.push_short(destination_offset.wrapping_add(length as i16))?;
-        }
-        MethodId::arrayFill | MethodId::arrayFillNonAtomic => {
-            let value = frame.pop_short()?;
-            let length = index(frame.pop_short()?)?;
-            let offset = frame.pop_short()?;
-            let array = frame.pop_reference()?;
-            heap.check_access(array, context)?;
-            let start = index(offset)?;
-            heap.byte_slice(array, start, length)?;
-            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            if name == MethodId::arrayFill {
-                heap.byte_slice_mut(array, start, length)?.fill(value as u8);
-            } else {
-                heap.fill_bytes_unconditional(array, start, length, value as u8)?;
-            }
-            frame.push_short(offset.wrapping_add(length as i16))?;
-        }
-        MethodId::arrayCompare => {
-            let length = frame.pop_short()?;
-            let right_offset = frame.pop_short()?;
-            let right = frame.pop_reference()?;
-            let left_offset = frame.pop_short()?;
-            let left = frame.pop_reference()?;
-            heap.check_access(left, context)?;
-            heap.check_access(right, context)?;
-            let length = index(length)?;
-            // Validate the entire request, even when comparison stops at the first byte.
-            let left = heap.byte_slice(left, index(left_offset)?, length)?;
-            let right = heap.byte_slice(right, index(right_offset)?, length)?;
-            *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            let answer = match left.cmp(right) {
-                core::cmp::Ordering::Less => -1,
-                core::cmp::Ordering::Equal => 0,
-                core::cmp::Ordering::Greater => 1,
-            };
-            frame.push_short(answer)?;
-        }
-        _ => return Ok(Native::Unimplemented),
-    }
-    Ok(Native::Returned)
-}
-
-/// An offset or length the API takes as a signed short. A negative one is out of bounds.
-fn index(value: i16) -> Result<usize> {
-    if value < 0 {
-        return Err(Error::Bounds);
-    }
-    Ok(value as usize)
 }
 
 #[cfg(test)]
