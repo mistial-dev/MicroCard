@@ -411,6 +411,8 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
         {
             Import::Native(34)
         }
+        // Compatibility for signed packages installed before TransactionScope replaced
+        // the public DomainStorage controls. The current framework cannot emit these.
         ("DomainStorage", "BeginTransaction" | "CommitTransaction" | "AbortTransaction")
             if reference(
                 assembly,

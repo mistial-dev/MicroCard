@@ -67,9 +67,6 @@ sealed class ReferenceHost(byte[] key) : IHost
     public void SetBytes(int key, byte[] value, int offset, int length) { }
     public void DeleteBytes(int key) { }
     public bool ContainsBytes(int key) => false;
-    public void BeginTransaction() { }
-    public void CommitTransaction() { }
-    public void AbortTransaction() { }
     public int Random() => 0;
     public void FillRandom(byte[] destination, int offset, int length) =>
         Array.Clear(destination, offset, length);

@@ -247,6 +247,8 @@ sealed class Compiler : IDisposable
                 ("CredentialNative", "Change") => 43,
                 ("CredentialNative", "Unblock") => 44,
                 ("CredentialNative", "RetriesRemaining") => 45,
+                // Compatibility when inspecting an assembly produced against the retired
+                // framework surface. Current source has no public DomainStorage controls.
                 ("DomainStorage", "BeginTransaction") => 46,
                 ("DomainStorage", "CommitTransaction") => 47,
                 ("DomainStorage", "AbortTransaction") => 48,
