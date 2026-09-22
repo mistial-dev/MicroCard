@@ -24,6 +24,8 @@ pub(crate) struct ExecutionMetrics {
     pub(crate) peak_transient_bytes: usize,
     pub(crate) peak_transient_objects: usize,
     pub(crate) native_work_units: usize,
+    pub(crate) transaction_snapshots: usize,
+    pub(crate) transaction_clone_allocations: usize,
 }
 
 #[cfg(not(test))]

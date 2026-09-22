@@ -5,7 +5,6 @@ namespace MicroCard.Framework;
 [AttributeUsage(AttributeTargets.Method)] public sealed class DeselectAttribute : Attribute { }
 [AttributeUsage(AttributeTargets.Method)] public sealed class ProcessAttribute : Attribute { }
 [AttributeUsage(AttributeTargets.Method)] public sealed class UninstallAttribute : Attribute { }
-[AttributeUsage(AttributeTargets.Method)] public sealed class TransactionAttribute : Attribute { }
 public enum DependencyAccess { Private = 0, Any = 1, SameSigner = 2, SpecificPublicKey = 3 }
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false)]
 public sealed class DependencyExportAttribute : Attribute {
@@ -62,9 +61,6 @@ public sealed class DomainStorage {
  public void SetBytes(int key,byte[] value,int offset,int length) => Host.Required.SetBytes(key,value,offset,length);
  public void DeleteBytes(int key) => Host.Required.DeleteBytes(key);
  public bool ContainsBytes(int key) => Host.Required.ContainsBytes(key);
- public void BeginTransaction() => Host.Required.BeginTransaction();
- public void CommitTransaction() => Host.Required.CommitTransaction();
- public void AbortTransaction() => Host.Required.AbortTransaction();
 }
 
 public static class SecureChannel {

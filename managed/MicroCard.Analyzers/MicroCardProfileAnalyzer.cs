@@ -106,9 +106,6 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor FieldRowLimit = Rule(
         "MCA0022", "Assembly exceeds the MC04 field table profile",
         "Assembly emits {0} fields; the MC04 limit is 1022");
-    private static readonly DiagnosticDescriptor AttributeRowLimit = Rule(
-        "MCA0023", "Assembly exceeds the MC04 attribute table profile",
-        "Assembly retains {0} runtime attributes; the MC04 limit is 256");
     private static readonly DiagnosticDescriptor PersistentSchema = Rule(
         "MCA0024", "Invalid persistent storage declaration",
         "{0}");
@@ -121,7 +118,7 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
             ExportPolicy, DependencyPolicy, TransactionSafety, CallGraph, LocalLimit,
             AllocationLimit, RepeatedAllocation, AggregateAllocation, CallAllocation,
             SwitchLimit, ObjectLimit, ParameterLimit, DependencyLimit, EntryPointLimit,
-            MethodRowLimit, TypeRowLimit, FieldRowLimit, AttributeRowLimit, PersistentSchema,
+            MethodRowLimit, TypeRowLimit, FieldRowLimit, PersistentSchema,
             PersistentAccess);
 
     public override void Initialize(AnalysisContext context)
@@ -244,9 +241,21 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeLocalDeclaration(SyntaxNodeAnalysisContext context)
     {
         var declaration = (LocalDeclarationStatementSyntax)context.Node;
-        if (declaration.UsingKeyword != default)
+        if (declaration.UsingKeyword != default && !IsTransactionScopeDeclaration(context, declaration))
             context.ReportDiagnostic(Diagnostic.Create(LanguageFeature,
                 declaration.UsingKeyword.GetLocation(), "using declaration"));
+    }
+
+    private static bool IsTransactionScopeDeclaration(
+        SyntaxNodeAnalysisContext context,
+        LocalDeclarationStatementSyntax declaration)
+    {
+        if (declaration.Declaration.Variables.Count != 1 ||
+            declaration.Declaration.Variables[0].Initializer?.Value is not ObjectCreationExpressionSyntax creation)
+            return false;
+        var symbol = context.SemanticModel.GetSymbolInfo(creation, context.CancellationToken).Symbol;
+        return symbol is IMethodSymbol { MethodKind: MethodKind.Constructor, Parameters.Length: 0 } constructor &&
+               IsTransactionScope(constructor.ContainingType);
     }
 
     private static DiagnosticDescriptor Rule(string id, string title, string message) =>
@@ -429,6 +438,17 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         var operation = (IObjectCreationOperation)context.Operation;
         if (operation.Syntax is AttributeSyntax)
             return;
+        if (operation.Type is INamedTypeSymbol transactionScope && IsTransactionScope(transactionScope))
+        {
+            bool canonical = operation.Constructor is { Parameters.Length: 0 } &&
+                operation.Syntax.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is
+                    { UsingKeyword.RawKind: not 0, Declaration.Variables.Count: 1 } declaration &&
+                declaration.Declaration.Variables[0].Initializer?.Value == operation.Syntax;
+            if (!canonical)
+                Report(context, ShapeRule, operation.Syntax.GetLocation(),
+                    "TransactionScope must be a parameterless using declaration");
+            return;
+        }
         if (operation.Type is not null && !IsSupportedType(operation.Type, context.Compilation))
             Report(context, TypeRule, operation.Syntax.GetLocation(), operation.Type.ToDisplayString());
         ReportRepeatedAllocation(context, operation);
@@ -703,6 +723,8 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
             return true;
         if (IsProjectedSystemCryptography(member))
             return true;
+        if (member is IMethodSymbol transactionMethod && IsExplicitTransactionCall(transactionMethod))
+            return true;
         if (member.ContainingAssembly?.Name == "MicroCard.Framework" &&
             member.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework")
             return true;
@@ -751,16 +773,14 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
             named.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework" &&
             named.Name is "SecurityDomain" or "DomainStorage" or "DomainKeys" or "KeyHandle")
             return true;
+        if (IsTransactionScope(named))
+            return true;
         return SymbolEqualityComparer.Default.Equals(named.ContainingAssembly, compilation.Assembly) &&
                named.TypeKind == TypeKind.Class && named.IsSealed;
     }
 
     private static bool IsAssemblyAttribute(AttributeData attribute) =>
         IsFrameworkAttribute(attribute, "AssemblyAttribute");
-
-    private static bool IsRuntimeMetadataAttribute(AttributeData attribute) =>
-        IsAssemblyAttribute(attribute) || IsLifecycleAttribute(attribute) ||
-        IsTransactionAttribute(attribute);
 
     private static bool IsLifecycleAttribute(AttributeData attribute) =>
         attribute.AttributeClass?.Name is "InstallAttribute" or "SelectAttribute" or
@@ -779,9 +799,6 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
     private static bool IsDependencyAttribute(AttributeData attribute) =>
         IsFrameworkAttribute(attribute, "DependencyAttribute");
 
-    private static bool IsTransactionAttribute(AttributeData attribute) =>
-        IsFrameworkAttribute(attribute, "TransactionAttribute");
-
     private static bool IsPersistentSchemaAttribute(AttributeData attribute) =>
         IsFrameworkAttribute(attribute, "PersistentInt32Attribute") ||
         IsFrameworkAttribute(attribute, "PersistentBytesAttribute");
@@ -791,11 +808,15 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         method.ContainingAssembly?.Name == "MicroCard.Framework" &&
         method.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework";
 
+    private static bool IsTransactionScope(ITypeSymbol? type) =>
+        type?.Name == "TransactionScope" &&
+        type.ContainingNamespace?.ToDisplayString() == "System.Transactions" &&
+        type.ContainingAssembly?.Name == "System.Transactions.Local";
+
     private static bool IsExplicitTransactionCall(IMethodSymbol method) =>
-        method.Name is "BeginTransaction" or "CommitTransaction" or "AbortTransaction" &&
-        method.ContainingType?.Name == "DomainStorage" &&
-        method.ContainingAssembly?.Name == "MicroCard.Framework" &&
-        method.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework";
+        IsTransactionScope(method.ContainingType) &&
+        (method is { MethodKind: MethodKind.Constructor, Parameters.Length: 0 } ||
+         method is { Name: "Complete", Parameters.Length: 0, ReturnsVoid: true });
 
     private static void AnalyzeTransactions(
         CompilationAnalysisContext context,
@@ -803,13 +824,11 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
     {
         foreach (var method in calls.Keys.OfType<IMethodSymbol>().Where(method =>
                      method.DeclaredAccessibility == Accessibility.Public ||
-                     method.GetAttributes().Any(IsLifecycleAttribute) ||
-                     method.GetAttributes().Any(IsTransactionAttribute)))
+                     method.GetAttributes().Any(IsLifecycleAttribute)))
         {
-            bool annotated = method.GetAttributes().Any(IsTransactionAttribute);
             bool explicitControl = ReachesExplicitTransaction(context.Compilation, calls, method,
                 new HashSet<ISymbol>(SymbolEqualityComparer.Default));
-            if (annotated || explicitControl)
+            if (explicitControl)
                 AnalyzeTransactionMethod(context, calls, method, method,
                     new HashSet<ISymbol>(SymbolEqualityComparer.Default));
         }
@@ -963,18 +982,6 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
                 ?? methods[256].ContainingType.Locations.FirstOrDefault(static item => item.IsInSource)
                 ?? Location.None;
             context.ReportDiagnostic(Diagnostic.Create(MethodRowLimit, location, methods.Length));
-        }
-        var runtimeAttributes = types.SelectMany(type => type.GetAttributes())
-            .Concat(methods.SelectMany(method => method.GetAttributes()))
-            .Concat(fields.SelectMany(field => field.GetAttributes()))
-            .Where(IsRuntimeMetadataAttribute)
-            .ToArray();
-        if (runtimeAttributes.Length > 256)
-        {
-            var location = runtimeAttributes[256].ApplicationSyntaxReference?
-                .GetSyntax(context.CancellationToken).GetLocation() ?? Location.None;
-            context.ReportDiagnostic(Diagnostic.Create(
-                AttributeRowLimit, location, runtimeAttributes.Length));
         }
         var entries = types
             .SelectMany(type => type.GetAttributes().Where(IsAssemblyAttribute))

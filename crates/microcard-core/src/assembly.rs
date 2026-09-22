@@ -520,7 +520,7 @@ impl<'a> Assembly<'a> {
     pub fn validate_imports(&self, capabilities: &[u8]) -> Result<()> {
         for (_, import) in self.framework_imports()? {
             if let crate::mc04_imports::Import::Native(id) = import {
-                if !capabilities.contains(&id) {
+                if !capabilities.contains(&crate::native_abi::capability(id)) {
                     return Err(Error::Unauthorized);
                 }
             }

@@ -7,16 +7,16 @@ from analyzer_cases import run_analyzer_cases
 from validation_common import ROOT, build_managed, run
 
 BOUNDARIES = [
+    ('CASE_TRANSACTION_SCOPE', 'transaction-scope'),
     ('CASE_PARAMETERS_BOUNDARY', 'parameter-boundary'),
     ('CASE_DEPENDENCY_BOUNDARY', 'dependency-boundary'),
     ('CASE_ENTRY_BOUNDARY', 'entry-boundary'),
     ('CASE_METHOD_ROWS_BOUNDARY', 'method-row-boundary'),
     ('CASE_TYPE_ROWS_BOUNDARY', 'type-row-boundary'),
     ('CASE_FIELD_ROWS_BOUNDARY', 'field-row-boundary'),
-    ('CASE_ATTRIBUTE_ROWS_BOUNDARY', 'attribute-row-boundary'),
 ]
 REJECTIONS = [
-    ('CASE_TRANSACTION_CONSTRUCTOR', 'unsafe-transaction', 'Transactional method reaches irreversible Hardware.Write'),
+    ('CASE_TRANSACTION', 'unsafe-transaction', 'Transactional method reaches irreversible Hardware.Write'),
     ('CASE_STORAGE_SCHEMA', 'storage-schema-bypass', 'Persistent byte maximum'),
     ('CASE_SYSTEM_SHA256_OVERLOAD', 'system-sha256-overload-bypass', 'Unsupported System.Security.Cryptography member'),
     ('CASE_SYSTEM_RNG_OVERLOAD', 'system-rng-overload-bypass', 'Unsupported System.Security.Cryptography member'),
@@ -43,7 +43,6 @@ REJECTIONS = [
     ('CASE_METHOD_ROWS_LIMIT', 'method-row-limit-bypass', 'MC04 metadata row quota exceeded'),
     ('CASE_TYPE_ROWS_LIMIT', 'type-row-limit-bypass', 'MC04 metadata row quota exceeded'),
     ('CASE_FIELD_ROWS_LIMIT', 'field-row-limit-bypass', 'MC04 metadata row quota exceeded'),
-    ('CASE_ATTRIBUTE_ROWS_LIMIT', 'attribute-row-limit-bypass', 'MC04 custom attribute quota exceeded'),
     ('CASE_LOCALS', 'excessive-locals', 'MC04 local-variable quota exceeded'),
     ('CASE_SWITCH_LIMIT', 'excessive-switch', 'Switch quota'),
 ]

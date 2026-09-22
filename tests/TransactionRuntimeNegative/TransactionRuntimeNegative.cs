@@ -1,4 +1,5 @@
 using MicroCard.Framework;
+using System.Transactions;
 
 [assembly: PersistentInt32(1)]
 
@@ -12,23 +13,9 @@ public static class InvalidTransactionSequences
     {
         byte[] command = new byte[CommandApdu.Length];
         CommandApdu.CopyTo(command, 0, 0, command.Length);
-        DomainStorage store = SecurityDomain.Current.Store;
-        switch (command[0])
-        {
-            case 0:
-                store.BeginTransaction();
-                Hardware.Write(1, 1);
-                break;
-            case 1:
-                store.BeginTransaction();
-                store.CommitTransaction();
-                store.SetInt32(1, 88);
-                break;
-            case 2:
-                store.BeginTransaction();
-                store.AbortTransaction();
-                store.GetInt32(1);
-                break;
-        }
+        using var scope = new TransactionScope();
+        if (command[0] == 0) Hardware.Write(1, 1);
+        SecurityDomain.Current.Store.SetInt32(1, 88);
+        scope.Complete();
     }
 }

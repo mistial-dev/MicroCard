@@ -68,11 +68,38 @@ impl StagedApplication {
         domain: &Domain,
         context: &mut crate::fallible_clone::CloneContext,
     ) -> Result<Self> {
+        Self::from_parts(
+            &domain.store,
+            &domain.blobs,
+            &domain.keys,
+            &domain.credentials,
+            context,
+        )
+    }
+
+    /// Temporarily moves the live application data out of a domain. This is the ordinary
+    /// invocation path: it preserves the existing allocations without cloning them.
+    pub(super) fn take(domain: &mut Domain) -> Self {
+        Self {
+            store: core::mem::replace(&mut domain.store, IntStore::new()),
+            blobs: core::mem::replace(&mut domain.blobs, BlobStore::new()),
+            keys: core::mem::take(&mut domain.keys),
+            credentials: core::mem::take(&mut domain.credentials),
+        }
+    }
+
+    pub(super) fn from_parts(
+        store: &IntStore,
+        blobs: &BlobStore,
+        keys: &crate::key_store::KeyStore,
+        credentials: &crate::credential_store::CredentialStore,
+        context: &mut crate::fallible_clone::CloneContext,
+    ) -> Result<Self> {
         Ok(Self {
-            store: domain.store.try_clone_with(context)?,
-            blobs: domain.blobs.try_clone_with(context)?,
-            keys: domain.keys.try_clone_with(context)?,
-            credentials: domain.credentials.try_clone_with(context)?,
+            store: store.try_clone_with(context)?,
+            blobs: blobs.try_clone_with(context)?,
+            keys: keys.try_clone_with(context)?,
+            credentials: credentials.try_clone_with(context)?,
         })
     }
 
@@ -101,6 +128,10 @@ impl StagedApplication {
         core::mem::swap(&mut self.keys, &mut domain.keys);
         core::mem::swap(&mut self.credentials, &mut domain.credentials);
     }
+
+    pub(super) fn install(mut self, domain: &mut Domain) {
+        self.swap(domain);
+    }
 }
 
 impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> Mc04Engine<F, P, S> {
@@ -111,6 +142,33 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .iter()
             .position(|(_, domain)| domain.registry_aid == aid)
             .ok_or(Error::Domain)
+    }
+
+    pub(super) fn restore_application(
+        &mut self,
+        aid: RegistryAid,
+        application: StagedApplication,
+    ) -> Result<()> {
+        let index = self.application_domain_index(aid)?;
+        application.install(&mut self.state.domains.0[index].1);
+        Ok(())
+    }
+
+    pub(super) fn commit_ordinary_application(
+        &mut self,
+        aid: RegistryAid,
+        application: StagedApplication,
+        dirty: bool,
+    ) -> Result<()> {
+        self.restore_application(aid, application)?;
+        if !dirty {
+            return Ok(());
+        }
+        if let Err(error) = self.commit_metadata_snapshot() {
+            self.recover_committed_state()?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(super) fn commit_application(
@@ -167,5 +225,32 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             core::mem::swap(&mut owner.domain(&mut self.state).credentials, &mut next);
         }
         result
+    }
+
+    /// Recover the record that reboot would select after an unsafe invocation or an
+    /// uncertain flash result. Package metadata is rebuilt because it is intentionally
+    /// omitted from the persistent snapshot.
+    pub(super) fn recover_committed_state(&mut self) -> Result<()> {
+        let data = self
+            .journal
+            .recover_with(&mut self.platform)?
+            .ok_or(Error::Storage)?;
+        let mut recovered = State::decode_snapshot(&data).map_err(|error| match error {
+            Error::IncompatibleState => error,
+            _ => Error::Storage,
+        })?;
+        for domain in core::iter::once(&mut recovered.isd).chain(recovered.domains.values_mut()) {
+            for (name, descriptor) in domain.image_refs.iter() {
+                let raw = descriptor.read_verified(self.journal.flash(), &mut self.platform)?;
+                let verified = PackageView::verify_with(&raw, &mut self.platform)?;
+                domain.packages.insert(
+                    Rc::clone(name),
+                    Rc::new(StoredPackage::from_verified(verified)),
+                )?;
+            }
+        }
+        self.state = recovered;
+        self.transaction = None;
+        Ok(())
     }
 }

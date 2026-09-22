@@ -183,6 +183,25 @@ sealed class Compiler : IDisposable
                     continue;
                 }
             }
+            if (type.ResolutionScope.Kind == HandleKind.AssemblyReference &&
+                md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) == "System.Transactions.Local" &&
+                md.GetString(type.Namespace) == "System.Transactions" &&
+                md.GetString(type.Name) == "TransactionScope" &&
+                md.GetBlobBytes(member.Signature).AsSpan().SequenceEqual(new byte[] { 0x20, 0x00, 0x01 }))
+            {
+                if (md.GetString(member.Name) == ".ctor")
+                {
+                    caps.Add(46);
+                    // Runtime failures abort a completed-source scope at the invocation boundary.
+                    caps.Add(48);
+                    continue;
+                }
+                if (md.GetString(member.Name) == "Complete")
+                {
+                    caps.Add(47);
+                    continue;
+                }
+            }
             if (type.ResolutionScope.Kind != HandleKind.AssemblyReference ||
                 md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) != frameworkName ||
                 md.GetString(type.Namespace) != "MicroCard.Framework") continue;
@@ -231,6 +250,9 @@ sealed class Compiler : IDisposable
                 ("DomainStorage", "BeginTransaction") => 46,
                 ("DomainStorage", "CommitTransaction") => 47,
                 ("DomainStorage", "AbortTransaction") => 48,
+                ("TransactionScopeRuntime", "Begin") => 46,
+                ("TransactionScopeRuntime", "Commit") => 47,
+                ("TransactionScopeRuntime", "Abort") => 48,
                 ("Cryptography", "Sha256Into") => 49,
                 ("Cryptography", "RandomBytes") => 50,
                 ("Cryptography", "FixedTimeEquals") => 51,

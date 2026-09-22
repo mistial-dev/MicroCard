@@ -7,6 +7,14 @@ pub struct Signature {
     pub returns: bool,
 }
 
+/// Internal static transaction calls retain the public transaction capability bits.
+pub const fn capability(id: u8) -> u8 {
+    match id {
+        55..=57 => id - 9,
+        _ => id,
+    }
+}
+
 pub fn signature(id: u8) -> Result<Signature> {
     let (arguments, returns) = match id {
         2 => (1, false),
@@ -45,6 +53,7 @@ pub fn signature(id: u8) -> Result<Signature> {
         50 => (1, true),
         51 | 54 => (6, true),
         52 => (5, false),
+        55..=57 => (0, false),
         _ => return Err(Error::Native),
     };
     Ok(Signature { arguments, returns })
@@ -59,7 +68,7 @@ mod tests {
         let valid = [
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 22, 23, 24, 25, 26, 27, 28,
             29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
-            48, 49, 50, 51, 52, 53, 54,
+            48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
         ];
         for id in 0..=u8::MAX {
             assert_eq!(
@@ -68,5 +77,8 @@ mod tests {
                 "capability {id}"
             );
         }
+        assert_eq!(capability(55), 46);
+        assert_eq!(capability(56), 47);
+        assert_eq!(capability(57), 48);
     }
 }

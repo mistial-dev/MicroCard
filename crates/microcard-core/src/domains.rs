@@ -1619,6 +1619,12 @@ struct Host<'a, P: Platform> {
     level: u8,
     units: Option<&'a [ExecutionUnit<'a>]>,
     transaction: &'a mut TransactionDisposition,
+    transaction_snapshot: &'a mut Option<StagedApplication>,
+    persistent_dirty: &'a mut bool,
+    #[cfg(test)]
+    transaction_snapshots: &'a mut usize,
+    #[cfg(test)]
+    transaction_clone_allocations: &'a mut usize,
     irreversible_output: bool,
 }
 

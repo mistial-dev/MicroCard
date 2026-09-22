@@ -184,30 +184,71 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             self.transaction = None;
             return Err(Error::Bounds);
         }
-        let mut found = self
-            .state
-            .domains
-            .iter()
-            .filter(|(_, d)| d.instances.contains_key(aid));
-        let Some((domain_id, source)) = found.next() else {
+        let mut source_index = None;
+        for (index, (_, domain)) in self.state.domains.0.iter().enumerate() {
+            if domain.instances.contains_key(aid) && source_index.replace(index).is_some() {
+                self.transaction = None;
+                return Err(Error::Domain);
+            }
+        }
+        let Some(source_index) = source_index else {
             self.transaction = None;
             return Err(Error::Missing);
         };
-        if found.next().is_some() {
-            self.transaction = None;
-            return Err(Error::Domain);
-        }
-        let source_assembly = source.instances.get(aid).ok_or(Error::Missing)?;
+        let source = &self.state.domains.0[source_index].1;
         let incarnation = source.incarnation;
         let domain_registry_aid = source.registry_aid;
-        let images = match linking::BorrowedExecution::new(&self.state, self.journal.flash(),
-            &mut self.platform, domain_id, source_assembly) {
-            Ok(images) => images,
-            Err(error) => { self.transaction = None; return Err(error); }
+        let source_assembly = Rc::clone(source.instances.get(aid).ok_or(Error::Missing)?);
+        let pending = self.transaction.take();
+        let pending_matches = pending.as_ref().is_some_and(|pending| {
+            pending.owner.0 == domain_registry_aid
+                && pending.owner.1 == incarnation
+                && pending.owner.2.as_str() == aid
+        });
+        let (mut next, mut transaction, commands_left, pending_owner) = if pending_matches {
+            let pending = pending.ok_or(Error::Storage)?;
+            (
+                pending.state,
+                TransactionDisposition::Active,
+                pending.commands_left,
+                Some(pending.owner),
+            )
+        } else {
+            (
+                StagedApplication::take(&mut self.state.domains.0[source_index].1),
+                TransactionDisposition::Inactive,
+                MAX_TRANSACTION_COMMANDS,
+                None,
+            )
         };
+        let started_active = transaction == TransactionDisposition::Active;
+        let (domain_id, source) = &self.state.domains.0[source_index];
+        let images_result = linking::BorrowedExecution::new(
+            &self.state,
+            self.journal.flash(),
+            &mut self.platform,
+            domain_id,
+            &source_assembly,
+        );
+        let (images, image_error) = images_result
+            .map_or_else(|error| (None, Some(error)), |images| (Some(images), None));
+        if let Some(error) = image_error {
+            drop(images);
+            if !started_active {
+                next.install(&mut self.state.domains.0[source_index].1);
+            }
+            return Err(error);
+        }
+        let images = images.ok_or(Error::Storage)?;
         let units = match images.units() {
             Ok(units) => units,
-            Err(error) => { self.transaction = None; return Err(error); }
+            Err(error) => {
+                drop(images);
+                if !started_active {
+                    self.restore_application(domain_registry_aid, next)?;
+                }
+                return Err(error);
+            }
         };
         let p = &units[0].package;
         let Some(a) = p
@@ -216,36 +257,31 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             .iter()
             .find(|a| a.aid == aid)
         else {
-            self.transaction = None;
+            drop(units);
+            drop(images);
+            if !started_active {
+                self.restore_application(domain_registry_aid, next)?;
+            }
             return Err(Error::Missing);
         };
         let process = a.process;
-        let (mut next, mut transaction, commands_left, pending_owner) =
-            match self.transaction.take() {
-            Some(pending)
-                if pending.owner.0 == domain_registry_aid
-                    && pending.owner.1 == incarnation
-                    && pending.owner.2.as_str() == aid =>
-            {
-                (
-                    pending.state,
-                    TransactionDisposition::Active,
-                    pending.commands_left,
-                    Some(pending.owner),
-                )
-            }
-            Some(_) | None => (
-                StagedApplication::new(source)?,
-                TransactionDisposition::Inactive,
-                MAX_TRANSACTION_COMMANDS,
-                None,
-            ),
-        };
         let mut retry_floor = CredentialRetryFloors::default();
+        let mut transaction_snapshot = None;
+        let mut persistent_dirty = false;
+        #[cfg(test)]
+        let mut transaction_snapshots = 0;
+        #[cfg(test)]
+        let mut transaction_clone_allocations = 0;
         let mut control = InvocationControl {
             retry_floor: &mut retry_floor,
             should_cancel,
             transaction: &mut transaction,
+            transaction_snapshot: &mut transaction_snapshot,
+            persistent_dirty: &mut persistent_dirty,
+            #[cfg(test)]
+            transaction_snapshots: &mut transaction_snapshots,
+            #[cfg(test)]
+            transaction_clone_allocations: &mut transaction_clone_allocations,
         };
         let execution = run_application_with_metrics_and_retry_floor(
             next.view(source),
@@ -261,6 +297,19 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             Err(error) => {
                 drop(units);
                 drop(images);
+                if started_active {
+                    drop(next);
+                } else if transaction.transaction_involved() {
+                    self.restore_application(
+                        domain_registry_aid,
+                        transaction_snapshot.take().ok_or(Error::Storage)?,
+                    )?;
+                } else {
+                    self.restore_application(domain_registry_aid, next)?;
+                    if persistent_dirty {
+                        self.recover_committed_state()?;
+                    }
+                }
                 if !retry_floor.is_empty() {
                     self.commit_credential_retry_floor(domain_registry_aid, &retry_floor)?;
                 }
@@ -276,6 +325,12 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             );
         drop(units);
         drop(images);
+        if !started_active && transaction.transaction_involved() {
+            self.restore_application(
+                domain_registry_aid,
+                transaction_snapshot.take().ok_or(Error::Storage)?,
+            )?;
+        }
         if retry_commit {
             self.commit_credential_retry_floor(domain_registry_aid, &retry_floor)?;
         }
@@ -292,8 +347,14 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             _ => None,
         };
         match transaction {
-            TransactionDisposition::Inactive | TransactionDisposition::Commit => {
-                self.commit_application(domain_registry_aid, next)?;
+            TransactionDisposition::Inactive => {
+                self.commit_ordinary_application(domain_registry_aid, next, persistent_dirty)?;
+            }
+            TransactionDisposition::Commit => {
+                if let Err(error) = self.commit_application(domain_registry_aid, next) {
+                    self.recover_committed_state()?;
+                    return Err(error);
+                }
             }
             TransactionDisposition::Begun => {
                 self.transaction = Some(PendingTransaction {
@@ -347,10 +408,22 @@ pub(super) fn run_lifecycle(
 ) -> Result<(Vec<u8>, crate::mc04_vm::ExecutionMetrics)> {
     let mut retry_floor = CredentialRetryFloors::default();
     let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    #[cfg(test)]
+    let mut transaction_snapshots = 0;
+    #[cfg(test)]
+    let mut transaction_clone_allocations = 0;
     let mut control = InvocationControl {
         retry_floor: &mut retry_floor,
         should_cancel: lifecycle.should_cancel,
         transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        #[cfg(test)]
+        transaction_snapshots: &mut transaction_snapshots,
+        #[cfg(test)]
+        transaction_clone_allocations: &mut transaction_clone_allocations,
     };
     let result =
         run_application_with_metrics_and_retry_floor(d, p, units, entry, input, platform, &mut control);
@@ -371,6 +444,12 @@ struct InvocationControl<'a> {
     retry_floor: &'a mut CredentialRetryFloors,
     should_cancel: &'a mut dyn FnMut() -> bool,
     transaction: &'a mut TransactionDisposition,
+    transaction_snapshot: &'a mut Option<StagedApplication>,
+    persistent_dirty: &'a mut bool,
+    #[cfg(test)]
+    transaction_snapshots: &'a mut usize,
+    #[cfg(test)]
+    transaction_clone_allocations: &'a mut usize,
 }
 
 fn managed_response_buffer() -> Result<Vec<u8>> {
@@ -412,6 +491,12 @@ fn run_application_with_metrics_and_retry_floor(
         level: input.level,
         units,
         transaction: control.transaction,
+        transaction_snapshot: control.transaction_snapshot,
+        persistent_dirty: control.persistent_dirty,
+        #[cfg(test)]
+        transaction_snapshots: control.transaction_snapshots,
+        #[cfg(test)]
+        transaction_clone_allocations: control.transaction_clone_allocations,
         irreversible_output: false,
     };
     let units = units.ok_or(Error::Storage)?;
@@ -445,9 +530,10 @@ fn run_application_with_metrics_and_retry_floor(
     let metrics = {
         let mut metrics = metrics;
         metrics.native_work_units = 1024 - host.budget;
+        metrics.transaction_snapshots = *host.transaction_snapshots;
+        metrics.transaction_clone_allocations = *host.transaction_clone_allocations;
         metrics
     };
     host.out.extend_from_slice(&host.sw.to_be_bytes());
     Ok((host.out, metrics))
 }
-

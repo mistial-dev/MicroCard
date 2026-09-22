@@ -1,4 +1,5 @@
 using MicroCard.Framework;
+using System.Transactions;
 
 [assembly: Dependency("mscorlib", "1.2.x", SignerPublicKeyHex = "0000000000000000000000000000000000000000000000000000000000000000")]
 [assembly: PersistentInt32(1)]
@@ -77,7 +78,6 @@ namespace MicroCard.AnalyzerCases;
 public static class ValidAssembly
 {
     [Process]
-    [Transaction]
     public static void Process()
     {
         int value = SecurityDomain.Current.Store.GetInt32(1);
@@ -85,6 +85,24 @@ public static class ValidAssembly
         ResponseApdu.Write(response, 0, response.Length);
     }
 }
+
+#if CASE_TRANSACTION_SCOPE
+public static class ValidTransactionScope
+{
+    public static void Run()
+    {
+        using var scope = new TransactionScope();
+        SecurityDomain.Current.Store.SetInt32(1, 1);
+        scope.Complete();
+    }
+
+    public static void Abort()
+    {
+        using var scope = new TransactionScope();
+        SecurityDomain.Current.Store.SetInt32(1, 2);
+    }
+}
+#endif
 
 #if CASE_STORAGE_ACCESS
 public static class InvalidStorageAccess
@@ -117,33 +135,12 @@ public static class EntryThree { [Process] public static void Process() { } }
 #if CASE_TRANSACTION
 public static class InvalidTransaction
 {
-    [Transaction]
-    public static void Run() => Output();
-    private static void Output() => Hardware.Write(0, 1);
-}
-#endif
-
-#if CASE_EXPLICIT_TRANSACTION
-public static class InvalidExplicitTransaction
-{
     public static void Run()
     {
-        SecurityDomain.Current.Store.BeginTransaction();
+        using var scope = new TransactionScope();
         Hardware.Write(0, 1);
+        scope.Complete();
     }
-}
-#endif
-
-#if CASE_TRANSACTION_CONSTRUCTOR
-public sealed class IrreversibleConstructor
-{
-    public IrreversibleConstructor() => Hardware.Write(0, 1);
-}
-
-public static class InvalidTransactionConstructor
-{
-    [Transaction]
-    public static void Run() { _ = new IrreversibleConstructor(); }
 }
 #endif
 

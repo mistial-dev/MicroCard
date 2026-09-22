@@ -24,6 +24,9 @@ sealed class Mc04Writer : IDisposable
     readonly Dictionary<MethodDefinitionHandle, ushort> methods;
     readonly Dictionary<MemberReferenceHandle, ushort> memberRefs;
     readonly Dictionary<AssemblyReferenceHandle, ushort> assemblyRefs;
+    readonly Dictionary<MethodDefinitionHandle, byte[]> methodCode = new();
+    readonly HashSet<TypeReferenceHandle> projectedTransactionTypes = new();
+    readonly Dictionary<MemberReferenceHandle, string> projectedTransactionMembers = new();
     readonly Dictionary<byte, ushort> emptyArrayTypeRows = new();
     readonly List<(EntityHandle Scope, string Name)> syntheticTypeRefs = new();
     readonly StringHeap strings = new();
@@ -64,7 +67,9 @@ sealed class Mc04Writer : IDisposable
             CollectSignature(md.GetBlobBytes(definition.Signature), usedTypes);
             var body = pe.GetMethodBody(definition.RelativeVirtualAddress);
             if (!body.LocalSignature.IsNil) CollectSignature(md.GetBlobBytes(md.GetStandaloneSignature(body.LocalSignature).Signature), usedTypes);
-            foreach (var token in CilTokens(body.GetILBytes()!))
+            var code = RewriteTransactionScope(body);
+            methodCode.Add(handle, code);
+            foreach (var token in CilTokens(code))
             {
                 if (token.Kind == HandleKind.MemberReference) usedMembers.Add((MemberReferenceHandle)token);
                 if (token.Kind == HandleKind.TypeReference) usedTypes.Add((TypeReferenceHandle)token);
@@ -93,7 +98,7 @@ sealed class Mc04Writer : IDisposable
         while (pending.TryDequeue(out var handle))
         {
             var scope = md.GetTypeReference(handle).ResolutionScope;
-            if (IsProjectedSystemCryptography(handle)) usedAssemblies.Add(frameworkReference);
+            if (IsProjectedType(handle)) usedAssemblies.Add(frameworkReference);
             else if (scope.Kind == HandleKind.AssemblyReference) usedAssemblies.Add((AssemblyReferenceHandle)scope);
             else if (scope.Kind == HandleKind.TypeReference && usedTypes.Add((TypeReferenceHandle)scope)) pending.Enqueue((TypeReferenceHandle)scope);
         }
@@ -168,21 +173,19 @@ sealed class Mc04Writer : IDisposable
             {
                 var method = md.GetMethodDefinition(handle);
                 if (method.RelativeVirtualAddress == 0) throw new Exception("MC04 requires method bodies");
-                var body = pe.GetMethodBody(method.RelativeVirtualAddress);
-                if (body.ExceptionRegions.Length != 0) throw new Exception("MC04 exception handlers unsupported");
                 byte[] cil;
-                try { cil = CompactCil(body.GetILBytes()!); }
+                try { cil = CompactCil(methodCode[handle]); }
                 catch (Exception error)
                 {
                     var owner = md.GetTypeDefinition(method.GetDeclaringType());
                     throw new Exception($"{md.GetString(owner.Name)}.{md.GetString(method.Name)}: {error.Message}");
                 }
+                var body = pe.GetMethodBody(method.RelativeVirtualAddress);
                 ushort locals = 0;
                 if (!body.LocalSignature.IsNil)
                     locals = blobs.Add(RewriteSignature(md.GetBlobBytes(md.GetStandaloneSignature(body.LocalSignature).Signature)));
                 codeOffsets.Add(handle, checked((uint)code.Position));
-                byte flags = (byte)((HasAttribute(method.GetCustomAttributes(), "TransactionAttribute") ? 1 : 0) |
-                    (body.LocalVariablesInitialized ? 2 : 0));
+                byte flags = (byte)(body.LocalVariablesInitialized ? 2 : 0);
                 writer.Write(flags);
                 writer.Write((byte)0);
                 writer.Write(checked((ushort)body.MaxStack));
@@ -262,7 +265,7 @@ sealed class Mc04Writer : IDisposable
         foreach (var handle in md.TypeDefinitions) { var value = md.GetTypeDefinition(handle); strings.Add(md.GetString(value.Name)); strings.Add(md.GetString(value.Namespace)); }
         foreach (var handle in fields.Keys.OrderBy(handle => MetadataTokens.GetRowNumber((EntityHandle)handle))) { var value = md.GetFieldDefinition(handle); strings.Add("_"); blobs.Add(RewriteSignature(md.GetBlobBytes(value.Signature))); }
         foreach (var handle in md.MethodDefinitions) { var value = md.GetMethodDefinition(handle); strings.Add(MethodName(value)); blobs.Add(RewriteSignature(md.GetBlobBytes(value.Signature))); }
-        foreach (var handle in memberRefs.Keys.OrderBy(handle => MetadataTokens.GetRowNumber((EntityHandle)handle))) { var value = md.GetMemberReference(handle); strings.Add(MemberReferenceName(handle)); blobs.Add(RewriteSignature(md.GetBlobBytes(value.Signature))); }
+        foreach (var handle in memberRefs.Keys.OrderBy(handle => MetadataTokens.GetRowNumber((EntityHandle)handle))) { strings.Add(MemberReferenceName(handle)); blobs.Add(MemberReferenceSignature(handle)); }
         foreach (var (_, handle) in attributes) blobs.Add(md.GetBlobBytes(md.GetCustomAttribute(handle).Value));
         strings.Add(deviceAssemblyName);
         foreach (var handle in assemblyRefs.Keys.OrderBy(handle => MetadataTokens.GetRowNumber((EntityHandle)handle)))
@@ -292,7 +295,7 @@ sealed class Mc04Writer : IDisposable
         foreach (var handle in typeRefs.Keys.OrderBy(handle => MetadataTokens.GetRowNumber((EntityHandle)handle)))
         {
             var value = md.GetTypeReference(handle);
-            writer.Write(ResolutionScope(IsProjectedSystemCryptography(handle) ? frameworkReference : value.ResolutionScope));
+            writer.Write(ResolutionScope(IsProjectedType(handle) ? frameworkReference : value.ResolutionScope));
             WriteIndex(writer, strings.Add(TypeReferenceName(handle)), stringWidth);
             WriteIndex(writer, strings.Add(TypeReferenceNamespace(handle)), stringWidth);
         }
@@ -335,7 +338,7 @@ sealed class Mc04Writer : IDisposable
             var value = md.GetMemberReference(handle);
             writer.Write(MemberRefParent(value.Parent));
             WriteIndex(writer, strings.Add(MemberReferenceName(handle)), stringWidth);
-            WriteIndex(writer, blobs.Add(RewriteSignature(md.GetBlobBytes(value.Signature))), blobWidth);
+            WriteIndex(writer, blobs.Add(MemberReferenceSignature(handle)), blobWidth);
         }
         foreach (var (parent, handle) in attributes)
         {
@@ -396,18 +399,37 @@ sealed class Mc04Writer : IDisposable
     }
 
     string TypeReferenceName(TypeReferenceHandle handle) =>
-        IsProjectedSystemCryptography(handle) ? "Cryptography" : md.GetString(md.GetTypeReference(handle).Name);
+        IsProjectedSystemCryptography(handle) ? "Cryptography" :
+        projectedTransactionTypes.Contains(handle) ? "TransactionScopeRuntime" :
+        md.GetString(md.GetTypeReference(handle).Name);
 
     string TypeReferenceNamespace(TypeReferenceHandle handle) =>
-        IsProjectedSystemCryptography(handle) ? "MicroCard.Framework" : md.GetString(md.GetTypeReference(handle).Namespace);
+        IsProjectedType(handle) ? "MicroCard.Framework" : md.GetString(md.GetTypeReference(handle).Namespace);
 
     string MemberReferenceName(MemberReferenceHandle handle)
     {
+        if (projectedTransactionMembers.TryGetValue(handle, out var transactionName))
+            return transactionName;
         if (!IsProjectedSystemCryptography(handle)) return md.GetString(md.GetMemberReference(handle).Name);
         return md.GetString(md.GetTypeReference(
             (TypeReferenceHandle)md.GetMemberReference(handle).Parent).Name) == "SHA256"
             ? "Sha256" : "RandomBytes";
     }
+
+    byte[] MemberReferenceSignature(MemberReferenceHandle handle)
+    {
+        var signature = RewriteSignature(md.GetBlobBytes(md.GetMemberReference(handle).Signature));
+        if (projectedTransactionMembers.ContainsKey(handle))
+        {
+            if (!signature.AsSpan().SequenceEqual(new byte[] { 0x20, 0x00, 0x01 }))
+                throw new Exception("Unexpected TransactionScope signature");
+            signature[0] = 0x00;
+        }
+        return signature;
+    }
+
+    bool IsProjectedType(TypeReferenceHandle handle) =>
+        IsProjectedSystemCryptography(handle) || projectedTransactionTypes.Contains(handle);
 
     static void WriteVersion(BinaryWriter writer, Version version)
     {
@@ -505,7 +527,7 @@ sealed class Mc04Writer : IDisposable
     bool IsFrameworkAttribute(CustomAttributeHandle handle) => AttributeName(handle) is not null;
     bool IsRuntimeAttribute(CustomAttributeHandle handle) => AttributeName(handle) is
         "AssemblyAttribute" or "InstallAttribute" or "SelectAttribute" or "DeselectAttribute" or
-        "ProcessAttribute" or "UninstallAttribute" or "TransactionAttribute";
+        "ProcessAttribute" or "UninstallAttribute";
     string? AttributeName(CustomAttributeHandle handle)
     {
         var value = md.GetCustomAttribute(handle);
@@ -598,6 +620,213 @@ sealed class Mc04Writer : IDisposable
         return output.ToArray();
     }
 
+    byte[] RewriteTransactionScope(MethodBodyBlock body)
+    {
+        byte[] code = body.GetILBytes()!;
+        var instructions = Decode(code);
+        if (body.ExceptionRegions.Length == 0)
+        {
+            if (instructions.Any(instruction =>
+                    !instruction.Token.IsNil && TransactionControl(instruction.Token) != 0))
+                throw new Exception("TransactionScope requires a canonical using declaration");
+            return code;
+        }
+        if (body.ExceptionRegions.Length != 1 ||
+            body.ExceptionRegions[0].Kind != ExceptionRegionKind.Finally)
+            throw new Exception("MC04 exception handlers unsupported");
+
+        var region = body.ExceptionRegions[0];
+        int tryStart = region.TryOffset;
+        int tryEnd = checked(tryStart + region.TryLength);
+        int handlerStart = region.HandlerOffset;
+        int handlerEnd = checked(handlerStart + region.HandlerLength);
+        if (tryEnd != handlerStart || handlerEnd > code.Length)
+            throw new Exception("TransactionScope requires a canonical using declaration");
+
+        var beforeTry = instructions.Where(instruction => instruction.Offset < tryStart).ToArray();
+        if (beforeTry.Length < 2 || beforeTry[^2].Opcode != OpCodes.Newobj.Value ||
+            TransactionControl(beforeTry[^2].Token) != 1)
+            throw new Exception("MC04 exception handlers unsupported");
+        if (beforeTry[^1].End != tryStart ||
+            LocalIndex(beforeTry[^1], store: true) is not int scopeLocal)
+            throw new Exception("TransactionScope requires a canonical using declaration");
+        var constructor = (MemberReferenceHandle)beforeTry[^2].Token;
+
+        var tryInstructions = instructions.Where(instruction =>
+            instruction.Offset >= tryStart && instruction.Offset < tryEnd).ToArray();
+        if (tryInstructions.Length == 0 || tryInstructions[^1].End != tryEnd ||
+            tryInstructions[^1].Opcode is not (0xdd or 0xde) ||
+            tryInstructions[^1].BranchTarget != handlerEnd)
+            throw new Exception("TransactionScope requires one normal scope exit");
+        var payload = tryInstructions[..^1];
+        MemberReferenceHandle completion = default;
+        bool completed = payload.Length >= 2 &&
+            LocalIndex(payload[^2], store: false) == scopeLocal &&
+            payload[^1].Opcode == OpCodes.Callvirt.Value &&
+            TransactionControl(payload[^1].Token) == 2;
+        if (completed)
+        {
+            completion = (MemberReferenceHandle)payload[^1].Token;
+            payload = payload[..^2];
+        }
+
+        var handler = instructions.Where(instruction =>
+            instruction.Offset >= handlerStart && instruction.Offset < handlerEnd).ToArray();
+        if (handler.Length != 5 || handler[^1].End != handlerEnd ||
+            LocalIndex(handler[0], store: false) != scopeLocal ||
+            handler[1].Opcode is not (0x2c or 0x39) ||
+            handler[1].BranchTarget != handler[4].Offset ||
+            LocalIndex(handler[2], store: false) != scopeLocal ||
+            handler[3].Opcode != OpCodes.Callvirt.Value ||
+            TransactionControl(handler[3].Token) != 3 ||
+            handler[4].Opcode != OpCodes.Endfinally.Value)
+            throw new Exception("TransactionScope requires the compiler-generated disposal finally");
+        var disposal = (MemberReferenceHandle)handler[3].Token;
+
+        foreach (var instruction in payload)
+        {
+            if ((!instruction.Token.IsNil && TransactionControl(instruction.Token) != 0) ||
+                LocalIndex(instruction, store: false) == scopeLocal ||
+                LocalIndex(instruction, store: true) == scopeLocal ||
+                instruction.Opcode is 0xdd or 0xde or 0xdc or 0x2a)
+                throw new Exception("TransactionScope cannot escape or use noncanonical control flow");
+            ValidateBranches(instruction, tryStart,
+                payload.Length == 0 ? tryStart : payload[^1].End);
+        }
+        int constructorStart = beforeTry[^2].Offset;
+        foreach (var instruction in instructions)
+        {
+            if (instruction.Offset < constructorStart)
+                ValidateBranches(instruction, 0, constructorStart);
+            else if (instruction.Offset >= handlerEnd)
+                ValidateBranches(instruction, handlerEnd, code.Length);
+        }
+
+        ProjectTransaction(constructor, "Begin");
+        if (completed) ProjectTransaction(completion, "Commit");
+        else ProjectTransaction(disposal, "Abort");
+
+        using var output = new MemoryStream();
+        using var writer = new BinaryWriter(output, Encoding.UTF8, true);
+        writer.Write(code, 0, constructorStart);
+        WriteProjectedCall(writer, constructor);
+        int payloadEnd = payload.Length == 0 ? tryStart : payload[^1].End;
+        writer.Write(code, tryStart, payloadEnd - tryStart);
+        WriteProjectedCall(writer, completed ? completion : disposal);
+        writer.Write(code, handlerEnd, code.Length - handlerEnd);
+        return output.ToArray();
+    }
+
+    void ProjectTransaction(MemberReferenceHandle member, string name)
+    {
+        var parent = md.GetMemberReference(member).Parent;
+        if (parent.Kind != HandleKind.TypeReference)
+            throw new Exception("TransactionScope projection requires a type reference");
+        projectedTransactionTypes.Add((TypeReferenceHandle)parent);
+        if (projectedTransactionMembers.TryGetValue(member, out var existing) && existing != name)
+            throw new Exception("Conflicting TransactionScope projection");
+        projectedTransactionMembers[member] = name;
+    }
+
+    static void WriteProjectedCall(BinaryWriter writer, MemberReferenceHandle member)
+    {
+        writer.Write((byte)OpCodes.Call.Value);
+        writer.Write(MetadataTokens.GetToken(member));
+    }
+
+    void ValidateBranches(Instruction instruction, int start, int end)
+    {
+        foreach (int target in instruction.BranchTargets)
+            if (target < start || target >= end)
+                throw new Exception("TransactionScope cannot cross a control-flow boundary");
+    }
+
+    int TransactionControl(EntityHandle handle)
+    {
+        if (handle.Kind != HandleKind.MemberReference) return 0;
+        var member = md.GetMemberReference((MemberReferenceHandle)handle);
+        if (member.Parent.Kind != HandleKind.TypeReference) return 0;
+        var type = md.GetTypeReference((TypeReferenceHandle)member.Parent);
+        if (type.ResolutionScope.Kind != HandleKind.AssemblyReference) return 0;
+        string assembly = md.GetString(md.GetAssemblyReference(
+            (AssemblyReferenceHandle)type.ResolutionScope).Name);
+        string ns = md.GetString(type.Namespace);
+        string typeName = md.GetString(type.Name);
+        string memberName = md.GetString(member.Name);
+        byte[] signature = md.GetBlobBytes(member.Signature);
+        bool parameterlessVoid = signature.AsSpan().SequenceEqual(new byte[] { 0x20, 0x00, 0x01 });
+        if (!parameterlessVoid) return 0;
+        if (assembly == "System.Transactions.Local" && ns == "System.Transactions" &&
+            typeName == "TransactionScope")
+            return memberName == ".ctor" ? 1 : memberName == "Complete" ? 2 : 0;
+        return assembly == "System.Runtime" && ns == "System" && typeName == "IDisposable" &&
+               memberName == "Dispose" ? 3 : 0;
+    }
+
+    static int? LocalIndex(Instruction instruction, bool store) => instruction.Opcode switch
+    {
+        0x06 when !store => 0, 0x07 when !store => 1, 0x08 when !store => 2, 0x09 when !store => 3,
+        0x0a when store => 0, 0x0b when store => 1, 0x0c when store => 2, 0x0d when store => 3,
+        0x11 when !store => instruction.Variable,
+        0x13 when store => instruction.Variable,
+        unchecked((short)0xfe0c) when !store => instruction.Variable,
+        unchecked((short)0xfe0e) when store => instruction.Variable,
+        _ => null,
+    };
+
+    List<Instruction> Decode(byte[] input)
+    {
+        var result = new List<Instruction>();
+        int pc = 0;
+        while (pc < input.Length)
+        {
+            int start = pc;
+            byte first = input[pc++]; short value = first;
+            if (first == 0xfe) value = unchecked((short)(0xfe00 | input[pc++]));
+            if (!opcodes.TryGetValue(value, out var opcode)) throw new Exception("Unknown CIL opcode");
+            EntityHandle token = default;
+            int variable = -1;
+            var targets = new List<int>();
+            switch (opcode.OperandType)
+            {
+                case OperandType.InlineNone: break;
+                case OperandType.ShortInlineI: pc += 1; break;
+                case OperandType.ShortInlineVar: variable = input[pc++]; break;
+                case OperandType.InlineVar: variable = BitConverter.ToUInt16(input, pc); pc += 2; break;
+                case OperandType.InlineI: case OperandType.ShortInlineR: pc += 4; break;
+                case OperandType.InlineI8: case OperandType.InlineR: pc += 8; break;
+                case OperandType.ShortInlineBrTarget:
+                    targets.Add(pc + 1 + (sbyte)input[pc]); pc += 1; break;
+                case OperandType.InlineBrTarget:
+                    targets.Add(pc + 4 + BitConverter.ToInt32(input, pc)); pc += 4; break;
+                case OperandType.InlineSwitch:
+                {
+                    int count = BitConverter.ToInt32(input, pc); pc += 4;
+                    int targetBase = checked(pc + count * 4);
+                    for (int index = 0; index < count; index++)
+                        targets.Add(checked(targetBase + BitConverter.ToInt32(input, pc + index * 4)));
+                    pc = targetBase;
+                    break;
+                }
+                case OperandType.InlineMethod: case OperandType.InlineField:
+                case OperandType.InlineType: case OperandType.InlineTok:
+                case OperandType.InlineString: case OperandType.InlineSig:
+                    token = MetadataTokens.EntityHandle(BitConverter.ToInt32(input, pc)); pc += 4; break;
+                default: throw new Exception($"Unsupported MC04 CIL operand {opcode.OperandType}");
+            }
+            if (pc > input.Length) throw new Exception("Truncated CIL operand");
+            result.Add(new Instruction(start, pc - start, value, token, variable, targets.ToArray()));
+        }
+        return result;
+    }
+
+    readonly record struct Instruction(
+        int Offset, int Size, short Opcode, EntityHandle Token, int Variable, int[] BranchTargets)
+    {
+        public int End => checked(Offset + Size);
+        public int? BranchTarget => BranchTargets.Length == 1 ? BranchTargets[0] : null;
+    }
+
     IEnumerable<EntityHandle> CilTokens(byte[] input)
     {
         int pc = 0;
@@ -669,25 +898,15 @@ sealed class Mc04Writer : IDisposable
         }
 
         foreach (var handle in md.MethodDefinitions)
-            if ((HasAttribute(md.GetMethodDefinition(handle).GetCustomAttributes(), "TransactionAttribute") ||
-                 ReachesExplicitControl(handle)) &&
+            if (ReachesExplicitControl(handle) &&
                 ReachesIrreversibleOutput(handle))
                 throw new Exception("Transactional method reaches irreversible Hardware.Write");
     }
 
     bool IsExplicitTransactionControl(MemberReferenceHandle handle)
     {
-        var member = md.GetMemberReference(handle);
-        string name = md.GetString(member.Name);
-        if (name is not ("BeginTransaction" or "CommitTransaction" or "AbortTransaction") ||
-            member.Parent.Kind != HandleKind.TypeReference)
-            return false;
-        var type = md.GetTypeReference((TypeReferenceHandle)member.Parent);
-        if (md.GetString(type.Name) != "DomainStorage" ||
-            md.GetString(type.Namespace) != "MicroCard.Framework" ||
-            type.ResolutionScope.Kind != HandleKind.AssemblyReference)
-            return false;
-        return md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) == frameworkName;
+        if (projectedTransactionMembers.ContainsKey(handle)) return true;
+        return TransactionControl(handle) != 0;
     }
 
     bool IsIrreversibleOutput(MemberReferenceHandle handle)

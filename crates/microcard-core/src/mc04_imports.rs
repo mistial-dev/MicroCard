@@ -138,6 +138,15 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
         }
         ("DomainStore", "GetInt32") if exact(&types, false, &[int], Some(int)) => Import::Native(3),
         ("DomainStore", "SetInt32") if exact(&types, false, &[int, int], None) => Import::Native(4),
+        ("TransactionScopeRuntime", "Begin" | "Commit" | "Abort")
+            if exact(&types, false, &[], None) =>
+        {
+            Import::Native(match member.name {
+                "Begin" => 55,
+                "Commit" => 56,
+                _ => 57,
+            })
+        }
         ("RandomNumber", "GetInt32") if exact(&types, false, &[], Some(int)) => Import::Native(5),
         ("Hardware", "Write") if exact(&types, false, &[int, int], None) => Import::Native(6),
         ("DomainStorage", "GetInt32")

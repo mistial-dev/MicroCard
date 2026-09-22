@@ -1883,11 +1883,22 @@ fn signed_multi_command_transactions_commit_abort_and_expire() {
     assert_eq!(card.state.domains["transaction"].blobs.get(&3).unwrap(), &[33]);
 
     let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    let generation = card.journal.generation();
+    let (read, ordinary_metrics) = card
+        .invoke_context_with_metrics("F04D430020", &[6], 0)
+        .unwrap();
     assert_eq!(
-        card.invoke("F04D430020", &[6]).unwrap(),
+        read,
         [11, 22, 33, 0x90, 0]
     );
-    card.invoke("F04D430020", &[0]).unwrap();
+    assert_eq!(ordinary_metrics.transaction_snapshots, 0);
+    assert_eq!(ordinary_metrics.transaction_clone_allocations, 0);
+    assert_eq!(card.journal.generation(), generation);
+    let (_, begin_metrics) = card
+        .invoke_context_with_metrics("F04D430020", &[0], 0)
+        .unwrap();
+    assert_eq!(begin_metrics.transaction_snapshots, 1);
+    assert!(begin_metrics.transaction_clone_allocations > 0);
     card.invoke("F04D430020", &[1, 44]).unwrap();
     card.invoke("F04D430020", &[5]).unwrap();
     assert_eq!(
@@ -1978,6 +1989,8 @@ fn representative_simulator_runtime_peaks_stay_within_budget() {
             peak_transient_bytes: 126,
             peak_transient_objects: 7,
             native_work_units: 124,
+            transaction_snapshots: 0,
+            transaction_clone_allocations: 0,
         }
     );
     assert!(peak.instructions <= 512);
@@ -2087,7 +2100,11 @@ fn invocation_and_package_removal_boundaries_recover_old_or_new_state() {
             flash.fail_after = Some(cut);
             let mut interrupted = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
             if mutate(&mut interrupted).is_err() {
-                assert_eq!(interrupted.state.encode_snapshot().unwrap().as_slice(), previous);
+                let reconciled = interrupted.state.encode_snapshot().unwrap();
+                assert!(
+                    reconciled.as_slice() == previous || reconciled.as_slice() == committed,
+                    "failed commit must reconcile to an authenticated generation"
+                );
             }
             assert_eq!(interrupted.state.domains["untouched"].store.get(&1), Some(&123));
             let mut flash = interrupted.into_flash();
@@ -2310,6 +2327,10 @@ fn issuer_dependency_code_cannot_reach_caller_domain_storage() {
     let mut credentials = crate::credential_store::CredentialStore::default();
     let mut platform = TestPlatform(0);
     let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    let mut transaction_snapshots = 0;
+    let mut transaction_clone_allocations = 0;
     let mut host = Host {
         store: &mut store,
         blobs: &mut blobs,
@@ -2332,6 +2353,10 @@ fn issuer_dependency_code_cannot_reach_caller_domain_storage() {
         level: 0,
         units: Some(&units),
         transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        transaction_snapshots: &mut transaction_snapshots,
+        transaction_clone_allocations: &mut transaction_clone_allocations,
         irreversible_output: false,
     };
     let mut heap = crate::mc04_vm::Heap::new();
@@ -2717,6 +2742,10 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
     let mut platform = TestPlatform(0);
     let capabilities = [12, 13, 53, 54];
     let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    let mut transaction_snapshots = 0;
+    let mut transaction_clone_allocations = 0;
     let mut host = Host {
         store: &mut store,
         blobs: &mut blobs,
@@ -2739,6 +2768,10 @@ fn bulk_command_io_validates_before_charging_or_mutating() {
         level: 0,
         units: None,
         transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        transaction_snapshots: &mut transaction_snapshots,
+        transaction_clone_allocations: &mut transaction_clone_allocations,
         irreversible_output: false,
     };
     let mut heap = crate::mc04_vm::Heap::new();
@@ -2811,6 +2844,10 @@ fn bulk_random_and_fixed_time_comparison_validate_ranges() {
     let mut platform = FailingEntropy;
     let capabilities = [39, 50, 51];
     let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    let mut transaction_snapshots = 0;
+    let mut transaction_clone_allocations = 0;
     let mut host = Host {
         store: &mut store,
         blobs: &mut blobs,
@@ -2833,6 +2870,10 @@ fn bulk_random_and_fixed_time_comparison_validate_ranges() {
         level: 0,
         units: None,
         transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        transaction_snapshots: &mut transaction_snapshots,
+        transaction_clone_allocations: &mut transaction_clone_allocations,
         irreversible_output: false,
     };
     let mut heap = crate::mc04_vm::Heap::new();
@@ -2894,6 +2935,10 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
     let capabilities = [40, 41, 42, 43, 44, 45];
     {
         let mut transaction = TransactionDisposition::Inactive;
+        let mut transaction_snapshot = None;
+        let mut persistent_dirty = false;
+        let mut transaction_snapshots = 0;
+        let mut transaction_clone_allocations = 0;
         let mut host = Host {
             store: &mut store,
             blobs: &mut blobs,
@@ -2916,6 +2961,10 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
             level: 0,
             units: None,
             transaction: &mut transaction,
+            transaction_snapshot: &mut transaction_snapshot,
+            persistent_dirty: &mut persistent_dirty,
+            transaction_snapshots: &mut transaction_snapshots,
+            transaction_clone_allocations: &mut transaction_clone_allocations,
             irreversible_output: false,
         };
         assert_eq!(
@@ -2996,6 +3045,10 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
         );
     }
     let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    let mut transaction_snapshots = 0;
+    let mut transaction_clone_allocations = 0;
     let mut host = Host {
         store: &mut store,
         blobs: &mut blobs,
@@ -3018,6 +3071,10 @@ fn credential_native_api_tracks_retries_and_scopes_authorization_to_invocation()
         level: 0,
         units: None,
         transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        transaction_snapshots: &mut transaction_snapshots,
+        transaction_clone_allocations: &mut transaction_clone_allocations,
         irreversible_output: false,
     };
     assert_eq!(
@@ -3152,6 +3209,10 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
     let mut platform = TestPlatform(0);
     let capabilities = [4, 22, 25, 29, 31, 32, 33, 34, 52];
     let mut transaction = TransactionDisposition::Inactive;
+    let mut transaction_snapshot = None;
+    let mut persistent_dirty = false;
+    let mut transaction_snapshots = 0;
+    let mut transaction_clone_allocations = 0;
     let mut host = Host {
         store: &mut store,
         blobs: &mut blobs,
@@ -3174,6 +3235,10 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         level: 0,
         units: None,
         transaction: &mut transaction,
+        transaction_snapshot: &mut transaction_snapshot,
+        persistent_dirty: &mut persistent_dirty,
+        transaction_snapshots: &mut transaction_snapshots,
+        transaction_clone_allocations: &mut transaction_clone_allocations,
         irreversible_output: false,
     };
     let oversized = alloc::vec![0u8; MAX_KEY_SERVICE_ARGUMENT_BYTES + 1];

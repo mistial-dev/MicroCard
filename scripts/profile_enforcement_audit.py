@@ -5,7 +5,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED = {f"MCA{index:04d}" for index in range(1, 26)}
+EXPECTED = {f"MCA{index:04d}" for index in range(1, 26)} - {"MCA0023"}
 
 
 def identifiers(relative: str) -> set[str]:
@@ -70,7 +70,7 @@ def main() -> None:
         "domain_schema",
     ))
     require("crates/microcard-core/src/domains/native.rs", ("authorize_storage", "domain_schema"))
-    print("PASS: MCA0001-MCA0025 coverage pointers and profile enforcement sites are present")
+    print("PASS: active analyzer coverage and profile enforcement sites are present")
 
 
 if __name__ == "__main__":

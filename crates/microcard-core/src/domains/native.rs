@@ -328,17 +328,26 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
                 &[NativeArgument::Int(*slot), NativeArgument::Int(*kind)],
             )?,
             (46, [Opaque(3)]) => {
-                if self.irreversible_output {
-                    return Err(Error::Unauthorized);
-                }
-                self.transaction.begin()?;
+                self.begin_transaction()?;
+                BufferResult::Void
+            }
+            (55, []) => {
+                self.begin_transaction()?;
                 BufferResult::Void
             }
             (47, [Opaque(3)]) => {
                 self.transaction.commit()?;
                 BufferResult::Void
             }
+            (56, []) => {
+                self.transaction.commit()?;
+                BufferResult::Void
+            }
             (48, [Opaque(3)]) => {
+                self.transaction.abort()?;
+                BufferResult::Void
+            }
+            (57, []) => {
                 self.transaction.abort()?;
                 BufferResult::Void
             }
@@ -352,6 +361,28 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
     }
 }
 impl<P: Platform> Host<'_, P> {
+    fn begin_transaction(&mut self) -> Result<()> {
+        if self.irreversible_output || *self.persistent_dirty {
+            return Err(Error::Unauthorized);
+        }
+        let mut clone_context = crate::fallible_clone::CloneContext::new();
+        let snapshot = StagedApplication::from_parts(
+            self.store,
+            self.blobs,
+            self.keys,
+            self.credentials,
+            &mut clone_context,
+        )?;
+        #[cfg(test)]
+        {
+            *self.transaction_snapshots += 1;
+            *self.transaction_clone_allocations += clone_context.allocations();
+        }
+        self.transaction.begin()?;
+        *self.transaction_snapshot = Some(snapshot);
+        Ok(())
+    }
+
     pub(super) fn authorize_storage(
         &self,
         unit: usize,
@@ -427,6 +458,7 @@ impl<P: Platform> Host<'_, P> {
                     (args[4].int()?, args[8].int()?),
                     self.platform,
                 )?;
+                *self.persistent_dirty = true;
                 BufferResult::Void
             }
             41 => {
@@ -445,6 +477,7 @@ impl<P: Platform> Host<'_, P> {
                     self.authorized_credentials.remove(slot);
                     self.record_credential_retry_floor(slot)?;
                 }
+                *self.persistent_dirty = true;
                 BufferResult::Scalar(i32::from(verified))
             }
             42 => BufferResult::Scalar(i32::from(
@@ -461,6 +494,7 @@ impl<P: Platform> Host<'_, P> {
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
                     self.platform,
                 )?;
+                *self.persistent_dirty = true;
                 BufferResult::Void
             }
             44 => {
@@ -477,6 +511,7 @@ impl<P: Platform> Host<'_, P> {
                 } else {
                     self.record_credential_retry_floor(slot)?;
                 }
+                *self.persistent_dirty = true;
                 BufferResult::Scalar(i32::from(unblocked))
             }
             45 => {
@@ -549,10 +584,12 @@ impl<P: Platform> Host<'_, P> {
                 if self.keys.len() >= self.max_key_slots {
                     return Err(Error::Quota);
                 }
-                self.keys
+                let generated = self.keys
                     .generate(self.owner, args[1].int()?, args[2].int()?, |b| {
                         self.platform.random(b)
-                    })?
+                    })?;
+                *self.persistent_dirty = true;
+                generated
             }
             23 => {
                 if args[0].int()? != 0 {
@@ -565,6 +602,7 @@ impl<P: Platform> Host<'_, P> {
                     return Err(Error::Unauthorized);
                 }
                 self.keys.delete(args[1].int()?)?;
+                *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
             25 => self.keys.hmac(
@@ -641,6 +679,7 @@ impl<P: Platform> Host<'_, P> {
                 }
                 let replacement = Self::copy_buffer(value)?;
                 self.blobs.insert(key, replacement)?;
+                *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
             52 => {
@@ -661,6 +700,7 @@ impl<P: Platform> Host<'_, P> {
                 }
                 let replacement = Self::copy_buffer(value)?;
                 self.blobs.insert(key, replacement)?;
+                *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
             33 => {
@@ -669,6 +709,7 @@ impl<P: Platform> Host<'_, P> {
                 }
                 let mut removed = self.blobs.remove(&args[1].int()?).ok_or(Error::Missing)?;
                 removed.zeroize();
+                *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
             34 => {
@@ -738,6 +779,7 @@ impl<P: Platform> Host<'_, P> {
                     return Err(Error::Quota);
                 }
                 self.store.insert(a[0], a[1])?;
+                *self.persistent_dirty = true;
                 Ok(None)
             }
             5 => {
@@ -972,4 +1014,3 @@ impl<P: Platform> Host<'_, P> {
         Ok(())
     }
 }
-
