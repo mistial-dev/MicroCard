@@ -51,6 +51,19 @@ keeps the upstream CSV and log untouched and treats a transport error, timeout,
 crash, or unfinished mode as an invalid measurement, never as an algorithmic
 "no".
 
+## Tiny-crypto-c backfill
+
+The upstream `tiny-crypto-c` review branch is pinned for evaluation at
+[`e0b94d7f18653196edf310af5505c606a59f07a4`](https://github.com/mistial-dev/tiny-crypto-c/commit/e0b94d7f18653196edf310af5505c606a59f07a4). It adds
+caller-workspace ECDSA digest signing for the library's P-192, P-256, and P-384
+curves with an injected nonce source. Its RFC 6979 sample vectors, negative
+cases, sanitizer runs, and all 179 configured CTest cases pass; optional
+external vector corpora were not supplied. This is upstream library work only:
+the DK firmware does not link this branch yet, and Java Card P-192/P-384
+signing remains unsupported. Before enabling it, pin the full commit in the
+build, review license and source provenance, connect a fail-closed board
+provider, and pass key import, operation, failure, and reboot acceptance.
+
 ## Baseline before unsigned loading
 
 At source revision `4c8c095d48d793a5b823f7efab21ab81e33eb8b5`, the DK
