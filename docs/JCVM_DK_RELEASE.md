@@ -52,6 +52,12 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
+The extended host scan reports **53 supported** probes against the P71D321
+reference's **288**. There are **233 missing supported** probes, **zero support
+claims outside the profile**, and two reference probes absent from the local
+applet result (`OwnerPINBuilder`). The runner writes the exact differences to
+`profile-comparison.json`; a factory result alone is not an algorithm acceptance.
+
 ## Conformance work
 
 | Area | Current evidence | Release gate |
@@ -113,3 +119,9 @@ physical timing result.
 The DK release gate also needs sealed provisioning, secure boot/update policy,
 debug lockout, and independent cryptographic review before deployment as a
 production secure element. A robust USB DK test target is the nearer milestone.
+
+The connected PCA10056 DK's J-Link enumerates, but probe-rs and OpenOCD cannot
+read the target's SWD ID, including under reset. An authorized erase attempt
+failed before any erase began. The separately enumerated MicroCard CCID reader
+answers SELECT, but this does not establish access to the DK target. Physical DK
+flashing and the full JCAlgTest run remain pending debug-link recovery.

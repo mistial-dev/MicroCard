@@ -2,6 +2,7 @@
 """Run the pinned upstream JCAlgTest client against a provisioned host JCVM."""
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import subprocess
 import tempfile
 
 from jcalgtest_gp_acceptance import APPLET, IMAGE, PACKAGE
+from jcalgtest_profile import REFERENCE, read_result
 from jcvm_transport_acceptance import load_cap, lv
 from scp03_acceptance import Client, ROOT, SIM
 from device_cbor import decode
@@ -21,6 +23,30 @@ MODES = (
 )
 SOURCE_LOCK = ROOT / "vendor/jcalgtest/client.lock.json"
 TERMINAL = ROOT / "scripts/jcalgtest_host/MicroCardTerminal.java"
+
+
+def compare_profile(candidate: pathlib.Path) -> dict:
+    reference = {
+        (section, name): supported
+        for section, probes in read_result(gzip.decompress(REFERENCE.read_bytes())).items()
+        for name, supported in probes.items()
+    }
+    observed = {
+        (section, name): supported
+        for section, probes in read_result(candidate.read_bytes()).items()
+        for name, supported in probes.items()
+    }
+    common = reference.keys() & observed.keys()
+    return {
+        "reference_probes": len(reference),
+        "reference_supported": sum(reference.values()),
+        "observed_probes": len(observed),
+        "observed_supported": sum(observed.values()),
+        "missing_probes": [list(key) for key in sorted(reference.keys() - observed.keys())],
+        "extra_probes": [list(key) for key in sorted(observed.keys() - reference.keys())],
+        "missing_support": [list(key) for key in sorted(key for key in common if reference[key] and not observed[key])],
+        "outside_profile_support": [list(key) for key in sorted(key for key in common if observed[key] and not reference[key])],
+    }
 
 
 def main():
@@ -91,6 +117,9 @@ def main():
         (output / "host-run.json").write_text(json.dumps(metadata, indent=2) + "\n")
         if result.returncode or not csvs or rows == 0 or failures:
             raise SystemExit(f"JCAlgTest run is incomplete or failed; see {output}")
+        if args.mode == "ALG_SUPPORT_EXTENDED":
+            comparison = compare_profile(csvs[0])
+            (output / "profile-comparison.json").write_text(json.dumps(comparison, indent=2) + "\n")
         print(f"PASS: pinned JCAlgTest {args.mode} completed {rows} CSV lines in {output}")
 
 
