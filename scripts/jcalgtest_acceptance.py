@@ -2,6 +2,7 @@
 """Run the vendored JCAlgTest applet through the host JCVM."""
 
 import pathlib
+import struct
 import subprocess
 import zipfile
 
@@ -30,6 +31,12 @@ FACTORIES = {
 }
 
 
+def digest_operation(method: int) -> str:
+    # JCAlgTest TestSettings: eleven big-endian shorts, one 16-byte operation.
+    settings = struct.pack(">11H", 0x15, 4, 0, 0, 0, method, 16, 0, 0, 1, 1)
+    return f"b0410000{len(settings):02x}{settings.hex()}"
+
+
 def main() -> None:
     with zipfile.ZipFile(CAP) as archive:
         components = {
@@ -51,7 +58,7 @@ def main() -> None:
     commands = [SELECT, GET_VERSION, *(
         f"b075{class_id:02x}0003{algorithm:02x}0000"
         for _, algorithm, class_id, _ in probes
-    )]
+    ), "b03400000400150004", *(digest_operation(method) for method in (2, 6, 4))]
     result = subprocess.run(
         [str(SIM), "serve-jcvm", str(LOAD_FILE)],
         input="\n".join(commands) + "\n",
@@ -67,7 +74,7 @@ def main() -> None:
     assert bytes.fromhex(answers[1][:-4]).decode("ascii") == "1.8.2_jc305"
     assert answers[1][-4:] == "9000", f"GET VERSION answered {answers[1]}"
 
-    for (name, algorithm, class_id, supported), answer in zip(probes, answers[2:]):
+    for (name, algorithm, class_id, supported), answer in zip(probes, answers[2:2 + len(probes)]):
         response = bytes.fromhex(answer)
         label = f"{name} algorithm {algorithm}"
         assert response[-2:] == b"\x90\x00", f"{label} answered {answer}"
@@ -75,7 +82,10 @@ def main() -> None:
         expected = 0 if supported else 3
         assert response[1] == expected, f"{label} result was {response[1]}"
 
-    print(f"PASS: JCAlgTest reports the expected JCVM algorithm surface ({len(probes)} factories)")
+    for operation, answer in zip(("prepare SHA-256", "update", "doFinal", "reset"), answers[2 + len(probes):]):
+        assert answer == "AA9000", f"JCAlgTest {operation} answered {answer}"
+
+    print(f"PASS: JCAlgTest reports {len(probes)} factories and runs SHA-256 update/final/reset")
 
 
 if __name__ == "__main__":
