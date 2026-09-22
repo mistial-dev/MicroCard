@@ -1,4 +1,5 @@
 using MicroCard.Framework;
+using MicroCard.Internal;
 
 [assembly: DependencyExport(DependencyAccess.Any)]
 
@@ -144,103 +145,22 @@ public static class CommandRouting
 
 public static class BerTlv
 {
-    public const int TagIndex = 0;
-    public const int HeaderLengthIndex = 1;
-    public const int ValueOffsetIndex = 2;
-    public const int ValueLengthIndex = 3;
-    public const int NextOffsetIndex = 4;
-    public const int ResultSize = 5;
+    public const int TagIndex = BoundedTlv.TagIndex;
+    public const int HeaderLengthIndex = BoundedTlv.HeaderLengthIndex;
+    public const int ValueOffsetIndex = BoundedTlv.ValueOffsetIndex;
+    public const int ValueLengthIndex = BoundedTlv.ValueLengthIndex;
+    public const int NextOffsetIndex = BoundedTlv.NextOffsetIndex;
+    public const int ResultSize = BoundedTlv.ResultSize;
 
     public static bool TryRead(byte[] input, int offset, int length, int[] result, int resultOffset) =>
-        Tlv.TryRead(input, offset, length, result, resultOffset, false);
+        BoundedTlv.TryRead(input, offset, length, result, resultOffset, false);
 
-    public static int WriteHeader(byte[] output, int offset, int capacity, int tag, int valueLength)
-    {
-        int tagLength = EncodedTagLength(tag);
-        int lengthLength = EncodedLengthLength(valueLength);
-        if (tagLength < 0 || lengthLength < 0 || !BufferBounds.Contains(output.Length, offset, capacity) ||
-            tagLength + lengthLength > capacity)
-            return -1;
-
-        int cursor = offset;
-        if (tagLength == 3)
-            output[cursor++] = (byte)(tag >> 16);
-        if (tagLength >= 2)
-            output[cursor++] = (byte)(tag >> 8);
-        output[cursor++] = (byte)tag;
-
-        if (lengthLength == 1)
-            output[cursor++] = (byte)valueLength;
-        else if (lengthLength == 2)
-        {
-            output[cursor++] = 0x81;
-            output[cursor++] = (byte)valueLength;
-        }
-        else
-        {
-            output[cursor++] = 0x82;
-            output[cursor++] = (byte)(valueLength >> 8);
-            output[cursor++] = (byte)valueLength;
-        }
-        return cursor - offset;
-    }
+    public static int WriteHeader(byte[] output, int offset, int capacity, int tag, int valueLength) =>
+        BoundedTlv.WriteHeader(output, offset, capacity, tag, valueLength);
 
     public static int Write(byte[] output, int offset, int capacity, int tag,
-        byte[] value, int valueOffset, int valueLength)
-    {
-        int tagLength = EncodedTagLength(tag);
-        int lengthLength = EncodedLengthLength(valueLength);
-        if (!BufferBounds.Contains(value.Length, valueOffset, valueLength) ||
-            !BufferBounds.Contains(output.Length, offset, capacity) || tagLength < 0 || lengthLength < 0 ||
-            tagLength + lengthLength > capacity - valueLength)
-            return -1;
-        int headerLength = tagLength + lengthLength;
-        int destination = offset + headerLength;
-        if (output == value)
-        {
-            if (destination > valueOffset && destination < valueOffset + valueLength)
-                for (int index = valueLength - 1; index >= 0; index--)
-                    output[destination + index] = value[valueOffset + index];
-            else
-                for (int index = 0; index < valueLength; index++)
-                    output[destination + index] = value[valueOffset + index];
-            WriteHeader(output, offset, capacity, tag, valueLength);
-        }
-        else
-        {
-            WriteHeader(output, offset, capacity, tag, valueLength);
-            for (int index = 0; index < valueLength; index++)
-                output[destination + index] = value[valueOffset + index];
-        }
-        return headerLength + valueLength;
-    }
-
-    private static int EncodedTagLength(int tag)
-    {
-        if (tag <= 0 || tag > 0xFFFFFF)
-            return -1;
-        if (tag <= 0xFF)
-            return (tag & 0x1F) == 0x1F ? -1 : 1;
-        if (tag <= 0xFFFF)
-        {
-            int first = tag >> 8;
-            int last = tag & 0xFF;
-            return (first & 0x1F) == 0x1F && (last & 0x80) == 0 && (last & 0x7F) >= 0x1F ? 2 : -1;
-        }
-        int middle = (tag >> 8) & 0xFF;
-        int finalByte = tag & 0xFF;
-        return ((tag >> 16) & 0x1F) == 0x1F && (middle & 0x80) != 0 &&
-            (middle & 0x7F) != 0 && (finalByte & 0x80) == 0 ? 3 : -1;
-    }
-
-    private static int EncodedLengthLength(int valueLength)
-    {
-        if (valueLength < 0 || valueLength > 0xFFFF)
-            return -1;
-        if (valueLength < 0x80)
-            return 1;
-        return valueLength < 0x100 ? 2 : 3;
-    }
+        byte[] value, int valueOffset, int valueLength) =>
+        BoundedTlv.Write(output, offset, capacity, tag, value, valueOffset, valueLength);
 }
 
 internal static class BufferBounds
