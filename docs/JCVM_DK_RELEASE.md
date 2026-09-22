@@ -34,6 +34,24 @@ upstream main class with the required dependency JARs; upstream's
 `package-for-store` JAR omits JCommander and json-simple. Pass upstream client
 arguments after `--`, including the exact PC/SC reader and an output path.
 
+Run the unmodified upstream client against the host JCVM through the
+`javax.smartcardio` adapter. The runner provisions the pinned applet through
+SCP03, saves the raw client output, CSV, log, and run metadata, and fails if a
+CSV contains a transport or crash result:
+
+```sh
+python3 scripts/jcalgtest_host_client.py \
+  --source work/jcalgtest-client-src \
+  --output /private/tmp/microcard-jcalgtest-extended \
+  --mode ALG_SUPPORT_EXTENDED
+```
+
+At the current host revision, the upstream basic and extended scans completed
+without transport-error rows. This verifies that unsupported `KeyBuilder` types
+raise a catchable Java Card exception and the applet remains selected. It does
+not imply P71D321 support; the supported entries still require real operations,
+failure, and reboot checks on the DK.
+
 ## Conformance work
 
 | Area | Current evidence | Release gate |
