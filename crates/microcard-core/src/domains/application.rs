@@ -164,11 +164,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if !dirty {
             return Ok(());
         }
-        if let Err(error) = self.commit_metadata_snapshot() {
-            self.recover_committed_state()?;
-            return Err(error);
-        }
-        Ok(())
+        self.commit_application_snapshot()
     }
 
     pub(super) fn commit_application(
@@ -193,17 +189,12 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         if !changed {
             return Ok(());
         }
-        // Keep the previous mutable fields as undo data until the journal succeeds.
+        // Keep the previous mutable fields alive until publication resolves. On a flash
+        // error recovery installs whichever authenticated generation became authoritative.
         for (index, (_, next)) in indexes.iter().zip(changes.0.iter_mut().flatten()) {
             next.swap(&mut self.state.domains.0[*index].1);
         }
-        let result = self.commit_metadata_snapshot();
-        if result.is_err() {
-            for (index, (_, next)) in indexes.iter().zip(changes.0.iter_mut().flatten()) {
-                next.swap(&mut self.state.domains.0[*index].1);
-            }
-        }
-        result
+        self.commit_application_snapshot()
     }
 
     pub(super) fn commit_credential_retry_floor(
@@ -220,21 +211,50 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
             return Ok(());
         }
         core::mem::swap(&mut domain.credentials, &mut next);
-        let result = self.commit_metadata_snapshot();
-        if result.is_err() {
-            core::mem::swap(&mut owner.domain(&mut self.state).credentials, &mut next);
+        self.commit_application_snapshot()
+    }
+
+    /// Resolve a failed publication before reporting its outcome. The commit marker may
+    /// already be durable when the flash driver reports an error, so callers must not retry
+    /// unless recovery proves that the previous generation remained authoritative.
+    fn commit_application_snapshot(&mut self) -> Result<()> {
+        if let Err(error) = self.commit_metadata_snapshot() {
+            // Keep the intended encoding only on this slow failure path. Recovery returns
+            // the exact authenticated bytes selected at reboot.
+            let intended = self.state.encode_snapshot();
+            let recovered = self.recover_committed_state_allow_unanchored()?;
+            if intended
+                .as_ref()
+                .is_ok_and(|intended| intended.as_slice() == recovered.as_slice())
+            {
+                return Ok(());
+            }
+            return Err(error);
         }
-        result
+        Ok(())
     }
 
     /// Recover the record that reboot would select after an unsafe invocation or an
     /// uncertain flash result. Package metadata is rebuilt because it is intentionally
     /// omitted from the persistent snapshot.
-    pub(super) fn recover_committed_state(&mut self) -> Result<()> {
-        let data = self
-            .journal
-            .recover_with(&mut self.platform)?
-            .ok_or(Error::Storage)?;
+    pub(super) fn recover_committed_state(&mut self) -> Result<Zeroizing<Vec<u8>>> {
+        self.recover_committed_state_mode(false)
+    }
+
+    fn recover_committed_state_allow_unanchored(&mut self) -> Result<Zeroizing<Vec<u8>>> {
+        self.recover_committed_state_mode(true)
+    }
+
+    fn recover_committed_state_mode(
+        &mut self,
+        allow_unanchored: bool,
+    ) -> Result<Zeroizing<Vec<u8>>> {
+        let data = if allow_unanchored {
+            self.journal.recover_selected_with(&mut self.platform)?
+        } else {
+            self.journal.recover_with(&mut self.platform)?
+        }
+        .ok_or(Error::Storage)?;
         let mut recovered = State::decode_snapshot(&data).map_err(|error| match error {
             Error::IncompatibleState => error,
             _ => Error::Storage,
@@ -251,6 +271,6 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         }
         self.state = recovered;
         self.transaction = None;
-        Ok(())
+        Ok(data)
     }
 }

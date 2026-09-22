@@ -361,7 +361,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, P> {
     }
 }
 impl<P: Platform> Host<'_, P> {
-    fn begin_transaction(&mut self) -> Result<()> {
+    pub(super) fn begin_transaction(&mut self) -> Result<()> {
         if self.irreversible_output || *self.persistent_dirty {
             return Err(Error::Unauthorized);
         }
@@ -463,7 +463,7 @@ impl<P: Platform> Host<'_, P> {
             }
             41 => {
                 let slot = args[0].int()?;
-                let verified =
+                let (verified, changed) =
                     self.credentials
                         .verify_pin(
                             self.owner,
@@ -477,7 +477,7 @@ impl<P: Platform> Host<'_, P> {
                     self.authorized_credentials.remove(slot);
                     self.record_credential_retry_floor(slot)?;
                 }
-                *self.persistent_dirty = true;
+                *self.persistent_dirty |= changed;
                 BufferResult::Scalar(i32::from(verified))
             }
             42 => BufferResult::Scalar(i32::from(
@@ -488,18 +488,18 @@ impl<P: Platform> Host<'_, P> {
                 if !self.authorized_credentials.contains(slot) {
                     return Err(Error::Unauthorized);
                 }
-                self.credentials.change_pin(
+                let changed = self.credentials.change_pin(
                     self.owner,
                     slot,
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
                     self.platform,
                 )?;
-                *self.persistent_dirty = true;
+                *self.persistent_dirty |= changed;
                 BufferResult::Void
             }
             44 => {
                 let slot = args[0].int()?;
-                let unblocked = self.credentials.unblock(
+                let (unblocked, changed) = self.credentials.unblock(
                     self.owner,
                     slot,
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
@@ -511,7 +511,7 @@ impl<P: Platform> Host<'_, P> {
                 } else {
                     self.record_credential_retry_floor(slot)?;
                 }
-                *self.persistent_dirty = true;
+                *self.persistent_dirty |= changed;
                 BufferResult::Scalar(i32::from(unblocked))
             }
             45 => {
@@ -677,6 +677,9 @@ impl<P: Platform> Host<'_, P> {
                 {
                     return Err(Error::Quota);
                 }
+                if self.blobs.get(&key).is_some_and(|old| old.as_slice() == value) {
+                    return Ok(BufferResult::Void);
+                }
                 let replacement = Self::copy_buffer(value)?;
                 self.blobs.insert(key, replacement)?;
                 *self.persistent_dirty = true;
@@ -697,6 +700,9 @@ impl<P: Platform> Host<'_, P> {
                     || total > self.max_blob_bytes
                 {
                     return Err(Error::Quota);
+                }
+                if self.blobs.get(&key).is_some_and(|old| old.as_slice() == value) {
+                    return Ok(BufferResult::Void);
                 }
                 let replacement = Self::copy_buffer(value)?;
                 self.blobs.insert(key, replacement)?;
@@ -778,8 +784,10 @@ impl<P: Platform> Host<'_, P> {
                 if !self.store.contains_key(&a[0]) && self.store.len() >= self.max_int_records {
                     return Err(Error::Quota);
                 }
-                self.store.insert(a[0], a[1])?;
-                *self.persistent_dirty = true;
+                if self.store.get(&a[0]) != Some(&a[1]) {
+                    self.store.insert(a[0], a[1])?;
+                    *self.persistent_dirty = true;
+                }
                 Ok(None)
             }
             5 => {

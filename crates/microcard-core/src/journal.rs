@@ -160,6 +160,27 @@ impl<F: Flash> Journal<F> {
     pub fn recover_with_replay(&mut self, provider: &mut impl CryptoProvider,
             apply: impl FnMut(&mut Zeroizing<Vec<u8>>, u64, &[u8]) -> Result<()>)
             -> Result<Option<Zeroizing<Vec<u8>>>> {
+        self.recover_with_replay_mode(provider, apply, false)
+    }
+
+    /// Return the selected authenticated generation even when repairing its monotonic
+    /// anchor fails. The journal stays poisoned, but a caller can still resolve whether
+    /// an interrupted publication took effect before it returns an operation result.
+    #[cfg(feature = "mc04")]
+    pub(crate) fn recover_selected_with(
+        &mut self,
+        provider: &mut impl CryptoProvider,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>> {
+        self.recover_with_replay_mode(
+            provider,
+            |_, _, _| Err(Error::IncompatibleState),
+            true,
+        )
+    }
+
+    fn recover_with_replay_mode(&mut self, provider: &mut impl CryptoProvider,
+            apply: impl FnMut(&mut Zeroizing<Vec<u8>>, u64, &[u8]) -> Result<()>,
+            allow_unreconciled: bool) -> Result<Option<Zeroizing<Vec<u8>>>> {
         #[cfg(any(test, feature = "jcvm"))]
         let mut apply = apply;
         #[cfg(not(any(test, feature = "jcvm")))]
@@ -273,12 +294,15 @@ impl<F: Flash> Journal<F> {
             Some((s, g, d, _, _, offset)) => (Some(s), g, Some(d), offset),
             None => (None, 0, None, None),
         };
-        reconcile_generation(flash, generation)?;
+        let reconciled = reconcile_generation(flash, generation);
         self.generation = generation;
         self.active = active;
         self.append_offset = append_offset;
         self.slot_count = slot_count;
-        self.poisoned = false;
+        self.poisoned = reconciled.is_err();
+        if !allow_unreconciled {
+            reconciled?;
+        }
         Ok(data)
     }
     #[cfg(feature = "software-crypto")]

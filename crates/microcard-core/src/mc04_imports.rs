@@ -532,6 +532,6 @@ mod tests {
             .collect::<Vec<_>>();
         native.sort_unstable();
         native.dedup();
-        assert!(native.ends_with(&[46, 47, 48]));
+        assert!(native.ends_with(&[55, 56, 57]));
     }
 }

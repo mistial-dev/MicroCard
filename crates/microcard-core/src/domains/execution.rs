@@ -307,7 +307,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 } else {
                     self.restore_application(domain_registry_aid, next)?;
                     if persistent_dirty {
-                        self.recover_committed_state()?;
+                        let _ = self.recover_committed_state()?;
                     }
                 }
                 if !retry_floor.is_empty() {
@@ -351,10 +351,7 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                 self.commit_ordinary_application(domain_registry_aid, next, persistent_dirty)?;
             }
             TransactionDisposition::Commit => {
-                if let Err(error) = self.commit_application(domain_registry_aid, next) {
-                    self.recover_committed_state()?;
-                    return Err(error);
-                }
+                self.commit_application(domain_registry_aid, next)?;
             }
             TransactionDisposition::Begun => {
                 self.transaction = Some(PendingTransaction {

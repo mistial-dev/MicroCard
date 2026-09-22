@@ -236,11 +236,11 @@ impl CredentialStore {
         slot: i32,
         candidate: &[u8],
         provider: &mut impl CryptoProvider,
-    ) -> Result<bool> {
+    ) -> Result<(bool, bool)> {
         validate_secret(candidate, MIN_PIN_BYTES)?;
         let entry = self.entry_mut(owner, slot)?;
         if entry.pin_retries == 0 {
-            return Ok(false);
+            return Ok((false, false));
         }
         let candidate = Zeroizing::new(credential_digest(
             owner,
@@ -251,11 +251,12 @@ impl CredentialStore {
             provider,
         )?);
         if bool::from(candidate.ct_eq(&entry.pin_digest)) {
+            let changed = entry.pin_retries != entry.pin_max_retries;
             entry.pin_retries = entry.pin_max_retries;
-            Ok(true)
+            Ok((true, changed))
         } else {
             entry.pin_retries -= 1;
-            Ok(false)
+            Ok((false, true))
         }
     }
 
@@ -265,7 +266,7 @@ impl CredentialStore {
         slot: i32,
         new_pin: &[u8],
         provider: &mut (impl CryptoProvider + Entropy),
-    ) -> Result<()> {
+    ) -> Result<bool> {
         validate_secret(new_pin, MIN_PIN_BYTES)?;
         let mut salt = Zeroizing::new([0; 16]);
         provider.fill_entropy(&mut *salt)?;
@@ -276,7 +277,8 @@ impl CredentialStore {
         entry.pin_salt.copy_from_slice(&*salt);
         entry.pin_digest.copy_from_slice(&*digest);
         entry.pin_retries = entry.pin_max_retries;
-        Ok(())
+        // A successful change always installs a fresh salt and digest.
+        Ok(true)
     }
 
     pub(crate) fn unblock(
@@ -286,17 +288,17 @@ impl CredentialStore {
         puk: &[u8],
         new_pin: &[u8],
         provider: &mut (impl CryptoProvider + Entropy),
-    ) -> Result<bool> {
+    ) -> Result<(bool, bool)> {
         validate_secret(puk, MIN_PUK_BYTES)?;
         validate_secret(new_pin, MIN_PIN_BYTES)?;
         let entry = self.entry_mut(owner, slot)?;
         if entry.puk_retries == 0 {
-            return Ok(false);
+            return Ok((false, false));
         }
         let candidate = Zeroizing::new(credential_digest(owner, slot, 2, &entry.puk_salt, puk, provider)?);
         if !bool::from(candidate.ct_eq(&entry.puk_digest)) {
             entry.puk_retries -= 1;
-            return Ok(false);
+            return Ok((false, true));
         }
         let mut salt = Zeroizing::new([0; 16]);
         provider.fill_entropy(&mut *salt)?;
@@ -308,7 +310,8 @@ impl CredentialStore {
         entry.pin_digest.copy_from_slice(&*digest);
         entry.pin_retries = entry.pin_max_retries;
         entry.puk_retries = entry.puk_max_retries;
-        Ok(true)
+        // A successful unblock always installs a fresh PIN salt and digest.
+        Ok((true, true))
     }
 
     pub(crate) fn retries(&self, owner: [u8; 16], slot: i32) -> Result<(u8, u8)> {
@@ -473,10 +476,10 @@ mod tests {
     fn retry_block_unblock_and_pin_change_are_transaction_ready() {
         let mut store = CredentialStore::default();
         create(&mut store);
-        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap());
-        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap());
-        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap());
-        assert!(!store.verify_pin(OWNER, 1, b"1234", &mut crate::crypto::SoftwareCrypto).unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap().0);
+        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap().0);
+        assert!(!store.verify_pin(OWNER, 1, b"9999", &mut crate::crypto::SoftwareCrypto).unwrap().0);
+        assert!(!store.verify_pin(OWNER, 1, b"1234", &mut crate::crypto::SoftwareCrypto).unwrap().0);
         assert_eq!(store.retries(OWNER, 1).unwrap(), (0, 2));
 
         assert!(!store
@@ -484,22 +487,22 @@ mod tests {
                 out.fill(4);
                 Ok(())
             }))
-            .unwrap());
+            .unwrap().0);
         assert!(store
             .unblock(OWNER, 1, b"12345678", b"5678", &mut TestProvider(|out: &mut [u8]| {
                 out.fill(5);
                 Ok(())
             }))
-            .unwrap());
-        assert!(store.verify_pin(OWNER, 1, b"5678", &mut crate::crypto::SoftwareCrypto).unwrap());
+            .unwrap().0);
+        assert!(store.verify_pin(OWNER, 1, b"5678", &mut crate::crypto::SoftwareCrypto).unwrap().0);
         store
             .change_pin(OWNER, 1, b"2468", &mut TestProvider(|out: &mut [u8]| {
                 out.fill(6);
                 Ok(())
             }))
             .unwrap();
-        assert!(!store.verify_pin(OWNER, 1, b"5678", &mut crate::crypto::SoftwareCrypto).unwrap());
-        assert!(store.verify_pin(OWNER, 1, b"2468", &mut crate::crypto::SoftwareCrypto).unwrap());
+        assert!(!store.verify_pin(OWNER, 1, b"5678", &mut crate::crypto::SoftwareCrypto).unwrap().0);
+        assert!(store.verify_pin(OWNER, 1, b"2468", &mut crate::crypto::SoftwareCrypto).unwrap().0);
         assert_eq!(store.retries(OWNER, 1).unwrap(), (3, 2));
     }
 

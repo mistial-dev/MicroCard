@@ -895,24 +895,14 @@ fn transaction_records_package(
             access: 0,
             key: None,
         },
-        entry_points: alloc::vec![
-            AssemblyEntry {
-                aid: "F04D430020".into(),
-                process: 0,
-                install: None,
-                uninstall: None,
-                select: None,
-                deselect: None,
-            },
-            AssemblyEntry {
-                aid: "F04D430021".into(),
-                process: 2,
-                install: Some(1),
-                uninstall: None,
-                select: None,
-                deselect: None,
-            },
-        ],
+        entry_points: alloc::vec![AssemblyEntry {
+            aid: "F04D430020".into(),
+            process: 0,
+            install: None,
+            uninstall: None,
+            select: None,
+            deselect: None,
+        }],
         dependencies: Vec::new(),
         capabilities: alloc::vec![2, 7, 8, 11, 12, 13, 31, 32, 34, 46, 47, 48],
         storage: alloc::vec![
@@ -1145,29 +1135,18 @@ fn linked_transaction_graph_rejects_indirect_irreversible_output() {
 fn signed_mc04_transaction_bits_drive_linked_effect_validation() {
     let mut card = card();
     let incarnation = create(&mut card, "effects");
-    load(&mut card, &counter_package("effects", incarnation, 1, 7)).unwrap();
+    load(
+        &mut card,
+        &transaction_records_package("effects", incarnation, 1, 7),
+    )
+    .unwrap();
     let calls = card
         .state
         .domains
         .get_mut("effects")
         .unwrap()
         .imports
-        .get_mut("Counter")
-        .unwrap();
-    calls
-        .iter_mut()
-        .find(|binding| binding.target == CallTarget::Native(11))
-        .unwrap()
-        .target = CallTarget::Native(6);
-    linking::BorrowedExecution::new(&card.state, card.journal.flash(), &mut card.platform, "effects", "Counter").and_then(|images| images.units().map(|_| ())).unwrap();
-
-    let calls = card
-        .state
-        .domains
-        .get_mut("effects")
-        .unwrap()
-        .imports
-        .get_mut("Counter")
+        .get_mut("TransactionRecords")
         .unwrap();
     calls
         .iter_mut()
@@ -1175,7 +1154,7 @@ fn signed_mc04_transaction_bits_drive_linked_effect_validation() {
         .unwrap()
         .target = CallTarget::Native(6);
     assert!(matches!(
-        linking::BorrowedExecution::new(&card.state, card.journal.flash(), &mut card.platform, "effects", "Counter").and_then(|images| images.units().map(|_| ())),
+        linking::BorrowedExecution::new(&card.state, card.journal.flash(), &mut card.platform, "effects", "TransactionRecords").and_then(|images| images.units().map(|_| ())),
         Err(Error::Unsupported)
     ));
 }
@@ -1815,7 +1794,7 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
 }
 
 #[test]
-fn signed_multi_command_transactions_commit_abort_and_expire() {
+fn generated_transaction_scope_commits_or_aborts_as_one_command() {
     let mut card = card();
     let incarnation = create(&mut card, "transaction");
     load(
@@ -1832,113 +1811,31 @@ fn signed_multi_command_transactions_commit_abort_and_expire() {
         .unwrap();
     card.manage(command(0xec, &management_names_wire("transaction", "F04D430022").unwrap()))
         .unwrap();
-    assert_eq!(
-        card.manage(command(0xec, &management_names_wire("transaction", "F04D430021").unwrap())),
-        Err(Error::Unauthorized)
-    );
-    assert!(!card.state.domains["transaction"]
-        .instances
-        .contains_key("F04D430021"));
-    assert!(card.transaction.is_none());
-    for command in [0, 1, 2] {
-        assert_eq!(
-            card.invoke("F04D430022", &[command]),
-            Err(Error::Unauthorized)
-        );
-        assert!(card.transaction.is_none());
-        assert!(card.state.domains["transaction"].store.is_empty());
-    }
-
-    assert_eq!(card.invoke("F04D430020", &[6]).unwrap(), [0, 0, 0, 0x90, 0]);
-    assert_eq!(card.invoke("F04D430020", &[4]), Err(Error::Missing));
-    assert_eq!(card.invoke("F04D430020", &[5]), Err(Error::Missing));
-    card.invoke("F04D430020", &[0]).unwrap();
-    card.invoke("F04D430020", &[1, 11]).unwrap();
-    card.invoke("F04D430020", &[2, 22]).unwrap();
-    card.invoke("F04D430020", &[3, 33]).unwrap();
-    assert_eq!(
-        card.invoke("F04D430020", &[6]).unwrap(),
-        [11, 22, 33, 0x90, 0]
-    );
-    assert!(card.state.domains["transaction"].store.is_empty());
-    assert!(card.state.domains["transaction"].blobs.is_empty());
-
-    let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
-    assert!(card.transaction.is_none());
-    assert_eq!(card.invoke("F04D430020", &[6]).unwrap(), [0, 0, 0, 0x90, 0]);
-
-    card.invoke("F04D430020", &[0]).unwrap();
-    let domain_registry_aid = card.state.domains["transaction"].registry_aid;
-    let owner_aid_pointer = card.transaction.as_ref().unwrap().owner.2.as_ptr();
-    card.invoke("F04D430020", &[1, 11]).unwrap();
-    let owner = &card.transaction.as_ref().unwrap().owner;
-    assert_eq!(owner.0, domain_registry_aid);
-    assert_eq!(owner.2.as_ptr(), owner_aid_pointer);
-    card.invoke("F04D430020", &[2, 22]).unwrap();
-    card.invoke("F04D430020", &[3, 33]).unwrap();
-    card.invoke("F04D430020", &[4]).unwrap();
-    assert!(card.transaction.is_none());
-    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
-    assert_eq!(card.state.domains["transaction"].store.get(&2), Some(&22));
-    assert_eq!(card.state.domains["transaction"].blobs.get(&3).unwrap(), &[33]);
-
-    let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     let generation = card.journal.generation();
-    let (read, ordinary_metrics) = card
-        .invoke_context_with_metrics("F04D430020", &[6], 0)
+    let (_, abort_metrics) = card
+        .invoke_context_with_metrics("F04D430020", &[1, 11, 22, 33], 0)
         .unwrap();
-    assert_eq!(
-        read,
-        [11, 22, 33, 0x90, 0]
-    );
-    assert_eq!(ordinary_metrics.transaction_snapshots, 0);
-    assert_eq!(ordinary_metrics.transaction_clone_allocations, 0);
+    assert_eq!(abort_metrics.transaction_snapshots, 1);
+    assert!(card.transaction.is_none());
     assert_eq!(card.journal.generation(), generation);
-    let (_, begin_metrics) = card
-        .invoke_context_with_metrics("F04D430020", &[0], 0)
+    assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [0, 0, 0, 0x90, 0]);
+
+    let (_, commit_metrics) = card
+        .invoke_context_with_metrics("F04D430020", &[0, 11, 22, 33], 0)
         .unwrap();
-    assert_eq!(begin_metrics.transaction_snapshots, 1);
-    assert!(begin_metrics.transaction_clone_allocations > 0);
-    card.invoke("F04D430020", &[1, 44]).unwrap();
-    card.invoke("F04D430020", &[5]).unwrap();
+    assert_eq!(commit_metrics.transaction_snapshots, 1);
+    assert!(card.transaction.is_none());
+    assert_eq!(card.journal.generation(), generation + 1);
     assert_eq!(
-        card.invoke("F04D430020", &[6]).unwrap(),
+        card.invoke("F04D430020", &[2]).unwrap(),
         [11, 22, 33, 0x90, 0]
     );
 
-    card.invoke("F04D430020", &[0]).unwrap();
-    card.invoke("F04D430020", &[1, 55]).unwrap();
-    assert_eq!(card.invoke("F04D430020", &[0]), Err(Error::Busy));
-    assert!(card.transaction.is_none());
-    assert_eq!(
-        card.invoke("F04D430020", &[6]).unwrap(),
-        [11, 22, 33, 0x90, 0]
-    );
-
-    card.invoke("F04D430020", &[0]).unwrap();
-    for _ in 0..14 {
-        card.invoke("F04D430020", &[6]).unwrap();
-    }
-    assert_eq!(card.invoke("F04D430020", &[6]), Err(Error::Budget));
-    assert!(card.transaction.is_none());
-
-    card.invoke("F04D430020", &[0]).unwrap();
-    card.invoke("F04D430020", &[1, 77]).unwrap();
-    assert_eq!(card.invoke("F04D430020", &[0; 256]), Err(Error::Bounds));
-    assert!(card.transaction.is_none());
-
-    card.invoke("F04D430020", &[7]).unwrap();
-    assert!(card.transaction.is_none());
+    assert_eq!(card.invoke("F04D430022", &[0]), Err(Error::Unauthorized));
     assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
 
-    card.invoke("F04D430020", &[0]).unwrap();
-    card.invoke("F04D430020", &[1, 66]).unwrap();
-    card.select("F04D430020").unwrap();
-    assert!(card.transaction.is_none());
-    assert_eq!(
-        card.invoke("F04D430020", &[6]).unwrap(),
-        [11, 22, 33, 0x90, 0]
-    );
+    let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [11, 22, 33, 0x90, 0]);
 }
 
 #[test]
@@ -2052,6 +1949,32 @@ fn cooperative_cancellation_rolls_back_all_writes() {
     assert!(!reopened.state.domains["cancel"].store.contains_key(&30));
 }
 
+#[test]
+fn ordinary_idempotent_blob_write_does_not_publish_a_journal_record() {
+    let mut card = card();
+    let incarnation = create(&mut card, "idem");
+    load(
+        &mut card,
+        &key_operations_package("idem", incarnation, 1, 7),
+    )
+    .unwrap();
+    card.manage(command(
+        0xec,
+        &management_names_wire("idem", "F04D430012").unwrap(),
+    ))
+    .unwrap();
+
+    card.invoke("F04D430012", &[0]).unwrap();
+    let generation = card.journal.generation();
+    let (_, metrics) = card
+        .invoke_context_with_metrics("F04D430012", &[0], 0)
+        .unwrap();
+
+    assert_eq!(card.journal.generation(), generation);
+    assert_eq!(metrics.transaction_snapshots, 0);
+    assert_eq!(metrics.transaction_clone_allocations, 0);
+}
+
 // Primitive tests sweep every flash byte. Domain tests exercise both sides of each
 // storage phase and the state changes that must commit together.
 fn commit_cuts(snapshot_bytes: usize, image_bytes: usize) -> Vec<usize> {
@@ -2099,22 +2022,24 @@ fn invocation_and_package_removal_boundaries_recover_old_or_new_state() {
             let mut flash = base.clone();
             flash.fail_after = Some(cut);
             let mut interrupted = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
-            if mutate(&mut interrupted).is_err() {
-                let reconciled = interrupted.state.encode_snapshot().unwrap();
-                assert!(
-                    reconciled.as_slice() == previous || reconciled.as_slice() == committed,
-                    "failed commit must reconcile to an authenticated generation"
-                );
-            }
+            let result = mutate(&mut interrupted);
             assert_eq!(interrupted.state.domains["untouched"].store.get(&1), Some(&123));
             let mut flash = interrupted.into_flash();
             flash.fail_after = None;
             let recovered = Mc04Engine::open(flash, TestPlatform(10), STORAGE_KEY).unwrap();
             let actual = recovered.state.encode_snapshot().unwrap().to_vec();
-            assert!(
-                actual == previous || actual == committed,
-                "partial commit at cut {cut}, package removal {remove}"
-            );
+            if remove {
+                assert!(
+                    actual == previous || actual == committed,
+                    "partial package removal at cut {cut}"
+                );
+            } else {
+                assert_eq!(
+                    actual.as_slice(),
+                    if result.is_ok() { committed.as_slice() } else { previous.as_slice() },
+                    "invocation result must identify the authoritative state at cut {cut}"
+                );
+            }
         }
     }
 }
@@ -3292,6 +3217,21 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         ),
         Ok(vm::BufferResult::Scalar(1))
     ));
+    *host.persistent_dirty = false;
+    assert_eq!(
+        host.key_call(
+            32,
+            &[
+                vm::NativeArgument::Int(0),
+                vm::NativeArgument::Int(7),
+                vm::NativeArgument::Bytes(b"value"),
+            ]
+        ),
+        Ok(vm::BufferResult::Void)
+    );
+    assert!(!*host.persistent_dirty);
+    host.begin_transaction().unwrap();
+    host.transaction.abort().unwrap();
     assert_eq!(
         host.key_call(
             52,
