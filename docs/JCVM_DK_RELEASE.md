@@ -53,10 +53,12 @@ not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
 The extended host scan reports **53 supported** probes against the P71D321
-reference's **288**. There are **233 missing supported** probes, **zero support
-claims outside the profile**, and two reference probes absent from the local
-applet result (`OwnerPINBuilder`). The runner writes the exact differences to
-`profile-comparison.json`; a factory result alone is not an algorithm acceptance.
+reference's **288**. There are **235 missing supported** probes and **zero support
+claims outside the profile**. The two `OwnerPINBuilder` variants return the
+specified `SystemException.ILLEGAL_USE` for unimplemented optional types; they
+count as unsupported rather than disappearing from the matrix. The runner writes
+the exact differences to `profile-comparison.json`; a factory result alone is
+not an algorithm acceptance.
 
 ## Conformance work
 

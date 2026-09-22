@@ -13,7 +13,7 @@ REFERENCE = ROOT / "vendor/jcalgtest/p71d321-reference.csv.gz"
 LOCK = ROOT / "vendor/jcalgtest/client.lock.json"
 
 
-def read_result(source: bytes) -> dict[str, dict[str, bool]]:
+def read_result(source: bytes, *, optional_unavailable: bool = False) -> dict[str, dict[str, bool]]:
     sections: dict[str, dict[str, bool]] = {}
     section: str | None = None
     for line in source.decode("utf-8-sig").splitlines():
@@ -29,6 +29,9 @@ def read_result(source: bytes) -> dict[str, dict[str, bool]]:
             continue
         name, status, *_ = line.split(";")
         status = status.strip()
+        if optional_unavailable and section == "javacard.framework.OwnerPINBuilder" \
+                and status == "SystemException_ILLEGAL_USE":
+            status = "no"
         if status not in {"yes", "no"}:
             continue
         name = name.strip()

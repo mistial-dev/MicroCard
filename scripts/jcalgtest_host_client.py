@@ -33,7 +33,7 @@ def compare_profile(candidate: pathlib.Path) -> dict:
     }
     observed = {
         (section, name): supported
-        for section, probes in read_result(candidate.read_bytes()).items()
+        for section, probes in read_result(candidate.read_bytes(), optional_unavailable=True).items()
         for name, supported in probes.items()
     }
     common = reference.keys() & observed.keys()
