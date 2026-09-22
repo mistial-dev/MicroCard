@@ -19,28 +19,6 @@ for vector in json.loads((Path(__file__).resolve().parents[1] / "format/manifest
     assert decode_manifest(bytes.fromhex(vector["hex"])) == vector["manifest"]
 print("PASS: manifest CBOR shared vectors")
 
-from device_cbor import jcvm_manifest, decode_jcvm_manifest
-vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-manifest-cbor-v1.json").read_text())
-wire = bytes.fromhex(vector["hex"])
-assert jcvm_manifest(vector["manifest"]) == wire
-assert decode_jcvm_manifest(wire) == vector["manifest"]
-for invalid in (wire + b"\0", b"\x89" + wire[1:], wire[:1] + b"\x02" + wire[2:], wire[:2] + b"\0" + wire[3:]):
-    try:
-        decode_jcvm_manifest(invalid)
-    except ValueError:
-        continue
-    raise AssertionError("accepted invalid JCVM manifest")
-for budget in (1, 4_000_000, 0, 4_000_001):
-    candidate = {**vector["manifest"], "limits": {**vector["manifest"]["limits"], "budget": budget}}
-    try:
-        encoded = jcvm_manifest(candidate)
-    except ValueError:
-        assert budget in (0, 4_000_001)
-    else:
-        assert budget in (1, 4_000_000)
-        assert decode_jcvm_manifest(encoded) == candidate
-print("PASS: JCVM manifest CBOR shared vector and version/shape rejection")
-
 from device_cbor import encode, decode
 policy = [bytes([2, *range(5, 14), 20, *range(22, 55)]), 8, 8, 512, 64, 8192, 8, 16384]
 domain = [bytes([1] * 16), bytes.fromhex("a000000151000000"), bytes([2] * 32), policy,
@@ -51,14 +29,14 @@ assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
 print("PASS: internal snapshot CBOR Rust/Python golden vector")
 
-state = [2, 1, 0, [[bytes.fromhex("a000000151000000"), bytes([1] * 16), None], None, None, None],
+state = [2, 2, 0, [[bytes.fromhex("a000000151000000"), bytes([1] * 16)], None, None, None],
          [None] * 8, [None] * 8, None]
-vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-registry-cbor-v2.json").read_text())
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-registry-cbor-v3.json").read_text())
 assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
 isd = bytes.fromhex("a000000151000000")
 aid, load = bytes([0xf0, 1, 2, 3, 4]), bytes([0xf0, 1, 2, 3, 5])
-pending = [2, 1, 0, [[isd, bytes([1] * 16), bytes([2] * 32)]] + [None] * 3,
+pending = [2, 2, 0, [[isd, bytes([1] * 16)]] + [None] * 3,
            [[isd, load, 1, [0, 512, bytes([3] * 32)]]] + [None] * 7,
            [[isd, load, aid, aid, bytes([4] * 16), 0]] + [None] * 7,
            [aid, 0, bytes([4] * 16), bytes([5] * 16), bytes([3] * 32), 1024, bytes([6] * 32)]]
@@ -66,8 +44,8 @@ assert encode(pending).hex() == vector["pending_hex"]
 assert decode(bytes.fromhex(vector["pending_hex"])) == pending
 print("PASS: JCVM registry CBOR Rust/Python fresh and renewal vectors")
 
-state = [2, 1, 1, 0, bytes.fromhex("a000000151000000"), bytes([1] * 16), None, 0, 0]
-vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-domain-cbor-v2.json").read_text())
+state = [2, 2, 1, 0, bytes.fromhex("a000000151000000"), bytes([1] * 16), None, 0, 0]
+vector = json.loads((Path(__file__).resolve().parents[1] / "format/jcvm-domain-cbor-v3.json").read_text())
 assert encode(state).hex() == vector["hex"]
 assert decode(bytes.fromhex(vector["hex"])) == state
 print("PASS: JCVM domain discovery CBOR Rust/Python golden vector")

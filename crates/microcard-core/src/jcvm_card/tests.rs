@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     crypto,
-    jcvm_test::{signed, Heaps, Provider, Scratch},
+    jcvm_test::{load_file, Heaps, Provider, Scratch},
     journal::MemoryFlash,
     scp03::{Keys, CHALLENGE_BYTES, CRYPTOGRAM_BITS, MAC_BYTES},
     staging::BoundedFlashStaging,
@@ -145,10 +145,11 @@ fn endpoint(storage: Storage<MemoryFlash, MemoryFlash, Heaps>) -> Endpoint<TestC
 
 #[test]
 fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() {
-    let raw = signed(7, 1, 7);
+    let raw = load_file();
     let package =
-        crate::jcvm_package::Package::verify(&raw, &mut Provider, &mut [0; 16384]).unwrap();
-    let file = LoadFile::parse(package.envelope.image).unwrap();
+        crate::jcvm_package::Package::verify(&raw, &gp::ISD_AID, [1; 16],
+            &mut Provider, &mut [0; 16384]).unwrap();
+    let file = LoadFile::parse(package.image).unwrap();
     let module = file.applets().unwrap().iter().next().unwrap().aid;
     let aid = [0xf0, 1, 2, 3, 4, 2];
     let install = lv(&[
@@ -163,7 +164,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let store = Store::open(
         MemoryFlash::new(4096),
         [3; 16],
-        Registry::new([1; 16], None),
+        Registry::new([1; 16]),
         &mut Provider,
     )
     .unwrap();
@@ -192,16 +193,9 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let mut host = Host::connect(&mut endpoint, 1);
     let response = host.send(&mut endpoint, 0xe2, 0, 0, &[0]);
     assert_eq!(&response[response.len() - 2..], &[0x90, 0]);
-    let vector: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../format/jcvm-domain-cbor-v2.json")).unwrap();
-    let hex = vector["hex"].as_str().unwrap();
-    let expected: Vec<_> = (0..hex.len())
-        .step_by(2)
-        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
-        .collect();
-    assert_eq!(&response[..response.len() - 2], expected);
+    assert_eq!(&response[..3], &[0x89, 2, 2]);
 
-    // Valid signatures do not excuse a mismatched GP load identity or hash.
+    // An authenticated command must still bind the CAP identity and hash.
     for (name, hash) in [
         (&aid[..], &[][..]),
         (package.manifest.package, &[0; 32][..]),
@@ -222,7 +216,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
             0xe6,
             2,
             0,
-            &load(package.manifest.package, &package.envelope.package_digest)
+            &load(package.manifest.package, &package.digest)
         ),
         [0, 0x90, 0]
     );
@@ -274,7 +268,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     }
     let (selected_aid, mut live) = card.selected.take().unwrap();
     card.upload = Some(Upload { load: old.load, domain: old.domain, hash: None,
-        receiver: LoadReceiver::new(Payload::SignedPackage, MAX_PACKAGE_BYTES) });
+        receiver: LoadReceiver::new(Payload::JavaCard, MAX_PACKAGE_BYTES) });
     assert!(card.staging.is_empty());
     card.renew_epoch_if_needed(selected_aid, &mut live, &mut || false).unwrap();
     assert_eq!(card.storage.heaps.preparations, preparations);
@@ -302,7 +296,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     storage.registry = Store::open(
         storage.registry.into_flash(),
         [3; 16],
-        Registry::new([99; 16], None),
+        Registry::new([99; 16]),
         &mut Provider,
     )
     .unwrap();

@@ -336,8 +336,8 @@ pub fn load_file_data(data: &[u8]) -> Result<(usize, &[u8])> {
     Ok((length, &data[1 + octets..]))
 }
 
-/// The outer container carried by a C4 load. The authenticated manifest selects
-/// the engine inside a signed package; raw CAP files are used by host tooling.
+/// The outer container carried by a C4 load. MC04 accepts signed packages;
+/// JCVM accepts raw CAP load files after SCP03 administrator authentication.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Payload {
     /// A signed MP05 envelope with an engine-specific manifest.

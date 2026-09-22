@@ -20,7 +20,6 @@ pub const MAX_SNAPSHOT_BYTES: usize = 4096;
 pub struct Domain {
     pub aid: Aid,
     pub incarnation: [u8; 16],
-    pub owner: Option<[u8; 32]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,12 +53,11 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn new(incarnation: [u8; 16], owner: Option<[u8; 32]>) -> Self {
+    pub fn new(incarnation: [u8; 16]) -> Self {
         let mut domains = [None; MAX_DOMAINS];
         domains[0] = Some(Domain {
             aid: Aid::isd(),
             incarnation,
-            owner,
         });
         Self {
             domains,
@@ -93,9 +91,6 @@ impl Registry {
         if self.in_use(aid) {
             return Err(Error::Busy);
         }
-        let owner = self.domains[0]
-            .and_then(|domain| domain.owner)
-            .ok_or(Error::Unauthorized)?;
         let slot = self
             .domains
             .iter_mut()
@@ -104,7 +99,6 @@ impl Registry {
         *slot = Some(Domain {
             aid,
             incarnation,
-            owner: Some(owner),
         });
         Ok(())
     }
@@ -151,15 +145,8 @@ impl Registry {
             .iter()
             .position(|entry| entry.is_some_and(|d| d.aid == domain))
             .ok_or(Error::Missing)?;
-        let authority = self.domains[domain_slot].unwrap();
-        if authority.incarnation != package.manifest.incarnation {
+        if self.domains[domain_slot].unwrap().incarnation != package.manifest.incarnation {
             return Err(Error::Domain);
-        }
-        if authority
-            .owner
-            .is_some_and(|owner| owner != package.envelope.signer)
-        {
-            return Err(Error::KeyMismatch);
         }
         let existing = self
             .loads
@@ -174,14 +161,13 @@ impl Registry {
                 return Err(Error::Rollback);
             }
             if package.manifest.version == previous.version {
-                return if previous
-                    .image
-                    .is_some_and(|image| image.digest == package.envelope.package_digest)
-                {
-                    Ok((domain_slot, index))
-                } else {
-                    Err(Error::Rollback)
-                };
+                if let Some(image) = previous.image {
+                    return if image.digest == package.digest {
+                        Ok((domain_slot, index))
+                    } else {
+                        Err(Error::Rollback)
+                    };
+                }
             }
             if self.instances().any(|instance| instance.load == aid) {
                 return Err(Error::Busy);
@@ -198,14 +184,11 @@ impl Registry {
     /// Call only with a verified package and a verified, staged image descriptor.
     /// Persist the resulting metadata before reclaiming any formerly protected slot.
     pub fn activate(&mut self, package: &Package<'_>, image: Descriptor) -> Result<()> {
-        let (domain_slot, index) = self.activation_slots(package)?;
+        let (_, index) = self.activation_slots(package)?;
         let domain = Aid::new(package.manifest.domain)?;
         let aid = Aid::new(package.manifest.package)?;
-        let length = crate::envelope::OVERHEAD_BYTES
-            + package.envelope.manifest.len()
-            + package.envelope.image.len();
-        if image.digest != package.envelope.package_digest
-            || image.length as usize != length
+        if image.digest != package.digest
+            || image.length as usize != package.image.len()
             || image.slot >= 64
         {
             return Err(Error::Authentication);
@@ -222,7 +205,6 @@ impl Registry {
             version: package.manifest.version,
             image: Some(image),
         });
-        self.domains[domain_slot].as_mut().unwrap().owner = Some(package.envelope.signer);
         Ok(())
     }
 
@@ -257,7 +239,7 @@ impl Registry {
             p.aid == load
                 && p.domain == domain
                 && p.image
-                    .is_some_and(|image| image.digest == package.envelope.package_digest)
+                    .is_some_and(|image| image.digest == package.digest)
         }) {
             return Err(Error::Missing);
         }
@@ -271,7 +253,7 @@ impl Registry {
         if heap_bank >= MAX_INSTANCES as u8 {
             return Err(Error::Quota);
         }
-        let file = microcard_engine_jcvm::cap::LoadFile::parse(package.envelope.image)
+        let file = microcard_engine_jcvm::cap::LoadFile::parse(package.image)
             .map_err(|_| Error::Format)?;
         if !file
             .applets()
@@ -312,7 +294,7 @@ impl Registry {
         let mut e = Encoder::new(MAX_SNAPSHOT_BYTES);
         e.array(7)?;
         e.unsigned(2)?;
-        e.unsigned(1)?;
+        e.unsigned(2)?;
         e.unsigned(u64::from(self.sequence))?;
         e.array(MAX_DOMAINS)?;
         for domain in self.domains {
@@ -320,14 +302,9 @@ impl Registry {
                 e.null()?;
                 continue;
             };
-            e.array(3)?;
+            e.array(2)?;
             e.bytes(d.aid.as_slice())?;
             e.bytes(&d.incarnation)?;
-            if let Some(owner) = d.owner {
-                e.bytes(&owner)?;
-            } else {
-                e.null()?;
-            }
         }
         e.array(MAX_PACKAGES)?;
         for load in self.loads {
@@ -372,10 +349,10 @@ impl Registry {
         }
         let mut d = Decoder::new(bytes);
         d.record(7).map_err(|_| Error::IncompatibleState)?;
-        if d.unsigned()? != 2 || d.unsigned()? != 1 {
+        if d.unsigned()? != 2 || d.unsigned()? != 2 {
             return Err(Error::IncompatibleState);
         }
-        let mut state = Self::new([0; 16], None);
+        let mut state = Self::new([0; 16]);
         state.sequence = d.number()?;
         d.record(MAX_DOMAINS)?;
         for slot in &mut state.domains {
@@ -383,11 +360,10 @@ impl Registry {
                 *slot = None;
                 continue;
             }
-            d.record(3)?;
+            d.record(2)?;
             *slot = Some(Domain {
                 aid: Aid::new(d.bytes(16)?)?,
                 incarnation: d.fixed()?,
-                owner: if d.null() { None } else { Some(d.fixed()?) },
             });
         }
         d.record(MAX_PACKAGES)?;
@@ -462,9 +438,7 @@ impl Registry {
             .filter_map(|(i, p)| p.map(|p| (i, p)))
         {
             if load.version == 0
-                || !self
-                    .domains()
-                    .any(|d| d.aid == load.domain && d.owner.is_some())
+                || !self.domains().any(|d| d.aid == load.domain)
                 || self.domains().any(|d| d.aid == load.aid)
                 || self.loads[..index].iter().flatten().any(|p| {
                     p.aid == load.aid
@@ -474,7 +448,7 @@ impl Registry {
                 })
                 || load.image.is_some_and(|image| {
                     image.slot >= 64
-                        || image.length as usize <= crate::envelope::OVERHEAD_BYTES
+                        || image.length == 0
                         || image.length as usize > crate::jcvm_package::MAX_PACKAGE_BYTES
                 })
             {
@@ -550,8 +524,8 @@ impl<F: crate::journal::Flash> Store<F> {
         Ok(self.state.renewal.as_ref())
     }
 
-    /// Authenticate and authorize before erasing, then activate only verified writes.
-    /// On error, query recovered state before reusing any image slot.
+    /// Exercise storage activation without a GP transport in unit tests.
+    #[cfg(test)]
     pub fn load<I: crate::image_store::ImageFlash>(
         &mut self,
         images: &mut crate::image_store::Images<I>,
@@ -564,6 +538,8 @@ impl<F: crate::journal::Flash> Store<F> {
     }
 
     /// Bind authenticated C4 reception to the requested load and security domain.
+    /// The caller must have authenticated the GP command. On error, query
+    /// recovered state before reusing any image slot.
     #[allow(clippy::too_many_arguments)]
     pub fn load_requested<I: crate::image_store::ImageFlash>(
         &mut self,
@@ -591,11 +567,16 @@ impl<F: crate::journal::Flash> Store<F> {
         if cancel() {
             return Err(Error::Cancelled);
         }
-        let package = Package::verify(raw, provider, scratch)?;
+        let domain = Aid::new(request.map_or(&crate::globalplatform::ISD_AID[..],
+            |request| request.domain_aid))?;
+        let authority = self.state.domains().find(|entry| entry.aid == domain)
+            .ok_or(Error::Missing)?;
+        let package = Package::verify(raw, domain.as_slice(), authority.incarnation,
+            provider, scratch)?;
         if request.is_some_and(|request| {
             request.load_aid != package.manifest.package
                 || request.domain_aid != package.manifest.domain
-                || request.hash.is_some_and(|hash| hash != package.envelope.package_digest)
+                || request.hash.is_some_and(|hash| hash != package.digest)
         }) {
             return Err(Error::Signature);
         }
@@ -713,13 +694,13 @@ impl<F: crate::journal::Flash> Store<F> {
     ) -> Result<(PinnedImage<I>, microcard_engine_jcvm::applet::Sizes, [u8; 32])> {
         let (length, sizes, digest) = Self::with_package_from(state, load, images, scratch, provider, |package| {
             validate(package)?;
-            Ok((package.envelope.image.len(), package.manifest.sizes, package.envelope.image_digest))
+            Ok((package.image.len(), package.manifest.sizes, package.digest))
         })?;
         let descriptor = state.loads().find(|item| item.aid == load)
             .and_then(|item| item.image).ok_or(Error::Storage)?;
         let end = usize::try_from(descriptor.length).map_err(|_| Error::Bounds)?;
-        let start = end.checked_sub(length).ok_or(Error::Bounds)?;
-        let image = images.pin(&descriptor, start..end, provider)?;
+        if end != length { return Err(Error::Authentication); }
+        let image = images.pin(&descriptor, 0..end, provider)?;
         Ok((image, sizes, digest))
     }
 
@@ -742,9 +723,13 @@ impl<F: crate::journal::Flash> Store<F> {
         let load = state.loads().find(|p| p.aid == aid).ok_or(Error::Missing)?;
         let image = load.image.ok_or(Error::Missing)?;
         images.with_verified_image(&image, provider, |raw, provider| {
-            let package = Package::verify(raw, provider, scratch)?;
+            let domain = state.domains().find(|d| d.aid == load.domain)
+                .ok_or(Error::Storage)?;
+            let package = Package::verify(raw, domain.aid.as_slice(), domain.incarnation,
+                provider, scratch)?;
             if package.manifest.package != aid.as_slice()
                 || package.manifest.version != load.version
+                || package.digest != image.digest
             {
                 return Err(Error::Authentication);
             }

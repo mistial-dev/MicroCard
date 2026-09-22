@@ -72,7 +72,7 @@ pub(super) fn open(mut hardware: Hardware, key: JournalKey) -> Result<BoardCard>
         registry: Store::open(
             Nvm::new(),
             key,
-            Registry::new(incarnation, None),
+            Registry::new(incarnation),
             &mut hardware,
         )?,
         images: Images::new(Nvm::new())?,

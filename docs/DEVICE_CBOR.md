@@ -37,34 +37,27 @@ manifest_length:u32le | image_length:u32le |
 manifest_cbor | image_sha256:32 | signer_sec1:65 | signature_p1363:64 | image
 ```
 
-The P-256 signature covers every byte from the magic through the signer key, inclusive. SHA-256 of the trailing image must match the signed digest. This keeps the signed descriptor contiguous without copying the image into a separate signing buffer. MC04 packages are bounded to 16 KiB; JCVM packages to 60 KiB. The signer key must be uncompressed SEC1; signature scalars must have valid ranges and low S. Trailing bytes, inconsistent lengths, provider failures, and old magic are errors. Package identity remains SHA-256 of the entire envelope, including the image.
+The P-256 signature covers every byte from the magic through the signer key, inclusive. SHA-256 of the trailing image must match the signed digest. This keeps the signed descriptor contiguous without copying the image into a separate signing buffer. MC04 packages are bounded to 16 KiB. The signer key must be uncompressed SEC1; signature scalars must have valid ranges and low S. Trailing bytes, inconsistent lengths, provider failures, and old magic are errors. Package identity remains SHA-256 of the entire envelope, including the image.
 
-Envelope authentication does not establish that a manifest or image is supported. The selected engine must then decode and validate both before installation. [The shared MP05 vector](../format/package-envelope-v5.json) deliberately uses a synthetic image to test that boundary; it is not an installable application. Its private scalar is public test data. Independent Python/OpenSSL signing produces exactly the same deterministic envelope as Rust, .NET, and Java.
+Envelope authentication does not establish that a manifest or image is supported. MC04 must then decode and validate both before installation. [The shared MP05 vector](../format/package-envelope-v5.json) deliberately uses a synthetic image to test that boundary; it is not an installable application. Its private scalar is public test data. Independent Python/OpenSSL signing produces exactly the same deterministic envelope as Rust, .NET, and Java.
 
-## JCVM manifest, version 1
+## JCVM load file
 
-The signed JCVM manifest is an eight-field array, distinct from the twelve-field MC04 record:
+JCVM receives a standard, raw Java Card Load File Data Block in GlobalPlatform
+`C4` blocks, with no MicroCard manifest or external applet signature. A protected
+SCP03 administrator session authorizes the load. The CAP Header supplies the package
+AID and package version. The card computes SHA-256 of the exact load-file bytes,
+verifies the CAP and imports, stages the image, and commits its digest and domain
+binding to authenticated registry state before activation. The optional GP load
+hash must match that digest. The current board profile grants at most 65,536 heap
+bytes, 8,192 frame words, a 261-byte APDU buffer and four million units of
+execution work per applet. These are maxima, not a measured capacity promise.
 
-```
-[1, 1, domain_aid:bytes, incarnation:bytes16, package_aid:bytes,
- [package_major:u8, package_minor:u8], rollback_version:u32,
- [heap_bytes, frame_words, buffer_bytes, instruction_budget]]
-```
-
-Both AIDs are 5–16 bytes. The second field identifies JCVM. The manifest is at most
-128 bytes, rollback version is nonzero, and package AID/version must equal the CAP
-Header. Heap size is even and 512–65,536 bytes; frame storage is 8–8,192 words; the
-APDU buffer is 261 bytes; execution work budget is 1–4,000,000 (bytecode instructions plus charged native work). These are upper profile
-bounds, not a promise that every permitted combination fits a board.
-
-The verifier authenticates MP05, validates this record, resolves imports, and runs
-structural bytecode verification. The management layer must additionally authorize
-the signer, match the current domain/incarnation, enforce rollback and storage quotas,
-and activate atomically. The [JCVM manifest vector](../format/jcvm-manifest-cbor-v1.json)
-is checked by Rust, Python, .NET, and Java. The shared GlobalPlatform loading path
-uses this contract for both managed simulator sessions and the separate JCVM board
-profile. The revision-bound MakerDiary smoke run loaded and installed the signed
-OpenFIPS201 package through this path; see [hardware smoke](HARDWARE_SMOKE.md).
+The registry uses the CAP package version for replacement ordering. Deleting a
+package permits an administrator to reload the same CAP version. The old signed
+JCVM format and registry version are explicitly incompatible and are never erased
+automatically. The earlier MakerDiary signed-load smoke result remains historical;
+it does not establish physical behavior for this format.
 
 ## Internal state snapshot, version 2
 
@@ -126,28 +119,28 @@ metadata commit keeps its candidate slots protected until ownership is resolved.
 
 ## JCVM registry journal
 
-The metadata store uses its own journal key and this seven-field v2 record:
+The metadata store uses its own journal key and this seven-field v3 record:
 
 ```
-[2, 1, reserved_scp03_sequence, domains[4], loads[8], instances[8], renewal_or_null]
-domain   = [aid, incarnation_bytes16, signer_hash_bytes32_or_null]
+[2, 2, reserved_scp03_sequence, domains[4], loads[8], instances[8], renewal_or_null]
+domain   = [aid, incarnation_bytes16]
 load     = [domain_aid, package_aid, rollback_version, image_or_null]
-image    = [slot, length, package_sha256_bytes32]
+image    = [slot, length, load_file_sha256_bytes32]
 instance = [domain_aid, package_aid, module_aid, instance_aid,
             installation_bytes16, heap_bank]
 renewal  = [instance_aid, heap_bank, old_identity_bytes16, new_identity_bytes16,
-            package_sha256_bytes32, record_length, record_sha256_bytes32]
+            load_file_sha256_bytes32, record_length, record_sha256_bytes32]
 ```
 
 Unused slots are null. Slot zero in `domains` is the ISD. AIDs are 5–16 bytes;
 registry AIDs, active image slots, installation identities, and heap banks cannot
-collide. Every load belongs to an owned domain, and every instance references a
+collide. Every load belongs to a registered domain, and every instance references a
 loaded package in that domain. The record is bounded to 4,096 bytes. The SCP03
 reservation is at most `0xffffff` and must commit before any reserved value is used.
 
-Deleting a load clears its image descriptor but retains its rollback version. A new
-activation must advance that version. Child domains inherit the ISD signer; fresh
-domain and installation identities come from the platform, not the package author.
+Deleting a load clears its image descriptor but retains its CAP version. The
+authenticated administrator may reload that version after deletion. Fresh domain
+and installation identities come from the platform, not the package author.
 Physical storage may impose lower quotas than these registry limits.
 
 A pending renewal names an existing instance and its current bank, identity, and
@@ -176,22 +169,24 @@ failure leaves an orphan that a later installation may explicitly reclaim.
 The store resolves uncertain commits with the reboot scan and disables state access
 if recovery fails. Its caller must verify referenced image and heap storage before
 execution, and must not reclaim formerly referenced storage before metadata commits.
-The [registry vector](../format/jcvm-registry-cbor-v2.json) is checked by Rust and Python.
+The [registry vector](../format/jcvm-registry-cbor-v3.json) is checked by Rust and Python.
+The old v2 vector remains only to prove explicit incompatibility.
 
 ### JCVM domain discovery
 
 Authenticated INS `E2`, P1/P2 zero, and one domain-index byte return:
 
 ```
-[2, 1, domain_count, domain_index, domain_aid, incarnation_bytes16,
- signer_hash_bytes32_or_null, active_load_count, instance_count]
+[2, 2, domain_count, domain_index, domain_aid, incarnation_bytes16,
+ null, active_load_count, instance_count]
 ```
 
-Version 2 and engine 1 distinguish this from MC04's earlier discovery record. Domains
+Version 2 and engine 2 distinguish this from MC04's earlier discovery record. Domains
 use registry slot order, with the ISD at index zero; indexes outside the current count
 fail. Counts have the registry bounds above and the response is at most 128 bytes.
-Use the returned AID and incarnation when signing a package for that domain.
-The [discovery vector](../format/jcvm-domain-cbor-v2.json) is checked by Rust and Python.
+The domain and incarnation are diagnostic; only the authenticated GP administrator
+can load an applet. The [discovery vector](../format/jcvm-domain-cbor-v3.json)
+is checked by Rust and Python.
 
 ## Dedicated JCVM state journal
 
@@ -237,7 +232,8 @@ see [the board layout](BOARD.md).
 
 ## Migration status
 
-MP05 packages, management names, and journal snapshots use these binary contracts.
-The loader rejects MP04 and earlier envelopes. Rebuild packages and use matching
-clients. Old persistent state fails explicitly and must be handled by an intentional
-development reset. JSON remains permitted for host authoring, reports, and test vectors.
+MC04 MP05 packages, management names, and journal snapshots use these binary
+contracts. JCVM loads raw CAP blocks under authenticated GP management. The MC04
+loader rejects MP04 and earlier envelopes; JCVM rejects its former signed-load
+registry state. Old persistent state fails explicitly and requires an intentional
+administrative reset. JSON remains permitted for host authoring, reports, and vectors.

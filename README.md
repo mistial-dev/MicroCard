@@ -50,7 +50,8 @@ package rejection, and persistence across restart.
 Both firmware engines cross-link for the nRF52840 DK and Makerdiary nRF52840 MDK USB
 Dongle. The Makerdiary JCVM development image boots without a cable power cycle,
 enumerates as a PC/SC reader, passes its CC310 startup checks, opens SCP03, and loads,
-installs, and selects the signed OpenFIPS201 fixture. Full physical NIST provisioning,
+installs, and selects an earlier signed OpenFIPS201 fixture. The current unsigned
+Java Card load path has passed host acceptance but awaits physical validation. Full physical NIST provisioning,
 fault injection, resource measurements, and production acceptance remain open.
 
 ## Run OpenFIPS201 locally

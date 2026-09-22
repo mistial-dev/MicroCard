@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise persistent JCVM delivery with the independent Python SCP03/package client."""
+"""Exercise unsigned Java Card loading through independent Python SCP03."""
 import argparse
 import datetime
 import hashlib
@@ -12,9 +12,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 
 from heap_profile import mark_phase
-from device_cbor import decode, jcvm_manifest
-from package_envelope import create
-from scp03_acceptance import Client, SIM, ROOT, sign_package, signer_public_key, aes, modes
+from device_cbor import decode
+from scp03_acceptance import Client, SIM, ROOT, aes, modes
 
 
 def lv(*values):
@@ -117,17 +116,13 @@ def agree_with_pin(client, public_key, pin):
     piv(client, 0x20, p2=0x80)
 
 
-def install_openfips(client, discovery, version=1):
-    """Load the pinned applet through signed management and return its installation data."""
+def install_openfips(client, discovery):
+    """Load the pinned raw Java Card image through SCP03 management."""
     package = bytes.fromhex("A00000030800001000")
     module = bytes.fromhex("A000000308000010000100")
     instance = module
     image = (ROOT / "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb").read_bytes()
-    manifest = jcvm_manifest(dict(domain=discovery[4].hex(), incarnation=discovery[5].hex(),
-        package=package.hex(), package_version=[1, 10], version=version,
-        limits=dict(heap_bytes=65536, frame_words=8192, buffer_bytes=261, budget=4000000)))
-    seed = bytes([7]) * 32
-    raw = create(manifest, image, signer_public_key(seed), lambda value: sign_package(seed, value), 60 * 1024)
+    raw = image
     client.command(0xe6, lv(package, discovery[4], hashlib.sha256(raw).digest(), b"", b""), p1=2)
     wire = b"\xc4\x82" + len(raw).to_bytes(2, "big") + raw
     blocks = [wire[offset:offset + 220] for offset in range(0, len(wire), 220)]
@@ -159,7 +154,7 @@ def main():
         client = Client(keys, state, mode)
         client.connect()
         discovery = decode(client.command(0xe2, b"\0"))
-        assert discovery[:4] == [2, 1, 1, 0]
+        assert discovery[:4] == [2, 2, 1, 0]
         assert discovery[6:] == [None, 0, 0]
         # Concurrent processes must not share monotonic/nonce reservations.
         blocked = subprocess.run([SIM, mode, keys, state], input="", text=True,

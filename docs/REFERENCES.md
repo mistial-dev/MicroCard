@@ -52,7 +52,7 @@ The following are already in the Reference Library at their original locations a
 
 The 3.0.5 archive also carries the Classic API specification as HTML. The devkit archive carries `api_classic` jars for 3.0.4, 3.0.5, 3.1.0, 3.2.0 and the 3.2 preview. Oracle publishes no PDF API specification for 3.1 or 3.2. The 3.2 API is HTML at `docs.oracle.com/en/java/javacard/3.2/jcapi/`. Neither the protection profiles nor the devkit are MicroCard inputs today, and no decompiled or proprietary implementation is an input to this code.
 
-Authenticated CAP loading uses the shared management path and signed MP05 envelope. GlobalPlatform Card Specification 2.3.1 and the SCP03 editions above govern INSTALL, LOAD and secure messaging. [GLOBALPLATFORM_PROFILE.md](GLOBALPLATFORM_PROFILE.md) defines that transport subset; [JCVM_PROFILE.md](JCVM_PROFILE.md) defines CAP acceptance and the reviewed 3.0.5 runtime clauses. CAP 2.1 support does not imply support for every CAP 2.2 feature defined by the 3.0.5 specification.
+Authenticated CAP loading uses the shared management path and raw CAP Load File Data Blocks under SCP03. GlobalPlatform Card Specification 2.3.1 and the SCP03 editions above govern INSTALL, LOAD and secure messaging. [GLOBALPLATFORM_PROFILE.md](GLOBALPLATFORM_PROFILE.md) defines that transport subset; [JCVM_PROFILE.md](JCVM_PROFILE.md) defines CAP acceptance and the reviewed 3.0.5 runtime clauses. CAP 2.1 support does not imply support for every CAP 2.2 feature defined by the 3.0.5 specification.
 
 ## Short explanatory excerpts
 

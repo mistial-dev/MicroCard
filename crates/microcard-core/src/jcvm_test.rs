@@ -1,16 +1,13 @@
 //! Shared real-applet fixtures for registry and transport lifecycle tests.
 use crate::{
-    crypto::{self, CryptoProvider},
-    envelope,
+    crypto::CryptoProvider,
     hal::Entropy,
-    jcvm_package,
     jcvm_storage::HeapBanks,
     journal::{Flash, MemoryFlash},
     Error, Result,
 };
 use alloc::{rc::Rc, vec::Vec};
 use core::cell::RefCell;
-use microcard_engine_jcvm::{applet::Sizes, cap::LoadFile};
 
 pub(crate) struct Provider;
 impl CryptoProvider for Provider {}
@@ -82,36 +79,9 @@ impl HeapBanks for Heaps {
     }
 }
 
-pub(crate) fn signed(version: u32, incarnation: u8, private: u8) -> Vec<u8> {
-    let image =
-        include_bytes!("../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb");
-    let header = LoadFile::parse(image).unwrap().header().unwrap();
-    let manifest = jcvm_package::Manifest {
-        domain: &crate::globalplatform::ISD_AID,
-        incarnation: [incarnation; 16],
-        package: header.package_aid,
-        package_version: [header.package_major, header.package_minor],
-        version,
-        sizes: Sizes {
-            heap_bytes: 65536,
-            frame_words: 8192,
-            ..Sizes::default()
-        },
-    }
-    .encode()
-    .unwrap();
-    let key = crypto::p256_public_key(&[private; 32]).unwrap();
-    let mut raw = envelope::signing_prefix_bounded(
-        &manifest,
-        image.len(),
-        &crypto::sha256(image),
-        &key,
-        jcvm_package::MAX_PACKAGE_BYTES,
-    )
-    .unwrap();
-    raw.extend(crypto::p256_ecdsa_sign_package(&[private; 32], &raw).unwrap());
-    raw.extend(image);
-    raw
+pub(crate) fn load_file() -> Vec<u8> {
+    include_bytes!("../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb")
+        .to_vec()
 }
 
 pub(crate) struct Scratch(pub Vec<u8>);

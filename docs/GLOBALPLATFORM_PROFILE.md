@@ -42,7 +42,7 @@ Installed-instance AIDs come from signed assembly metadata. An SSD created throu
 - project-specific SSD: RID `A000000151`, byte `53`, then the first ten incarnation bytes
 - assembly: RID `A000000151`, byte `4C`, then the first ten signed-package digest bytes
 
-These identifiers are registry handles. They do not change MicroCard's signed assembly identity, dependency identity or domain identifier.
+These identifiers are registry handles. They do not change MC04's signed assembly identity, dependency identity or domain identifier.
 
 ## SSD lifecycle
 
@@ -52,21 +52,30 @@ DELETE (`E4`) accepts one `4F` AID TLV and resolves SSDs, installed instances an
 
 Persisted domains now require a canonical, unique registry AID. Snapshots from before this field was introduced fail closed. There is no conversion or upgrade path.
 
-## Assembly transfer and installation
+## MC04 assembly transfer and installation
 
 GlobalPlatform Card Specification 2.3.1, §11.6.1 leaves the runtime representation open: “The runtime environment internal handling or storage of the Load File is beyond the scope of this Specification.” MicroCard therefore defines one proprietary Load File Data Block format while retaining the standard command framing.
 
 INSTALL [for load] (`E6`, P1 `02`) carries the standard LV fields from §11.5.2.3.1. The Load File AID is `A0000001514C` followed by the first ten bytes of the package SHA-256. The Security Domain AID is the durable registry AID of the target ISD or SSD. The Load File Data Block Hash is the complete 32-byte SHA-256. Load Parameters and Load Token are empty. Other hash sizes, tokens and parameters are rejected.
 
-Sequential LOAD commands (`E8`) follow §§11.6.2.1-11.6.2.3. P2 starts at zero and increments without gaps. P1 is `00` until the final `80` block. The first block starts one canonical BER `C4` Load File Data Block whose value is the complete MP05 package. The wrapper is parsed and discarded from the first borrowed command slice, so only package bytes enter the bounded staging vector. No DAP block or ciphered `D4` block is accepted. A wrong sequence, length, hash, signature, target domain or package structure aborts staging. ISD selection, a new SCP03 initialization or a secure-channel error also clears it.
+Sequential LOAD commands (`E8`) follow §§11.6.2.1-11.6.2.3. P2 starts at zero and increments without gaps. P1 is `00` until the final `80` block. The first block starts one canonical BER `C4` Load File Data Block whose value is the complete MP05 package. The wrapper is parsed and discarded from the first borrowed command slice, so only package bytes enter the bounded staging vector. The Java Card path uses the same command framing with a raw CAP load file. No DAP block or ciphered `D4` block is accepted. A wrong sequence, length, hash, signature, target domain or package structure aborts staging. ISD selection, a new SCP03 initialization or a secure-channel error also clears it.
 
-Only the final LOAD block can activate content. Activation uses the normal device verifier once, compares its SHA-256 with the INSTALL request, enforces the MP05 domain and incarnation, verifies the package signature, links dependencies and commits signer binding, versions and package bytes transactionally.
+Only the final MC04 LOAD block can activate content. Activation uses the normal device verifier once, compares its SHA-256 with the INSTALL request, enforces the MP05 domain and incarnation, verifies the package signature, links dependencies and commits signer binding, versions and package bytes transactionally.
 
 INSTALL [for install and make selectable] (`E6`, P1 `0C`) installs a declared assembly instance when its Executable Load File AID names a loaded package. In this profile the Executable Module and Application AIDs must be the same signed lifecycle AID, privileges are zero, Install Parameters are `C9 00`, and the Install Token is empty. The exact package is resolved before its install method executes.
 
 ## Current boundary
 
-The authenticated project-specific E2 inventory remains available for diagnostics. GlobalPlatformPro's `--load` option accepts CAP files only, so the interop test sends the profiled INSTALL [for load] and LOAD commands with repeated `--secure-apdu`. Stable release `v25.10.20` parses `--install-only` without sending a command, so the check also sends the standard installation command through `--secure-apdu`, then exercises normal `--delete` operations. This does not claim CAP compatibility. Assembly signatures, permanent signer binding, dependency verification, quotas and incarnation replay protection apply to every path.
+The authenticated project-specific E2 inventory remains available for diagnostics. GlobalPlatformPro's `--load` option accepts CAP files only, so the MC04 interop test sends the profiled INSTALL [for load] and LOAD commands with repeated `--secure-apdu`. Stable release `v25.10.20` parses `--install-only` without sending a command, so the check also sends the standard installation command through `--secure-apdu`, then exercises normal `--delete` operations. This does not claim MC04 CAP compatibility. Assembly signatures, permanent signer binding, dependency verification, quotas and incarnation replay protection apply to the MC04 path.
+
+## Java Card load files
+
+The JCVM build uses the same authenticated SCP03 and ordered `C4` transfer, but
+the `C4` value is a raw Java Card Load File Data Block, not MP05. Its AID and
+version come from the CAP Header. The optional GP load hash, when present, must
+equal SHA-256 of the exact received bytes. The card verifies the CAP and imports,
+stages the image, then authenticates its digest and domain binding in registry
+metadata before activation. Applet authors do not provide an external signature.
 
 The optional `scripts/gppro_card_data_test.py` check takes an explicitly supplied GlobalPlatformPro jar and required digest. It passes simulator Card Data into GlobalPlatformPro's parser, takes ISD ownership, creates SSD `F04D435344`, streams a differently signed Counter package through standard load commands, confirms the durable assembly and instance counts through authenticated inventory, removes the instance and assembly, deletes the SSD and confirms each removal. Durable-state assertions avoid depending on release-specific display labels. The test fails on any INSTALL or LOAD status other than `9000`.
 

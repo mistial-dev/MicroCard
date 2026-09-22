@@ -204,8 +204,10 @@ verify the engine, revision, artifact hashes, and `hardware_flashed: false` in i
 ## Hardware and production blockers
 
 [Hardware smoke](HARDWARE_SMOKE.md) records revision-bound DK results and the current
-Makerdiary JCVM result. The Makerdiary image now boots, enumerates over USB CCID, opens
-SCP03, and loads, installs, persists, and selects the signed OpenFIPS201 fixture.
+Makerdiary JCVM result. An earlier MakerDiary image booted, enumerated over USB CCID, opened
+SCP03, and loaded, installed, persisted, and selected the then-signed OpenFIPS201 fixture.
+The current unsigned CAP load path has passed host acceptance and links for the DK;
+it has not run on physical hardware.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
 Makerdiary and cover both engine builds, CC310 independent vectors and

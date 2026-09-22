@@ -131,7 +131,7 @@ pub(crate) fn open(keys: Keys, root: &Path) -> Result<Endpoint<ManagedCard>> {
         registry: Store::open(
             metadata,
             key,
-            Registry::new(incarnation, None),
+            Registry::new(incarnation),
             &mut provider,
         )?,
         images: Images::new(images)?,

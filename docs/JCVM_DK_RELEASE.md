@@ -25,11 +25,11 @@ the older v1.8.2 release JAR.
 
 | Area | Current evidence | Release gate |
 | --- | --- | --- |
-| CAP loading | Signed MP05 and CAP 2.1 structural checks | Unsigned standard LFDB under SCP03; complete supported CAP 2.2 verification |
+| CAP loading | Host accepts unsigned LFDB under SCP03; CAP 2.1 structural checks | Complete supported CAP 2.2 type/dataflow verification |
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
 | API | 104 JCAlgTest factory probes | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
-| GlobalPlatform | Host SCP03 load/install/select; physical signed OpenFIPS201 selection | Standard unsigned load, install/delete, interruption and recovery on DK |
+| GlobalPlatform | Host SCP03 unsigned load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
 Optional Java Card features must be declared explicitly. They cannot be inferred
@@ -49,6 +49,10 @@ this machine. These are whole-process host timings, not device APDU latency.
 Flash operations, device install/selection timing, heap high-water, and power
 loss behavior have no current-DK measurement. Do not fill those cells from the
 MakerDiary or host figures.
+
+After the host unsigned-load change, the DK USB/CCID profile links at **229,184
+text, 148 data, and 198,284 BSS bytes**. This is a link measurement, not a
+physical timing result.
 
 The DK release gate also needs sealed provisioning, secure boot/update policy,
 debug lockout, and independent cryptographic review before deployment as a

@@ -324,7 +324,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
                 load,
                 domain,
                 hash: request.hash,
-                receiver: LoadReceiver::new(Payload::SignedPackage, MAX_PACKAGE_BYTES),
+                receiver: LoadReceiver::new(Payload::JavaCard, MAX_PACKAGE_BYTES),
             });
             return receipt();
         }
@@ -464,11 +464,11 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
         let aid = chosen.ok_or(Error::Missing)?;
         let mut body = Vec::new();
         push_tlv(&mut body, &[0x4f], aid.as_slice())?;
-        if let Some(domain) = registry.domains().find(|d| d.aid == aid) {
+        if registry.domains().any(|domain| domain.aid == aid) {
             push_tlv(
                 &mut body,
                 &[0x9f, 0x70],
-                &[if domain.owner.is_some() { 0x0f } else { 1 }],
+                &[0x0f],
             )?;
             push_tlv(&mut body, &[0xc5], &[0x80, 0, 0])?;
             if aid != Aid::isd() {
@@ -490,7 +490,7 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
                     push_tlv(&mut body, &[0xce], &package.manifest.package_version)?;
                     if kind == 0x10 {
                         let file =
-                            microcard_engine_jcvm::cap::LoadFile::parse(package.envelope.image)
+                            microcard_engine_jcvm::cap::LoadFile::parse(package.image)
                                 .map_err(|_| Error::Storage)?;
                         for module in file.applets().map_err(|_| Error::Storage)?.iter() {
                             push_tlv(&mut body, &[0x84], module.aid)?;
@@ -575,15 +575,12 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
         let domain = registry.domains().nth(index).ok_or(Error::Missing)?;
         let mut wire = crate::cbor::Encoder::new(128);
         wire.array(9)?;
-        for value in [2, 1, registry.domains().count() as u64, index as u64] {
+        for value in [2, 2, registry.domains().count() as u64, index as u64] {
             wire.unsigned(value)?;
         }
         wire.bytes(domain.aid.as_slice())?;
         wire.bytes(&domain.incarnation)?;
-        match domain.owner {
-            Some(owner) => wire.bytes(&owner)?,
-            None => wire.null()?,
-        }
+        wire.null()?;
         wire.unsigned(
             registry
                 .loads()

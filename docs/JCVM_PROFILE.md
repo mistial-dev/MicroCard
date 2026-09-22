@@ -29,18 +29,18 @@ real SCP03 messages, installs the committed PIV applet, selects it, checks PIN r
 across reboot, and deletes it. `serve-jcvm-managed MANAGEMENT_KEYS STATE_DIR` uses this
 path with persistent files; `serve-jcvm-managed-binary` uses the shared framed transport.
 The separate `engine-jcvm` board build uses the same adapter with NVMC storage.
-Both DK and dongle layouts cross-link. The Makerdiary dongle has booted this image,
-opened SCP03, loaded and installed the signed OpenFIPS201 fixture, and selected PIV.
-Complete physical personalization, NIST, interruption, and resource tests remain open.
+Both DK and dongle layouts cross-link. An earlier MakerDiary revision opened
+SCP03, loaded and installed a signed OpenFIPS201 fixture, and selected PIV.
+The current unsigned-load format has host acceptance but no physical run yet.
+Physical personalization, NIST, interruption, and resource tests remain open.
 
 The shared C4 receiver enforces container identity, an engine-specific size limit,
 ordered blocks, and exact completion. A rejected block closes the upload and resets
-staging. Both core adapters use the receiver. JCVM checks that the signed manifest
-matches the requested load AID, security domain, and optional package hash before
-writing an image. RAM and flash staging accept compile-time limits,
-so the MC04 16 KiB bound does not constrain the JCVM profile. The JCVM package
-verifier uses MP05 and its own [bounded signed manifest](DEVICE_CBOR.md#jcvm-manifest-version-1),
-with a 60 KiB package limit. Raw CAP input remains a simulator convenience, not a signed package.
+staging. Both core adapters use the receiver. JCVM verifies a raw CAP load file,
+matching its Header AID and computed SHA-256 against the authenticated GP load
+request before writing an image. RAM and flash staging accept compile-time limits,
+so the MC04 16 KiB bound does not constrain JCVM's 60 KiB load-file limit.
+See the [device format](DEVICE_CBOR.md#jcvm-load-file).
 
 Installation, selection, and processing expose cancellation callbacks, checked before
 execution and at each instruction boundary. Cancellation escapes as an engine error;
@@ -59,7 +59,7 @@ AID, and frames instance AID, privileges, and C9 application data for the applet
 Explicit `Applet.register` calls must use the requested instance AID. Empty or short
 registration AIDs and repeated registration are rejected. The bounded registry journal
 now persists ownership, rollback history, image references, and installation identities.
-The registry loader authorizes signed packages before erasing, stages images in
+The registry loader requires authenticated GP loading before erasing, stages images in
 unreferenced slots, verifies readback, and commits activation metadata. It protects
 the old image through write failures and cancellation. Package reads verify both flash
 and the current registry binding. Installation commits a dedicated heap before
@@ -592,8 +592,8 @@ objects and still declares a 3DES 9E key, which is unsupported. Those failures r
 visible. Use `--test SelectCommand:1` for one vector, or `--seed DIR` containing
 `keys` and `state` for an existing closed simulator with matching personalization.
 
-The signed OpenFIPS201 package requests 4,000,000 execution work units; the engine
-default remains 1,000,000. One measured ECDH request consumed 2,548,595 units,
+The JCVM profile permits 4,000,000 execution work units; an earlier signed-package
+profile used the same limit. One measured ECDH request consumed 2,548,595 units,
 including Java EC-point validation. This does not establish worst-case device latency.
 The ordinary transport check covers independently verified ECDH after reboot and
 rejection of an off-curve point without losing selection.
@@ -683,11 +683,11 @@ separate from passes. Host timings and upstream JVM results are not hardware evi
 
 ## Authorization
 
-A raw Java Card CAP carries no MicroCard signature. Device installation requires its
-MP05 envelope, whose P-256 signature binds the image digest and versioned manifest,
-including the security domain and incarnation. The authenticated transport, signed
-package verification, and registry ownership checks are distinct requirements.
-The raw simulator loader is a development entry point, not the board loading path.
+A raw Java Card CAP carries no MicroCard signature. Device installation requires
+an authenticated SCP03 administrator command. The card verifies the exact CAP
+load file, binds its digest to the security domain in authenticated registry
+state, and checks that binding at reopen. An applet author needs no external
+signing key. The raw simulator loader remains a separate development entry point.
 
 ## Sources
 
