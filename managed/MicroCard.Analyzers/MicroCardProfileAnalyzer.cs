@@ -704,6 +704,13 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         var operation = (IPropertyReferenceOperation)context.Operation;
         if (operation.Property.Name == "Length" && operation.Instance?.Type is IArrayTypeSymbol)
             return;
+        if (IsAmbientTransactionProperty(operation.Property))
+        {
+            if (operation.Parent is IAssignmentOperation assignment &&
+                ReferenceEquals(assignment.Target, operation))
+                Report(context, ExternalCall, operation.Syntax.GetLocation(), operation.Property.ToDisplayString());
+            return;
+        }
         if (!AllowedMember(operation.Property, context.Compilation))
             Report(context, ExternalCall, operation.Syntax.GetLocation(), operation.Property.ToDisplayString());
     }
@@ -775,6 +782,8 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
             return true;
         if (IsTransactionScope(named))
             return true;
+        if (IsTransactionType(named))
+            return true;
         return SymbolEqualityComparer.Default.Equals(named.ContainingAssembly, compilation.Assembly) &&
                named.TypeKind == TypeKind.Class && named.IsSealed;
     }
@@ -812,6 +821,29 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
         type?.Name == "TransactionScope" &&
         type.ContainingNamespace?.ToDisplayString() == "System.Transactions" &&
         type.ContainingAssembly?.Name == "System.Transactions.Local";
+
+    private static bool IsTransactionType(ITypeSymbol? type) =>
+        type?.Name is "Transaction" or "TransactionInformation" or "TransactionStatus" &&
+        type.ContainingNamespace?.ToDisplayString() == "System.Transactions" &&
+        type.ContainingAssembly?.Name == "System.Transactions.Local";
+
+    private static bool IsAmbientTransactionProperty(IPropertySymbol property)
+    {
+        if (property.Parameters.Length != 0 ||
+            property.ContainingNamespace?.ToDisplayString() != "System.Transactions" ||
+            property.ContainingAssembly?.Name != "System.Transactions.Local")
+            return false;
+
+        return property is { Name: "Current", IsStatic: true } &&
+                   property.ContainingType.Name == "Transaction" &&
+                   property.Type.Name == "Transaction" ||
+               property is { Name: "TransactionInformation", IsStatic: false } &&
+                   property.ContainingType.Name == "Transaction" &&
+                   property.Type.Name == "TransactionInformation" ||
+               property is { Name: "Status", IsStatic: false } &&
+                   property.ContainingType.Name == "TransactionInformation" &&
+                   property.Type.Name == "TransactionStatus";
+    }
 
     private static bool IsExplicitTransactionCall(IMethodSymbol method) =>
         IsTransactionScope(method.ContainingType) &&

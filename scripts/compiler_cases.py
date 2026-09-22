@@ -9,6 +9,7 @@ import mcinspect
 
 BOUNDARIES = [
     ('CASE_TRANSACTION_SCOPE', 'transaction-scope'),
+    ('CASE_TRANSACTION_CURRENT', 'ambient-transaction'),
     ('CASE_PARAMETERS_BOUNDARY', 'parameter-boundary'),
     ('CASE_DEPENDENCY_BOUNDARY', 'dependency-boundary'),
     ('CASE_ENTRY_BOUNDARY', 'entry-boundary'),
@@ -17,7 +18,7 @@ BOUNDARIES = [
     ('CASE_FIELD_ROWS_BOUNDARY', 'field-row-boundary'),
 ]
 REJECTIONS = [
-    ('CASE_TRANSACTION_CURRENT', 'ambient-transaction', 'Unsupported System.Transactions member'),
+    ('CASE_TRANSACTION_CURRENT_SET', 'ambient-transaction-write', 'Unsupported System.Transactions member'),
     ('CASE_TRANSACTION', 'unsafe-transaction', 'Transactional method reaches irreversible Hardware.Write'),
     ('CASE_STORAGE_SCHEMA', 'storage-schema-bypass', 'Persistent byte maximum'),
     ('CASE_SYSTEM_SHA256_OVERLOAD', 'system-sha256-overload-bypass', 'Unsupported System.Security.Cryptography member'),

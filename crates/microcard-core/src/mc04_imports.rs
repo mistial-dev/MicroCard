@@ -147,6 +147,44 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
                 _ => 57,
             })
         }
+        ("TransactionRuntime", "Current")
+            if exact(&types, false, &[], types.result)
+                && reference(
+                    assembly,
+                    types.result,
+                    "MicroCard.Framework",
+                    "TransactionRuntime",
+                ) =>
+        {
+            Import::Native(58)
+        }
+        ("TransactionRuntime", "Information")
+            if reference(
+                assembly,
+                types.receiver,
+                "MicroCard.Framework",
+                "TransactionRuntime",
+            ) && types.parameters.is_empty()
+                && reference(
+                    assembly,
+                    types.result,
+                    "MicroCard.Framework",
+                    "TransactionInformationRuntime",
+                ) =>
+        {
+            Import::Native(59)
+        }
+        ("TransactionInformationRuntime", "Status")
+            if reference(
+                assembly,
+                types.receiver,
+                "MicroCard.Framework",
+                "TransactionInformationRuntime",
+            ) && types.parameters.is_empty()
+                && types.result == Some(int) =>
+        {
+            Import::Native(60)
+        }
         ("RandomNumber", "GetInt32") if exact(&types, false, &[], Some(int)) => Import::Native(5),
         ("Hardware", "Write") if exact(&types, false, &[int, int], None) => Import::Native(6),
         ("DomainStorage", "GetInt32")
@@ -534,6 +572,6 @@ mod tests {
             .collect::<Vec<_>>();
         native.sort_unstable();
         native.dedup();
-        assert!(native.ends_with(&[55, 56, 57]));
+        assert!(native.ends_with(&[55, 56, 57, 58, 59, 60]));
     }
 }

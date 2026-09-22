@@ -107,9 +107,24 @@ public static class ValidTransactionScope
 #endif
 
 #if CASE_TRANSACTION_CURRENT
-public static class InvalidAmbientTransaction
+public static class ValidAmbientTransaction
 {
-    public static void Run() { _ = Transaction.Current; }
+    public static void Run()
+    {
+        _ = Transaction.Current;
+        using var scope = new TransactionScope();
+        SecurityDomain.Current.Store.SetInt32(
+            1,
+            (int)Transaction.Current!.TransactionInformation.Status);
+        scope.Complete();
+    }
+}
+#endif
+
+#if CASE_TRANSACTION_CURRENT_SET
+public static class InvalidAmbientTransactionWrite
+{
+    public static void Run() { Transaction.Current = null; }
 }
 #endif
 

@@ -18,8 +18,10 @@ The supported surface is the parameterless `TransactionScope` constructor and
 `Complete()` commits synchronously. Leaving it without `Complete()` aborts. Nested
 scopes, constructor options, escaped scopes, arbitrary enlistment, ambient flow, async
 flow, promotion, and distributed transactions are outside the MC04 profile.
-`Transaction`, `Transaction.Current`, and `TransactionStatus` are deliberately rejected
-until the device has a typed, query-only ambient-state ABI.
+`Transaction.Current` is null outside a live scope. Inside it, applications may read
+`Transaction.Current.TransactionInformation.Status`, which reports `Active`. The
+canonical method-ending using declaration does not expose terminal state before the
+engine has durably committed or aborted it.
 
 MC04 does not implement managed exception handling. The preprocessor validates the
 exact Roslyn disposal `finally`, lowers it to straight-line begin plus commit or abort,
@@ -27,9 +29,10 @@ and rejects every other exception region. A VM, native, cancellation, or storage
 aborts an active transaction at the engine boundary. Application code cannot throw and
 catch an exception to control durability.
 
-Projected scope calls use internal static native IDs 55 through 57. Packages retain the
-stable transaction capability bits 46 through 48, and runtime authorization aliases the
-internal calls to those bits. The retired public `DomainStorage` transaction methods and
+Projected scope controls and ambient queries use internal native IDs 55 through 60.
+Packages retain the stable transaction capability bits 46 through 48; runtime
+authorization aliases the query calls to capability 46. The retired public
+`DomainStorage` transaction methods and
 `[Transaction]` annotation are not part of the managed API.
 
 The public scope is lexical: it begins and ends inside one `Process` invocation. The

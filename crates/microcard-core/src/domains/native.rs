@@ -101,7 +101,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
         if matches!(
             *self.transaction,
             TransactionDisposition::Commit | TransactionDisposition::Abort
-        ) && !matches!(id, 2 | 13)
+        ) && !matches!(id, 2 | 13 | 58)
         {
             return Err(Error::Unauthorized);
         }
@@ -112,6 +112,35 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             .package
             .manifest
             .capabilities;
+        match (id, arguments) {
+            (58, []) => {
+                return Ok(Some(if matches!(
+                    *self.transaction,
+                    TransactionDisposition::Begun | TransactionDisposition::Active
+                ) {
+                    Opaque(4)
+                } else {
+                    crate::mc04_vm::RuntimeValue::Ref(0)
+                }));
+            }
+            (59, [Opaque(4)])
+                if matches!(
+                    *self.transaction,
+                    TransactionDisposition::Begun | TransactionDisposition::Active
+                ) =>
+            {
+                return Ok(Some(Opaque(5)));
+            }
+            (60, [Opaque(5)])
+                if matches!(
+                    *self.transaction,
+                    TransactionDisposition::Begun | TransactionDisposition::Active
+                ) =>
+            {
+                return Ok(Some(Int(0)));
+            }
+            _ => {}
+        }
         match (id, arguments) {
             (3, [Int(key)]) | (7, [Opaque(3), Int(key)]) => {
                 self.authorize_storage(unit, *key, 1, None)?;

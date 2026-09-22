@@ -13,6 +13,7 @@ public static class Records
     [Process]
     public static void Process()
     {
+        _ = Transaction.Current;
         int length = CommandApdu.Length;
         if (length < 1)
         {
@@ -51,6 +52,7 @@ public static class Records
     private static void CommitUpdate(byte[] command)
     {
         using var scope = new TransactionScope();
+        _ = Transaction.Current!.TransactionInformation.Status;
         Write(command);
         scope.Complete();
     }
@@ -58,6 +60,7 @@ public static class Records
     private static void AbortUpdate(byte[] command)
     {
         using var scope = new TransactionScope();
+        _ = Transaction.Current!.TransactionInformation.Status;
         Write(command);
     }
 

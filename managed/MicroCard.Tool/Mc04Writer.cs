@@ -26,8 +26,8 @@ sealed class Mc04Writer : IDisposable
     readonly Dictionary<AssemblyReferenceHandle, ushort> assemblyRefs;
     readonly Dictionary<MethodDefinitionHandle, byte[]> methodCode = new();
     readonly HashSet<MethodDefinitionHandle> transactionalMethods = new();
-    readonly HashSet<TypeReferenceHandle> projectedTransactionTypes = new();
-    readonly Dictionary<MemberReferenceHandle, string> projectedTransactionMembers = new();
+    readonly Dictionary<TypeReferenceHandle, string> projectedTransactionTypes = new();
+    readonly Dictionary<MemberReferenceHandle, (string Name, bool Staticize)> projectedTransactionMembers = new();
     readonly Dictionary<byte, ushort> emptyArrayTypeRows = new();
     readonly List<(EntityHandle Scope, string Name)> syntheticTypeRefs = new();
     readonly StringHeap strings = new();
@@ -89,7 +89,8 @@ sealed class Mc04Writer : IDisposable
             var member = md.GetMemberReference(handle);
             if (member.Parent.Kind == HandleKind.TypeReference &&
                 IsSystemTransactions((TypeReferenceHandle)member.Parent) &&
-                !projectedTransactionMembers.ContainsKey(handle))
+                !projectedTransactionMembers.ContainsKey(handle) &&
+                !ProjectTransactionQuery(handle))
                 throw new Exception("Unsupported System.Transactions member");
             if (member.Parent.Kind == HandleKind.TypeReference &&
                 IsProjectedSystemCryptography((TypeReferenceHandle)member.Parent) &&
@@ -406,7 +407,7 @@ sealed class Mc04Writer : IDisposable
 
     string TypeReferenceName(TypeReferenceHandle handle) =>
         IsProjectedSystemCryptography(handle) ? "Cryptography" :
-        projectedTransactionTypes.Contains(handle) ? "TransactionScopeRuntime" :
+        projectedTransactionTypes.TryGetValue(handle, out var transactionName) ? transactionName :
         md.GetString(md.GetTypeReference(handle).Name);
 
     string TypeReferenceNamespace(TypeReferenceHandle handle) =>
@@ -414,8 +415,8 @@ sealed class Mc04Writer : IDisposable
 
     string MemberReferenceName(MemberReferenceHandle handle)
     {
-        if (projectedTransactionMembers.TryGetValue(handle, out var transactionName))
-            return transactionName;
+        if (projectedTransactionMembers.TryGetValue(handle, out var transaction))
+            return transaction.Name;
         if (!IsProjectedSystemCryptography(handle)) return md.GetString(md.GetMemberReference(handle).Name);
         return md.GetString(md.GetTypeReference(
             (TypeReferenceHandle)md.GetMemberReference(handle).Parent).Name) == "SHA256"
@@ -425,7 +426,11 @@ sealed class Mc04Writer : IDisposable
     byte[] MemberReferenceSignature(MemberReferenceHandle handle)
     {
         var signature = RewriteSignature(md.GetBlobBytes(md.GetMemberReference(handle).Signature));
-        if (projectedTransactionMembers.ContainsKey(handle))
+        if (projectedTransactionMembers.TryGetValue(handle, out var query) &&
+            query.Name == "Status")
+            return new byte[] { 0x20, 0x00, 0x08 };
+        if (projectedTransactionMembers.TryGetValue(handle, out var transaction) &&
+            transaction.Staticize)
         {
             if (!signature.AsSpan().SequenceEqual(new byte[] { 0x20, 0x00, 0x01 }))
                 throw new Exception("Unexpected TransactionScope signature");
@@ -435,7 +440,7 @@ sealed class Mc04Writer : IDisposable
     }
 
     bool IsProjectedType(TypeReferenceHandle handle) =>
-        IsProjectedSystemCryptography(handle) || projectedTransactionTypes.Contains(handle);
+        IsProjectedSystemCryptography(handle) || projectedTransactionTypes.ContainsKey(handle);
 
     bool IsSystemTransactions(TypeReferenceHandle handle)
     {
@@ -737,10 +742,74 @@ sealed class Mc04Writer : IDisposable
         var parent = md.GetMemberReference(member).Parent;
         if (parent.Kind != HandleKind.TypeReference)
             throw new Exception("TransactionScope projection requires a type reference");
-        projectedTransactionTypes.Add((TypeReferenceHandle)parent);
-        if (projectedTransactionMembers.TryGetValue(member, out var existing) && existing != name)
+        projectedTransactionTypes[(TypeReferenceHandle)parent] = "TransactionScopeRuntime";
+        var projection = (name, true);
+        if (projectedTransactionMembers.TryGetValue(member, out var existing) && existing != projection)
             throw new Exception("Conflicting TransactionScope projection");
-        projectedTransactionMembers[member] = name;
+        projectedTransactionMembers[member] = projection;
+    }
+
+    bool ProjectTransactionQuery(MemberReferenceHandle memberHandle)
+    {
+        var member = md.GetMemberReference(memberHandle);
+        if (member.Parent.Kind != HandleKind.TypeReference) return false;
+        var parent = (TypeReferenceHandle)member.Parent;
+        if (!IsSystemTransactions(parent)) return false;
+        string owner = md.GetString(md.GetTypeReference(parent).Name);
+        string memberName = md.GetString(member.Name);
+        (string RuntimeOwner, string RuntimeMember, byte Calling, byte ResultKind, string ResultType)? shape =
+            (owner, memberName) switch
+            {
+                ("Transaction", "get_Current") =>
+                    ("TransactionRuntime", "Current", 0x00, 0x12, "Transaction"),
+                ("Transaction", "get_TransactionInformation") =>
+                    ("TransactionRuntime", "Information", 0x20, 0x12, "TransactionInformation"),
+                ("TransactionInformation", "get_Status") =>
+                    ("TransactionInformationRuntime", "Status", 0x20, 0x11, "TransactionStatus"),
+                _ => null,
+            };
+        if (shape is null) return false;
+        var expected = shape.Value;
+        if (!TransactionGetterSignature(member.Signature, expected.Calling,
+                expected.ResultKind, expected.ResultType))
+            throw new Exception("Unexpected System.Transactions query signature");
+        projectedTransactionTypes[parent] = expected.RuntimeOwner;
+        ProjectTransactionType(expected.ResultType,
+            expected.ResultType == "Transaction" ? "TransactionRuntime" :
+            expected.ResultType == "TransactionInformation" ? "TransactionInformationRuntime" :
+            "TransactionStatusRuntime");
+        projectedTransactionMembers[memberHandle] = (expected.RuntimeMember, false);
+        return true;
+    }
+
+    void ProjectTransactionType(string source, string runtime)
+    {
+        foreach (var handle in md.TypeReferences)
+        {
+            var type = md.GetTypeReference(handle);
+            if (IsSystemTransactions(handle) && md.GetString(type.Name) == source)
+                projectedTransactionTypes[handle] = runtime;
+        }
+    }
+
+    bool TransactionGetterSignature(BlobHandle signatureHandle, byte calling,
+        byte resultKind, string resultType)
+    {
+        byte[] signature = md.GetBlobBytes(signatureHandle);
+        if (signature.Length < 4 || signature[0] != calling || signature[1] != 0 ||
+            signature[2] != resultKind) return false;
+        int cursor = 3;
+        uint coded;
+        byte first = signature[cursor++];
+        if (first < 0x80) coded = first;
+        else if (first < 0xc0 && cursor < signature.Length)
+            coded = checked((uint)((first & 0x3f) << 8 | signature[cursor++]));
+        else return false;
+        if (cursor != signature.Length || (coded & 3) != 1 || (coded >> 2) == 0)
+            return false;
+        var result = MetadataTokens.TypeReferenceHandle(checked((int)(coded >> 2)));
+        var type = md.GetTypeReference(result);
+        return IsSystemTransactions(result) && md.GetString(type.Name) == resultType;
     }
 
     static void WriteProjectedCall(BinaryWriter writer, MemberReferenceHandle member)
