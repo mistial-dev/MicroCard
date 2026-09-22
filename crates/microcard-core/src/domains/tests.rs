@@ -986,6 +986,24 @@ fn transaction_negative_package(
     )
 }
 
+fn stage_pending_transaction(
+    card: &mut Mc04Engine<MemoryFlash, TestPlatform>,
+    value: i32,
+    commands_left: u8,
+) {
+    let (registry_aid, incarnation, state) = {
+        let domain = card.state.domains.get_mut("transaction").unwrap();
+        let mut state = StagedApplication::new(domain).unwrap();
+        state.view(domain).store.insert(1, value).unwrap();
+        (domain.registry_aid, domain.incarnation, state)
+    };
+    card.transaction = Some(PendingTransaction {
+        owner: (registry_aid, incarnation, "F04D430020".into()),
+        state,
+        commands_left,
+    });
+}
+
 fn key_operations_package(id: &str, inc: [u8; 16], version: u32, seed: u8) -> Vec<u8> {
     key_operations_package_with_storage(
         id,
@@ -1811,7 +1829,7 @@ fn lifecycle_callbacks_share_staging_and_roll_back_registry_and_data() {
 }
 
 #[test]
-fn generated_transaction_scope_commits_or_aborts_as_one_command() {
+fn explicit_transaction_lifecycle_is_bounded_and_owner_scoped() {
     let mut card = card();
     let incarnation = create(&mut card, "transaction");
     load(
@@ -1851,7 +1869,27 @@ fn generated_transaction_scope_commits_or_aborts_as_one_command() {
     assert_eq!(card.invoke("F04D430022", &[0]), Err(Error::Unauthorized));
     assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
 
+    let generation = card.journal.generation();
+    stage_pending_transaction(&mut card, 44, 2);
+    assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [44, 22, 33, 0x90, 0]);
+    assert_eq!(card.invoke("F04D430020", &[2]), Err(Error::Budget));
+    assert!(card.transaction.is_none(), "expired transaction remained active");
+    assert_eq!(card.journal.generation(), generation);
+    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
+
+    stage_pending_transaction(&mut card, 55, MAX_TRANSACTION_COMMANDS);
+    card.select("F04D430022").unwrap();
+    assert!(card.transaction.is_none(), "selection retained another applet's transaction");
+    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
+
+    stage_pending_transaction(&mut card, 66, MAX_TRANSACTION_COMMANDS);
+    assert_eq!(card.invoke("F04D430022", &[0]), Err(Error::Unauthorized));
+    assert!(card.transaction.is_none(), "another applet controlled the transaction");
+    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
+
+    stage_pending_transaction(&mut card, 77, MAX_TRANSACTION_COMMANDS);
     let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
+    assert!(card.transaction.is_none(), "reset recovered an in-memory transaction");
     assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [11, 22, 33, 0x90, 0]);
 }
 
