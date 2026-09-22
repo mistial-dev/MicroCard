@@ -254,7 +254,9 @@ impl<'a> PackageView<'a> {
             }
         }
         for c in &manifest.capabilities {
-            crate::native_abi::signature(*c)?;
+            if !crate::native_abi::valid_capability(*c) {
+                return Err(Error::Native);
+            }
         }
         assembly.validate_imports(&manifest.capabilities)?;
         if expected_digest.is_some_and(|expected| *expected != digest) {

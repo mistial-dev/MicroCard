@@ -17,10 +17,9 @@ impl DomainPolicy {
     pub(super) fn standard() -> Result<Self> {
         let mut capabilities = Vec::new();
         capabilities
-            .try_reserve_exact(46)
+            .try_reserve_exact(crate::native_abi::CAPABILITIES.len())
             .map_err(|_| Error::Quota)?;
-        // 21 was the Ed25519 verification primitive, which the card no longer carries.
-        capabilities.extend((2..=13).chain(core::iter::once(20)).chain(22..=54));
+        capabilities.extend_from_slice(crate::native_abi::CAPABILITIES);
         Ok(Self {
             capabilities,
             max_assemblies: MAX_ASSEMBLIES_PER_DOMAIN,
@@ -38,7 +37,7 @@ impl DomainPolicy {
             && self
                 .capabilities
                 .iter()
-                .all(|id| crate::native_abi::signature(*id).is_ok())
+                .all(|id| crate::native_abi::valid_capability(*id))
             && (1..=MAX_ASSEMBLIES_PER_DOMAIN).contains(&self.max_assemblies)
             && (1..=MAX_INSTANCES_PER_DOMAIN).contains(&self.max_instances)
             && (1..=MAX_INT_RECORDS as u16).contains(&self.max_int_records)

@@ -1646,7 +1646,7 @@ fn domain_policy_is_immutable_and_enforced() {
     );
     assert!(c.state.domains["a"].key.is_none());
 
-    policy.capabilities = alloc::vec![2, 3, 4, 7, 8, 9, 11, 12, 13, 20];
+    policy.capabilities = alloc::vec![2, 7, 8, 9, 11, 12, 13, 20];
     c.manage(command(0xe1, &request(policy.clone()))).unwrap();
     load(&mut c, &counter_package("a", inc, 1, 7)).unwrap();
     assert_eq!(
@@ -1837,14 +1837,17 @@ fn explicit_transaction_lifecycle_is_bounded_and_owner_scoped() {
         &transaction_records_package("transaction", incarnation, 1, 7),
     )
     .unwrap();
-    load(
-        &mut card,
-        &transaction_negative_package("transaction", incarnation, 1, 7),
-    )
-    .unwrap();
+    assert_eq!(
+        load(
+            &mut card,
+            &transaction_negative_package("transaction", incarnation, 1, 7),
+        ),
+        Err(Error::Unsupported)
+    );
+    load(&mut card, &counter_package("transaction", incarnation, 1, 7)).unwrap();
     card.manage(command(0xec, &management_names_wire("transaction", "F04D430020").unwrap()))
         .unwrap();
-    card.manage(command(0xec, &management_names_wire("transaction", "F04D430022").unwrap()))
+    card.manage(command(0xec, &management_names_wire("transaction", "F04D430001").unwrap()))
         .unwrap();
     let generation = card.journal.generation();
     let (_, abort_metrics) = card
@@ -1866,9 +1869,6 @@ fn explicit_transaction_lifecycle_is_bounded_and_owner_scoped() {
         [11, 22, 33, 0x90, 0]
     );
 
-    assert_eq!(card.invoke("F04D430022", &[0]), Err(Error::Unauthorized));
-    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
-
     let generation = card.journal.generation();
     stage_pending_transaction(&mut card, 44, 2);
     assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [44, 22, 33, 0x90, 0]);
@@ -1878,19 +1878,19 @@ fn explicit_transaction_lifecycle_is_bounded_and_owner_scoped() {
     assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
 
     stage_pending_transaction(&mut card, 55, MAX_TRANSACTION_COMMANDS);
-    card.select("F04D430022").unwrap();
+    card.select("F04D430001").unwrap();
     assert!(card.transaction.is_none(), "selection retained another applet's transaction");
     assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
 
     stage_pending_transaction(&mut card, 66, MAX_TRANSACTION_COMMANDS);
-    assert_eq!(card.invoke("F04D430022", &[0]), Err(Error::Unauthorized));
+    assert_eq!(card.invoke("F04D430001", &[0]).unwrap(), [12, 0x90, 0]);
     assert!(card.transaction.is_none(), "another applet controlled the transaction");
-    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&11));
+    assert_eq!(card.state.domains["transaction"].store.get(&1), Some(&12));
 
     stage_pending_transaction(&mut card, 77, MAX_TRANSACTION_COMMANDS);
     let mut card = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
     assert!(card.transaction.is_none(), "reset recovered an in-memory transaction");
-    assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [11, 22, 33, 0x90, 0]);
+    assert_eq!(card.invoke("F04D430020", &[2]).unwrap(), [12, 22, 33, 0x90, 0]);
 }
 
 #[test]
@@ -1934,7 +1934,7 @@ fn representative_simulator_runtime_peaks_stay_within_budget() {
     assert_eq!(
         peak,
         crate::mc04_vm::ExecutionMetrics {
-            instructions: 256,
+            instructions: 294,
             peak_evaluation_slots: 7,
             peak_local_slots: 10,
             peak_frames: 2,
@@ -3334,7 +3334,7 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
     let mut keys = crate::key_store::KeyStore::default();
     let mut credentials = crate::credential_store::CredentialStore::default();
     let mut platform = TestPlatform(0);
-    let capabilities = [4, 22, 25, 29, 31, 32, 33, 34, 52];
+    let capabilities = [8, 22, 25, 29, 31, 32, 33, 34, 52];
     let mut transaction = TransactionDisposition::Inactive;
     let mut transaction_snapshot = None;
     let mut persistent_dirty = false;
@@ -3397,7 +3397,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             52,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(7),
                 vm::NativeArgument::Bytes(b"xvaluey"),
                 vm::NativeArgument::Int(1),
@@ -3409,14 +3408,14 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
     assert!(matches!(
         host.key_call(
             31,
-            &[vm::NativeArgument::Int(0), vm::NativeArgument::Int(7)]
+            &[vm::NativeArgument::Int(7)]
         ),
         Ok(vm::BufferResult::Bytes(value)) if value == b"value"
     ));
     assert!(matches!(
         host.key_call(
             34,
-            &[vm::NativeArgument::Int(0), vm::NativeArgument::Int(7)]
+            &[vm::NativeArgument::Int(7)]
         ),
         Ok(vm::BufferResult::Scalar(1))
     ));
@@ -3425,7 +3424,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(7),
                 vm::NativeArgument::Bytes(b"value"),
             ]
@@ -3439,7 +3437,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             52,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(7),
                 vm::NativeArgument::Bytes(b"value"),
                 vm::NativeArgument::Int(4),
@@ -3453,7 +3450,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(7),
                 vm::NativeArgument::Bytes(b"value"),
             ]
@@ -3466,7 +3462,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(8),
                 vm::NativeArgument::Bytes(&[]),
             ]
@@ -3475,13 +3470,12 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
     );
     host.max_blob_records = 64;
     host.max_int_records = 1;
-    assert_eq!(host.call(4, &[1, 1]), Ok(None));
-    assert_eq!(host.call(4, &[2, 2]), Err(Error::Quota));
+    assert_eq!(host.call(8, &[1, 1]), Ok(None));
+    assert_eq!(host.call(8, &[2, 2]), Err(Error::Quota));
     assert!(matches!(
         host.key_call(
             22,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(1),
             ]
@@ -3493,7 +3487,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             22,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(1),
                 vm::NativeArgument::Int(1),
             ]
@@ -3502,16 +3495,8 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
     );
     assert_eq!(
         host.key_call(
-            31,
-            &[vm::NativeArgument::Int(1), vm::NativeArgument::Int(7)]
-        ),
-        Err(Error::Unauthorized)
-    );
-    assert_eq!(
-        host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(8),
                 vm::NativeArgument::Bytes(&[0; MAX_DECLARED_BLOB_BYTES as usize + 1]),
             ]
@@ -3522,7 +3507,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(slot),
                 vm::NativeArgument::Bytes(&[slot as u8; 1024]),
             ],
@@ -3533,7 +3517,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(8),
                 vm::NativeArgument::Bytes(&[0]),
             ]
@@ -3544,7 +3527,7 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         assert_eq!(
             host.key_call(
                 33,
-                &[vm::NativeArgument::Int(0), vm::NativeArgument::Int(slot)]
+                &[vm::NativeArgument::Int(slot)]
             ),
             Ok(vm::BufferResult::Void)
         );
@@ -3553,7 +3536,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(slot),
                 vm::NativeArgument::Bytes(&[]),
             ],
@@ -3564,7 +3546,6 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
         host.key_call(
             32,
             &[
-                vm::NativeArgument::Int(0),
                 vm::NativeArgument::Int(64),
                 vm::NativeArgument::Bytes(&[]),
             ]
@@ -3574,7 +3555,7 @@ fn byte_storage_native_api_enforces_ownership_and_quotas() {
     assert_eq!(
         host.key_call(
             33,
-            &[vm::NativeArgument::Int(0), vm::NativeArgument::Int(100)]
+            &[vm::NativeArgument::Int(100)]
         ),
         Err(Error::Missing)
     );

@@ -42,7 +42,7 @@ for budget in (1, 4_000_000, 0, 4_000_001):
 print("PASS: JCVM manifest CBOR shared vector and version/shape rejection")
 
 from device_cbor import encode, decode
-policy = [bytes([*range(2, 14), 20, *range(22, 55)]), 8, 8, 512, 64, 8192, 8, 16384]
+policy = [bytes([2, *range(5, 14), 20, *range(22, 55)]), 8, 8, 512, 64, 8192, 8, 16384]
 domain = [bytes([1] * 16), bytes.fromhex("a000000151000000"), bytes([2] * 32), policy,
           [["mscorlib", [7, 123, bytes([3] * 32)]]], [], [], [], [], [], [], [], [], []]
 state = [2, 0, 0, domain, []]

@@ -4,6 +4,60 @@ use crate::{Error, Result};
 
 pub const CATALOG_SHA256: &str = "fbf27e9a7355a1d62755412dfad24122b24708b1c0c76dbbef17936d8ed0cad0";
 
+pub const CAPABILITIES: &[u8] = &[
+    2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+    36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
+];
+
+pub const fn valid_capability(id: u8) -> bool {
+    matches!(
+        id,
+        2 | 5
+            | 6
+            | 7
+            | 8
+            | 9
+            | 10
+            | 11
+            | 12
+            | 13
+            | 20
+            | 22
+            | 23
+            | 24
+            | 25
+            | 26
+            | 27
+            | 28
+            | 29
+            | 30
+            | 31
+            | 32
+            | 33
+            | 34
+            | 35
+            | 36
+            | 37
+            | 38
+            | 39
+            | 40
+            | 41
+            | 42
+            | 43
+            | 44
+            | 45
+            | 46
+            | 47
+            | 48
+            | 49
+            | 50
+            | 51
+            | 52
+            | 53
+            | 54
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Signature {
     pub arguments: u8,
@@ -91,6 +145,13 @@ mod tests {
             assert_eq!(
                 signature(id).is_ok(),
                 VALID.contains(&id),
+                "capability {id}"
+            );
+        }
+        for id in 0..=u8::MAX {
+            assert_eq!(
+                valid_capability(id),
+                CAPABILITIES.contains(&id),
                 "capability {id}"
             );
         }

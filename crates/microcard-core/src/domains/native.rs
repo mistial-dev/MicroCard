@@ -142,10 +142,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             _ => {}
         }
         match (id, arguments) {
-            (3, [Int(key)]) | (7, [Opaque(3), Int(key)]) => {
+            (7, [Opaque(3), Int(key)]) => {
                 self.authorize_storage(unit, *key, 1, None)?;
             }
-            (4, [Int(key), Int(_)]) | (8, [Opaque(3), Int(key), Int(_)]) => {
+            (8, [Opaque(3), Int(key), Int(_)]) => {
                 self.authorize_storage(unit, *key, 1, None)?;
             }
             (31 | 33 | 34, [Opaque(3), Int(key)]) => {
@@ -157,12 +157,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             _ => {}
         }
         let result = match (id, arguments) {
-            (2, [Int(value)]) => scalar(self.call(id, &[*value])?),
-            (3, [Int(key)]) => scalar(self.call(3, &[*key])?),
-            (4, [Int(key), Int(value)]) => scalar(self.call(4, &[*key, *value])?),
-            (5 | 9 | 10, []) => scalar(self.call(id, &[])?),
-            (11, []) => scalar(self.call(id, &[])?),
-            (12, [destination, Int(destination_offset), Int(source_offset), Int(length)]) => {
+            (2, [Opaque(2), Int(value)]) => scalar(self.call(id, &[*value])?),
+            (5 | 9 | 10, [Opaque(2)]) => scalar(self.call(id, &[])?),
+            (11, [Opaque(2)]) => scalar(self.call(id, &[])?),
+            (12, [Opaque(2), destination, Int(destination_offset), Int(source_offset), Int(length)]) => {
                 self.copy_command(
                     heap,
                     *destination,
@@ -180,11 +178,11 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                 let copied = self.copy_bytes(heap, *source, *source_offset, *destination, *destination_offset, *length)?;
                 BufferResult::Scalar(i32::from(copied))
             }
-            (13, [source, Int(source_offset), Int(length)]) => {
+            (13, [Opaque(2), source, Int(source_offset), Int(length)]) => {
                 self.write_response(heap, *source, *source_offset, *length)?;
                 BufferResult::Void
             }
-            (6, [Int(resource), Int(value)]) => {
+            (6, [Opaque(2), Int(resource), Int(value)]) => {
                 if self.transaction.transaction_involved() {
                     return Err(Error::Unauthorized);
                 }
@@ -192,19 +190,20 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                 self.irreversible_output = true;
                 result
             }
-            (7, [Opaque(3), Int(key)]) => scalar(self.call(7, &[0, *key])?),
-            (8, [Opaque(3), Int(key), Int(value)]) => scalar(self.call(8, &[0, *key, *value])?),
-            (20, [input]) => self.buffers(20, &[heap.bytes(*input)?])?,
+            (7, [Opaque(3), Int(key)]) => scalar(self.call(7, &[*key])?),
+            (8, [Opaque(3), Int(key), Int(value)]) => scalar(self.call(8, &[*key, *value])?),
+            (20, [input]) | (20, [Opaque(2), input]) => {
+                self.buffers(20, &[heap.bytes(*input)?])?
+            }
             (22, [Opaque(2), Int(slot), Int(algorithm)]) => self.key_call(
                 22,
                 &[
-                    NativeArgument::Int(0),
                     NativeArgument::Int(*slot),
                     NativeArgument::Int(*algorithm),
                 ],
             )?,
             (23 | 24, [Opaque(2), Int(slot)]) => {
-                self.key_call(id, &[NativeArgument::Int(0), NativeArgument::Int(*slot)])?
+                self.key_call(id, &[NativeArgument::Int(*slot)])?
             }
             (25 | 26, [handle, input]) => self.key_call(
                 id,
@@ -231,12 +230,11 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                 ],
             )?,
             (31, [Opaque(3), Int(key)]) => {
-                self.key_call(31, &[NativeArgument::Int(0), NativeArgument::Int(*key)])?
+                self.key_call(31, &[NativeArgument::Int(*key)])?
             }
             (32, [Opaque(3), Int(key), value]) => self.key_call(
                 32,
                 &[
-                    NativeArgument::Int(0),
                     NativeArgument::Int(*key),
                     NativeArgument::Bytes(heap.bytes(*value)?),
                 ],
@@ -244,7 +242,6 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             (52, [Opaque(3), Int(key), value, Int(offset), Int(length)]) => self.key_call(
                 52,
                 &[
-                    NativeArgument::Int(0),
                     NativeArgument::Int(*key),
                     NativeArgument::Bytes(heap.bytes(*value)?),
                     NativeArgument::Int(*offset),
@@ -252,7 +249,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                 ],
             )?,
             (33 | 34, [Opaque(3), Int(key)]) => {
-                self.key_call(id, &[NativeArgument::Int(0), NativeArgument::Int(*key)])?
+                self.key_call(id, &[NativeArgument::Int(*key)])?
             }
             (35, [handle]) => self.key_call(
                 35,
@@ -274,7 +271,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Bytes(heap.bytes(*input)?),
                 ],
             )?,
-            (37, [public_key, data, signature]) => self.buffers(
+            (37, [Opaque(2), public_key, data, signature]) => self.buffers(
                 37,
                 &[
                     heap.bytes(*public_key)?,
@@ -282,11 +279,11 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     heap.bytes(*signature)?,
                 ],
             )?,
-            (39, [destination, Int(offset), Int(length)]) => {
+            (39, [Opaque(2), destination, Int(offset), Int(length)]) => {
                 self.fill_random(heap, *destination, *offset, *length)?;
                 BufferResult::Void
             }
-            (49, [input, Int(input_offset), Int(input_length), destination, Int(destination_offset)]) => {
+            (49, [Opaque(2), input, Int(input_offset), Int(input_length), destination, Int(destination_offset)]) => {
                 scalar(Some(self.sha256_into(
                     heap,
                     *input,
@@ -296,15 +293,17 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     *destination_offset,
                 )?))
             }
-            (50, [Int(length)]) => BufferResult::Bytes(self.random_bytes(*length)?),
-            (51, [left, Int(left_offset), Int(left_length), right, Int(right_offset), Int(right_length)]) => {
+            (50, [Int(length)]) | (50, [Opaque(2), Int(length)]) => {
+                BufferResult::Bytes(self.random_bytes(*length)?)
+            }
+            (51, [Opaque(2), left, Int(left_offset), Int(left_length), right, Int(right_offset), Int(right_length)]) => {
                 scalar(Some(self.fixed_time_equals(
                     heap,
                     (*left, *left_offset, *left_length),
                     (*right, *right_offset, *right_length),
                 )?))
             }
-            (40, [Int(slot), pin, Int(pin_offset), Int(pin_length), Int(pin_retries), puk, Int(puk_offset), Int(puk_length), Int(puk_retries)]) => self
+            (40, [Opaque(2), Int(slot), pin, Int(pin_offset), Int(pin_length), Int(pin_retries), puk, Int(puk_offset), Int(puk_length), Int(puk_retries)]) => self
                 .credential_call(
                     40,
                     &[
@@ -319,7 +318,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                         NativeArgument::Int(*puk_retries),
                     ],
                 )?,
-            (41, [Int(slot), candidate, Int(offset), Int(length)]) => self.credential_call(
+            (41, [Opaque(2), Int(slot), candidate, Int(offset), Int(length)]) => self.credential_call(
                 41,
                 &[
                     NativeArgument::Int(*slot),
@@ -328,10 +327,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*length),
                 ],
             )?,
-            (42, [Int(slot)]) => {
+            (42, [Opaque(2), Int(slot)]) => {
                 self.credential_call(42, &[NativeArgument::Int(*slot)])?
             }
-            (43, [Int(slot), new_pin, Int(offset), Int(length)]) => self.credential_call(
+            (43, [Opaque(2), Int(slot), new_pin, Int(offset), Int(length)]) => self.credential_call(
                 43,
                 &[
                     NativeArgument::Int(*slot),
@@ -340,7 +339,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*length),
                 ],
             )?,
-            (44, [Int(slot), puk, Int(puk_offset), Int(puk_length), new_pin, Int(new_pin_offset), Int(new_pin_length)]) => self.credential_call(
+            (44, [Opaque(2), Int(slot), puk, Int(puk_offset), Int(puk_length), new_pin, Int(new_pin_offset), Int(new_pin_length)]) => self.credential_call(
                 44,
                 &[
                     NativeArgument::Int(*slot),
@@ -352,7 +351,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*new_pin_length),
                 ],
             )?,
-            (45, [Int(slot), Int(kind)]) => self.credential_call(
+            (45, [Opaque(2), Int(slot), Int(kind)]) => self.credential_call(
                 45,
                 &[NativeArgument::Int(*slot), NativeArgument::Int(*kind)],
             )?,
@@ -611,7 +610,7 @@ impl<P: Platform> Host<'_, '_, P> {
                     native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len(),
                 )
                 .ok_or(Error::Quota)?,
-            52 => native_range(args[2].bytes()?, args[3].int()?, args[4].int()?)?.len(),
+            52 => native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len(),
             _ => complete_byte_total,
         };
         if byte_total > MAX_KEY_SERVICE_TOTAL_BYTES {
@@ -625,30 +624,21 @@ impl<P: Platform> Host<'_, '_, P> {
         // Management credentials never enter this store. A caller can access only its current SSD.
         let bytes = match id {
             22 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
                 if self.keys.len() >= self.max_key_slots {
                     return Err(Error::Quota);
                 }
                 let generated = self.keys
-                    .generate(self.owner, args[1].int()?, args[2].int()?, |b| {
+                    .generate(self.owner, args[0].int()?, args[1].int()?, |b| {
                         self.platform.random(b)
                     })?;
                 *self.persistent_dirty = true;
                 generated
             }
             23 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
-                self.keys.open(self.owner, args[1].int()?)?
+                self.keys.open(self.owner, args[0].int()?)?
             }
             24 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
-                self.keys.delete(args[1].int()?)?;
+                self.keys.delete(args[0].int()?)?;
                 *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
@@ -700,20 +690,14 @@ impl<P: Platform> Host<'_, '_, P> {
                 self.platform,
             )?,
             31 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
-                match self.blobs.get(&args[1].int()?) {
+                match self.blobs.get(&args[0].int()?) {
                     Some(value) => Self::copy_buffer(value)?,
                     None => Vec::new(),
                 }
             }
             32 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
-                let key = args[1].int()?;
-                let value = args[2].bytes()?;
+                let key = args[0].int()?;
+                let value = args[1].bytes()?;
                 if value.len() > usize::from(MAX_DECLARED_BLOB_BYTES) {
                     return Err(Error::Quota);
                 }
@@ -733,11 +717,8 @@ impl<P: Platform> Host<'_, '_, P> {
                 return Ok(BufferResult::Void);
             }
             52 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
-                let key = args[1].int()?;
-                let value = native_range(args[2].bytes()?, args[3].int()?, args[4].int()?)?;
+                let key = args[0].int()?;
+                let value = native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?;
                 if value.len() > usize::from(MAX_DECLARED_BLOB_BYTES) {
                     return Err(Error::Quota);
                 }
@@ -757,20 +738,14 @@ impl<P: Platform> Host<'_, '_, P> {
                 return Ok(BufferResult::Void);
             }
             33 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
-                let mut removed = self.blobs.remove(&args[1].int()?).ok_or(Error::Missing)?;
+                let mut removed = self.blobs.remove(&args[0].int()?).ok_or(Error::Missing)?;
                 removed.zeroize();
                 *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
             34 => {
-                if args[0].int()? != 0 {
-                    return Err(Error::Unauthorized);
-                }
                 return Ok(BufferResult::Scalar(
-                    self.blobs.contains_key(&args[1].int()?) as i32,
+                    self.blobs.contains_key(&args[0].int()?) as i32,
                 ));
             }
             _ => return Err(Error::Native),
@@ -814,8 +789,8 @@ impl<P: Platform> Host<'_, '_, P> {
     pub(super) fn call(&mut self, id: u8, a: &[i32]) -> Result<Option<i32>> {
         self.charge(id, 0)?;
         let (id, a) = match id {
-            7 => (3, &a[1..]),
-            8 => (4, &a[1..]),
+            7 => (3, a),
+            8 => (4, a),
             _ => (id, a),
         };
         match id {
