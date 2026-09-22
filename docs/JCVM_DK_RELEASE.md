@@ -61,12 +61,13 @@ change passed RFC 6979 sample vectors, negative cases, sanitizer runs, and all
 179 configured CTest cases; the subsequent key-generation change passed focused
 EC and sanitizer suites. Optional external vector corpora were not supplied.
 For a Cortex-M4 `-Os` object with these three curves enabled, `ec.c` grew from
-4,827 to 6,045 text bytes before link-time dead-code elimination. This is
-upstream library work only. The DK firmware does not link this branch yet, and
-Java Card P-192/P-384 signing and key generation remain unsupported. Before
-enabling it, pin the full commit in the build, review license and source
-provenance, connect a fail-closed board provider, and pass key import,
-operation, failure, and reboot acceptance.
+4,827 to 6,045 text bytes before link-time dead-code elimination. The EC source
+is vendored as an exact slice in `vendor/tiny-crypto-c`. Its no-std Rust
+bridge passes host and ARM compilation and a focused cross-language lifecycle
+test. The DK firmware does not link this bridge yet, and Java Card P-192/P-384
+signing and key generation remain unsupported. Before enabling it, connect a
+fail-closed board provider and pass key import, operation, failure, and reboot
+acceptance.
 
 ## Baseline before unsigned loading
 
