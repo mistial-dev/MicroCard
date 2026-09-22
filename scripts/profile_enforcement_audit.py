@@ -71,10 +71,8 @@ def main() -> None:
         "MAX_CUSTOMATTRIBUTE_ROWS: u16 = 256",
     ))
     require("crates/microcard-core/src/domains/linking.rs", ("validate_linked_program(&units)?",))
-    require("crates/microcard-core/src/domains.rs", (
-        "merged_storage_schema",
-        "domain_schema",
-    ))
+    require("crates/microcard-core/src/domains/model.rs", ("merged_storage_schema",))
+    require("crates/microcard-core/src/domains/session.rs", ("domain_schema",))
     require("crates/microcard-core/src/domains/native.rs", ("authorize_storage", "domain_schema"))
     print("PASS: active analyzer coverage and profile enforcement sites are present")
 

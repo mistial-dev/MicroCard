@@ -29,10 +29,16 @@ AUDITED = {
         "self.data[at..at + 4].copy_from_slice(&value.to_le_bytes());",
     ],
     "crates/microcard-core/src/domains.rs": [
-        "merged.extend_from_slice(&self.storage_schema);",
         "copy.extend_from_slice(value);",
+    ],
+    "crates/microcard-core/src/domains/model.rs": [
+        "merged.extend_from_slice(&self.storage_schema);",
         # Clones a pair of offsets, not package bytes.
         "image: raw.get(self.image.clone()).ok_or(Error::Storage)?,",
+    ],
+    "crates/microcard-core/src/domains/registry.rs": [
+        # Build the authenticated policy from the generated canonical ABI list.
+        "capabilities.extend_from_slice(crate::native_abi::CAPABILITIES);",
         # MC04 recovery still owns one shared immutable package buffer.
         "version[index * 2..index * 2 + 2].copy_from_slice(&component.to_be_bytes());",
         ".copy_from_slice(&crate::globalplatform::ISD_AID);",

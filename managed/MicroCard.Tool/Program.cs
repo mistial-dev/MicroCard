@@ -41,6 +41,9 @@ sealed class Compiler : IDisposable
 
     sealed record DependencyDeclaration(string Name, string ReferenceName, bool HasExplicitReference, object Manifest);
 
+    static bool IsSupportedFieldType(string type) =>
+        type == "int32" || type.StartsWith("enum:MicroCard.Framework.", StringComparison.Ordinal);
+
     public Compiler(string input)
     {
         this.input = input;
@@ -55,7 +58,7 @@ sealed class Compiler : IDisposable
         const System.Reflection.TypeAttributes supportedTypeAttributes = System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Abstract | System.Reflection.TypeAttributes.Sealed | System.Reflection.TypeAttributes.BeforeFieldInit;
         foreach (var h in md.TypeDefinitions) { var t = md.GetTypeDefinition(h); var name = md.GetString(t.Name); if (name == "<Module>") { if (t.Attributes != 0 || !t.BaseType.IsNil) throw new Exception("Unsupported module type"); continue; } if ((t.Attributes & ~supportedTypeAttributes) != 0 || (t.Attributes & System.Reflection.TypeAttributes.Sealed) == 0) throw new Exception("Unsupported type flags"); if (t.BaseType.Kind != HandleKind.TypeReference) throw new Exception("Unsupported base type"); var baseType = md.GetTypeReference((TypeReferenceHandle)t.BaseType); if (md.GetString(baseType.Name) != "Object" || md.GetString(baseType.Namespace) != "System" || baseType.ResolutionScope.Kind != HandleKind.AssemblyReference) throw new Exception("Unsupported base type"); }
         const System.Reflection.FieldAttributes supportedFieldAttributes = System.Reflection.FieldAttributes.FieldAccessMask | System.Reflection.FieldAttributes.InitOnly;
-        foreach (var h in md.FieldDefinitions) { var f = md.GetFieldDefinition(h); var signature = md.GetBlobBytes(f.Signature); if (signature.Length != 2 || signature[0] != 0x06 || signature[1] != 0x08) throw new Exception("Only Int32 fields and constants supported"); if ((f.Attributes & System.Reflection.FieldAttributes.Literal) != 0) continue; if ((f.Attributes & ~supportedFieldAttributes) != 0) throw new Exception("Unsupported field flags"); }
+        foreach (var h in md.FieldDefinitions) { var f = md.GetFieldDefinition(h); if (!IsSupportedFieldType(f.DecodeSignature(types, null))) throw new Exception("Only Int32 fields and constants supported"); if ((f.Attributes & System.Reflection.FieldAttributes.Literal) != 0) continue; if ((f.Attributes & ~supportedFieldAttributes) != 0) throw new Exception("Unsupported field flags"); }
         const System.Reflection.MethodAttributes supportedMethodAttributes = System.Reflection.MethodAttributes.MemberAccessMask | System.Reflection.MethodAttributes.Static | System.Reflection.MethodAttributes.HideBySig | System.Reflection.MethodAttributes.SpecialName | System.Reflection.MethodAttributes.RTSpecialName;
         foreach (var h in md.MethodDefinitions) { var m = md.GetMethodDefinition(h); var owner = md.GetTypeDefinition(m.GetDeclaringType()); if (owner.GetGenericParameters().Count != 0) throw new Exception("Generic type"); if ((m.Attributes & System.Reflection.MethodAttributes.Static) == 0 && (owner.Attributes & System.Reflection.TypeAttributes.Sealed) == 0) throw new Exception("Only sealed objects supported"); if ((m.Attributes & ~supportedMethodAttributes) != 0 || m.ImplAttributes != 0) throw new Exception("Unsupported method flags"); if (md.GetString(m.Name) == ".cctor") throw new Exception("Static constructor unsupported"); if (m.GetGenericParameters().Count != 0 || m.RelativeVirtualAddress == 0) throw new Exception("Unsupported method"); if (m.DecodeSignature(types, null).ParameterTypes.Length > 32) throw new Exception("Method parameter quota exceeded"); ids[h] = ids.Count; }
     }
