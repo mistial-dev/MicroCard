@@ -138,6 +138,28 @@ The demonstration provisions separate Personal and Work credentials, signs fresh
 challenges, exhausts and recovers a PIN, rejects invalid packages, and verifies state
 after restarting the simulator. See the [wallet guide](docs/WALLET.md).
 
+## Create an MC04 assembly
+
+MC04 applications are assemblies. Java Card applications are applets. The project
+template installs the compile-time API, analyzer, and converter through one private
+package reference, so editors provide normal completion and diagnostics without adding
+the API assembly to the converted package.
+
+Until the packages are published, build and install them from a checkout:
+
+```sh
+mkdir -p work/packages
+dotnet pack managed/OpenPhysical.MicroCard.Sdk -c Release -o work/packages
+dotnet pack managed/OpenPhysical.MicroCard.Templates -c Release -o work/packages
+dotnet new install work/packages/OpenPhysical.MicroCard.Templates.0.1.0-wip.nupkg
+dotnet new microcard-assembly -n CredentialCard --sdkVersion 0.1.0-wip
+dotnet build CredentialCard
+```
+
+The converted `.mca` image and manifest are written below the project's
+`obj/<configuration>/<framework>/microcard` directory. Run the isolated packaging and
+conversion check with `python3 scripts/sdk_template_smoke.py`.
+
 ## Architecture and security boundaries
 
 Both engines share APDU transport, GlobalPlatform/SCP03 management, authenticated
