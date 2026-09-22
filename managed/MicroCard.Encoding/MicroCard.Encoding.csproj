@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="../MicroCard.Framework/MicroCard.Framework.csproj" />
     <Compile Include="../Shared/BoundedTlv.cs" Link="BoundedTlv.cs" />
+    <Compile Include="../Shared/DerCanonical.cs" Link="DerCanonical.cs" />
   </ItemGroup>
   <Import Project="../../build/MicroCard.targets" />
 </Project>

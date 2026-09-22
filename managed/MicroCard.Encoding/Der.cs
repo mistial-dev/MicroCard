@@ -74,7 +74,7 @@ public static class Der
     public static int WriteObjectIdentifier(byte[] output, int offset, int capacity,
         byte[] encodedValue, int valueOffset, int valueLength)
     {
-        if (!BoundedTlv.IsCanonicalObjectIdentifier(encodedValue, valueOffset, valueLength))
+        if (!DerCanonical.IsObjectIdentifier(encodedValue, valueOffset, valueLength))
             return -1;
         return WriteValue(output, offset, capacity, ObjectIdentifierTag,
             encodedValue, valueOffset, valueLength);
@@ -170,7 +170,7 @@ public static class Der
     private static int WriteConstructed(byte[] output, int offset, int capacity, int tag,
         byte[] encodedValues, int valueOffset, int valueLength)
     {
-        if (!BoundedTlv.IsCanonicalPrimitiveSequence(encodedValues, valueOffset, valueLength))
+        if (!DerCanonical.IsPrimitiveSequence(encodedValues, valueOffset, valueLength))
             return -1;
         return WriteValue(output, offset, capacity, tag, encodedValues, valueOffset, valueLength);
     }
