@@ -1,6 +1,5 @@
 using MicroCard.Cryptography;
 using MicroCard.Framework;
-using System.Transactions;
 using MicroCard.Security;
 
 [assembly: PersistentBytes(1, 248)]
@@ -86,10 +85,8 @@ public static class Credential
 
     private static void Provision(byte[] command)
     {
-        using var scope = new TransactionScope();
         Pin.Create(PinSlot, command, 1, 4, 3, command, 5, 8, 3);
         SecurityDomain.Current.Store.SetBytes(PublicDataKey, command, 13, command.Length - 13);
-        scope.Complete();
     }
 
     private static void Sign(byte[] command)

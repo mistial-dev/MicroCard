@@ -25,6 +25,7 @@ sealed class Mc04Writer : IDisposable
     readonly Dictionary<MemberReferenceHandle, ushort> memberRefs;
     readonly Dictionary<AssemblyReferenceHandle, ushort> assemblyRefs;
     readonly Dictionary<MethodDefinitionHandle, byte[]> methodCode = new();
+    readonly HashSet<MethodDefinitionHandle> transactionalMethods = new();
     readonly HashSet<TypeReferenceHandle> projectedTransactionTypes = new();
     readonly Dictionary<MemberReferenceHandle, string> projectedTransactionMembers = new();
     readonly Dictionary<byte, ushort> emptyArrayTypeRows = new();
@@ -189,7 +190,8 @@ sealed class Mc04Writer : IDisposable
                 if (!body.LocalSignature.IsNil)
                     locals = blobs.Add(RewriteSignature(md.GetBlobBytes(md.GetStandaloneSignature(body.LocalSignature).Signature)));
                 codeOffsets.Add(handle, checked((uint)code.Position));
-                byte flags = (byte)(body.LocalVariablesInitialized ? 2 : 0);
+                byte flags = (byte)((transactionalMethods.Contains(handle) ? 1 : 0) |
+                    (body.LocalVariablesInitialized ? 2 : 0));
                 writer.Write(flags);
                 writer.Write((byte)0);
                 writer.Write(checked((ushort)body.MaxStack));
@@ -911,9 +913,12 @@ sealed class Mc04Writer : IDisposable
         }
 
         foreach (var handle in md.MethodDefinitions)
-            if (ReachesExplicitControl(handle) &&
-                ReachesIrreversibleOutput(handle))
+        {
+            if (!ReachesExplicitControl(handle)) continue;
+            transactionalMethods.Add(handle);
+            if (ReachesIrreversibleOutput(handle))
                 throw new Exception("Transactional method reaches irreversible Hardware.Write");
+        }
     }
 
     bool IsExplicitTransactionControl(MemberReferenceHandle handle)

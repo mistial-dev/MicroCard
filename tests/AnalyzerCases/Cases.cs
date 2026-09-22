@@ -89,7 +89,9 @@ public static class ValidAssembly
 #if CASE_TRANSACTION_SCOPE
 public static class ValidTransactionScope
 {
-    public static void Run()
+    public static void Run() => Commit();
+
+    private static void Commit()
     {
         using var scope = new TransactionScope();
         SecurityDomain.Current.Store.SetInt32(1, 1);

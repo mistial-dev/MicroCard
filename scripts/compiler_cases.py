@@ -5,6 +5,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from analyzer_cases import run_analyzer_cases
 from validation_common import ROOT, build_managed, run
+import mcinspect
 
 BOUNDARIES = [
     ('CASE_TRANSACTION_SCOPE', 'transaction-scope'),
@@ -88,6 +89,19 @@ def run_compiler_cases(jobs=1, prebuilt=False):
                      check=False, capture_output=True, text=True)
         if error is None:
             assert result.returncode == 0 and prefix.with_suffix(".mca").exists(), (name, result.stdout, result.stderr)
+            if name == "transaction-scope":
+                parsed = mcinspect.inspect(prefix.with_suffix(".mca").read_bytes())
+                tables = {table["name"]: table["rows"] for table in parsed["tables"]}
+                methods = json.loads(prefix.with_suffix(".map.json").read_text())
+                by_name = {(item["type"], item["method"]): tables["MethodDef"][item["id"]]
+                           for item in methods}
+                for method in ("Run", "Commit", "Abort"):
+                    assert (by_name[("ValidTransactionScope", method)]
+                            ["columns"]["Body"]["flags"] & 1), \
+                        f"{method} lost its signed transaction effect"
+                assert not (by_name[("ValidAssembly", "Process")]
+                            ["columns"]["Body"]["flags"] & 1), \
+                    "ordinary method gained a transaction effect"
         else:
             assert result.returncode != 0 and error in result.stdout + result.stderr, (name, result.stdout, result.stderr)
             assert not prefix.with_suffix(".mca").exists(), f"{name} emitted a rejected assembly"
