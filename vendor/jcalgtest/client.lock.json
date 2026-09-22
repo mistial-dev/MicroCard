@@ -1,0 +1,10 @@
+{
+  "project": "crocs-muni/JCAlgTest",
+  "applet_tag": "v1.8.2",
+  "applet_commit": "991c0488418a0efb4bf0acd484f7996e0eaa7bcd",
+  "reference_client_version": "1.8.3",
+  "reference_client_commit": "4c9d2906e358818f6ab6fdfb3286f168d4936f60",
+  "reference_result_project": "crocs-muni/jcalgtest_results",
+  "reference_result_commit": "0f031da713ea0a4e5883288794039c856bb6e5f1",
+  "reference_result_sha256": "d837dd1fe4eaee4de4a9f6a41058cb9416257173f5b5bf12cd2e0c43932020d7"
+}

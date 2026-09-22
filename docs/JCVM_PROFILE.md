@@ -120,11 +120,10 @@ The crypto compatibility target is **JCOP4 P71D321**, using its
 [published JCAlgTest result](https://github.com/crocs-muni/jcalgtest_results/blob/main/javacard/Profiles/results/NXP_JCOP4_P71D321_ALGSUPPORT__3b_85_80_01_80_73_c8_21_10_0e_%28provided_by_Jean_Dupont%29.csv)
 as comparison evidence. It reports the algorithms above as supported. The
 separately listed P71 NoECC profile does not support ECDSA or ECDH and cannot
-satisfy the OpenFIPS201 EC path. JCAlgTest
-probes many other algorithms so that unsupported requests return the specified
-Java Card error; passing the probe does not require implementing every algorithm
-found on a P71. Additional algorithms need an applet requirement or a measured
-compatibility benefit before they enter this profile.
+satisfy the OpenFIPS201 EC path. JCAlgTest probes many other algorithms so that
+unsupported requests return the specified Java Card error. The expanded
+P71D321 target and the gap between factory probes and full client measurements
+are tracked in the [DK release contract](JCVM_DK_RELEASE.md).
 
 [`format/jcvm-applet-api-surface.json`](../format/jcvm-applet-api-surface.json)
 resolves the external method constants in both committed load files against the pinned
