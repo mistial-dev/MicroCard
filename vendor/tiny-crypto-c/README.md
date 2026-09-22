@@ -1,7 +1,7 @@
 # tiny-crypto-c EC source
 
 This directory contains the EC-only source slice from
-[`tiny-crypto-c` commit e5bf501735a36bcf9581754a3ef7717486dbc3da](https://github.com/mistial-dev/tiny-crypto-c/commit/e5bf501735a36bcf9581754a3ef7717486dbc3da).
+[`tiny-crypto-c` commit c485a1e3fb6c8f632f3523ce314e49c3312e3c0c](https://github.com/mistial-dev/tiny-crypto-c/commit/c485a1e3fb6c8f632f3523ce314e49c3312e3c0c).
 The files are copied without local modifications. Their SPDX notices identify
 GPL-2.0-or-later; the upstream license text is retained in `LICENSE`.
 The Rust bridge uses AGPL-3.0-or-later. The GPLv3 option permitted by the C
