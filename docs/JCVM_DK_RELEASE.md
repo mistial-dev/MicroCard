@@ -64,10 +64,17 @@ For a Cortex-M4 `-Os` object with these three curves enabled, `ec.c` grew from
 4,827 to 6,045 text bytes before link-time dead-code elimination. The EC source
 is vendored as an exact slice in `vendor/tiny-crypto-c`. Its no-std Rust
 bridge passes host and ARM compilation and a focused cross-language lifecycle
-test. The DK firmware does not link this bridge yet, and Java Card P-192/P-384
+test. The bridge now covers public-key derivation and validation plus raw ECDH
+for both curves, with malformed-point rejection and cleared failed outputs.
+The DK firmware does not link this bridge yet, and Java Card P-192/P-384
 signing and key generation remain unsupported. Before enabling it, connect a
 fail-closed board provider and pass key import, operation, failure, and reboot
 acceptance.
+
+The P71D321 result also reports on-card EC prime-field generation at 128, 160,
+224, and 521 bits, beyond CC310 P-256 and this library's P-192/P-384 slice.
+Those sizes remain implementation gaps; the bridge alone does not close the
+declared compatibility target.
 
 ## Baseline before unsigned loading
 

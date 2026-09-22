@@ -26,6 +26,28 @@ int mc_tc_ec_generate(unsigned bits, uint8_t* private_key, size_t private_len,
       public_key, public_len, random, 16, (TC_EC_workspace*)scratch);
 }
 
+int mc_tc_ec_public_key(unsigned bits, const uint8_t* private_key,
+    size_t private_len, uint8_t* public_key, size_t public_len, void* scratch)
+{
+  return TC_EC_public_key(curve_for_bits(bits), private_key, private_len,
+      public_key, public_len, (TC_EC_workspace*)scratch);
+}
+
+int mc_tc_ec_valid_public(unsigned bits, const uint8_t* public_key,
+    size_t public_len, void* scratch)
+{
+  return TC_EC_validate_public_key(curve_for_bits(bits), public_key,
+      public_len, (TC_EC_workspace*)scratch);
+}
+
+int mc_tc_ec_agree(unsigned bits, const uint8_t* private_key,
+    size_t private_len, const uint8_t* peer_key, size_t peer_len,
+    uint8_t* secret, size_t secret_len, void* scratch)
+{
+  return TC_ECDH(curve_for_bits(bits), private_key, private_len,
+      peer_key, peer_len, secret, secret_len, (TC_EC_workspace*)scratch);
+}
+
 int mc_tc_ecdsa_sign(unsigned bits, const uint8_t* private_key, size_t private_len,
     const uint8_t* digest, size_t digest_len, uint8_t* signature,
     size_t signature_len, TC_random_fn fill, void* context, void* scratch)
