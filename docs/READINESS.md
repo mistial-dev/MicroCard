@@ -39,8 +39,10 @@ independently of the committed generation, including failed attempts.
 MC04 domain management separates state/recovery, authenticated commands, execution,
 native services, application staging, lifecycle changes, metadata, snapshots and
 linking into focused modules; its regression suite is separate from production code.
-MC04 no longer copies the whole runtime state for transactions. It stages affected
-application records, keys, and credentials, and uses small undo records for metadata.
+MC04 ordinary invocation moves the live application's existing allocations into the
+executor and returns them at the command boundary without cloning rollback state. An
+explicit transaction clones only that application's records, keys, and credentials;
+lifecycle changes retain their separate bounded staging and metadata undo records.
 Credential retry floors survive failed lifecycle callbacks. The compact MC04 slab
 and JCVM heap share checked allocation sizing; native copies and bounded BER/DER
 reading replace interpreted utility loops while preserving engine-specific checks.
@@ -55,7 +57,7 @@ board's reserved heap.
 
 ## Required before the pre-hardware release candidate
 
-- Complete host interruption coverage for personalized OpenFIPS201 provisioning.
+- Complete physical interruption coverage for personalized OpenFIPS201 provisioning.
   The original ICAM object-only workflow passes exact readback of 11 objects after
   reopening.
   The combined derived P-256 identity now imports all objects and keys and verifies
@@ -134,19 +136,12 @@ board's reserved heap.
   record the current MC04 DK comparison: 185,708 software text bytes versus 211,608
   with all hardware providers. Vendor dispatch also links non-profile ChaCha20/Poly1305
   symbols despite the absence of RustCrypto. Remeasure the final tree; this is not an achieved optimization.
-- Reduce affected-application staging where bounded undo improves measured cost
-  while preserving rollback, cancellation, quota, and persistence invariants.
 - Finish native utility integration and the dead-code/dependency review. Preserve
   useful generated references and provenance; avoid a maintenance fork solely to
   unify dependency version numbers.
 - Record reproducible cold/warm validation, representative load/invoke work, flash,
   static RAM, and host heap peaks for the final tree. Establish final budgets from
   achieved measurements. Do not lower the device heap without supporting evidence.
-- Complete the final host/wallet/recovery checkpoint, workspace Clippy, generated
-  artifact and contract checks, affected fuzz-target builds, and all required board
-  profile links and dependency/symbol inspections. Produce two firmware artifacts
-  from a clean committed tree, with revision and artifact hashes recorded.
-
 The cleanup intentionally breaks old packages and state. Rebuild clients and packages;
 there is no legacy decoder or automatic migration. Physical execution is a later gate,
 not a prerequisite for finishing these implementation tasks.
@@ -157,7 +152,12 @@ not a prerequisite for finishing these implementation tasks.
 reference builds, with profile-specific ceilings and engine/provider isolation checks.
 [Assembly budgets](ASSEMBLY_BUDGETS.json) record managed image sizes;
 [runtime budgets](RUNTIME_BUDGETS.md) record logical work. Final-tree measurements remain
-required. Static RAM includes the reserved heap.
+required. Static RAM includes the reserved heap. Clean revision `d13e4af` produced
+development-only Makerdiary bundles for both engines without accessing hardware. The
+MC04 UF2 SHA-256 is `1cf089bb3a1fff58144b6fb98b601bd57ced22a1979d05230b423b9bc374aad6`;
+the JCVM UF2 SHA-256 is `9886b74b3504dd5a5425089ab52c5d75cfd73f462622315bf2b8635f5b3fc240`.
+Both manifests record `hardware_flashed: false` and their exact layouts, ELF hashes,
+features, link inspection, and revision.
 
 CBOR and image separation reduced the credential metadata snapshot to 1,408 bytes,
 with 5,792 bytes of separately stored packages. The measured credential workload's
@@ -174,15 +174,14 @@ comparisons remain in Git history; reproduce current results before using them a
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
 coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The checkpoint after the
-APDU API fixes ran at clean revision `9e89009` and took 60.677 seconds with two workers
-and incremental rebuilding (`work/checkpoint-apdu-audit.json`). The tree remained
-unchanged throughout the run. Host, Java wallet, recovery, generated
-artifacts, and fuzz-target builds passed; workspace Clippy also passed. The workspace
-run includes the JCVM registry, transport lifecycle, and session recovery tests.
-All seven firmware profiles linked with engine/provider isolation checks. The only
-failing stage was the seven unchanged flash optimization ceilings. This is not a
-cold-build measurement; final-tree cold/warm measurements remain required.
+reuses outputs with bounded workers and isolated logs/state. The final host checkpoint
+ran at clean revision `d13e4af` in 42.061 seconds with four workers and incremental
+outputs (`work/checkpoint-explicit-transactions-final.json`). Host, Java wallet,
+recovery, generated artifacts, and affected fuzz-target builds passed; workspace and
+both dongle-profile Clippy runs also passed. All seven firmware profiles linked with
+engine/provider isolation. The checkpoint exits nonzero only because three unchanged
+flash optimization ceilings remain exceeded; none were raised. A cold host timing and
+physical command latency remain release measurements.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.
