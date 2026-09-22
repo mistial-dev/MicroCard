@@ -58,7 +58,8 @@ claims outside the profile**. The two `OwnerPINBuilder` variants return the
 specified `SystemException.ILLEGAL_USE` for unimplemented optional types; they
 count as unsupported rather than disappearing from the matrix. The runner writes
 the exact differences to `profile-comparison.json`; a factory result alone is
-not an algorithm acceptance.
+not an algorithm acceptance. An extended run with missing or extra probes fails
+instead of passing as a partial result.
 
 ## Conformance work
 

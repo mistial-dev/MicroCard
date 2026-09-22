@@ -43,10 +43,7 @@ def read_result(source: bytes, *, optional_unavailable: bool = False) -> dict[st
     return sections
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, help="write a JSON matrix; stdout by default")
-    args = parser.parse_args()
+def pinned_result() -> tuple[str, dict[str, dict[str, bool]]]:
     lock = json.loads(LOCK.read_text())
     raw = gzip.decompress(REFERENCE.read_bytes())
     digest = hashlib.sha256(raw).hexdigest()
@@ -57,6 +54,14 @@ def main() -> None:
         sum(rows.values()) for rows in sections.values()
     ) != 288:
         raise ValueError("reference result has an incomplete probe matrix")
+    return digest, sections
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, help="write a JSON matrix; stdout by default")
+    args = parser.parse_args()
+    digest, sections = pinned_result()
     result = {
         "source": "JCAlgTest 1.8.3, P71D321, 2026-06-18",
         "source_sha256": digest,

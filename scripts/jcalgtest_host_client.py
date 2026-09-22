@@ -2,7 +2,6 @@
 """Run the pinned upstream JCAlgTest client against a provisioned host JCVM."""
 
 import argparse
-import gzip
 import hashlib
 import json
 import os
@@ -11,7 +10,7 @@ import subprocess
 import tempfile
 
 from jcalgtest_gp_acceptance import APPLET, IMAGE, PACKAGE
-from jcalgtest_profile import REFERENCE, read_result
+from jcalgtest_profile import pinned_result, read_result
 from jcvm_transport_acceptance import load_cap, lv
 from scp03_acceptance import Client, ROOT, SIM
 from device_cbor import decode
@@ -28,7 +27,7 @@ TERMINAL = ROOT / "scripts/jcalgtest_host/MicroCardTerminal.java"
 def compare_profile(candidate: pathlib.Path) -> dict:
     reference = {
         (section, name): supported
-        for section, probes in read_result(gzip.decompress(REFERENCE.read_bytes())).items()
+        for section, probes in pinned_result()[1].items()
         for name, supported in probes.items()
     }
     observed = {
@@ -120,6 +119,8 @@ def main():
         if args.mode == "ALG_SUPPORT_EXTENDED":
             comparison = compare_profile(csvs[0])
             (output / "profile-comparison.json").write_text(json.dumps(comparison, indent=2) + "\n")
+            if comparison["missing_probes"] or comparison["extra_probes"]:
+                raise SystemExit(f"JCAlgTest probe matrix is incomplete; see {output}")
         print(f"PASS: pinned JCAlgTest {args.mode} completed {rows} CSV lines in {output}")
 
 
