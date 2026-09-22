@@ -10,9 +10,9 @@ try { new Compiler(args[0], args[2], args[3]).WriteMc04(args[1]); return 0; }
 catch (Exception e) { Console.Error.WriteLine(e.Message); return 1; }
 sealed class Types : ISignatureTypeProvider<string, object?>, ICustomAttributeTypeProvider<string>
 {
-    public string GetPrimitiveType(PrimitiveTypeCode c) => c.ToString();
-    public string GetTypeFromDefinition(MetadataReader r, TypeDefinitionHandle h, byte k) => r.GetString(r.GetTypeDefinition(h).Name);
-    public string GetTypeFromReference(MetadataReader r, TypeReferenceHandle h, byte k) => r.GetString(r.GetTypeReference(h).Name);
+    public string GetPrimitiveType(PrimitiveTypeCode c) => c switch { PrimitiveTypeCode.Void => "void", PrimitiveTypeCode.Boolean => "bool", PrimitiveTypeCode.Int32 => "int32", PrimitiveTypeCode.Byte => "byte", _ => c.ToString() };
+    public string GetTypeFromDefinition(MetadataReader r, TypeDefinitionHandle h, byte k) { var t = r.GetTypeDefinition(h); return "ref:" + r.GetString(t.Namespace) + "." + r.GetString(t.Name); }
+    public string GetTypeFromReference(MetadataReader r, TypeReferenceHandle h, byte k) { var t = r.GetTypeReference(h); return "ref:" + r.GetString(t.Namespace) + "." + r.GetString(t.Name); }
     public string GetTypeFromSpecification(MetadataReader r, object? c, TypeSpecificationHandle h, byte k) => throw new NotSupportedException("Type specification");
     public string GetSZArrayType(string t) => t + "[]";
     public string GetArrayType(string t, ArrayShape s) => throw new NotSupportedException();
@@ -21,8 +21,8 @@ sealed class Types : ISignatureTypeProvider<string, object?>, ICustomAttributeTy
     public string GetGenericMethodParameter(object? c, int i) => throw new NotSupportedException(); public string GetGenericTypeParameter(object? c, int i) => throw new NotSupportedException();
     public string GetModifiedType(string m, string t, bool r) => throw new NotSupportedException("Modified signatures unsupported"); public string GetPinnedType(string t) => throw new NotSupportedException(); public string GetFunctionPointerType(MethodSignature<string> s) => throw new NotSupportedException();
     public PrimitiveTypeCode GetUnderlyingEnumType(string type) => PrimitiveTypeCode.Int32;
-    public bool IsSystemType(string type) => type == "System.Type";
-    public string GetSystemType() => "System.Type";
+    public bool IsSystemType(string type) => type == "ref:System.Type";
+    public string GetSystemType() => "ref:System.Type";
     public string GetTypeFromSerializedName(string name) => name;
 }
 sealed class Compiler : IDisposable
@@ -30,8 +30,7 @@ sealed class Compiler : IDisposable
     // This identifies the reviewed device ABI. The DLL digest below authenticates
     // the host input, while this stable value keeps MC04 output reproducible across
     // equivalent framework builds.
-    static readonly byte[] FrameworkAbiIdentity = Convert.FromHexString(
-        "E9B276DC4459E6FFB37F9119874B5053B14CD0B3484A01C70316DD80FB08365A");
+    static readonly byte[] FrameworkAbiIdentity = Convert.FromHexString(Mc04Abi.FrameworkIdentitySha256);
     readonly string input; readonly FileStream file; readonly PEReader pe; readonly MetadataReader md; readonly Types types = new();
     readonly Dictionary<MethodDefinitionHandle, int> ids = new(); readonly List<object> entry_points = new(); readonly SortedSet<int> caps = new();
     readonly string frameworkName;
@@ -168,22 +167,6 @@ sealed class Compiler : IDisposable
             if (member.Parent.Kind != HandleKind.TypeReference) continue;
             var type = md.GetTypeReference((TypeReferenceHandle)member.Parent);
             if (type.ResolutionScope.Kind == HandleKind.AssemblyReference &&
-                md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) == "System.Security.Cryptography" &&
-                md.GetString(type.Namespace) == "System.Security.Cryptography")
-            {
-                var projectedCapability = (md.GetString(type.Name), md.GetString(member.Name)) switch
-                {
-                    ("SHA256", "HashData") when IsByteArrayHashSignature(member.Signature) => 20,
-                    ("RandomNumberGenerator", "GetBytes") when IsRandomBytesSignature(member.Signature) => 50,
-                    _ => -1,
-                };
-                if (projectedCapability >= 0)
-                {
-                    caps.Add(projectedCapability);
-                    continue;
-                }
-            }
-            if (type.ResolutionScope.Kind == HandleKind.AssemblyReference &&
                 md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) == "System.Transactions.Local" &&
                 md.GetString(type.Namespace) == "System.Transactions" &&
                 md.GetString(type.Name) == "TransactionScope" &&
@@ -202,68 +185,23 @@ sealed class Compiler : IDisposable
                     continue;
                 }
             }
-            if (type.ResolutionScope.Kind != HandleKind.AssemblyReference ||
-                md.GetString(md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope).Name) != frameworkName ||
-                md.GetString(type.Namespace) != "MicroCard.Framework") continue;
-            var capability = (md.GetString(type.Name), md.GetString(member.Name)) switch
+            if (type.ResolutionScope.Kind == HandleKind.AssemblyReference)
             {
-                ("ResponseApdu", "SetStatus") => 2,
-                ("DomainStore", "GetInt32") => 3,
-                ("DomainStore", "SetInt32") => 4,
-                ("RandomNumber", "GetInt32") => 5,
-                ("Hardware", "Write") => 6,
-                ("DomainStorage", "GetInt32") => 7,
-                ("DomainStorage", "SetInt32") => 8,
-                ("SecureChannel", "get_SecurityLevel") => 9,
-                ("SecureChannel", "get_IsAuthenticated") => 10,
-                ("CommandApdu", "get_Length") => 11,
-                ("CommandApdu", "CopyTo") => 12,
-                ("ResponseApdu", "Write") => 13,
-                ("Buffers", "Copy") => 53,
-                ("Tlv", "TryRead") => 54,
-                ("Cryptography", "Sha256") => 20,
-                              ("DomainKeys", "Generate") => 22,
-                ("DomainKeys", "Open") => 23,
-                ("DomainKeys", "Delete") => 24,
-                ("KeyHandle", "HmacSha256") => 25,
-                ("KeyHandle", "AesCmac") => 26,
-                ("KeyHandle", "EncryptCbc") => 27,
-                ("KeyHandle", "DecryptCbc") => 28,
-                ("KeyHandle", "EncryptCcm") => 29,
-                ("KeyHandle", "DecryptCcm") => 30,
-                ("DomainStorage", "GetBytes") => 31,
-                ("DomainStorage", "SetBytes") when IsSetBytesRangeSignature(member.Signature) => 52,
-                ("DomainStorage", "SetBytes") => 32,
-                ("DomainStorage", "DeleteBytes") => 33,
-                ("DomainStorage", "ContainsBytes") => 34,
-                ("KeyHandle", "ExportP256PublicKey") => 35,
-                ("KeyHandle", "SignP256") => 36,
-                ("Cryptography", "VerifyP256") => 37,
-                ("KeyHandle", "DeriveP256") => 38,
-                ("Cryptography", "FillRandom") => 39,
-                ("CredentialNative", "Create") => 40,
-                ("CredentialNative", "Verify") => 41,
-                ("CredentialNative", "IsVerified") => 42,
-                ("CredentialNative", "Change") => 43,
-                ("CredentialNative", "Unblock") => 44,
-                ("CredentialNative", "RetriesRemaining") => 45,
-                // Compatibility when inspecting an assembly produced against the retired
-                // framework surface. Current source has no public DomainStorage controls.
-                ("DomainStorage", "BeginTransaction") => 46,
-                ("DomainStorage", "CommitTransaction") => 47,
-                ("DomainStorage", "AbortTransaction") => 48,
-                ("TransactionScopeRuntime", "Begin") => 46,
-                ("TransactionScopeRuntime", "Commit") => 47,
-                ("TransactionScopeRuntime", "Abort") => 48,
-                ("TransactionRuntime", "Current") => 46,
-                ("TransactionRuntime", "Information") => 46,
-                ("TransactionInformationRuntime", "Status") => 46,
-                ("Cryptography", "Sha256Into") => 49,
-                ("Cryptography", "RandomBytes") => 50,
-                ("Cryptography", "FixedTimeEquals") => 51,
-                _ => -1,
-            };
-            if (capability >= 0) caps.Add(capability);
+                var reference = md.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope);
+                var assembly = md.GetString(reference.Name);
+                var ns = md.GetString(type.Namespace);
+                var owner = md.GetString(type.Name);
+                var name = md.GetString(member.Name);
+                if (!Mc04Abi.ContainsName(assembly, ns, owner, name)) continue;
+                var signature = member.DecodeMethodSignature(types, null);
+                var definition = Mc04Abi.Find(assembly, ns, owner, name, signature.Header.IsInstance,
+                    signature.ParameterTypes, signature.ReturnType);
+                if (definition is not null)
+                {
+                    if (definition.Capability >= 0) caps.Add(definition.Capability);
+                    continue;
+                }
+            }
         }
         foreach (var typeHandle in md.TypeDefinitions)
         {
@@ -287,7 +225,7 @@ sealed class Compiler : IDisposable
                     if (hooks.GetValueOrDefault(key) != null) throw new Exception("Duplicate lifecycle hook");
                     var signature = method.DecodeSignature(types, null);
                     if (signature.Header.IsInstance || signature.ParameterTypes.Length != 0 ||
-                        signature.ReturnType != "Void" ||
+                        signature.ReturnType != "void" ||
                         (method.Attributes & System.Reflection.MethodAttributes.MemberAccessMask) !=
                             System.Reflection.MethodAttributes.Public)
                         throw new Exception("Lifecycle hooks must be public static parameterless void methods");
@@ -299,26 +237,6 @@ sealed class Compiler : IDisposable
         }
     }
 
-    bool IsByteArrayHashSignature(BlobHandle handle)
-    {
-        var signature = md.GetBlobBytes(handle);
-        return signature.Length == 6 && signature[0] == 0x00 && signature[1] == 0x01 &&
-               signature[2] == 0x1d && signature[3] == 0x05 &&
-               signature[4] == 0x1d && signature[5] == 0x05;
-    }
-
-    bool IsRandomBytesSignature(BlobHandle handle)
-    {
-        var signature = md.GetBlobBytes(handle);
-        return signature.Length == 5 && signature[0] == 0x00 && signature[1] == 0x01 &&
-               signature[2] == 0x1d && signature[3] == 0x05 && signature[4] == 0x08;
-    }
-
-    bool IsSetBytesRangeSignature(BlobHandle handle)
-    {
-        var signature = md.GetBlobBytes(handle);
-        return signature.SequenceEqual(new byte[] { 0x20, 0x04, 0x01, 0x08, 0x1d, 0x05, 0x08, 0x08 });
-    }
     void WriteManifest(string prefix)
     {
         var definition = md.GetAssemblyDefinition();

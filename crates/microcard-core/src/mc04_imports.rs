@@ -1,6 +1,7 @@
 //! Compiled device-side ABI used by the verified MC04 linker.
 use crate::{
     assembly::{Assembly, MethodTypes, StackType},
+    mc04_abi::{self, AbiType, Lowering},
     Error, Result,
 };
 
@@ -13,15 +14,8 @@ pub enum Import {
     Native(u8),
 }
 
-pub(crate) const SYSTEM_RUNTIME_TOKEN: &[u8] =
-    &[0xb0, 0x3f, 0x5f, 0x7f, 0x11, 0xd5, 0x0a, 0x3a];
-/// Stable identity of the reviewed MicroCard.Framework 1.0 device ABI.
-/// Host tooling separately authenticates the framework DLL by file digest.
-pub(crate) const FRAMEWORK_HASH: &[u8] = &[
-    0xe9, 0xb2, 0x76, 0xdc, 0x44, 0x59, 0xe6, 0xff, 0xb3, 0x7f, 0x91, 0x19, 0x87, 0x4b,
-    0x50, 0x53, 0xb1, 0x4c, 0xd0, 0xb3, 0x48, 0x4a, 0x01, 0xc7, 0x03, 0x16, 0xdd, 0x80,
-    0xfb, 0x08, 0x36, 0x5a,
-];
+pub(crate) const SYSTEM_RUNTIME_TOKEN: &[u8] = &[0xb0, 0x3f, 0x5f, 0x7f, 0x11, 0xd5, 0x0a, 0x3a];
+pub(crate) use crate::mc04_abi::FRAMEWORK_HASH;
 
 fn reference(
     assembly: &Assembly<'_>,
@@ -40,13 +34,36 @@ fn reference(
             .is_ok_and(|ty| ty.namespace == namespace && ty.name == name)
 }
 
-fn exact(
-    types: &MethodTypes,
-    receiver: bool,
-    parameters: &[StackType],
-    result: Option<StackType>,
-) -> bool {
-    types.receiver.is_some() == receiver && types.parameters == parameters && types.result == result
+fn abi_type(assembly: &Assembly<'_>, value: Option<StackType>, expected: AbiType) -> bool {
+    match expected {
+        AbiType::Bool | AbiType::Int32 => value == Some(StackType::Int),
+        AbiType::ByteArray => value == Some(StackType::Array(1)),
+        AbiType::Int32Array => value == Some(StackType::Array(2)),
+        AbiType::Reference(full_name) => {
+            let Some((namespace, name)) = full_name.rsplit_once('.') else {
+                return false;
+            };
+            reference(assembly, value, namespace, name)
+        }
+    }
+}
+
+fn exact(assembly: &Assembly<'_>, types: &MethodTypes, member: &mc04_abi::Member) -> bool {
+    if types.receiver.is_some() != member.receiver
+        || types.parameters.len() != member.parameters.len()
+        || !member
+            .parameters
+            .iter()
+            .zip(types.parameters.iter().copied())
+            .all(|(expected, actual)| abi_type(assembly, Some(actual), *expected))
+        || match member.result {
+            Some(expected) => !abi_type(assembly, types.result, expected),
+            None => types.result.is_some(),
+        }
+    {
+        return false;
+    }
+    !member.receiver || reference(assembly, types.receiver, member.namespace, member.owner)
 }
 
 /// Resolve only the immutable MicroCard.Framework 1.0 ABI. Matching names do
@@ -81,7 +98,7 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
             Err(Error::Unauthorized)
         };
     }
-    if provider.name != "MicroCard.Framework" {
+    if provider.name != mc04_abi::FRAMEWORK_ASSEMBLY {
         return Ok(None);
     }
     if provider.version != [1, 0, 0, 0]
@@ -89,387 +106,24 @@ pub fn resolve(assembly: &Assembly<'_>, index: u16) -> Result<Option<Import>> {
         || !provider.public_key_or_token.is_empty()
         || !provider.culture.is_empty()
         || provider.hash_value != FRAMEWORK_HASH
-        || owner.namespace != "MicroCard.Framework"
+        || owner.namespace != mc04_abi::FRAMEWORK_NAMESPACE
     {
         return Err(Error::Unauthorized);
     }
     let types = assembly.member_types(index)?;
-    let byte_array = StackType::Array(1);
-    let int = StackType::Int;
-    let binding = match (owner.name, member.name) {
-        ("SecurityDomain", "get_Current")
-            if types.receiver.is_none()
-                && types.parameters.is_empty()
-                && reference(
-                    assembly,
-                    types.result,
-                    "MicroCard.Framework",
-                    "SecurityDomain",
-                ) =>
-        {
-            Import::CurrentDomain
-        }
-        ("SecurityDomain", "get_Keys")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "SecurityDomain",
-            ) && types.parameters.is_empty()
-                && reference(assembly, types.result, "MicroCard.Framework", "DomainKeys") =>
-        {
-            Import::DomainKeys
-        }
-        ("SecurityDomain", "get_Store")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "SecurityDomain",
-            ) && types.parameters.is_empty()
-                && reference(
-                    assembly,
-                    types.result,
-                    "MicroCard.Framework",
-                    "DomainStorage",
-                ) =>
-        {
-            Import::DomainStorage
-        }
-        ("DomainStore", "GetInt32") if exact(&types, false, &[int], Some(int)) => Import::Native(3),
-        ("DomainStore", "SetInt32") if exact(&types, false, &[int, int], None) => Import::Native(4),
-        ("TransactionScopeRuntime", "Begin" | "Commit" | "Abort")
-            if exact(&types, false, &[], None) =>
-        {
-            Import::Native(match member.name {
-                "Begin" => 55,
-                "Commit" => 56,
-                _ => 57,
-            })
-        }
-        ("TransactionRuntime", "Current")
-            if exact(&types, false, &[], types.result)
-                && reference(
-                    assembly,
-                    types.result,
-                    "MicroCard.Framework",
-                    "TransactionRuntime",
-                ) =>
-        {
-            Import::Native(58)
-        }
-        ("TransactionRuntime", "Information")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "TransactionRuntime",
-            ) && types.parameters.is_empty()
-                && reference(
-                    assembly,
-                    types.result,
-                    "MicroCard.Framework",
-                    "TransactionInformationRuntime",
-                ) =>
-        {
-            Import::Native(59)
-        }
-        ("TransactionInformationRuntime", "Status")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "TransactionInformationRuntime",
-            ) && types.parameters.is_empty()
-                && types.result == Some(int) =>
-        {
-            Import::Native(60)
-        }
-        ("RandomNumber", "GetInt32") if exact(&types, false, &[], Some(int)) => Import::Native(5),
-        ("Hardware", "Write") if exact(&types, false, &[int, int], None) => Import::Native(6),
-        ("DomainStorage", "GetInt32")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int]
-                && types.result == Some(int) =>
-        {
-            Import::Native(7)
-        }
-        ("DomainStorage", "SetInt32")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int, int]
-                && types.result.is_none() =>
-        {
-            Import::Native(8)
-        }
-        ("SecureChannel", "get_SecurityLevel") if exact(&types, false, &[], Some(int)) => {
-            Import::Native(9)
-        }
-        ("SecureChannel", "get_IsAuthenticated") if exact(&types, false, &[], Some(int)) => {
-            Import::Native(10)
-        }
-        ("CommandApdu", "get_Length") if exact(&types, false, &[], Some(int)) => {
-            Import::Native(11)
-        }
-        ("CommandApdu", "CopyTo")
-            if exact(&types, false, &[byte_array, int, int, int], None) =>
-        {
-            Import::Native(12)
-        }
-        ("Tlv", "TryRead")
-            if exact(&types, false, &[byte_array, int, int, StackType::Array(2), int, int], Some(int)) =>
-        {
-            Import::Native(54)
-        }
-        ("Buffers", "Copy")
-            if exact(&types, false, &[byte_array, int, byte_array, int, int], Some(int)) =>
-        {
-            Import::Native(53)
-        }
-        ("ResponseApdu", "Write")
-            if exact(&types, false, &[byte_array, int, int], None) =>
-        {
-            Import::Native(13)
-        }
-        ("Cryptography", "Sha256") if exact(&types, false, &[byte_array], Some(byte_array)) => {
-            Import::Native(20)
-        }
-        ("Cryptography", "Sha256Into")
-            if exact(
-                &types,
-                false,
-                &[byte_array, int, int, byte_array, int],
-                Some(int),
-            ) =>
-        {
-            Import::Native(49)
-        }
-        ("Cryptography", "RandomBytes")
-            if exact(&types, false, &[int], Some(byte_array)) =>
-        {
-            Import::Native(50)
-        }
-        ("Cryptography", "FixedTimeEquals")
-            if exact(
-                &types,
-                false,
-                &[byte_array, int, int, byte_array, int, int],
-                Some(int),
-            ) =>
-        {
-            Import::Native(51)
-        }
-        ("DomainKeys", "Generate")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainKeys",
-            ) && types.parameters == [int, int]
-                && reference(assembly, types.result, "MicroCard.Framework", "KeyHandle") =>
-        {
-            Import::Native(22)
-        }
-        ("DomainKeys", "Open")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainKeys",
-            ) && types.parameters == [int]
-                && reference(assembly, types.result, "MicroCard.Framework", "KeyHandle") =>
-        {
-            Import::Native(23)
-        }
-        ("DomainKeys", "Delete")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainKeys",
-            ) && types.parameters == [int]
-                && types.result.is_none() =>
-        {
-            Import::Native(24)
-        }
-        ("KeyHandle", "HmacSha256" | "AesCmac")
-            if reference(assembly, types.receiver, "MicroCard.Framework", "KeyHandle")
-                && types.parameters == [byte_array]
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(if member.name == "HmacSha256" { 25 } else { 26 })
-        }
-        ("KeyHandle", "EncryptCbc" | "DecryptCbc")
-            if reference(assembly, types.receiver, "MicroCard.Framework", "KeyHandle")
-                && types.parameters == [byte_array, byte_array]
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(if member.name == "EncryptCbc" { 27 } else { 28 })
-        }
-        ("KeyHandle", "EncryptCcm" | "DecryptCcm")
-            if reference(assembly, types.receiver, "MicroCard.Framework", "KeyHandle")
-                && types.parameters == [byte_array, byte_array, byte_array]
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(if member.name == "EncryptCcm" { 29 } else { 30 })
-        }
-        ("KeyHandle", "ExportP256PublicKey")
-            if reference(assembly, types.receiver, "MicroCard.Framework", "KeyHandle")
-                && types.parameters.is_empty()
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(35)
-        }
-        ("KeyHandle", "SignP256")
-            if reference(assembly, types.receiver, "MicroCard.Framework", "KeyHandle")
-                && types.parameters == [byte_array, int, int]
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(36)
-        }
-        ("KeyHandle", "DeriveP256")
-            if reference(assembly, types.receiver, "MicroCard.Framework", "KeyHandle")
-                && types.parameters == [byte_array]
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(38)
-        }
-        ("Cryptography", "VerifyP256")
-            if exact(
-                &types,
-                false,
-                &[byte_array, byte_array, byte_array],
-                Some(int),
-            ) =>
-        {
-            Import::Native(37)
-        }
-        ("Cryptography", "FillRandom")
-            if exact(&types, false, &[byte_array, int, int], None) =>
-        {
-            Import::Native(39)
-        }
-        ("CredentialNative", "Create")
-            if exact(
-                &types,
-                false,
-                &[int, byte_array, int, int, int, byte_array, int, int, int],
-                None,
-            ) =>
-        {
-            Import::Native(40)
-        }
-        ("CredentialNative", "Verify")
-            if exact(&types, false, &[int, byte_array, int, int], Some(int)) =>
-        {
-            Import::Native(41)
-        }
-        ("CredentialNative", "IsVerified") if exact(&types, false, &[int], Some(int)) => {
-            Import::Native(42)
-        }
-        ("CredentialNative", "Change")
-            if exact(&types, false, &[int, byte_array, int, int], None) =>
-        {
-            Import::Native(43)
-        }
-        ("CredentialNative", "Unblock")
-            if exact(
-                &types,
-                false,
-                &[int, byte_array, int, int, byte_array, int, int],
-                Some(int),
-            ) =>
-        {
-            Import::Native(44)
-        }
-        ("CredentialNative", "RetriesRemaining")
-            if exact(&types, false, &[int, int], Some(int)) =>
-        {
-            Import::Native(45)
-        }
-        ("DomainStorage", "GetBytes")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int]
-                && types.result == Some(byte_array) =>
-        {
-            Import::Native(31)
-        }
-        ("DomainStorage", "SetBytes")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int, byte_array]
-                && types.result.is_none() =>
-        {
-            Import::Native(32)
-        }
-        ("DomainStorage", "SetBytes")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int, byte_array, int, int]
-                && types.result.is_none() =>
-        {
-            Import::Native(52)
-        }
-        ("DomainStorage", "DeleteBytes")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int]
-                && types.result.is_none() =>
-        {
-            Import::Native(33)
-        }
-        ("DomainStorage", "ContainsBytes")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters == [int]
-                && types.result == Some(int) =>
-        {
-            Import::Native(34)
-        }
-        // Compatibility for signed packages installed before TransactionScope replaced
-        // the public DomainStorage controls. The current framework cannot emit these.
-        ("DomainStorage", "BeginTransaction" | "CommitTransaction" | "AbortTransaction")
-            if reference(
-                assembly,
-                types.receiver,
-                "MicroCard.Framework",
-                "DomainStorage",
-            ) && types.parameters.is_empty()
-                && types.result.is_none() =>
-        {
-            Import::Native(match member.name {
-                "BeginTransaction" => 46,
-                "CommitTransaction" => 47,
-                _ => 48,
-            })
-        }
-        ("ResponseApdu", "SetStatus") if exact(&types, false, &[int], None) => {
-            Import::Native(2)
-        }
-        _ => return Err(Error::Unauthorized),
+    let definition = mc04_abi::named(
+        mc04_abi::FRAMEWORK_ASSEMBLY,
+        mc04_abi::FRAMEWORK_NAMESPACE,
+        owner.name,
+        member.name,
+    )
+    .find(|definition| exact(assembly, &types, definition))
+    .ok_or(Error::Unauthorized)?;
+    let binding = match definition.lowering {
+        Lowering::Native(id) => Import::Native(id),
+        Lowering::CurrentDomain => Import::CurrentDomain,
+        Lowering::DomainKeys => Import::DomainKeys,
+        Lowering::DomainStorage => Import::DomainStorage,
     };
     Ok(Some(binding))
 }
@@ -481,10 +135,8 @@ mod tests {
 
     #[test]
     fn compiled_consumer_uses_current_bulk_imports() {
-        let assembly = Assembly::parse(include_bytes!(
-            "../../../fuzz/fixtures/kdf108_consumer.mca"
-        ))
-        .unwrap();
+        let assembly =
+            Assembly::parse(include_bytes!("../../../fuzz/fixtures/kdf108_consumer.mca")).unwrap();
         let imports = assembly
             .member_ref_uses()
             .unwrap()
@@ -503,10 +155,8 @@ mod tests {
 
     #[test]
     fn compiled_cryptography_facade_uses_the_complete_native_profile() {
-        let assembly = Assembly::parse(include_bytes!(
-            "../../../fuzz/fixtures/cryptography.mca"
-        ))
-        .unwrap();
+        let assembly =
+            Assembly::parse(include_bytes!("../../../fuzz/fixtures/cryptography.mca")).unwrap();
         let mut native = assembly
             .member_ref_uses()
             .unwrap()

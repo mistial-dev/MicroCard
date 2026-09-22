@@ -722,12 +722,13 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
     {
         if (SymbolEqualityComparer.Default.Equals(member.ContainingAssembly, compilation.Assembly))
             return true;
-        if (IsProjectedSystemCryptography(member))
+        if (member.ContainingAssembly?.Name == Mc04Abi.FrameworkAssembly &&
+            member.ContainingType?.BaseType is { Name: "Attribute" } baseType &&
+            baseType.ContainingNamespace?.ToDisplayString() == "System")
+            return true;
+        if (IsCatalogMember(member))
             return true;
         if (member is IMethodSymbol transactionMethod && IsExplicitTransactionCall(transactionMethod))
-            return true;
-        if (member.ContainingAssembly?.Name == "MicroCard.Framework" &&
-            member.ContainingNamespace?.ToDisplayString() == "MicroCard.Framework")
             return true;
         return member.ContainingAssembly is { } provider &&
                provider.GetAttributes().Any(IsDependencyExportAttribute) &&
@@ -738,19 +739,36 @@ public sealed class MicroCardProfileAnalyzer : DiagnosticAnalyzer
                     ?? (attribute.ConstructorArguments[0].Value as string)) == provider.Name);
     }
 
-    private static bool IsProjectedSystemCryptography(ISymbol member)
+    private static bool IsCatalogMember(ISymbol symbol)
     {
-        if (member is not IMethodSymbol { IsStatic: true } method ||
-            member.ContainingNamespace?.ToDisplayString() != "System.Security.Cryptography" ||
-            member.ContainingAssembly?.Name != "System.Security.Cryptography" ||
-            method.ReturnType is not IArrayTypeSymbol result ||
-            result.ElementType.SpecialType != SpecialType.System_Byte || method.Parameters.Length != 1)
+        var method = symbol switch
+        {
+            IMethodSymbol value => value,
+            IPropertySymbol { GetMethod: { } getter } => getter,
+            _ => null,
+        };
+        if (method is null || method.ContainingAssembly?.Name is not { } assembly ||
+            method.ContainingNamespace?.ToDisplayString() is not { } ns)
             return false;
-        if (method is { Name: "HashData", ContainingType.Name: "SHA256" } &&
-            method.Parameters[0].Type is IArrayTypeSymbol input)
-            return input.ElementType.SpecialType == SpecialType.System_Byte;
-        return method is { Name: "GetBytes", ContainingType.Name: "RandomNumberGenerator" } &&
-               method.Parameters[0].Type.SpecialType == SpecialType.System_Int32;
+        var parameters = method.Parameters.Select(static parameter => AbiType(parameter.Type)).ToArray();
+        return parameters.All(static parameter => parameter is not null) &&
+            AbiType(method.ReturnType) is { } result &&
+            Mc04Abi.Find(assembly, ns, method.ContainingType.Name, method.MetadataName,
+                !method.IsStatic, parameters!, result) is not null;
+    }
+
+    private static string? AbiType(ITypeSymbol type)
+    {
+        if (type.SpecialType == SpecialType.System_Void) return "void";
+        if (type.SpecialType == SpecialType.System_Boolean) return "bool";
+        if (type.SpecialType == SpecialType.System_Int32) return "int32";
+        if (type is IArrayTypeSymbol { IsSZArray: true, ElementType.SpecialType: SpecialType.System_Byte })
+            return "byte[]";
+        if (type is IArrayTypeSymbol { IsSZArray: true, ElementType.SpecialType: SpecialType.System_Int32 })
+            return "int32[]";
+        if (type is INamedTypeSymbol { Arity: 0 } named)
+            return "ref:" + named.ContainingNamespace.ToDisplayString() + "." + named.Name;
+        return null;
     }
 
     private static void CheckType(SymbolAnalysisContext context, ITypeSymbol type, Location location)

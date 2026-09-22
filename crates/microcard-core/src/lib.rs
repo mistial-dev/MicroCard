@@ -14,6 +14,8 @@ mod fallible_clone;
 pub mod journal;
 pub mod image_store;
 #[cfg(feature = "mc04")]
+mod mc04_abi;
+#[cfg(feature = "mc04")]
 pub mod mc04_imports;
 #[allow(dead_code)]
 #[cfg(feature = "mc04")]

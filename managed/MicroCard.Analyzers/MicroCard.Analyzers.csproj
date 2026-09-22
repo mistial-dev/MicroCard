@@ -19,6 +19,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
     <Compile Include="../MicroCard.Build/VersionConstraint.cs" Link="VersionConstraint.cs" />
     <Compile Include="../MicroCard.Build/EmbeddedIdentifier.cs" Link="EmbeddedIdentifier.cs" />
+    <Compile Include="../MicroCard.Build/Mc04Abi.g.cs" Link="Mc04Abi.g.cs" />
     <None Include="$(TargetPath)" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive/MicroCard.Analyzers.props" Pack="true" PackagePath="buildTransitive" />
     <None Include="README.md" Pack="true" PackagePath="/" />

@@ -1,0 +1,706 @@
+[abi]
+format = 1
+profiles = ["mc04-1.0"]
+framework_assembly = "MicroCard.Framework"
+framework_namespace = "MicroCard.Framework"
+framework_version = "1.0.0.0"
+framework_identity_sha256 = "e9b276dc4459e6ffb37f9119874b5053b14cd0b3484a01c70316dd80fb08365a"
+
+# Signatures use: void, bool, int32, byte[], int32[], or ref:<namespace>.<type>.
+# `native` is the device dispatch identity. `capability` is the signed policy bit.
+
+[[member]]
+owner = "SecurityDomain"
+name = "get_Current"
+kind = "static"
+parameters = []
+result = "ref:MicroCard.Framework.SecurityDomain"
+lowering = "current-domain"
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "SecurityDomain"
+name = "get_Keys"
+kind = "instance"
+parameters = []
+result = "ref:MicroCard.Framework.DomainKeys"
+lowering = "domain-keys"
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "SecurityDomain"
+name = "get_Store"
+kind = "instance"
+parameters = []
+result = "ref:MicroCard.Framework.DomainStorage"
+lowering = "domain-storage"
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "ResponseApdu"
+name = "SetStatus"
+kind = "static"
+parameters = ["int32"]
+result = "void"
+lowering = "native"
+native = 2
+capability = 2
+side_effect = "irreversible"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStore"
+name = "GetInt32"
+kind = "static"
+parameters = ["int32"]
+result = "int32"
+lowering = "native"
+native = 3
+capability = 3
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStore"
+name = "SetInt32"
+kind = "static"
+parameters = ["int32", "int32"]
+result = "void"
+lowering = "native"
+native = 4
+capability = 4
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "RandomNumber"
+name = "GetInt32"
+kind = "static"
+parameters = []
+result = "int32"
+lowering = "native"
+native = 5
+capability = 5
+side_effect = "random"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Hardware"
+name = "Write"
+kind = "static"
+parameters = ["int32", "int32"]
+result = "void"
+lowering = "native"
+native = 6
+capability = 6
+side_effect = "irreversible"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "GetInt32"
+kind = "instance"
+parameters = ["int32"]
+result = "int32"
+lowering = "native"
+native = 7
+capability = 7
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "SetInt32"
+kind = "instance"
+parameters = ["int32", "int32"]
+result = "void"
+lowering = "native"
+native = 8
+capability = 8
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "SecureChannel"
+name = "get_SecurityLevel"
+kind = "static"
+parameters = []
+result = "int32"
+lowering = "native"
+native = 9
+capability = 9
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "SecureChannel"
+name = "get_IsAuthenticated"
+kind = "static"
+parameters = []
+result = "bool"
+lowering = "native"
+native = 10
+capability = 10
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CommandApdu"
+name = "get_Length"
+kind = "static"
+parameters = []
+result = "int32"
+lowering = "native"
+native = 11
+capability = 11
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CommandApdu"
+name = "CopyTo"
+kind = "static"
+parameters = ["byte[]", "int32", "int32", "int32"]
+result = "void"
+lowering = "native"
+native = 12
+capability = 12
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "ResponseApdu"
+name = "Write"
+kind = "static"
+parameters = ["byte[]", "int32", "int32"]
+result = "void"
+lowering = "native"
+native = 13
+capability = 13
+side_effect = "irreversible"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Cryptography"
+name = "Sha256"
+kind = "static"
+parameters = ["byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 20
+capability = 20
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainKeys"
+name = "Generate"
+kind = "instance"
+parameters = ["int32", "int32"]
+result = "ref:MicroCard.Framework.KeyHandle"
+lowering = "native"
+native = 22
+capability = 22
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainKeys"
+name = "Open"
+kind = "instance"
+parameters = ["int32"]
+result = "ref:MicroCard.Framework.KeyHandle"
+lowering = "native"
+native = 23
+capability = 23
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainKeys"
+name = "Delete"
+kind = "instance"
+parameters = ["int32"]
+result = "void"
+lowering = "native"
+native = 24
+capability = 24
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "HmacSha256"
+kind = "instance"
+parameters = ["byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 25
+capability = 25
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "AesCmac"
+kind = "instance"
+parameters = ["byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 26
+capability = 26
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "EncryptCbc"
+kind = "instance"
+parameters = ["byte[]", "byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 27
+capability = 27
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "DecryptCbc"
+kind = "instance"
+parameters = ["byte[]", "byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 28
+capability = 28
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "EncryptCcm"
+kind = "instance"
+parameters = ["byte[]", "byte[]", "byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 29
+capability = 29
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "DecryptCcm"
+kind = "instance"
+parameters = ["byte[]", "byte[]", "byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 30
+capability = 30
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "GetBytes"
+kind = "instance"
+parameters = ["int32"]
+result = "byte[]"
+lowering = "native"
+native = 31
+capability = 31
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "SetBytes"
+kind = "instance"
+parameters = ["int32", "byte[]"]
+result = "void"
+lowering = "native"
+native = 32
+capability = 32
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "DeleteBytes"
+kind = "instance"
+parameters = ["int32"]
+result = "void"
+lowering = "native"
+native = 33
+capability = 33
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "ContainsBytes"
+kind = "instance"
+parameters = ["int32"]
+result = "bool"
+lowering = "native"
+native = 34
+capability = 34
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "ExportP256PublicKey"
+kind = "instance"
+parameters = []
+result = "byte[]"
+lowering = "native"
+native = 35
+capability = 35
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "SignP256"
+kind = "instance"
+parameters = ["byte[]", "int32", "int32"]
+result = "byte[]"
+lowering = "native"
+native = 36
+capability = 36
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Cryptography"
+name = "VerifyP256"
+kind = "static"
+parameters = ["byte[]", "byte[]", "byte[]"]
+result = "bool"
+lowering = "native"
+native = 37
+capability = 37
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "KeyHandle"
+name = "DeriveP256"
+kind = "instance"
+parameters = ["byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 38
+capability = 38
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Cryptography"
+name = "FillRandom"
+kind = "static"
+parameters = ["byte[]", "int32", "int32"]
+result = "void"
+lowering = "native"
+native = 39
+capability = 39
+side_effect = "random"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CredentialNative"
+name = "Create"
+kind = "static"
+parameters = ["int32", "byte[]", "int32", "int32", "int32", "byte[]", "int32", "int32", "int32"]
+result = "void"
+lowering = "native"
+native = 40
+capability = 40
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CredentialNative"
+name = "Verify"
+kind = "static"
+parameters = ["int32", "byte[]", "int32", "int32"]
+result = "bool"
+lowering = "native"
+native = 41
+capability = 41
+side_effect = "security-state"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CredentialNative"
+name = "IsVerified"
+kind = "static"
+parameters = ["int32"]
+result = "bool"
+lowering = "native"
+native = 42
+capability = 42
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CredentialNative"
+name = "Change"
+kind = "static"
+parameters = ["int32", "byte[]", "int32", "int32"]
+result = "void"
+lowering = "native"
+native = 43
+capability = 43
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CredentialNative"
+name = "Unblock"
+kind = "static"
+parameters = ["int32", "byte[]", "int32", "int32", "byte[]", "int32", "int32"]
+result = "bool"
+lowering = "native"
+native = 44
+capability = 44
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "CredentialNative"
+name = "RetriesRemaining"
+kind = "static"
+parameters = ["int32", "int32"]
+result = "int32"
+lowering = "native"
+native = 45
+capability = 45
+side_effect = "read"
+profiles = ["mc04-1.0"]
+
+# Retained only for pre-TransactionScope packages accepted by the device linker.
+[[member]]
+owner = "DomainStorage"
+name = "BeginTransaction"
+kind = "instance"
+parameters = []
+result = "void"
+lowering = "native"
+native = 46
+capability = 46
+side_effect = "transaction-control"
+profiles = ["mc04-1.0"]
+compatibility = true
+
+[[member]]
+owner = "DomainStorage"
+name = "CommitTransaction"
+kind = "instance"
+parameters = []
+result = "void"
+lowering = "native"
+native = 47
+capability = 47
+side_effect = "transaction-control"
+profiles = ["mc04-1.0"]
+compatibility = true
+
+[[member]]
+owner = "DomainStorage"
+name = "AbortTransaction"
+kind = "instance"
+parameters = []
+result = "void"
+lowering = "native"
+native = 48
+capability = 48
+side_effect = "transaction-control"
+profiles = ["mc04-1.0"]
+compatibility = true
+
+[[member]]
+owner = "Cryptography"
+name = "Sha256Into"
+kind = "static"
+parameters = ["byte[]", "int32", "int32", "byte[]", "int32"]
+result = "int32"
+lowering = "native"
+native = 49
+capability = 49
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Cryptography"
+name = "RandomBytes"
+kind = "static"
+parameters = ["int32"]
+result = "byte[]"
+lowering = "native"
+native = 50
+capability = 50
+side_effect = "random"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Cryptography"
+name = "FixedTimeEquals"
+kind = "static"
+parameters = ["byte[]", "int32", "int32", "byte[]", "int32", "int32"]
+result = "bool"
+lowering = "native"
+native = 51
+capability = 51
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "DomainStorage"
+name = "SetBytes"
+kind = "instance"
+parameters = ["int32", "byte[]", "int32", "int32"]
+result = "void"
+lowering = "native"
+native = 52
+capability = 52
+side_effect = "transactional"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Buffers"
+name = "Copy"
+kind = "static"
+parameters = ["byte[]", "int32", "byte[]", "int32", "int32"]
+result = "bool"
+lowering = "native"
+native = 53
+capability = 53
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+[[member]]
+owner = "Tlv"
+name = "TryRead"
+kind = "static"
+parameters = ["byte[]", "int32", "int32", "int32[]", "int32", "int32"]
+result = "bool"
+lowering = "native"
+native = 54
+capability = 54
+side_effect = "none"
+profiles = ["mc04-1.0"]
+
+# Internal transaction projections emitted by the MC04 writer.
+[[member]]
+owner = "TransactionScopeRuntime"
+name = "Begin"
+kind = "static"
+parameters = []
+result = "void"
+lowering = "native"
+native = 55
+capability = 46
+side_effect = "transaction-control"
+profiles = ["mc04-1.0"]
+internal = true
+
+[[member]]
+owner = "TransactionScopeRuntime"
+name = "Commit"
+kind = "static"
+parameters = []
+result = "void"
+lowering = "native"
+native = 56
+capability = 47
+side_effect = "transaction-control"
+profiles = ["mc04-1.0"]
+internal = true
+
+[[member]]
+owner = "TransactionScopeRuntime"
+name = "Abort"
+kind = "static"
+parameters = []
+result = "void"
+lowering = "native"
+native = 57
+capability = 48
+side_effect = "transaction-control"
+profiles = ["mc04-1.0"]
+internal = true
+
+[[member]]
+owner = "TransactionRuntime"
+name = "Current"
+kind = "static"
+parameters = []
+result = "ref:MicroCard.Framework.TransactionRuntime"
+lowering = "native"
+native = 58
+capability = 46
+side_effect = "read"
+profiles = ["mc04-1.0"]
+internal = true
+
+[[member]]
+owner = "TransactionRuntime"
+name = "Information"
+kind = "instance"
+parameters = []
+result = "ref:MicroCard.Framework.TransactionInformationRuntime"
+lowering = "native"
+native = 59
+capability = 46
+side_effect = "read"
+profiles = ["mc04-1.0"]
+internal = true
+
+[[member]]
+owner = "TransactionInformationRuntime"
+name = "Status"
+kind = "instance"
+parameters = []
+result = "int32"
+lowering = "native"
+native = 60
+capability = 46
+side_effect = "read"
+profiles = ["mc04-1.0"]
+internal = true
+
+# Framework calls projected from standard library references before device linking.
+[[member]]
+assembly = "System.Security.Cryptography"
+namespace = "System.Security.Cryptography"
+owner = "SHA256"
+name = "HashData"
+kind = "static"
+parameters = ["byte[]"]
+result = "byte[]"
+lowering = "native"
+native = 20
+capability = 20
+side_effect = "none"
+profiles = ["mc04-1.0"]
+projection = true
+
+[[member]]
+assembly = "System.Security.Cryptography"
+namespace = "System.Security.Cryptography"
+owner = "RandomNumberGenerator"
+name = "GetBytes"
+kind = "static"
+parameters = ["int32"]
+result = "byte[]"
+lowering = "native"
+native = 50
+capability = 50
+side_effect = "random"
+profiles = ["mc04-1.0"]
+projection = true
