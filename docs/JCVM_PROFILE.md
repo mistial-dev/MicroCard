@@ -498,37 +498,6 @@ live transaction. PIN validation and transient buffers remain absent from snapsh
 Checkpoint failure stops execution; host cancellation tests confirm a consumed attempt
 survives recovery. Installation still publishes only its completed state.
 
-Each completed bytecode instruction checkpoints ordinary persistent writes before
-execution advances, returns, or enters an exception handler. Native calls checkpoint
-on return, with earlier PIN and transaction publication boundaries retained.
-Cooperative cancellation saves any remaining writes using the same committed-state
-projection. Successful checkpoints clear the write marker. Allocations outside transactions
-mark their headers for persistence, including transient-array headers; failed
-allocations do not. Transactional writes and transient payload writes alone do not
-trigger another snapshot. Storage
-failure stops execution instead of reporting a successful cancellation checkpoint.
-
-A completed instruction cannot advance past a failed checkpoint. Power loss during
-publication recovers the preceding committed state or the complete new record.
-Checkpoints append small heap/static changes in authenticated 1,024-byte frames. Larger changes, transaction
-commits, and exhausted append space use a full snapshot in the next journal slot.
-Recovery replays complete frames, checks generation continuity and the rollback
-anchor, and refuses to reuse partial tails. Interrupted rotation preserves the
-previous committed chain or the completed replacement snapshot.
-
-`PersistentView.save_range` stages bounded committed windows, projects undo records,
-and clears transient payloads, PIN validation, and runtime exception reasons. The
-fixed-size write tracker merges heap/static intervals and excludes uncommitted
-allocation tails. Heap and static changes share one authenticated record. Both are
-validated before replay mutates scratch state; the complete resulting snapshot must
-fit its storage quota. A provider or flash failure stops the operation. Full snapshots
-and records use the same providers, with no software retry.
-
-The board programs one fresh 32-bit word in separate 4 KiB generation and nonce counters
-per commit/encryption attempt, limiting each to 1,024 values. Append records reduce
-erases but do not extend these counters. Remaining work includes auditing internal
-native bulk-write/allocation failure boundaries, counter lifetime, and the remaining
-native-API transaction semantics.
 A passing host workflow does not establish Java Card guarantees or physical execution.
 
 To measure host flash traffic, build `microcard-sim` with `--features heap-metrics`,

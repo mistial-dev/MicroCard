@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 103440,
+      "text_bytes": 104052,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 138200,
+      "text_bytes": 138816,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 138216,
+      "text_bytes": 138840,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 233636,
+      "text_bytes": 234324,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 236660,
+      "text_bytes": 237356,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 232240,
+      "text_bytes": 232288,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
@@ -75,8 +75,8 @@
   },
   "budgets_passed": false,
   "budget_failures": [
-    "usb_ccid text_bytes 233636 exceeds 224000",
-    "dongle text_bytes 236660 exceeds 224000",
-    "jcvm_dongle text_bytes 232240 exceeds 178000"
+    "usb_ccid text_bytes 234324 exceeds 224000",
+    "dongle text_bytes 237356 exceeds 224000",
+    "jcvm_dongle text_bytes 232288 exceeds 178000"
   ]
 }

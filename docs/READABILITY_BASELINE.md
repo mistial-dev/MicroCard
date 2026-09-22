@@ -41,3 +41,32 @@ An abstraction stays only when it owns an invariant, removes behavior duplicated
 ## Comparison gates
 
 Each structural commit must keep the relevant quick gate green. Changes on a hot path also compare generated package size, firmware flash, allocation count, and representative host APDU latency with this revision. A regression must be explained or removed before the cleanup continues.
+
+## Post-cleanup comparison
+
+Warm validation on the same host after the cleanup:
+
+- Rust quick gate: **2.142 seconds**, down from 7.479 seconds.
+- Managed quick gate: **1.956 seconds**, down from 3.415 seconds.
+- The isolated SDK pack, template install, conversion, and signed host execution smoke
+  takes about **4.9 seconds** and runs only in the checkpoint.
+- Individual conversions in the checkpoint take **0.07 to 0.09 seconds** after the
+  managed build is complete.
+
+The authoring API adds readable context and service references to emitted metadata.
+The Counter image still shrank from 2,476 to **2,464 bytes**. The default ISD bundle
+grew from 10,242 to **10,975 bytes**, mostly because the ISO 7816 and cryptography
+facades now use the typed API and shared checked copy path. Splitting DER-only
+validation out of the shared TLV core reduced the ISO 7816 image from an intermediate
+2,821 bytes to **2,157 bytes**. All assembly and package ceilings still pass.
+
+Representative MC04 execution retains **zero transaction snapshots and zero transaction
+clone allocations** on ordinary commands. The credential workload now peaks at 86
+instructions, 20 evaluation slots, 152 transient bytes, and three transient objects.
+Its authenticated state is 1,428 bytes.
+
+Both MakerDiary engine profiles link and the link-map checks prove that each artifact
+contains only its selected interpreter. The existing USB profiles remain above their
+tracked flash ceilings: MC04 USB CCID is 234,324 bytes, MC04 dongle is 237,356 bytes,
+and JCVM dongle is 232,288 bytes. The ceilings were not raised; this cleanup records
+the remaining size work without blocking host correctness.
