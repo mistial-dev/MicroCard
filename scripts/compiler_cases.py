@@ -1,5 +1,4 @@
 """Compile checkpoint cases once and verify the independent MC04 preprocessor gate."""
-import hashlib
 import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -72,8 +71,6 @@ def run_compiler_cases(jobs=1, prebuilt=False):
         "Outputs": outputs,
     }, indent=2) + "\n")
     run_analyzer_cases(emission, prebuilt=True)
-    framework = ROOT / "managed/MicroCard.Framework/bin/Release/net10.0/MicroCard.Framework.dll"
-    pin = hashlib.sha256(framework.read_bytes()).hexdigest()
     tool = ROOT / "managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll"
     cases = [(outputs[symbol], name, None) for symbol, name in BOUNDARIES]
     cases += [(outputs[symbol], name, error) for symbol, name, error in REJECTIONS]
@@ -86,7 +83,7 @@ def run_compiler_cases(jobs=1, prebuilt=False):
         prefix.parent.mkdir(parents=True, exist_ok=True)
         for suffix in (".mca", ".json", ".map.json"):
             prefix.with_suffix(suffix).unlink(missing_ok=True)
-        result = run("dotnet", str(tool), str(assembly), str(prefix), str(framework), pin,
+        result = run("dotnet", str(tool), str(assembly), str(prefix),
                      check=False, capture_output=True, text=True)
         if error is None:
             assert result.returncode == 0 and prefix.with_suffix(".mca").exists(), (name, result.stdout, result.stderr)

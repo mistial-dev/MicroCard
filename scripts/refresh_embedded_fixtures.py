@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Regenerate or verify MC04 files compiled into Rust tests and fuzz targets."""
 import argparse
-import hashlib
 import pathlib
 import subprocess
 import tempfile
@@ -33,9 +32,7 @@ def main() -> None:
     args = parser.parse_args()
     run("dotnet", "build", "managed/MicroCard.Framework", "-c", "Release", "--nologo")
     run("dotnet", "build", "managed/MicroCard.Tool", "-c", "Release", "--nologo")
-    framework = ROOT / "managed/MicroCard.Framework/bin/Release" / TFM / "MicroCard.Framework.dll"
     tool = ROOT / "managed/MicroCard.Tool/bin/Release" / TFM / "MicroCard.Tool.dll"
-    pin = hashlib.sha256(framework.read_bytes()).hexdigest()
     stale = []
     with tempfile.TemporaryDirectory(prefix="microcard-fixtures-") as directory_name:
         directory = pathlib.Path(directory_name)
@@ -43,7 +40,7 @@ def main() -> None:
             run("dotnet", "build", project, "-c", "Release", "--nologo")
             assembly = ROOT / project / "bin/Release" / TFM / f"{assembly_name}.dll"
             prefix = directory / str(index)
-            run("dotnet", tool, assembly, prefix, framework, pin)
+            run("dotnet", tool, assembly, prefix)
             generated = prefix.with_suffix(".mca").read_bytes()
             destination = ROOT / destination_name
             if destination.exists() and destination.read_bytes() == generated:

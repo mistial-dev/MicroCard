@@ -130,14 +130,12 @@ def ensure_assembly(project, output):
  for source_root in (ROOT/project,ROOT/'managed/MicroCard.Tool',ROOT/'managed/MicroCard.Framework'):
   inputs.extend(path for path in source_root.rglob('*') if path.suffix in ('.cs','.csproj'))
  if image.exists() and metadata.exists() and max(path.stat().st_mtime_ns for path in inputs)<=min(image.stat().st_mtime_ns,metadata.stat().st_mtime_ns): return image,metadata
- framework=ROOT/'managed/MicroCard.Framework/bin/Release/net10.0/MicroCard.Framework.dll'
  tool=ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'
  for item in ('managed/MicroCard.Framework','managed/MicroCard.Tool',project):
   subprocess.run(['dotnet','build',item,'-c','Release','--nologo','--verbosity','quiet'],cwd=ROOT,check=True)
- pin=hashlib.sha256(framework.read_bytes()).hexdigest()
  assembly_name='MicroCard.Core' if pathlib.Path(project).name=='CoreLib' else pathlib.Path(project).name
  assembly=ROOT/project/'bin/Release/net10.0'/f'{assembly_name}.dll'
- subprocess.run(['dotnet',tool,assembly,ROOT/'work'/output,framework,pin],cwd=ROOT,check=True)
+ subprocess.run(['dotnet',tool,assembly,ROOT/'work'/output],cwd=ROOT,check=True)
  return image,metadata
 
 # MP05 packages are signed with P-256 ECDSA over SHA-256. The signer key travels as an

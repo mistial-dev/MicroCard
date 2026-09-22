@@ -1,7 +1,6 @@
 <Project>
   <PropertyGroup>
     <MicroCardEnabled Condition="'$(MicroCardEnabled)' == ''">true</MicroCardEnabled>
-    <MicroCardAppModel>$(MSBuildThisFileDirectory)../ref/net10.0/MicroCard.AppModel.dll</MicroCardAppModel>
     <MicroCardConverter>$(MSBuildThisFileDirectory)../tools/net10.0/any/MicroCard.Tool.dll</MicroCardConverter>
   </PropertyGroup>
 </Project>

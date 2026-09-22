@@ -1,5 +1,5 @@
 """Full host acceptance sequence. Invoked through check.py."""
-import hashlib,json,subprocess
+import json,subprocess
 from validation_common import ROOT, build_managed, run, run_acceptance
 from compiler_cases import run_compiler_cases
 from validation_quick import PROJECTS, managed_checks
@@ -25,9 +25,8 @@ def run_checkpoint(jobs=1):
  assert packaged_bad.returncode!=0 and 'MCA0002' in packaged_bad.stdout,(packaged_bad.stdout,packaged_bad.stderr)
  run('dotnet',str(ROOT/'tests/VersionConstraints/bin/Release/net10.0/VersionConstraints.dll'))
  run_compiler_cases(jobs, prebuilt=True)
- framework=ROOT/'managed/MicroCard.Framework/bin/Release/net10.0/MicroCard.Framework.dll';pin=hashlib.sha256(framework.read_bytes()).hexdigest()
  common=['dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Counter/bin/Release/net10.0/Counter.dll')]
- for prefix in ['counter','counter-again']:run(*common,str(ROOT/'work'/prefix),str(framework),pin)
+ for prefix in ['counter','counter-again']:run(*common,str(ROOT/'work'/prefix))
  counter_metadata=json.loads((ROOT/'work/counter.json').read_text());assert counter_metadata['storage']==[{'key':1,'kind':1,'max_bytes':0}]
  pack_tool=ROOT/'managed/MicroCard.Pack/bin/Release/net10.0/MicroCard.Pack.dll';pack_seed=ROOT/'work/pack-quota.seed';pack_seed.write_bytes(bytes([0x5a])*32)
  large_image=ROOT/'work/pack-large.mca';large_image.write_bytes((ROOT/'work/counter.mca').read_bytes().ljust(9000,b'\0'))
@@ -47,8 +46,8 @@ def run_checkpoint(jobs=1):
  oversized_image=ROOT/'work/pack-oversized.mca';oversized_image.write_bytes(bytes(16384));oversized_package=ROOT/'work/pack-oversized.mcp';oversized_package.unlink(missing_ok=True)
  oversized=subprocess.run(['dotnet',str(pack_tool),str(oversized_image),str(ROOT/'work/counter.json'),'quota','00'*16,'1',str(pack_seed),str(oversized_package),'--explicit-sign'],cwd=ROOT,capture_output=True,text=True)
  assert oversized.returncode!=0 and 'Package exceeds quota' in oversized.stderr+oversized.stdout and not oversized_package.exists(),(oversized.stdout,oversized.stderr)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CoreLib/bin/Release/net10.0/MicroCard.Core.dll'),str(ROOT/'work/mscorlib'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CoreConsumer/bin/Release/net10.0/CoreConsumer.dll'),str(ROOT/'work/core-consumer'),str(framework),pin)
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CoreLib/bin/Release/net10.0/MicroCard.Core.dll'),str(ROOT/'work/mscorlib'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CoreConsumer/bin/Release/net10.0/CoreConsumer.dll'),str(ROOT/'work/core-consumer'))
  core_manifest=json.loads((ROOT/'work/mscorlib.json').read_text())
  core_consumer_manifest=json.loads((ROOT/'work/core-consumer.json').read_text())
  assert core_manifest['assembly']=='mscorlib' and core_manifest['assembly_version']==[0,1,0,0]
@@ -56,21 +55,21 @@ def run_checkpoint(jobs=1):
  core_consumer_inspection=json.loads(subprocess.run(['python3','scripts/mcinspect.py','work/core-consumer.mca'],cwd=ROOT,check=True,capture_output=True,text=True).stdout)
  assembly_references=[row['columns']['Name']['value'] for table in core_consumer_inspection['tables'] if table['name']=='AssemblyRef' for row in table['rows']]
  assert 'mscorlib' in assembly_references and 'MicroCard.Core' not in assembly_references
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/SigningAcceptance/bin/Release/net10.0/SigningAcceptance.dll'),str(ROOT/'work/signing-acceptance'),str(framework),pin)
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/SigningAcceptance/bin/Release/net10.0/SigningAcceptance.dll'),str(ROOT/'work/signing-acceptance'))
  public_prefix=ROOT/'work/public-tool/counter';public_prefix.parent.mkdir(parents=True,exist_ok=True)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Counter/bin/Release/net10.0/Counter.dll'),str(public_prefix),str(framework),pin)
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Counter/bin/Release/net10.0/Counter.dll'),str(public_prefix))
  assert public_prefix.with_suffix('.mca').exists() and not public_prefix.with_suffix('.mci').exists(),'public preprocessor emitted a legacy assembly'
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Kdf108/bin/Release/net10.0/Kdf108.dll'),str(ROOT/'work/kdf108'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Kdf108Consumer/bin/Release/net10.0/Kdf108Consumer.dll'),str(ROOT/'work/kdf108-consumer'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Iso7816/bin/Release/net10.0/MicroCard.Iso7816.dll'),str(ROOT/'work/iso7816'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Encoding/bin/Release/net10.0/MicroCard.Encoding.dll'),str(ROOT/'work/encoding'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/EncodingConsumer/bin/Release/net10.0/EncodingConsumer.dll'),str(ROOT/'work/encoding-consumer'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Cryptography/bin/Release/net10.0/MicroCard.Cryptography.dll'),str(ROOT/'work/cryptography'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Security/bin/Release/net10.0/MicroCard.Security.dll'),str(ROOT/'work/security'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/SecurityConsumer/bin/Release/net10.0/SecurityConsumer.dll'),str(ROOT/'work/security-consumer'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Credential/bin/Release/net10.0/Credential.dll'),str(ROOT/'work/credential'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CryptographyConsumer/bin/Release/net10.0/CryptographyConsumer.dll'),str(ROOT/'work/cryptography-consumer'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Iso7816Consumer/bin/Release/net10.0/Iso7816Consumer.dll'),str(ROOT/'work/iso7816-consumer'),str(framework),pin)
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Kdf108/bin/Release/net10.0/Kdf108.dll'),str(ROOT/'work/kdf108'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Kdf108Consumer/bin/Release/net10.0/Kdf108Consumer.dll'),str(ROOT/'work/kdf108-consumer'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Iso7816/bin/Release/net10.0/MicroCard.Iso7816.dll'),str(ROOT/'work/iso7816'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Encoding/bin/Release/net10.0/MicroCard.Encoding.dll'),str(ROOT/'work/encoding'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/EncodingConsumer/bin/Release/net10.0/EncodingConsumer.dll'),str(ROOT/'work/encoding-consumer'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Cryptography/bin/Release/net10.0/MicroCard.Cryptography.dll'),str(ROOT/'work/cryptography'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'managed/MicroCard.Security/bin/Release/net10.0/MicroCard.Security.dll'),str(ROOT/'work/security'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/SecurityConsumer/bin/Release/net10.0/SecurityConsumer.dll'),str(ROOT/'work/security-consumer'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Credential/bin/Release/net10.0/Credential.dll'),str(ROOT/'work/credential'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/CryptographyConsumer/bin/Release/net10.0/CryptographyConsumer.dll'),str(ROOT/'work/cryptography-consumer'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/Iso7816Consumer/bin/Release/net10.0/Iso7816Consumer.dll'),str(ROOT/'work/iso7816-consumer'))
  iso_manifest=json.loads((ROOT/'work/iso7816.json').read_text())
  assert iso_manifest['assembly']=='MicroCard.Iso7816' and iso_manifest['capabilities']==[54] and iso_manifest['entry_points']==[]
  encoding_manifest=json.loads((ROOT/'work/encoding.json').read_text())
@@ -89,8 +88,8 @@ def run_checkpoint(jobs=1):
  assert iso_consumer['capabilities']==[2,11,12,13] and iso_consumer['dependencies'][0]['assembly']=='MicroCard.Iso7816'
  iso_inspection=json.loads(subprocess.run(['python3','scripts/mcinspect.py','work/iso7816.mca'],cwd=ROOT,check=True,capture_output=True,text=True).stdout)
  assert 'Field' not in [table['name'] for table in iso_inspection['tables']],'compile-time constants leaked into MC04 metadata'
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/KeyOperations/bin/Release/net10.0/KeyOperations.dll'),str(ROOT/'work/keys'),str(framework),pin)
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/TransactionRecords/bin/Release/net10.0/TransactionRecords.dll'),str(ROOT/'work/transaction-records'),str(framework),pin)
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/KeyOperations/bin/Release/net10.0/KeyOperations.dll'),str(ROOT/'work/keys'))
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'samples/TransactionRecords/bin/Release/net10.0/TransactionRecords.dll'),str(ROOT/'work/transaction-records'))
  assert (ROOT/'work/counter.mca').read_bytes()==(ROOT/'fuzz/fixtures/counter.mca').read_bytes(),'counter fuzz fixture is stale'
  assert (ROOT/'work/mscorlib.mca').read_bytes()==(ROOT/'fuzz/fixtures/mscorlib.mca').read_bytes(),'mscorlib fuzz fixture is stale'
  assert (ROOT/'work/keys.mca').read_bytes()==(ROOT/'fuzz/fixtures/key_operations.mca').read_bytes(),'key-operation transaction fixture is stale'
@@ -101,7 +100,7 @@ def run_checkpoint(jobs=1):
  assert (ROOT/'work/security.mca').read_bytes()==(ROOT/'fuzz/fixtures/security.mca').read_bytes(),'security runtime fixture is stale'
  assert (ROOT/'work/credential.mca').read_bytes()==(ROOT/'fuzz/fixtures/credential.mca').read_bytes(),'credential runtime fixture is stale'
  assert (ROOT/'work/transaction-records.mca').read_bytes()==(ROOT/'tests/fixtures/transaction_records.mca').read_bytes(),'transaction runtime fixture is stale'
- run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(ROOT/'work/dependency'),str(framework),pin)
+ run('dotnet',str(ROOT/'managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll'),str(ROOT/'tests/AnalyzerCases/bin/Release/net10.0/AnalyzerCases.dll'),str(ROOT/'work/dependency'))
  dependency_assembly=(ROOT/'work/dependency.mca').read_bytes()
  assert b'EmptyCore\0' not in dependency_assembly and b'value\0' not in dependency_assembly,'private metadata name retained'
  assert b'Empty\0' in dependency_assembly and b'Read\0' in dependency_assembly,'public metadata name stripped'
@@ -112,13 +111,11 @@ def run_checkpoint(jobs=1):
  assert (ROOT/'work/counter.mca').stat().st_size <= 3072,'MC04 counter assembly exceeded 3 KiB regression budget'
  mapping=json.loads((ROOT/'work/counter.map.json').read_text())
  target=ROOT/'work/msbuild/counter'
- properties=['-p:BuildProjectReferences=false','-p:MicroCardEnabled=true',f'-p:MicroCardFramework={framework}',f'-p:MicroCardFrameworkHash={pin}',f'-p:MicroCardTool={ROOT}/managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll',f'-p:MicroCardOutput={target}']
+ properties=['-p:BuildProjectReferences=false','-p:MicroCardEnabled=true',f'-p:MicroCardTool={ROOT}/managed/MicroCard.Tool/bin/Release/net10.0/MicroCard.Tool.dll',f'-p:MicroCardOutput={target}']
  run('dotnet','build','samples/Counter','-c','Release','--nologo','--verbosity','quiet',*properties)
  stamp=target.with_suffix('.mca').stat().st_mtime_ns
  run('dotnet','build','samples/Counter','-c','Release','--nologo','--verbosity','quiet',*properties)
  assert target.with_suffix('.mca').stat().st_mtime_ns==stamp,'incremental output regenerated'
- bad=subprocess.run(['dotnet','build','samples/Counter','-c','Release','--nologo','--verbosity','quiet',*properties,'-p:MicroCardFrameworkHash=00'],cwd=ROOT,capture_output=True,text=True)
- assert bad.returncode!=0 and 'approved pin' in bad.stdout
  run('cargo','build','--locked','--quiet')
  run(str(ROOT/'target/debug/microcard-sim'),'verify-assembly',str(ROOT/'work/counter.mca'))
  run(str(ROOT/'target/debug/microcard-sim'),'verify-assembly',str(ROOT/'work/mscorlib.mca'))

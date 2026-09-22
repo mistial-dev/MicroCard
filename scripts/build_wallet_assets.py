@@ -32,10 +32,8 @@ def main() -> None:
 
     if not prebuilt():
         build_managed(["managed/MicroCard.Tool", *[project for project, _, _ in ASSEMBLIES]])
-    framework = ROOT / "managed/MicroCard.Framework/bin" / CONFIGURATION / TFM / "MicroCard.Framework.dll"
     tool = ROOT / "managed/MicroCard.Tool/bin" / CONFIGURATION / TFM / "MicroCard.Tool.dll"
-    require_artifacts(framework, tool)
-    framework_hash = hashlib.sha256(framework.read_bytes()).hexdigest()
+    require_artifacts(tool)
 
     for project, assembly_name, stem in ASSEMBLIES:
         assembly = ROOT / project / "bin" / CONFIGURATION / TFM / f"{assembly_name}.dll"
@@ -45,7 +43,7 @@ def main() -> None:
             candidate = pathlib.Path(str(prefix) + suffix)
             if candidate.exists():
                 candidate.unlink()
-        run("dotnet", tool, assembly, prefix, framework, framework_hash)
+        run("dotnet", tool, assembly, prefix)
 
     manifest = output / "assets.sha256"
     lines = []

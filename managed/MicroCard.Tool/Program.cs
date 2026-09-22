@@ -1,12 +1,11 @@
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Collections.Immutable;
-using System.Security.Cryptography;
 using System.Text.Json;
 using MicroCard.Build;
 // ECMA-335, 6th ed., II.22 metadata; III.3 instructions. Input assembly code is never executed here.
-if (args.Length != 4) { Console.Error.WriteLine("usage: MicroCard.Tool ASSEMBLY OUTPUT_PREFIX FRAMEWORK_DLL EXPECTED_SHA256"); return 2; }
-try { new Compiler(args[0], args[2], args[3]).WriteMc04(args[1]); return 0; }
+if (args.Length != 2) { Console.Error.WriteLine("usage: MicroCard.Tool ASSEMBLY OUTPUT_PREFIX"); return 2; }
+try { new Compiler(args[0]).WriteMc04(args[1]); return 0; }
 catch (Exception e) { Console.Error.WriteLine(e.Message); return 1; }
 sealed class Types : ISignatureTypeProvider<string, object?>, ICustomAttributeTypeProvider<string>
 {
@@ -27,27 +26,19 @@ sealed class Types : ISignatureTypeProvider<string, object?>, ICustomAttributeTy
 }
 sealed class Compiler : IDisposable
 {
-    // This identifies the reviewed device ABI. The DLL digest below authenticates
-    // the host input, while this stable value keeps MC04 output reproducible across
-    // equivalent framework builds.
-    static readonly byte[] FrameworkAbiIdentity = Convert.FromHexString(Mc04Abi.FrameworkIdentitySha256);
     readonly string input; readonly FileStream file; readonly PEReader pe; readonly MetadataReader md; readonly Types types = new();
     readonly Dictionary<MethodDefinitionHandle, int> ids = new(); readonly List<object> entry_points = new(); readonly SortedSet<int> caps = new();
-    readonly string frameworkName;
-    readonly byte[] frameworkHash;
+    readonly string frameworkName = Mc04Abi.FrameworkAssembly;
+    readonly byte[] frameworkHash = Convert.FromHexString(Mc04Abi.FrameworkIdentitySha256);
     readonly string deviceAssemblyName;
     readonly DependencyDeclaration[] dependencies;
     readonly object[] storage;
 
     sealed record DependencyDeclaration(string Name, string ReferenceName, bool HasExplicitReference, object Manifest);
 
-    public Compiler(string input, string framework, string hash)
+    public Compiler(string input)
     {
         this.input = input;
-        if (!Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(framework))).Equals(hash, StringComparison.OrdinalIgnoreCase)) throw new Exception("Trusted framework hash mismatch");
-        frameworkHash = FrameworkAbiIdentity;
-        using (var f = File.OpenRead(framework)) using (var p = new PEReader(f)) { frameworkName = p.GetMetadataReader().GetString(p.GetMetadataReader().GetAssemblyDefinition().Name); }
-        if (frameworkName != "MicroCard.Framework") throw new Exception("Wrong framework");
         file = File.OpenRead(input); pe = new(file); md = pe.GetMetadataReader();
         deviceAssemblyName = DeviceAssemblyName();
         dependencies = Dependencies(deviceAssemblyName);

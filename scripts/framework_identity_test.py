@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Verify stable platform ABI identities in deterministic MC04 output."""
-import hashlib
 import pathlib
 import subprocess
 import tempfile
@@ -27,7 +26,6 @@ def assembly_refs(parsed):
 
 
 def main():
-    framework = ROOT / "managed/MicroCard.Framework/bin/Release/net10.0/MicroCard.Framework.dll"
     for prefix in PREFIXES:
         parsed = mcinspect.inspect((ROOT / f"work/{prefix}.mca").read_bytes())
         for row in assembly_refs(parsed):
