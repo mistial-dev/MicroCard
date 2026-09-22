@@ -18,7 +18,7 @@ is the authoritative list of supported behavior, unfinished implementation, and 
 - [Domain policy](DOMAIN_POLICY.md) — per-SSD capability and resource policy.
 - [Storage](STORAGE.md) and [persistent storage schema](PERSISTENT_STORAGE_SCHEMA.md) — the application store.
 - [Key store](KEYSTORE.md) — the eight per-SSD key slots and their opaque handles.
-- [Transactions](TRANSACTIONS.md) — what the transaction attribute means and where it stops.
+- [Transactions](TRANSACTIONS.md) — explicit MC04 and Java Card transaction boundaries.
 
 ## The .NET engine
 
