@@ -21,6 +21,19 @@ in its vendor README. The published P71D321 result used client v1.8.3; the
 release run must use a pinned build of that client, not silently substitute
 the older v1.8.2 release JAR.
 
+Build the pinned upstream desktop client with its own Ant project:
+
+```sh
+git clone https://github.com/crocs-muni/JCAlgTest.git work/jcalgtest-client-src
+git -C work/jcalgtest-client-src checkout 4c9d2906e358818f6ab6fdfb3286f168d4936f60
+python3 scripts/jcalgtest_client.py --source work/jcalgtest-client-src --build-only
+```
+
+The helper checks the full commit and reported client version. It launches the
+upstream main class with the required dependency JARs; upstream's
+`package-for-store` JAR omits JCommander and json-simple. Pass upstream client
+arguments after `--`, including the exact PC/SC reader and an output path.
+
 ## Conformance work
 
 | Area | Current evidence | Release gate |
