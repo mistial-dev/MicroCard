@@ -7,7 +7,7 @@
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
-        "text_bytes": 186000,
+        "text_bytes": 110000,
         "data_bytes": 0,
         "bss_bytes": 199000
       }
@@ -17,7 +17,7 @@
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
-        "text_bytes": 212000,
+        "text_bytes": 145000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
@@ -27,7 +27,7 @@
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
-        "text_bytes": 212000,
+        "text_bytes": 145000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
@@ -37,7 +37,7 @@
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 224000,
+        "text_bytes": 241000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
@@ -47,36 +47,42 @@
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 224000,
+        "text_bytes": 244000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 114748,
+      "text_bytes": 113120,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
-        "text_bytes": 168000,
+        "text_bytes": 120000,
+        "data_bytes": 160,
+        "bss_bytes": 199000
+      }
+    },
+    "jcvm_usb_ccid": {
+      "text_bytes": 229192,
+      "data_bytes": 148,
+      "bss_bytes": 198284,
+      "ceilings": {
+        "text_bytes": 236000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 232288,
+      "text_bytes": 230788,
       "data_bytes": 148,
       "bss_bytes": 198284,
       "ceilings": {
-        "text_bytes": 178000,
+        "text_bytes": 237000,
         "data_bytes": 160,
         "bss_bytes": 199000
       }
     }
   },
-  "budgets_passed": false,
-  "budget_failures": [
-    "usb_ccid text_bytes 234324 exceeds 224000",
-    "dongle text_bytes 237356 exceeds 224000",
-    "jcvm_dongle text_bytes 232288 exceeds 178000"
-  ]
+  "budgets_passed": true,
+  "budget_failures": []
 }

@@ -115,6 +115,14 @@ The older [add-on experiment](NRF52840_CC310_PLATFORM_SPIKE.json) is historical 
 Test-only measurement counters are absent from firmware. Build from the board directory
 so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
+These ceilings are regression alarms based on measured links, with about 5–7 KiB of
+headroom. They are not the physical firmware partition size. The linker scripts set
+the actual DK and dongle code, staging, image, heap, and journal regions. The
+earlier USB ceilings were below their own recorded measurements, so the gate could
+never pass; the current gate includes the operational JCVM DK USB profile and uses
+measured ceilings. A deliberate Java Card feature addition can raise a ceiling only
+with a new link measurement and a check that the storage layout still fits.
+
 BSS includes a 192 KiB heap reservation. These link-time sizes provide no measured peaks. Stack margin, allocator exhaustion, maximum-domain workloads and command latency require board testing.
 
 ## Hardware acceptance still required
