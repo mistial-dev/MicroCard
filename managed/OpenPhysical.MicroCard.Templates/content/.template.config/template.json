@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "OpenPhysical",
+  "classifications": ["MicroCard", "Smart card", "MC04"],
+  "identity": "OpenPhysical.MicroCard.Templates.Assembly",
+  "name": "OpenPhysical MicroCard assembly",
+  "shortName": "microcard-assembly",
+  "sourceName": "MicroCardAssembly",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "symbols": {
+    "sdkVersion": {
+      "type": "parameter",
+      "datatype": "string",
+      "description": "OpenPhysical.MicroCard.Sdk package version",
+      "defaultValue": "0.1.0-wip",
+      "replaces": "MicroCardSdkPackageVersion"
+    },
+    "aid": {
+      "type": "parameter",
+      "datatype": "string",
+      "description": "Card application identifier",
+      "defaultValue": "A000000001",
+      "replaces": "MicroCardAssemblyAid"
+    }
+  }
+}

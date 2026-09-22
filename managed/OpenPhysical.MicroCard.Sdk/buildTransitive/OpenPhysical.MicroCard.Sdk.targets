@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <MicroCardOutput Condition="'$(MicroCardOutput)' == ''">$(IntermediateOutputPath)microcard/$(AssemblyName)</MicroCardOutput>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MicroCardDisableAnalyzer)' != 'true'">
+    <Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/MicroCard.Analyzers.dll" />
+  </ItemGroup>
+
+  <Target Name="MicroCardConvert"
+          AfterTargets="Build"
+          Condition="'$(MicroCardEnabled)' == 'true'"
+          Inputs="$(TargetPath);$(MicroCardConverter);$(MicroCardAppModel);$(MSBuildProjectFullPath);$(MSBuildThisFileFullPath)"
+          Outputs="$(MicroCardOutput).mca;$(MicroCardOutput).json;$(MicroCardOutput).map.json">
+    <Error Condition="!Exists('$(MicroCardConverter)')" Text="The MicroCard converter is missing from the SDK package." />
+    <Error Condition="!Exists('$(MicroCardAppModel)')" Text="The MicroCard application model is missing from the SDK package." />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(MicroCardOutput)'))" />
+    <GetFileHash Files="$(MicroCardAppModel)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_MicroCardAppModelHash" />
+    </GetFileHash>
+    <Exec Command="dotnet &quot;$(MicroCardConverter)&quot; &quot;$(TargetPath)&quot; &quot;$(MicroCardOutput)&quot; &quot;$(MicroCardAppModel)&quot; %(_MicroCardAppModelHash.FileHash)" />
+  </Target>
+</Project>

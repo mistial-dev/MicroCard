@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <PackageId>OpenPhysical.MicroCard.Sdk</PackageId>
+    <PackageVersion>0.1.0-wip</PackageVersion>
+    <Title>OpenPhysical MicroCard SDK</Title>
+    <Description>Compile-time application model, diagnostics, and MC04 conversion tooling.</Description>
+    <PackageTags>microcard;smartcard;mc04;analyzer</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <NoWarn>$(NoWarn);NU5128;NU5131</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MicroCard.Framework/MicroCard.Framework.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="../MicroCard.Analyzers/MicroCard.Analyzers.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="../MicroCard.Tool/MicroCard.Tool.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all" />
+
+    <None Include="../MicroCard.Framework/obj/$(Configuration)/net10.0/ref/MicroCard.Framework.dll"
+          Pack="true" PackagePath="ref/net10.0/MicroCard.AppModel.dll" />
+    <None Include="../MicroCard.Framework/bin/$(Configuration)/net10.0/MicroCard.Framework.xml"
+          Pack="true" PackagePath="ref/net10.0/MicroCard.AppModel.xml" />
+    <None Include="../MicroCard.Analyzers/bin/$(Configuration)/netstandard2.0/MicroCard.Analyzers.dll"
+          Pack="true" PackagePath="analyzers/dotnet/cs/MicroCard.Analyzers.dll" />
+    <None Include="../MicroCard.Tool/bin/$(Configuration)/net10.0/MicroCard.Tool.dll"
+          Pack="true" PackagePath="tools/net10.0/any/MicroCard.Tool.dll" />
+    <None Include="../MicroCard.Tool/bin/$(Configuration)/net10.0/MicroCard.Tool.deps.json"
+          Pack="true" PackagePath="tools/net10.0/any/MicroCard.Tool.deps.json" />
+    <None Include="../MicroCard.Tool/bin/$(Configuration)/net10.0/MicroCard.Tool.runtimeconfig.json"
+          Pack="true" PackagePath="tools/net10.0/any/MicroCard.Tool.runtimeconfig.json" />
+    <None Include="buildTransitive/OpenPhysical.MicroCard.Sdk.props"
+          Pack="true" PackagePath="buildTransitive/OpenPhysical.MicroCard.Sdk.props" />
+    <None Include="buildTransitive/OpenPhysical.MicroCard.Sdk.targets"
+          Pack="true" PackagePath="buildTransitive/OpenPhysical.MicroCard.Sdk.targets" />
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <Target Name="BuildSdkPayload" BeforeTargets="GenerateNuspec">
+    <MSBuild Projects="../MicroCard.Framework/MicroCard.Framework.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);GenerateDocumentationFile=true;NoWarn=1591" />
+    <MSBuild Projects="../MicroCard.Analyzers/MicroCard.Analyzers.csproj;../MicroCard.Tool/MicroCard.Tool.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+  </Target>
+</Project>

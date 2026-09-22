@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <PackageId>OpenPhysical.MicroCard.Templates</PackageId>
+    <PackageVersion>0.1.0-wip</PackageVersion>
+    <Title>OpenPhysical MicroCard templates</Title>
+    <Description>dotnet new templates for MC04 assemblies.</Description>
+    <PackageTags>dotnet-new;templates;microcard;mc04</PackageTags>
+    <PackageType>Template</PackageType>
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="content/**/*" Exclude="content/**/bin/**;content/**/obj/**"
+             Pack="true" PackagePath="content" />
+    <None Include="PACKAGE.md" Pack="true" PackagePath="PACKAGE.md" />
+  </ItemGroup>
+</Project>
