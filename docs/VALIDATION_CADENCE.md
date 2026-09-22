@@ -35,12 +35,12 @@ Both quick and checkpoint gates build .NET projects through one generated soluti
 
 Timed commands report elapsed time. `work/validation-timings.json` records overall wall time and command durations and exit codes, including the failing stage. Acceptance stages identify the suite and text/binary transport mode. Concurrent command durations overlap, so their sum is not wall time. Use `--timings PATH` to preserve a comparison run. These timings reflect existing caches unless a separate clean build directory is used.
 
-A warm host sample with the same 17 acceptance invocations measured 43.312 seconds
-for the complete checkpoint with one worker and 33.489 seconds with two. The
-acceptance batch itself fell from 23.123 to 15.876 seconds. Both runs passed, including
-wallet and board checks. Reproduce with `--checkpoint --jobs 1` and `--jobs 2`, recording
-separate timing files. These are warm host measurements; cold builds and device latency
-remain separate measurements.
+A clean host checkpoint at revision `11e83f4` rebuilt Rust, .NET, and Java outputs in
+55.467 seconds with four workers. Its 17 acceptance invocations took 10.817 seconds;
+the wallet worker reused the single Maven build performed before the batch. Every
+behavioral and link stage passed, and the final board-budget stage reported the three
+tracked flash ceilings. Reproduce with `--checkpoint --jobs 4` and a separate timing
+file. Device latency remains a separate measurement.
 
 ## Continuous integration
 

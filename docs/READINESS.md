@@ -173,18 +173,19 @@ latency improvement or smaller safe heap has been established. Historical per-ch
 comparisons remain in Git history; reproduce current results before using them as budgets.
 
 [Validation cadence](VALIDATION_CADENCE.md) defines focused, quick, checkpoint, and CI
-coverage. Managed builds share a graph, compiler cases run in process, and acceptance
-reuses outputs with bounded workers and isolated logs/state. The final host checkpoint
-ran at clean revision `d13e4af` in 42.061 seconds with four workers and incremental
-outputs (`work/checkpoint-explicit-transactions-final.json`). Host, Java wallet,
-recovery, generated artifacts, and affected fuzz-target builds passed; workspace and
-both dongle-profile Clippy runs also passed. All seven firmware profiles linked with
+coverage. .NET builds share a graph, the Java wallet builds once before acceptance,
+compiler cases run in process, and acceptance reuses outputs with bounded workers and
+isolated logs/state. A clean revision `11e83f4` checkpoint rebuilt Rust, .NET, and Java
+outputs and took 55.467 seconds with four workers
+(`work/checkpoint-explicit-transactions-fully-cold.json`). Host, Java wallet, recovery,
+generated artifacts, and affected fuzz-target builds passed; workspace and both
+dongle-profile Clippy runs also passed. All seven firmware profiles linked with
 engine/provider isolation. The checkpoint exits nonzero only because three unchanged
-flash optimization ceilings remain exceeded; none were raised. A second clean run at
-`6fe95b2` rebuilt Rust and fuzz outputs in an isolated target directory while reusing
-managed outputs; it took 62.801 seconds with four workers
-(`work/checkpoint-explicit-transactions-rust-cold.json`). A fully cold managed build
-and physical command latency remain release measurements.
+flash optimization ceilings remain exceeded; none were raised. The full OpenFIPS201
+NIST contact run at the same clean revision reported 61 passed, 0 failed, and 2
+documented not applicable cases out of 63
+(`work/nist-explicit-transactions-final/nist-results.xml`). Physical command latency
+remains a release measurement.
 
 Run `python3 scripts/check.py --checkpoint --jobs 2` and
 `cargo clippy --workspace --all-targets -- -D warnings` for the consolidated host gate.
