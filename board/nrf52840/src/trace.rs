@@ -60,6 +60,12 @@ pub(crate) mod event {
     pub const PANIC: u32 = 14;
     #[cfg(feature = "development-recovery")]
     pub const HARD_FAULT: u32 = 15;
+    pub const RENEW_PHASE: u32 = 16;
+}
+
+#[no_mangle]
+pub extern "C" fn microcard_trace_phase(stage: u32) {
+    record(event::RENEW_PHASE, stage);
 }
 
 pub(crate) fn boot(reset_reason: u32) {

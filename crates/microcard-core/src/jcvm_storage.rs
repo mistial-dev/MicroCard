@@ -17,6 +17,8 @@ mod patch;
 mod trace;
 #[cfg(feature = "latency-trace")]
 pub(crate) use trace::record_session_error;
+#[cfg(feature = "latency-trace")]
+pub(crate) use trace::renewal_phase;
 mod session;
 pub use session::Session;
 mod banks;

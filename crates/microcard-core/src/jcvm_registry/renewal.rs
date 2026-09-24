@@ -65,9 +65,13 @@ impl<F: crate::journal::Flash> Store<F> {
             let (image, sizes, digest) = Self::session_image_from(self.state()?, instance.load, images, scratch, provider, |_| Ok(()))?;
             let identity = self.reserve_heap_identity()?;
             let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &identity, &digest)?;
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::renewal_phase(10);
             let record = session.prepare_epoch_record(instance.identity, digest, identity, key, provider)?;
             if record.len() > size - 3 || record.len() > staging.persistent_capacity() { return Err(Error::Quota); }
             staging.append(&record)?;
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::renewal_phase(11);
             if !staging.matches(0, &record)? { return Err(Error::Authentication); }
             let mut hash = [0; 32]; provider.sha256_into(&record, &mut hash)?;
             let record_length = record.len();
@@ -83,6 +87,8 @@ impl<F: crate::journal::Flash> Store<F> {
                     crate::jcvm_storage::validate_seed_snapshot(snapshot, &file, sizes, digest, identity)
                 }).map(|_| ())
             })?;
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::renewal_phase(12);
             let package_digest = self.state()?.loads().find(|load| load.aid == instance.load)
                 .and_then(|load| load.image).ok_or(Error::Storage)?.digest;
             let renewal = Renewal { aid, bank: instance.heap_bank, old_identity: instance.identity,
@@ -99,6 +105,8 @@ impl<F: crate::journal::Flash> Store<F> {
             if matches!(self.pending_renewal(), Ok(None)) { staging.reset(); }
             return Err(error);
         }
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(13);
         Ok(renewal)
     }
 
@@ -152,6 +160,8 @@ impl<F: crate::journal::Flash> Store<F> {
                 crate::jcvm_storage::validate_seed_snapshot(snapshot, &file, sizes, digest, renewal.new_identity)
             })
         })?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(20);
         let mut next = self.state;
         next.instances.iter_mut().flatten().find(|instance| instance.aid == renewal.aid)
             .ok_or(Error::Storage)?.identity = renewal.new_identity;
@@ -160,11 +170,18 @@ impl<F: crate::journal::Flash> Store<F> {
         // Everything needed for recovery is authenticated before the first erase.
         let mut flash = heaps.prepare(renewal.bank)?;
         seed.install_empty_bank(&mut flash)?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(21);
         drop(owned);
         image.with_bytes(provider, |bytes, provider| {
             crate::jcvm_storage::Store::validate_journal(flash, key, bytes, renewal.new_identity, sizes, provider)
         })?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(22);
         // Copying the heap does not authorize execution. Publication does.
-        self.commit_snapshot(next, provider)
+        let result = self.commit_snapshot(next, provider);
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(23);
+        result
     }
 }

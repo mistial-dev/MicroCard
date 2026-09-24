@@ -33,14 +33,22 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks> Storage<F, I, H> {
         provider: &mut impl CryptoProvider,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(1);
         self.registry.begin_renewal(aid, session, &self.images, &self.heaps,
             &self.heap_key, staging, scratch, provider)?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(2);
         if cancel() { return Err(Error::Cancelled); }
         self.registry.recover_renewal(&self.images, &mut self.heaps, &self.heap_key,
             staging, scratch, provider)?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(3);
         if cancel() { return Err(Error::Cancelled); }
         self.registry.handoff_renewed_session(aid, session, &self.images, &mut self.heaps,
             &self.heap_key, scratch, provider)?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(4);
         staging.reset();
         Ok(())
     }
@@ -169,6 +177,8 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         self.storage.renew_epoch(aid, session, &mut self.staging,
             &mut self.scratch, &mut self.provider, cancel)?;
         session.restore_idle_memory()?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(5);
         if cancel() { return Err(Error::Cancelled); }
         Ok(())
     }

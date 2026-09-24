@@ -51,6 +51,18 @@ pub(crate) fn record_session_error(stage: u32, code: u32) {
     }
 }
 
+pub(crate) fn renewal_phase(stage: u32) {
+    #[cfg(target_arch = "arm")]
+    unsafe {
+        extern "C" {
+            fn microcard_trace_phase(stage: u32);
+        }
+        microcard_trace_phase(stage);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    let _ = stage;
+}
+
 pub(super) fn capture_view(view: PersistentView<'_>) {
     let trace = &MICROCARD_JCVM_PATCH_TRACE;
     let writes = view.pending_writes();
