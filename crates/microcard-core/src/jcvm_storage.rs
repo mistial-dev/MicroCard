@@ -15,6 +15,8 @@ use zeroize::Zeroizing;
 mod patch;
 #[cfg(feature = "latency-trace")]
 mod trace;
+#[cfg(feature = "latency-trace")]
+pub(crate) use trace::record_session_error;
 mod session;
 pub use session::Session;
 mod banks;
@@ -221,7 +223,10 @@ impl<F: Flash> Store<F> {
         #[cfg(feature = "latency-trace")]
         trace::capture_view(view);
         let (instance, statics) = view.metadata();
-        if snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())? > self.maximum {
+        let required = snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())?;
+        #[cfg(feature = "latency-trace")]
+        trace::capacity(required, self.maximum, view.heap_bytes());
+        if required > self.maximum {
             return Err(Error::Quota);
         }
         if let Some(before_length) = self.heap_length {
@@ -236,6 +241,8 @@ impl<F: Flash> Store<F> {
                         #[cfg(feature = "latency-trace")]
                         trace::patch(delta.len());
                         self.journal.append_owned_with(delta, provider)?;
+                        #[cfg(feature = "latency-trace")]
+                        trace::committed_patch();
                         self.heap_length = Some(view.heap_bytes());
                         return Ok(());
                     }
@@ -253,6 +260,8 @@ impl<F: Flash> Store<F> {
         if self.heap_length.is_none() { trace::fallback(1); }
         let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
         self.journal.commit_owned_with(snapshot, provider)?;
+        #[cfg(feature = "latency-trace")]
+        trace::committed_snapshot();
         self.heap_length = Some(view.heap_bytes());
         Ok(())
     }

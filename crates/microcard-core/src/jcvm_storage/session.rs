@@ -288,7 +288,14 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             }.with_checkpoint(&mut checkpoint);
             let result = self.card.as_mut().unwrap()
                 .process_with_cancel(&file, &mut services, command, selecting, cancel)
-                .map_err(|error| services.take_persistence_error().unwrap_or_else(|| engine_error(error)));
+                .map_err(|error| {
+                    #[cfg(feature = "latency-trace")]
+                    super::record_session_error(1, error.clone() as u32);
+                    let result = services.take_persistence_error().unwrap_or_else(|| engine_error(error));
+                    #[cfg(feature = "latency-trace")]
+                    super::record_session_error(2, result.clone() as u32);
+                    result
+                });
             self.reset_requested |= services.reset_requested();
             result
         });

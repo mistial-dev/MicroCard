@@ -120,8 +120,14 @@ impl<P: CryptoProvider> Services<'_, P> {
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     fn checkpoint(&mut self, state: PersistentView<'_>) -> Result<()> {
-        let Some(checkpoint) = self.checkpoint.as_mut() else { return Err(Error::Storage); };
+        let Some(checkpoint) = self.checkpoint.as_mut() else {
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::record_session_error(3, 0);
+            return Err(Error::Storage);
+        };
         if let Err(error) = checkpoint(state, self.provider) {
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::record_session_error(4, error.clone() as u32);
             self.persistence_error = Some(error);
             return Err(Error::Storage);
         }

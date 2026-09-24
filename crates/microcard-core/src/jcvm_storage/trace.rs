@@ -12,6 +12,11 @@ pub struct PatchTrace {
     static_end: AtomicU32,
     snapshot_required: AtomicU32,
     patch_bytes: AtomicU32,
+    snapshot_bytes: AtomicU32,
+    maximum_bytes: AtomicU32,
+    heap_bytes: AtomicU32,
+    append_commits: AtomicU32,
+    snapshot_commits: AtomicU32,
 }
 
 #[no_mangle]
@@ -23,7 +28,28 @@ pub static MICROCARD_JCVM_PATCH_TRACE: PatchTrace = PatchTrace {
     static_end: AtomicU32::new(0),
     snapshot_required: AtomicU32::new(0),
     patch_bytes: AtomicU32::new(0),
+    snapshot_bytes: AtomicU32::new(0),
+    maximum_bytes: AtomicU32::new(0),
+    heap_bytes: AtomicU32::new(0),
+    append_commits: AtomicU32::new(0),
+    snapshot_commits: AtomicU32::new(0),
 };
+
+#[no_mangle]
+pub static MICROCARD_JCVM_ENGINE_ERROR: AtomicU32 = AtomicU32::new(0);
+#[no_mangle]
+pub static MICROCARD_JCVM_CORE_ERROR: AtomicU32 = AtomicU32::new(0);
+#[no_mangle]
+pub static MICROCARD_JCVM_CHECKPOINT_ERROR: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn record_session_error(stage: u32, code: u32) {
+    match stage {
+        1 => MICROCARD_JCVM_ENGINE_ERROR.store(code, Ordering::Relaxed),
+        2 => MICROCARD_JCVM_CORE_ERROR.store(code, Ordering::Relaxed),
+        3 | 4 => MICROCARD_JCVM_CHECKPOINT_ERROR.store((stage << 16) | code, Ordering::Relaxed),
+        _ => {}
+    }
+}
 
 pub(super) fn capture_view(view: PersistentView<'_>) {
     let trace = &MICROCARD_JCVM_PATCH_TRACE;
@@ -39,6 +65,12 @@ pub(super) fn capture_view(view: PersistentView<'_>) {
     trace.patch_bytes.store(0, Ordering::Relaxed);
 }
 
+pub(super) fn capacity(snapshot: usize, maximum: usize, heap: usize) {
+    MICROCARD_JCVM_PATCH_TRACE.snapshot_bytes.store(snapshot as u32, Ordering::Relaxed);
+    MICROCARD_JCVM_PATCH_TRACE.maximum_bytes.store(maximum as u32, Ordering::Relaxed);
+    MICROCARD_JCVM_PATCH_TRACE.heap_bytes.store(heap as u32, Ordering::Relaxed);
+}
+
 pub(super) fn fallback(reason: u32) {
     MICROCARD_JCVM_PATCH_TRACE.reason.store(reason, Ordering::Relaxed);
 }
@@ -46,4 +78,12 @@ pub(super) fn fallback(reason: u32) {
 pub(super) fn patch(bytes: usize) {
     MICROCARD_JCVM_PATCH_TRACE.reason.store(4, Ordering::Relaxed);
     MICROCARD_JCVM_PATCH_TRACE.patch_bytes.store(bytes as u32, Ordering::Relaxed);
+}
+
+pub(super) fn committed_patch() {
+    MICROCARD_JCVM_PATCH_TRACE.append_commits.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(super) fn committed_snapshot() {
+    MICROCARD_JCVM_PATCH_TRACE.snapshot_commits.fetch_add(1, Ordering::Relaxed);
 }
