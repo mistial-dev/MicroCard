@@ -19,7 +19,7 @@ fn pin_matches(material: &[u8], stored_length: usize, candidate: &[u8], blocked:
 
 fn initialize(heap: &mut Heap, this: u16, tries: i16, max_size: i16,
     context: heap::Context) -> Result<Option<Native>> {
-    if tries < 1 || max_size < 1 {
+    if !(1..=127).contains(&tries) || !(1..=127).contains(&max_size) {
         let exception = new_exception(heap, ClassId::PINException, context)?;
         heap.put_word_unconditional(exception, REASON_FIELD, 1)?;
         return Ok(Some(Native::Threw(exception)));
@@ -41,38 +41,74 @@ pub(super) fn build(heap: &mut Heap, frame: &mut Frame,
     let pin_type = frame.pop_short()?;
     let max_size = frame.pop_short()?;
     let tries = frame.pop_short()?;
-    if pin_type != 1 {
-        let (class, reason) = if matches!(pin_type, 2 | 3) {
-            (ClassId::SystemException, 6) // Optional extended PIN types: ILLEGAL_USE.
-        } else {
-            (ClassId::PINException, 1) // Unknown type: ILLEGAL_VALUE.
-        };
-        let exception = new_exception(heap, class, context)?;
-        heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
+    let class = match pin_type {
+        1 => ClassId::OwnerPIN,
+        2 => ClassId::OwnerPINx,
+        3 => ClassId::OwnerPINxWithPredecrement,
+        _ => {
+            let exception = new_exception(heap, ClassId::PINException, context)?;
+            heap.put_word_unconditional(exception, REASON_FIELD, 1)?;
+            return Ok(Native::Threw(exception));
+        }
+    };
+    if !(1..=127).contains(&tries) || !(1..=127).contains(&max_size) {
+        let exception = new_exception(heap, ClassId::PINException, context)?;
+        heap.put_word_unconditional(exception, REASON_FIELD, 1)?;
         return Ok(Native::Threw(exception));
     }
-    if tries < 1 || max_size < 1 {
-        return initialize(heap, 0, tries, max_size, context)?
-            .ok_or(Error::Inconsistent);
-    }
-    heap.check_allocations(&[
+    let allocations = [
         (heap::KIND_OBJECT, super::STATE_WORDS),
         (heap::KIND_BYTE, max_size as u16),
-    ])?;
-    let this = new_native(heap, ClassId::OwnerPIN, super::STATE_WORDS, context)?;
+        (heap::KIND_BYTE, u16::from(pin_type == 3)),
+    ];
+    heap.check_allocations(&allocations[..if pin_type == 3 { 3 } else { 2 }])?;
+    let this = new_native(heap, class, super::STATE_WORDS, context)?;
     if let Some(result) = initialize(heap, this, tries, max_size, context)? { return Ok(result); }
+    if pin_type == 3 {
+        let flag = heap.new_transient_array(heap::KIND_BYTE, 1, context, heap::CLEAR_ON_RESET)?;
+        heap.put_word(this, super::PENDING, flag)?;
+    }
     frame.push_reference(this)?;
     Ok(Native::Returned)
 }
 
+fn pin_class(heap: &Heap, this: u16, declared: ClassId, context: heap::Context) -> Result<ClassId> {
+    heap.check_access(this, context)?;
+    let actual = crate::natives::api_class(heap.info(this)?.class)
+        .map(|class| class.id).ok_or(Error::Type)?;
+    let allowed = match declared {
+        ClassId::PIN => matches!(actual, ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement),
+        ClassId::OwnerPINx => matches!(actual, ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement),
+        _ => actual == declared,
+    };
+    if !allowed { return Err(Error::Type); }
+    Ok(actual)
+}
+
+fn clear_predecrement(heap: &mut Heap, this: u16, actual: ClassId) -> Result<bool> {
+    if actual != ClassId::OwnerPINxWithPredecrement { return Ok(false); }
+    let flag = heap.get_word(this, super::PENDING)?;
+    let state = heap.byte_slice_mut(flag, 0, 1)?;
+    let pending = state[0] != 0;
+    state[0] = 0;
+    Ok(pending)
+}
+
+fn pin_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Result<Native> {
+    let exception = new_exception(heap, ClassId::PINException, context)?;
+    heap.put_word_unconditional(exception, REASON_FIELD, reason)?;
+    Ok(Native::Threw(exception))
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host::Host,
+pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &mut dyn crate::host::Host,
     frame: &mut Frame, context: heap::Context, jcre: &Jcre, statics: &[u8]) -> Result<Native> {
     match method {
         MethodId::Constructor => {
             let max_size = frame.pop_short()?;
             let tries = frame.pop_short()?;
             let this = frame.pop_reference()?;
+            if pin_class(heap, this, declared, context)? != ClassId::OwnerPIN { return Err(Error::Type); }
             if let Some(result) = initialize(heap, this, tries, max_size, context)? { return Ok(result); }
         }
         MethodId::update => {
@@ -80,6 +116,7 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
             let offset = frame.pop_short()?;
             let source = frame.pop_reference()?;
             let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
             heap.check_access(source, context)?;
             let material = heap.get_word(this, MATERIAL)?;
             if length >= 0 && length as u16 > heap.info(material)?.length {
@@ -91,23 +128,36 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
             let length = length as usize;
             // Validate and reserve all conditional writes before publishing the new PIN.
             heap.byte_slice(source, offset as usize, length)?;
-            heap.prepare_payload_writes(&[(this, SIZE * 2, 2), (this, COUNTER * 2, 2), (material, 0, length)])?;
+            let writes = [(this, SIZE * 2, 2), (this, COUNTER * 2, 2),
+                (material, 0, length), (this, READY * 2, 2)];
+            heap.prepare_payload_writes(&writes[..if actual == ClassId::OwnerPIN { 3 } else { 4 }])?;
             heap.copy_bytes(source, offset as usize, material, 0, length)?;
             heap.put_word(this, SIZE, length as u16)?;
             // Updating resets the counter and clears the validated flag, JCRE §5.1.
             let tries = heap.get_word(this, KIND)?;
             heap.put_word(this, COUNTER, tries)?;
-            heap.put_word_unconditional(this, READY, 0)?;
+            if actual == ClassId::OwnerPIN {
+                heap.put_word_unconditional(this, READY, 0)?;
+            } else {
+                heap.put_word(this, READY, 0)?;
+                clear_predecrement(heap, this, actual)?;
+            }
         }
         MethodId::check => {
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
             let candidate = frame.pop_reference()?;
             let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
+            let predecremented = clear_predecrement(heap, this, actual)?;
+            if actual == ClassId::OwnerPINxWithPredecrement && !predecremented {
+                return pin_exception(heap, context, 2);
+            }
             let tries = heap.get_word(this, COUNTER)?;
-            // The counter is decremented before the comparison, JCRE §5.1. A card cut off
-            // mid check must not give the attempt back.
-            heap.put_word_unconditional(this, COUNTER, tries.saturating_sub(1))?;
+            // Presentation spends the attempt durably before comparing.
+            if !predecremented {
+                heap.put_word_unconditional(this, COUNTER, tries.saturating_sub(1))?;
+            }
             heap.put_word_unconditional(this, READY, 0)?;
             checkpoint_committed(heap, host, jcre, context, statics)?;
             if candidate == crate::vm::NULL {
@@ -139,20 +189,26 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
         MethodId::setValidatedFlag => {
             let value = frame.pop_short()? != 0;
             let this = frame.pop_reference()?;
+            if pin_class(heap, this, declared, context)? != ClassId::OwnerPIN { return Err(Error::Type); }
             // Unlike PIN presentation, this accessor has no transaction exception
             // in the API contract; internal state follows JCRE §9.3.
             heap.put_word(this, READY, u16::from(value))?;
         }
         MethodId::isValidated | MethodId::getValidatedFlag => {
             let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
+            if method == MethodId::getValidatedFlag && actual != ClassId::OwnerPIN { return Err(Error::Type); }
             frame.push_short(word_field(heap, this, READY)? as i16)?;
         }
         MethodId::getTriesRemaining => {
             let this = frame.pop_reference()?;
+            pin_class(heap, this, declared, context)?;
             frame.push_short(word_field(heap, this, COUNTER)? as i16)?;
         }
         MethodId::reset => {
             let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
+            clear_predecrement(heap, this, actual)?;
             if heap.get_word(this, READY)? != 0 {
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
@@ -162,10 +218,56 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
         }
         MethodId::resetAndUnblock => {
             let this = frame.pop_reference()?;
+            if pin_class(heap, this, declared, context)? != ClassId::OwnerPIN { return Err(Error::Type); }
             let limit = heap.get_word(this, KIND)?;
             heap.put_word_unconditional(this, COUNTER, limit)?;
             heap.put_word_unconditional(this, READY, 0)?;
             checkpoint_committed(heap, host, jcre, context, statics)?;
+        }
+
+        MethodId::getTryLimit => {
+            let this = frame.pop_reference()?;
+            if pin_class(heap, this, declared, context)? == ClassId::OwnerPIN { return Err(Error::Type); }
+            frame.push_short(word_field(heap, this, KIND)? as i16)?;
+        }
+        MethodId::setTryLimit => {
+            let limit = frame.pop_short()?;
+            let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
+            if actual == ClassId::OwnerPIN { return Err(Error::Type); }
+            if !(1..=127).contains(&limit) { return pin_exception(heap, context, 1); }
+            heap.prepare_payload_writes(&[(this, KIND * 2, 2), (this, COUNTER * 2, 2),
+                (this, READY * 2, 2)])?;
+            heap.put_word(this, KIND, limit as u16)?;
+            heap.put_word(this, COUNTER, limit as u16)?;
+            heap.put_word(this, READY, 0)?;
+            clear_predecrement(heap, this, actual)?;
+        }
+        MethodId::setTriesRemaining => {
+            let remaining = frame.pop_short()?;
+            let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
+            if actual == ClassId::OwnerPIN { return Err(Error::Type); }
+            if remaining < 0 || remaining as u16 > heap.get_word(this, KIND)? {
+                return pin_exception(heap, context, 1);
+            }
+            heap.prepare_payload_writes(&[(this, COUNTER * 2, 2), (this, READY * 2, 2)])?;
+            heap.put_word(this, COUNTER, remaining as u16)?;
+            heap.put_word(this, READY, 0)?;
+            clear_predecrement(heap, this, actual)?;
+        }
+        MethodId::decrementTriesRemaining => {
+            let this = frame.pop_reference()?;
+            let actual = pin_class(heap, this, declared, context)?;
+            if actual != ClassId::OwnerPINxWithPredecrement { return Err(Error::Type); }
+            let tries = heap.get_word(this, COUNTER)?;
+            let next = tries.saturating_sub(1);
+            heap.put_word_unconditional(this, COUNTER, next)?;
+            heap.put_word_unconditional(this, READY, 0)?;
+            checkpoint_committed(heap, host, jcre, context, statics)?;
+            let flag = heap.get_word(this, super::PENDING)?;
+            heap.byte_slice_mut(flag, 0, 1)?[0] = 1;
+            frame.push_short(next as i16)?;
         }
 
         _ => return Ok(Native::Unimplemented),

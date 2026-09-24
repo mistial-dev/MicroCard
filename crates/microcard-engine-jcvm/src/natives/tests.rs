@@ -1435,7 +1435,7 @@ fn util_fills_and_compares() {
 }
 
 #[test]
-fn owner_pin_builder_constructs_the_supported_type_and_names_optional_types() {
+fn owner_pin_builder_and_extended_counter_methods_follow_the_declared_type() {
     let (mut slab, mut words, mut tags) = setup(0);
     let mut heap = Heap::new(&mut slab).unwrap();
     reserve_runtime_exceptions(&mut heap, 1).unwrap();
@@ -1444,31 +1444,91 @@ fn owner_pin_builder_constructs_the_supported_type_and_names_optional_types() {
         .method.signature;
     let mut jcre = idle();
     let mut budget = u32::MAX;
-    for value in [3, 8, 1] { frame.push_short(value).unwrap(); }
-    assert!(matches!(security::call(ClassId::OwnerPINBuilder, MethodId::buildOwnerPIN,
-        signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
-        &mut budget, &[]), Ok(Native::Returned)));
-    let pin = frame.pop_reference().unwrap();
-    assert_eq!(api_class(heap.info(pin).unwrap().class).unwrap().id, ClassId::OwnerPIN);
-    frame.push_reference(pin).unwrap();
-    assert!(matches!(security::call(ClassId::OwnerPIN, MethodId::getTriesRemaining,
-        signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
-        &mut budget, &[]), Ok(Native::Returned)));
-    assert_eq!(frame.pop_short(), Ok(3));
-
-    for (pin_type, class, reason) in [
-        (0, ClassId::PINException, 1),
-        (2, ClassId::SystemException, 6),
-        (3, ClassId::SystemException, 6),
-    ] {
+    for (pin_type, class) in [(1, ClassId::OwnerPIN), (2, ClassId::OwnerPINx),
+        (3, ClassId::OwnerPINxWithPredecrement)] {
         for value in [3, 8, pin_type] { frame.push_short(value).unwrap(); }
-        let Native::Threw(exception) = security::call(ClassId::OwnerPINBuilder,
-            MethodId::buildOwnerPIN, signature, &mut heap, &mut crate::host::NoHost,
-            &mut frame, 1, &mut jcre, &mut budget, &[]).unwrap()
-            else { panic!("unsupported OwnerPIN type was accepted"); };
-        assert_eq!(api_class(heap.info(exception).unwrap().class).unwrap().id, class);
-        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(reason));
+        assert!(matches!(security::call(ClassId::OwnerPINBuilder, MethodId::buildOwnerPIN,
+            signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+            &mut budget, &[]), Ok(Native::Returned)));
+        let pin = frame.pop_reference().unwrap();
+        assert_eq!(api_class(heap.info(pin).unwrap().class).unwrap().id, class);
+        frame.push_reference(pin).unwrap();
+        assert!(matches!(security::call(ClassId::PIN, MethodId::getTriesRemaining,
+            signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+            &mut budget, &[]), Ok(Native::Returned)));
+        assert_eq!(frame.pop_short(), Ok(3));
+        if pin_type >= 2 {
+            frame.push_reference(pin).unwrap();
+            frame.push_short(4).unwrap();
+            assert!(matches!(security::call(ClassId::OwnerPINx, MethodId::setTryLimit,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Ok(Native::Returned)));
+            frame.push_reference(pin).unwrap();
+            assert!(matches!(security::call(ClassId::OwnerPINx, MethodId::getTryLimit,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Ok(Native::Returned)));
+            assert_eq!(frame.pop_short(), Ok(4));
+            frame.push_reference(pin).unwrap();
+            frame.push_short(2).unwrap();
+            assert!(matches!(security::call(ClassId::OwnerPINx, MethodId::setTriesRemaining,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Ok(Native::Returned)));
+            assert_eq!(heap.get_word(pin, security::COUNTER), Ok(2));
+            heap.begin_transaction(32).unwrap();
+            frame.push_reference(pin).unwrap();
+            frame.push_short(5).unwrap();
+            security::call(ClassId::OwnerPINx, MethodId::setTryLimit, signature,
+                &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]).unwrap();
+            heap.abort_transaction(&mut []).unwrap();
+            assert_eq!(heap.get_word(pin, security::KIND), Ok(4));
+            assert_eq!(heap.get_word(pin, security::COUNTER), Ok(2));
+            heap.begin_transaction(0).unwrap();
+            frame.push_reference(pin).unwrap();
+            frame.push_short(5).unwrap();
+            assert!(matches!(security::call(ClassId::OwnerPINx, MethodId::setTryLimit,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Err(Error::TransactionFull)));
+            assert_eq!(heap.get_word(pin, security::KIND), Ok(4));
+            assert_eq!(heap.get_word(pin, security::COUNTER), Ok(2));
+            heap.abort_transaction(&mut []).unwrap();
+        }
+        if pin_type == 3 {
+            jcre.installing = true;
+            frame.push_reference(pin).unwrap();
+            assert!(matches!(security::call(class, MethodId::decrementTriesRemaining,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Ok(Native::Returned)));
+            assert_eq!(frame.pop_short(), Ok(1));
+            let candidate = heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
+            for value in [pin, candidate] { frame.push_reference(value).unwrap(); }
+            for value in [0, 1] { frame.push_short(value).unwrap(); }
+            assert!(matches!(security::call(class, MethodId::check,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Ok(Native::Returned)));
+            assert_eq!(frame.pop_short(), Ok(0));
+            assert_eq!(heap.get_word(pin, security::COUNTER), Ok(1));
+            frame.push_reference(pin).unwrap();
+            assert!(matches!(security::call(class, MethodId::decrementTriesRemaining,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]), Ok(Native::Returned)));
+            assert_eq!(frame.pop_short(), Ok(0));
+            heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
+            for value in [pin, candidate] { frame.push_reference(value).unwrap(); }
+            for value in [0, 1] { frame.push_short(value).unwrap(); }
+            let Native::Threw(exception) = security::call(class, MethodId::check,
+                signature, &mut heap, &mut crate::host::NoHost, &mut frame, 1, &mut jcre,
+                &mut budget, &[]).unwrap() else { panic!("missing predecrement accepted"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(2));
+            jcre.installing = false;
+        }
     }
+    for value in [3, 8, 0] { frame.push_short(value).unwrap(); }
+    let Native::Threw(exception) = security::call(ClassId::OwnerPINBuilder,
+        MethodId::buildOwnerPIN, signature, &mut heap, &mut crate::host::NoHost,
+        &mut frame, 1, &mut jcre, &mut budget, &[]).unwrap()
+        else { panic!("unknown OwnerPIN type was accepted"); };
+    assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
 }
 
 #[test]

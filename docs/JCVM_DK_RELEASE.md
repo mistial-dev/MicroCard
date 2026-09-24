@@ -52,11 +52,12 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
-The extended host scan reports **53 supported** probes against the P71D321
-reference's **288**. There are **235 missing supported** probes and **zero support
-claims outside the profile**. The two `OwnerPINBuilder` variants return the
-specified `SystemException.ILLEGAL_USE` for unimplemented optional types; they
-count as unsupported rather than disappearing from the matrix. The runner writes
+The extended host scan reports **55 supported** probes against the P71D321
+reference's **288**. There are **233 missing supported** probes and **zero support
+claims outside the profile**. Both `OwnerPINBuilder` extended variants now
+construct real PIN objects. The host's pinned upstream client reported both as
+supported in a complete 8,607-probe extended scan; the physical DK passed the
+two targeted factory probes. The runner writes
 the exact differences to `profile-comparison.json`; a factory result alone is
 not an algorithm acceptance. An extended run with missing or extra probes fails
 instead of passing as a partial result.
@@ -140,8 +141,21 @@ selected its PIV applet. The `usbd-ccid` 0.5.0 crate initially rejected the
 local library patch responds with the fixed descriptor values; three consecutive
 SWD resets followed by SCP03 and PIV selection passed. Allow about two seconds
 after reset for macOS reader enumeration. The linked development image uses
-**230,392 text, 148 data, and 198,284 BSS bytes**.
+**231,184 text, 148 data, and 198,284 BSS bytes**.
 
-OwnerPINx behavior, full JCAlgTest, flash interruption, and production
+After adding the two extended PIN types, the same DK loaded the pinned JCAlgTest
+CAP through SCP03 and passed its version, digest, `OWNER_PIN_X`, and
+`OWNER_PIN_X_WITH_PREDECREMENT` probes. Reproduce the targeted check with:
+
+```sh
+python3 scripts/jcalgtest_gp_acceptance.py \
+  --reader 'MicroCard MicroCard virtual smart card' \
+  --management-key .keys/first-test-management.key --select-only
+```
+
+The full physical extended scan is not yet a release result: early key probes
+took about 1.4 seconds each, and the run was interrupted. An independently built
+applet must still exercise OwnerPINx methods, transaction behavior, and reset
+state through Java bytecode. Full JCAlgTest, flash interruption, and production
 provisioning remain release work. The physical smoke result does not imply
 P71D321 compatibility.

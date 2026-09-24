@@ -25,7 +25,7 @@ pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 pub const STATE_WORDS: u16 = 6;
 
 /// Field zero of a key or a PIN, which is what kind it is.
-const KIND: usize = 0;
+pub(super) const KIND: usize = 0;
 /// Field one, a length in bits for a key and the current PIN length.
 const SIZE: usize = 1;
 /// Field two, the array holding the material or the PIN.
@@ -33,7 +33,7 @@ const MATERIAL: usize = 2;
 /// Field three, whether a key has been set or a PIN has been verified.
 const READY: usize = 3;
 /// Field four, tries left on a PIN, or the padding mode of a cipher.
-const COUNTER: usize = 4;
+pub(super) const COUNTER: usize = 4;
 /// Reset-scoped cipher state: count/seen-input flag, fifteen pending bytes, then CBC IV.
 const PENDING: usize = 5;
 const RANDOM_STATE_BYTES: u16 = 33; // Seeded flag followed by a SHA-256 chain value.
@@ -91,7 +91,7 @@ fn store_secure_chain(heap: &mut Heap, state: u16, chain: &[u8; 32]) -> Result<(
 pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops::Range<usize>>> {
     if info.kind != heap::KIND_OBJECT { return Ok(None); }
     let Some(class) = super::api_class(info.class) else { return Ok(None); };
-    if class.id == ClassId::OwnerPIN {
+    if matches!(class.id, ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement) {
         if info.length as usize <= READY { return Err(Error::Bounds); }
         return Ok(Some(READY * 2..READY * 2 + 2));
     }
@@ -200,8 +200,8 @@ pub fn call(
     budget: &mut u32,
     statics: &[u8],
 ) -> Result<Native> {
-    if class == ClassId::OwnerPIN {
-        return pin::call(method, heap, host, frame, context, jcre, statics);
+    if matches!(class, ClassId::PIN | ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement) {
+        return pin::call(class, method, heap, host, frame, context, jcre, statics);
     }
     if class == ClassId::OwnerPINBuilder && method == MethodId::buildOwnerPIN {
         return pin::build(heap, frame, context);
