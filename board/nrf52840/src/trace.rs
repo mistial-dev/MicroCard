@@ -152,6 +152,30 @@ pub(crate) static MICROCARD_LATENCY_TRACE: LatencyTrace = LatencyTrace {
     erase_size: AtomicU32::new(0),
 };
 
+#[repr(C)]
+pub(crate) struct MaximumApduTrace {
+    max_apdu_us: AtomicU32,
+    erase_calls: AtomicU32,
+    erase_us: AtomicU32,
+    program_words: AtomicU32,
+    program_us: AtomicU32,
+    wait_extensions: AtomicU32,
+    total_erase_calls: AtomicU32,
+    total_program_words: AtomicU32,
+}
+
+#[no_mangle]
+pub(crate) static MICROCARD_MAX_APDU_TRACE: MaximumApduTrace = MaximumApduTrace {
+    max_apdu_us: AtomicU32::new(0),
+    erase_calls: AtomicU32::new(0),
+    erase_us: AtomicU32::new(0),
+    program_words: AtomicU32::new(0),
+    program_us: AtomicU32::new(0),
+    wait_extensions: AtomicU32::new(0),
+    total_erase_calls: AtomicU32::new(0),
+    total_program_words: AtomicU32::new(0),
+};
+
 pub(crate) fn apdu_start() {
     let trace = &MICROCARD_LATENCY_TRACE;
     trace.apdu_count.fetch_add(1, Ordering::Relaxed);
@@ -166,9 +190,29 @@ pub(crate) fn apdu_start() {
 pub(crate) fn apdu_end() {
     let trace = &MICROCARD_LATENCY_TRACE;
     let start = trace.apdu_start.load(Ordering::Relaxed);
-    trace
-        .apdu_us
-        .store(now().wrapping_sub(start), Ordering::Relaxed);
+    let elapsed = now().wrapping_sub(start);
+    trace.apdu_us.store(elapsed, Ordering::Relaxed);
+    let maximum = &MICROCARD_MAX_APDU_TRACE;
+    if elapsed > maximum.max_apdu_us.load(Ordering::Relaxed) {
+        maximum.max_apdu_us.store(elapsed, Ordering::Relaxed);
+        maximum
+            .erase_calls
+            .store(trace.erase_count.load(Ordering::Relaxed), Ordering::Relaxed);
+        maximum
+            .erase_us
+            .store(trace.erase_us.load(Ordering::Relaxed), Ordering::Relaxed);
+        maximum.program_words.store(
+            trace.program_words.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        maximum
+            .program_us
+            .store(trace.program_us.load(Ordering::Relaxed), Ordering::Relaxed);
+        maximum.wait_extensions.store(
+            trace.wait_extensions.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+    }
 }
 pub(crate) fn cancel_poll() {
     MICROCARD_LATENCY_TRACE
@@ -182,6 +226,9 @@ pub(crate) fn wait_extension() {
     record(event::WAIT_EXTENSION, 0);
 }
 pub(crate) fn erase(start: u32, base: usize, size: usize) {
+    MICROCARD_MAX_APDU_TRACE
+        .total_erase_calls
+        .fetch_add(1, Ordering::Relaxed);
     MICROCARD_LATENCY_TRACE
         .erase_count
         .fetch_add(1, Ordering::Relaxed);
@@ -196,6 +243,9 @@ pub(crate) fn erase(start: u32, base: usize, size: usize) {
         .store(size as u32, Ordering::Relaxed);
 }
 pub(crate) fn program(start: u32, words: u32) {
+    MICROCARD_MAX_APDU_TRACE
+        .total_program_words
+        .fetch_add(words, Ordering::Relaxed);
     MICROCARD_LATENCY_TRACE
         .program_words
         .fetch_add(words, Ordering::Relaxed);

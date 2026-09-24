@@ -19,6 +19,10 @@ PATCH_FIELDS = (
     "snapshot_bytes", "maximum_bytes", "heap_bytes",
     "append_commits", "snapshot_commits",
 )
+MAXIMUM_FIELDS = (
+    "max_apdu_us", "erase_calls", "erase_us", "program_words",
+    "program_us", "wait_extensions", "total_erase_calls", "total_program_words",
+)
 PATCH_REASONS = {
     0: "no commit recorded", 1: "first snapshot", 2: "no append frame",
     3: "patch exceeds frame", 4: "append patch",
@@ -47,9 +51,10 @@ def symbols(elf):
             "MICROCARD_RETAINED_TRACE", "MICROCARD_JCVM_ENGINE_ERROR",
             "MICROCARD_JCVM_CORE_ERROR",
             "MICROCARD_JCVM_CHECKPOINT_ERROR",
+            "MICROCARD_MAX_APDU_TRACE",
         ):
             addresses[parts[2]] = int(parts[0], 16)
-    if len(addresses) != 6:
+    if len(addresses) < 6:
         raise RuntimeError("ELF lacks trace symbols; build with --features usb-ccid,latency-trace")
     return addresses
 
@@ -105,6 +110,11 @@ def main():
     checkpoint_error = read_words(addresses["MICROCARD_JCVM_CHECKPOINT_ERROR"], 1, args.probe)[0]
     print(f"Last JCVM session error: engine={engine_error} core={core_error} "
           f"checkpoint_stage={checkpoint_error >> 16} checkpoint_error={checkpoint_error & 0xffff}")
+    if "MICROCARD_MAX_APDU_TRACE" in addresses:
+        maximum = read_words(addresses["MICROCARD_MAX_APDU_TRACE"], len(MAXIMUM_FIELDS), args.probe)
+        print("Slowest APDU and run totals:")
+        for name, value in zip(MAXIMUM_FIELDS, maximum):
+            print(f"  {name}: {value}")
     retained = read_words(
         addresses["MICROCARD_RETAINED_TRACE"],
         RETAINED_HEADER_WORDS + RETAINED_EVENTS * RETAINED_EVENT_WORDS,
