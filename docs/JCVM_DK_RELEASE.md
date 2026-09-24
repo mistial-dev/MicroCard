@@ -155,6 +155,28 @@ python3 scripts/jcalgtest_gp_acceptance.py \
 
 ### JCAlgTest latency on the DK
 
+The performance baseline is local unsigned commit
+`572ea69a8fb5419501c69fff36dd2c7268786713`, running at the supported
+**64 MHz** CPU clock through the PC/SC reader
+`MicroCard MicroCard virtual smart card`. The pinned desktop client is
+`4c9d2906e358818f6ab6fdfb3286f168d4936f60`; the installed LFDB SHA-256
+is `f11c20bb665d15b40b28b99707da7f0e007e2ca8877f20eca0bd860a30d01393`.
+Reproduce the targeted host-observed selection and factory times with:
+
+```sh
+python3 scripts/jcalgtest_gp_acceptance.py \
+  --reader 'MicroCard MicroCard virtual smart card' \
+  --management-key .keys/first-test-management.key \
+  --select-only --timings --repeat 12
+```
+
+At that baseline, warm digest and OwnerPINx factories were about **17–19 ms**
+through PC/SC, with a genuine heap-journal rollover at **1.47 s**. The
+available trace counted **31 programmed words and zero erases** for one
+77-byte append patch. Cold selection, no-op, persistent write, PIN failure,
+transaction commit, install, and recovery did not yet have comparable
+per-workload percentiles; those are measurement gaps, not zero-cost paths.
+
 The original image never started TIMER0, so its microsecond timeout and idle
 maintenance deadlines stayed at zero. A live SWD capture confirmed two reads a
 second apart both returned zero. The corrected image starts a 32-bit, 1 MHz
@@ -199,3 +221,18 @@ An independently built applet must still exercise OwnerPINx methods, transaction
 behavior, and reset state through Java bytecode. Full physical JCAlgTest,
 flash interruption, and production provisioning remain release work. The
 physical smoke result does not imply P71D321 compatibility.
+
+Classify a completed raw DK scan without changing its upstream CSV or log:
+
+```sh
+python3 scripts/analyze_jcalgtest_dk.py \
+  --result /private/tmp/microcard-jcalgtest-dk-run \
+  --elf /private/tmp/microcard-jcalgtest-dk-run/firmware.elf \
+  --source work/jcalgtest-client-src
+```
+
+The analyzer pins the firmware and applet hashes, reader, ATR, client
+revision, PC/SC latency distribution, the complete 8,607-probe matrix, and
+all unexpected statuses. It rejects a scan that merely reaches its final
+line after the applet has failed: `6982`, `6A82`, timeouts, and transport
+errors cannot be counted as unsupported algorithms.
