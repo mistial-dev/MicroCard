@@ -292,7 +292,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let (selected_aid, mut live) = card.selected.take().unwrap();
     live.release_idle_memory().unwrap();
     card.storage.renew_epoch(selected_aid, &mut live, &mut card.staging,
-        &mut card.scratch, &mut card.provider).unwrap();
+        &mut card.scratch, &mut card.provider, &mut || false).unwrap();
     live.restore_idle_memory().unwrap();
     card.selected = Some((selected_aid, live));
     let current = card.storage.registry.state().unwrap().instances()

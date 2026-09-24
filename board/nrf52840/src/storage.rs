@@ -1,3 +1,5 @@
+#[cfg(feature = "usb-ccid")]
+use core::sync::atomic::{AtomicPtr, Ordering};
 use microcard_core::{
     hal::StagingFlash,
     journal::{decode_program_once_words, next_program_once_word, Flash},
@@ -20,8 +22,63 @@ pub(crate) struct Nvm {
     pub(crate) nonces: usize,
 }
 
+#[cfg(feature = "usb-ccid")]
+struct FlashYield {
+    context: *mut (),
+    call: unsafe fn(*mut ()),
+}
+
+#[cfg(feature = "usb-ccid")]
+static FLASH_YIELD: AtomicPtr<FlashYield> = AtomicPtr::new(core::ptr::null_mut());
+
+#[cfg(feature = "usb-ccid")]
+struct ClearFlashYield;
+#[cfg(feature = "usb-ccid")]
+impl Drop for ClearFlashYield {
+    fn drop(&mut self) {
+        FLASH_YIELD.store(core::ptr::null_mut(), Ordering::SeqCst);
+    }
+}
+
 impl Nvm {
     const COUNTER_BYTES: usize = 4096;
+
+    #[cfg(feature = "usb-ccid")]
+    pub(crate) fn with_flash_yield<F: FnMut(), T>(
+        service: &mut F,
+        operation: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        unsafe fn call<F: FnMut()>(context: *mut ()) {
+            // The stack-owned callback remains live until the guard clears the hook.
+            unsafe { (*(context.cast::<F>()))() }
+        }
+        let mut hook = FlashYield {
+            context: (service as *mut F).cast(),
+            call: call::<F>,
+        };
+        if FLASH_YIELD
+            .compare_exchange(
+                core::ptr::null_mut(),
+                &mut hook,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return Err(Error::Busy);
+        }
+        let _clear = ClearFlashYield;
+        operation()
+    }
+
+    #[cfg(feature = "usb-ccid")]
+    fn yield_flash() {
+        let hook = FLASH_YIELD.load(Ordering::SeqCst);
+        if !hook.is_null() {
+            // Only the main loop installs this hook. Flash never calls it recursively.
+            unsafe { ((*hook).call)((*hook).context) };
+        }
+    }
 
     pub(crate) fn new() -> Self {
         Self {
@@ -127,10 +184,20 @@ impl Nvm {
         nvmc.config.write(|w| w.wen().een());
         let result = (|| {
             for page in (base..base + size).step_by(4096) {
+                #[cfg(feature = "latency-trace")]
+                crate::trace::record(crate::trace::event::ERASE_PAGE_START, page as u32);
                 nvmc.erasepage()
                     .write(|w| unsafe { w.erasepage().bits(page as u32) });
                 Self::ready()?;
+                #[cfg(feature = "latency-trace")]
+                crate::trace::record(crate::trace::event::ERASE_PAGE_DONE, page as u32);
                 feed();
+                #[cfg(feature = "usb-ccid")]
+                {
+                    nvmc.config.write(|w| w.wen().ren());
+                    Self::yield_flash();
+                    nvmc.config.write(|w| w.wen().een());
+                }
             }
             Ok(())
         })();
@@ -154,9 +221,13 @@ impl Nvm {
         let trace_start = now();
         #[cfg(feature = "latency-trace")]
         let mut trace_words = 0u32;
+        #[cfg(feature = "latency-trace")]
+        crate::trace::record(crate::trace::event::PROGRAM_START, (base + offset) as u32);
         nvmc.config.write(|w| w.wen().wen());
         let result = (|| {
             let end = offset + bytes.len();
+            #[cfg(feature = "usb-ccid")]
+            let mut since_yield = 0usize;
             for pos in ((offset & !3)..((end + 3) & !3)).step_by(4) {
                 let current = unsafe { read(base + pos) };
                 let mut word = current.to_le_bytes();
@@ -181,12 +252,25 @@ impl Nvm {
                 }
                 Self::ready()?;
                 feed();
+                #[cfg(feature = "usb-ccid")]
+                {
+                    since_yield += 1;
+                    if since_yield == 32 {
+                        nvmc.config.write(|w| w.wen().ren());
+                        Self::yield_flash();
+                        nvmc.config.write(|w| w.wen().wen());
+                        since_yield = 0;
+                    }
+                }
             }
             Ok(())
         })();
         nvmc.config.write(|w| w.wen().ren());
         #[cfg(feature = "latency-trace")]
-        crate::trace::program(trace_start, trace_words);
+        {
+            crate::trace::program(trace_start, trace_words);
+            crate::trace::record(crate::trace::event::PROGRAM_DONE, trace_words);
+        }
         result
     }
 
@@ -246,7 +330,13 @@ impl StagingNvm {
 
     pub(crate) const fn new() -> Self {
         Self {
-            bank: None,
+            // The DK JCVM layout has one staging bank. A pending authenticated
+            // renewal must be able to read its seed after reboot, before erase().
+            bank: if cfg!(feature = "engine-jcvm") {
+                Some(0)
+            } else {
+                None
+            },
             next_bank: 0,
         }
     }

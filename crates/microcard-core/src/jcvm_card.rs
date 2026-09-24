@@ -31,11 +31,14 @@ impl<F: Flash, I: ImageFlash, H: HeapBanks> Storage<F, I, H> {
         staging: &mut impl PackageStaging,
         scratch: &mut [u8],
         provider: &mut impl CryptoProvider,
+        cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         self.registry.begin_renewal(aid, session, &self.images, &self.heaps,
             &self.heap_key, staging, scratch, provider)?;
+        if cancel() { return Err(Error::Cancelled); }
         self.registry.recover_renewal(&self.images, &mut self.heaps, &self.heap_key,
             staging, scratch, provider)?;
+        if cancel() { return Err(Error::Cancelled); }
         self.registry.handoff_renewed_session(aid, session, &self.images, &mut self.heaps,
             &self.heap_key, scratch, provider)?;
         staging.reset();
@@ -156,14 +159,15 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             session: &mut StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>,
             cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
-        // The global monotonic counter is not replenished by epoch renewal. Renew only
-        // when the active slot is nearly out of append frames, leaving one APDU in reserve.
-        if session.remaining_append_frames()? > 1 { return Ok(()); }
-        if session.remaining_commits()? <= 1 { return Ok(()); }
+        // The heap bank's counters are replenished by renewal. Leave one commit
+        // available for an APDU that arrives before idle maintenance runs.
+        if session.remaining_append_frames()? > 1 && session.remaining_commits()? > 1 {
+            return Ok(());
+        }
         if self.upload.is_some() { return Ok(()); }
         session.release_idle_memory()?;
         self.storage.renew_epoch(aid, session, &mut self.staging,
-            &mut self.scratch, &mut self.provider)?;
+            &mut self.scratch, &mut self.provider, cancel)?;
         session.restore_idle_memory()?;
         if cancel() { return Err(Error::Cancelled); }
         Ok(())
@@ -177,7 +181,15 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         Ok(())
     }
 
+    fn prepare_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
+        let result = self.renew_epoch_if_needed(aid, &mut session, cancel);
+        self.selected = Some((aid, session));
+        result
+    }
+
     fn park_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
+        self.prepare_selected(cancel)?;
         let Some((aid, session)) = self.selected.as_mut() else { return Ok(()); };
         let instance = *self.storage.registry.state()?.instances()
             .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;
@@ -233,6 +245,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         }
         .encode()?;
         if self.selected.as_ref().is_some_and(|(selected, _)| *selected == aid) {
+            self.prepare_selected(cancel)?;
             let (_, session) = self.selected.as_mut().unwrap();
             let response = session.process(&command, true, &mut self.provider, cancel)?;
             if session.take_security_reset() && self.storage.registry.state()?.instances()
@@ -255,6 +268,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             session.restore_volatile(&cached.state)?;
             self.retained.remove(index);
         }
+        self.renew_epoch_if_needed(aid, &mut session, cancel)?;
         let response = session.process(&command, true, &mut self.provider, cancel)?;
         let selected = session.selected()?;
         self.selected = Some((aid, session));
@@ -521,6 +535,9 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
     }
 
     fn process_plain_with_cancel(&mut self, command: &Command<'_>, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+        // Any command may mutate persistent state. Renew before invoking Java code
+        // when the active bank can no longer guarantee one durable checkpoint.
+        self.prepare_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
         let result = session.process(&command.encode()?, false, &mut self.provider, cancel);
         if session.take_security_reset() && self.storage.registry.state()?.instances()
@@ -602,6 +619,7 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
         verified: Verified,
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Vec<u8>> {
+        self.prepare_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
         let instance = self.storage.registry.state()?.instances()
             .find(|instance| instance.aid == *aid).ok_or(Error::Storage)?;

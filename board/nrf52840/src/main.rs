@@ -166,6 +166,13 @@ fn main() -> ! {
         halt_with_diagnostic(&mut watchdog, 0x09);
     }
     let _reset_reason = BoardResetReport::capture().reset_reason();
+    #[cfg(feature = "latency-trace")]
+    {
+        let power = unsafe { &*pac::POWER::ptr() };
+        let reset_reason = power.resetreas.read().bits();
+        trace::boot(reset_reason);
+        power.resetreas.write(|w| unsafe { w.bits(reset_reason) });
+    }
     let mut device_identity = [0; 8];
     let _ = BoardIdentity.read_identity(&mut device_identity);
     // Ties the image to a MicroCard memory map at link time. The generated region constants
@@ -286,17 +293,24 @@ fn main() -> ! {
     let mut usb_was_powered = false;
     #[cfg(feature = "usb-ccid")]
     let mut maintenance_at = None;
+    #[cfg(feature = "usb-ccid")]
+    let mut pending_extension_at = None;
     #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
     let mut usb_configuration_deadline = None;
     #[cfg(all(feature = "usb-ccid", feature = "dongle-layout"))]
     let mut enter_uf2_at = None;
     loop {
+        let _ = watchdog.feed();
         #[cfg(feature = "usb-ccid")]
         {
             let powered = usb_ccid::power_ready();
             if powered && usb_stack.is_none() {
                 usb_stack = initialize_usb();
                 usb_was_powered = usb_stack.is_some();
+                #[cfg(feature = "latency-trace")]
+                if usb_was_powered {
+                    trace::record(trace::event::USB_READY, 0);
+                }
                 #[cfg(feature = "dongle-layout")]
                 if usb_was_powered {
                     usb_configuration_deadline = Some(now().wrapping_add(5_000_000));
@@ -315,6 +329,8 @@ fn main() -> ! {
                             usb_configuration_deadline = Some(now().wrapping_add(5_000_000));
                         }
                     }
+                    #[cfg(feature = "latency-trace")]
+                    trace::usb_poll();
                     let _ = device.poll(&mut [class]);
                     #[cfg(feature = "dongle-layout")]
                     match device.state() {
@@ -341,42 +357,81 @@ fn main() -> ! {
                     // synchronously and hands the reply straight back to the class.
                     if let Some(request) = responder.take_request() {
                         #[cfg(feature = "latency-trace")]
-                        trace::apdu_start();
-                        let mut wait_extension_at = match class.did_start_processing() {
-                            usbd_ccid::Status::ReceivedData(_) => Some(now().wrapping_add(750_000)),
-                            usbd_ccid::Status::Idle => None,
-                        };
-                        let reply = endpoint.exchange_with_cancel(&request, &mut || {
-                            #[cfg(feature = "latency-trace")]
-                            trace::cancel_poll();
-                            feed();
-                            if !usb_ccid::power_ready() {
-                                return true;
+                        {
+                            trace::apdu_start();
+                            let header = request
+                                .get(0..4)
+                                .map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()))
+                                .unwrap_or(0);
+                            trace::record(trace::event::REQUEST, header);
+                        }
+                        let mut wait_extension_at = pending_extension_at.take().or_else(|| {
+                            match class.did_start_processing() {
+                                usbd_ccid::Status::ReceivedData(_) => {
+                                    Some(now().wrapping_add(750_000))
+                                }
+                                usbd_ccid::Status::Idle => None,
                             }
-                            // Long JCVM callbacks remain one APDU. Keep USB serviced and use
-                            // the CCID library's standard time-extension response until the
-                            // runtime publishes the final reply.
-                            let _ = device.poll(&mut [class]);
-                            if wait_extension_at
-                                .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
-                            {
-                                wait_extension_at = match class.send_wait_extension() {
-                                    usbd_ccid::Status::ReceivedData(_) => {
-                                        #[cfg(feature = "latency-trace")]
-                                        trace::wait_extension();
-                                        Some(now().wrapping_add(750_000))
-                                    }
-                                    usbd_ccid::Status::Idle => None,
-                                };
-                            }
-                            false
                         });
+                        let reply = {
+                            let poll = core::cell::RefCell::new(|| {
+                                #[cfg(feature = "latency-trace")]
+                                trace::cancel_poll();
+                                feed();
+                                if !usb_ccid::power_ready() {
+                                    return true;
+                                }
+                                // Long JCVM callbacks remain one APDU. Keep USB serviced and use
+                                // the CCID library's standard time-extension response until the
+                                // runtime publishes the final reply.
+                                #[cfg(feature = "latency-trace")]
+                                trace::usb_poll();
+                                let _ = device.poll(&mut [class]);
+                                if wait_extension_at.is_some_and(|deadline| {
+                                    now().wrapping_sub(deadline) < 0x8000_0000
+                                }) {
+                                    wait_extension_at = match class.send_wait_extension() {
+                                        usbd_ccid::Status::ReceivedData(_) => {
+                                            #[cfg(feature = "latency-trace")]
+                                            trace::wait_extension();
+                                            Some(now().wrapping_add(750_000))
+                                        }
+                                        usbd_ccid::Status::Idle => None,
+                                    };
+                                }
+                                false
+                            });
+                            Nvm::with_flash_yield(
+                                &mut || {
+                                    let _ = (*poll.borrow_mut())();
+                                },
+                                || {
+                                    Ok(endpoint.exchange_with_cancel(&request, &mut || {
+                                        (*poll.borrow_mut())()
+                                    }))
+                                },
+                            )
+                            .unwrap_or_else(|_| alloc::vec![0x69, 0x85])
+                        };
                         #[cfg(feature = "latency-trace")]
-                        trace::apdu_end();
+                        {
+                            trace::apdu_end();
+                            let status = reply
+                                .get(reply.len().saturating_sub(2)..)
+                                .and_then(|bytes| <[u8; 2]>::try_from(bytes).ok())
+                                .map(u16::from_be_bytes)
+                                .unwrap_or(0);
+                            trace::record(
+                                trace::event::EXECUTION_DONE,
+                                ((reply.len() as u32) << 16) | u32::from(status),
+                            );
+                        }
                         let mut outgoing = heapless::Vec::new();
                         if outgoing.extend_from_slice(&reply).is_ok()
                             && responder.respond(outgoing).is_ok()
                         {
+                            #[cfg(feature = "latency-trace")]
+                            trace::record(trace::event::RESPONSE_QUEUED, 0);
                             // Give usbd-ccid time to drain the response before flash can stall USB.
                             if maintenance_at.is_none() {
                                 maintenance_at = Some(now().wrapping_add(250_000));
@@ -395,13 +450,54 @@ fn main() -> ! {
                     {
                         #[cfg(feature = "latency-trace")]
                         let maintenance_start = now();
-                        let maintenance_result = endpoint
-                            .maintenance_with_cancel(&mut || {
-                                feed();
-                                false
-                            });
                         #[cfg(feature = "latency-trace")]
-                        trace::maintenance(maintenance_start, maintenance_result.is_err());
+                        trace::record(trace::event::MAINTENANCE_START, 0);
+                        let maintenance_result = {
+                            let poll = core::cell::RefCell::new(|| {
+                                if !usb_ccid::power_ready() {
+                                    return;
+                                }
+                                #[cfg(feature = "latency-trace")]
+                                trace::usb_poll();
+                                let _ = device.poll(&mut [class]);
+                                class.check_for_app_response();
+                                if pending_extension_at.is_none()
+                                    && matches!(
+                                        class.did_start_processing(),
+                                        usbd_ccid::Status::ReceivedData(_)
+                                    )
+                                {
+                                    pending_extension_at = Some(now().wrapping_add(750_000));
+                                }
+                                if pending_extension_at.is_some_and(|deadline| {
+                                    now().wrapping_sub(deadline) < 0x8000_0000
+                                }) {
+                                    pending_extension_at = match class.send_wait_extension() {
+                                        usbd_ccid::Status::ReceivedData(_) => {
+                                            #[cfg(feature = "latency-trace")]
+                                            trace::wait_extension();
+                                            Some(now().wrapping_add(750_000))
+                                        }
+                                        usbd_ccid::Status::Idle => None,
+                                    };
+                                }
+                            });
+                            Nvm::with_flash_yield(&mut || (*poll.borrow_mut())(), || {
+                                endpoint.maintenance_with_cancel(&mut || {
+                                    feed();
+                                    (*poll.borrow_mut())();
+                                    !usb_ccid::power_ready()
+                                })
+                            })
+                        };
+                        #[cfg(feature = "latency-trace")]
+                        {
+                            trace::maintenance(maintenance_start, maintenance_result.is_err());
+                            trace::record(
+                                trace::event::MAINTENANCE_DONE,
+                                maintenance_result.is_err() as u32,
+                            );
+                        }
                         if maintenance_result.is_err() {
                             // Startup recovery owns an uncertain published renewal.
                             cortex_m::peripheral::SCB::sys_reset();
@@ -415,9 +511,12 @@ fn main() -> ! {
                         enter_uf2();
                     }
                 } else if usb_was_powered {
+                    #[cfg(feature = "latency-trace")]
+                    trace::record(trace::event::USB_POWER_LOST, 0);
                     endpoint.reset();
                     usb_was_powered = false;
                     maintenance_at = None;
+                    pending_extension_at = None;
                     #[cfg(feature = "dongle-layout")]
                     {
                         led_color(LedColor::Blue);
@@ -435,6 +534,8 @@ fn main() -> ! {
 }
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
+    #[cfg(feature = "latency-trace")]
+    trace::record(trace::event::PANIC, 0);
     #[cfg(feature = "development-recovery")]
     enter_uf2();
     #[cfg(not(feature = "development-recovery"))]
@@ -446,5 +547,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 #[cfg(feature = "development-recovery")]
 #[exception]
 unsafe fn HardFault(_: &ExceptionFrame) -> ! {
+    #[cfg(feature = "latency-trace")]
+    trace::record(trace::event::HARD_FAULT, 0);
     enter_uf2()
 }

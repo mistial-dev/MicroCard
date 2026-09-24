@@ -211,12 +211,32 @@ python3 scripts/read_jcvm_latency_trace.py \
 
 The trace feature is excluded from the ordinary image. SWD attachment can
 interrupt an active PC/SC session; finish the probe before reading counters.
-The pinned upstream extended scan advanced through the key-builder section,
-then lost the PC/SC reader at its `OwnerPINBuilder` type-1 probe. A software
-reset restored the reader and the targeted probes still passed. The incomplete
-CSV and log in `/private/tmp/microcard-jcalgtest-dk-latency-20260924` are
-diagnostics, not a valid JCAlgTest result. The failure needs a fresh trace
-covering USB, flash, and reset reason before any further timing changes.
+The first pinned upstream extended scan advanced through the key-builder section,
+then lost the PC/SC reader at its `OwnerPINBuilder` type-1 probe. The incomplete
+CSV and log in `/private/tmp/microcard-jcalgtest-dk-latency-20260924` remain
+diagnostics, not a JCAlgTest result. An opt-in retained RAM/SWD trace showed
+that the watchdog was fed during commands but not while the USB main loop idled.
+The heap bank's 1,024 program-once counter words were also exhausted: renewal
+returned early precisely when the bank needed renewal, and reboot recovery could
+not map the single staging bank until it had been selected by a new upload.
+The fixes feed the watchdog in the main loop, permit heap-bank renewal when its
+counters are nearly exhausted, and map the existing staging bank after reset.
+Flash page erases and batches of programmed words now return NVMC to read mode
+and poll USB, using the existing CCID time-extension path when needed.
+
+With the first corrected diagnostic image, the unmodified upstream v1.8.3
+desktop client completed `ALG_SUPPORT_EXTENDED` on the DK: **8,607/8,607 probes,
+zero error rows, and no reader loss**. Its host PC/SC APDUs had a **19 ms median,
+21 ms p95, and 6,178 ms maximum**. The maximum is an actual heap-bank renewal;
+ordinary factory probes remain near 19 ms. The run is preserved under
+`/private/tmp/microcard-jcalgtest-fixed-20260924`, including untouched CSV and
+console log, `analysis.json`, and the exact traced firmware ELF. The analyzer
+pins firmware SHA-256 `57820defebd91bbb26b61daa5a4b78674e3acb9bbc36a7d65450e84f697e47f9`.
+It reports **55 supported** probes against the target's **288**, leaving **233
+P71D321-supported probes unimplemented**. A complete scan establishes transport
+stability and a valid support result; it does not establish those missing
+algorithms or their operation, failure, and reboot behavior. A second scan on
+the final non-diagnostic image is still required.
 An independently built applet must still exercise OwnerPINx methods, transaction
 behavior, and reset state through Java bytecode. Full physical JCAlgTest,
 flash interruption, and production provisioning remain release work. The
