@@ -61,6 +61,7 @@ fn encode_diff(before: &[u8], after: &[u8], generation: u64, maximum: usize)
 }
 
 /// Stage only the requested sanitized heap window, bounded by the record budget.
+#[cfg(test)]
 pub(super) fn encode_heap_window(view: microcard_engine_jcvm::applet::PersistentView<'_>,
         range: core::ops::Range<usize>, before_length: usize, generation: u64,
         maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
@@ -72,12 +73,39 @@ pub(super) fn encode_heap_window(view: microcard_engine_jcvm::applet::Persistent
     encode(change.into_iter(), before_length, view.heap_bytes(), generation, maximum)
 }
 
+fn encode_heap_ranges(view: microcard_engine_jcvm::applet::PersistentView<'_>,
+        ranges: impl Iterator<Item = core::ops::Range<usize>> + Clone,
+        before_length: usize, generation: u64, maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
+    let count = ranges.clone().count();
+    if count > MAX_SPANS { return Err(Error::Quota); }
+    let mut encoder = Encoder::new(maximum);
+    encoder.array(5)?;
+    encoder.unsigned(1)?;
+    encoder.unsigned(generation)?;
+    encoder.unsigned(before_length as u64)?;
+    encoder.unsigned(view.heap_bytes() as u64)?;
+    encoder.array(count)?;
+    let mut previous_end = 0;
+    for range in ranges {
+        if range.start >= range.end || range.end > view.heap_bytes() || range.start < previous_end {
+            return Err(Error::Bounds);
+        }
+        if range.len() > maximum { return Err(Error::Quota); }
+        let mut bytes = crate::crypto::zeroizing_buffer(range.len())?;
+        view.save_range(range.start, &mut bytes).map_err(|_| Error::Format)?;
+        encoder.array(2)?;
+        encoder.unsigned(range.start as u64)?;
+        encoder.bytes(&bytes)?;
+        previous_end = range.end;
+    }
+    Ok(Zeroizing::new(encoder.finish()))
+}
+
 pub(super) fn encode_view(view: microcard_engine_jcvm::applet::PersistentView<'_>,
         before_length: usize, generation: u64, maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
     let writes = view.pending_writes().ok_or(Error::Quota)?;
     if writes.snapshot_required() { return Err(Error::Quota); }
-    let heap = encode_heap_window(view, writes.heap_range().unwrap_or(0..0),
-        before_length, generation, maximum)?;
+    let heap = encode_heap_ranges(view, writes.heap_ranges(), before_length, generation, maximum)?;
     let (instance, statics) = view.metadata();
     let range = writes.static_range().unwrap_or(0..0);
     let bytes = statics.get(range.clone()).ok_or(Error::Bounds)?;

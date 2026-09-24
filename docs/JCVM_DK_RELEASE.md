@@ -153,9 +153,49 @@ python3 scripts/jcalgtest_gp_acceptance.py \
   --management-key .keys/first-test-management.key --select-only
 ```
 
-The full physical extended scan is not yet a release result: early key probes
-took about 1.4 seconds each, and the run was interrupted. An independently built
-applet must still exercise OwnerPINx methods, transaction behavior, and reset
-state through Java bytecode. Full JCAlgTest, flash interruption, and production
-provisioning remain release work. The physical smoke result does not imply
-P71D321 compatibility.
+### JCAlgTest latency on the DK
+
+The original image never started TIMER0, so its microsecond timeout and idle
+maintenance deadlines stayed at zero. A live SWD capture confirmed two reads a
+second apart both returned zero. The corrected image starts a 32-bit, 1 MHz
+timer before crystal startup. With opt-in `latency-trace` counters, a physical
+JCAlgTest probe showed that an ordinary applet APDU took about 292 ms while
+deferred maintenance spent 5.5 s, including 4.5 s erasing flash. The maintenance
+trigger compared remaining program-once counter words with 1024 even though
+each counter page holds only 1024 words, so it renewed after every eligible APDU.
+It now checks remaining append frames in the active heap journal.
+
+The next trace found a separate 1.45 s cost on JCAlgTest factory probes: a
+single dirty interval spanned 3,756 heap bytes, exceeding the 1 KiB patch frame.
+That forced a full snapshot and a 64 KiB heap-slot erase on every probe. A bounded
+eight-interval dirty tracker preserves sparse writes; a matching bounded encoder
+now appends their separate ranges. On the same physical DK, digest and two
+OwnerPINx factory APDUs fell from about **1,454 ms to 17 ms** each. A 120-APDU
+repeat stayed near 17–19 ms for those probes, apart from one 1.47 s full
+snapshot when the journal actually filled. This is a measured latency result,
+not an algorithm-conformance claim.
+The ordinary `development-debug` link is **231,832 text, 148 data, and 198,284
+BSS bytes**; the latency counters are not linked into that image.
+
+Reproduce host-observed APDU timings with `--timings --repeat 12` on the targeted
+command above. For flash and VM-boundary counters, build with
+`--features usb-ccid,latency-trace` in `scripts/prepare_first_flash.py`, flash
+the resulting ELF, run the targeted command, then read the counters:
+
+```sh
+python3 scripts/read_jcvm_latency_trace.py \
+  --probe 1366:1020:000802009660
+```
+
+The trace feature is excluded from the ordinary image. SWD attachment can
+interrupt an active PC/SC session; finish the probe before reading counters.
+The pinned upstream extended scan advanced through the key-builder section,
+then lost the PC/SC reader at its `OwnerPINBuilder` type-1 probe. A software
+reset restored the reader and the targeted probes still passed. The incomplete
+CSV and log in `/private/tmp/microcard-jcalgtest-dk-latency-20260924` are
+diagnostics, not a valid JCAlgTest result. The failure needs a fresh trace
+covering USB, flash, and reset reason before any further timing changes.
+An independently built applet must still exercise OwnerPINx methods, transaction
+behavior, and reset state through Java bytecode. Full physical JCAlgTest,
+flash interruption, and production provisioning remain release work. The
+physical smoke result does not imply P71D321 compatibility.

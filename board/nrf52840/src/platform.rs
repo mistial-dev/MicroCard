@@ -6,7 +6,6 @@ use nrf52840_pac as pac;
 
 #[cfg(not(feature = "cc310-entropy"))]
 pub(crate) const RNG: usize = 0x4000D000;
-const TIMER: usize = 0x40008000;
 const WDT: usize = 0x40010000;
 
 // Register offsets follow nRF52840 Product Specification peripheral register tables.
@@ -21,6 +20,16 @@ pub(crate) unsafe fn write(address: usize, value: u32) {
 pub(crate) fn enable_instruction_cache() {
     let nvmc = unsafe { &*pac::NVMC::ptr() };
     nvmc.icachecnf.write(|w| w.cacheen().enabled());
+}
+
+pub(crate) fn start_monotonic_timer() {
+    let timer = unsafe { &*pac::TIMER0::ptr() };
+    timer.tasks_stop.write(|w| w.tasks_stop().set_bit());
+    timer.mode.write(|w| w.mode().timer());
+    timer.bitmode.write(|w| w.bitmode()._32bit());
+    timer.prescaler.write(|w| unsafe { w.prescaler().bits(4) });
+    timer.tasks_clear.write(|w| w.tasks_clear().set_bit());
+    timer.tasks_start.write(|w| w.tasks_start().set_bit());
 }
 
 pub(crate) fn start_hfxo() -> Result<()> {
@@ -41,10 +50,9 @@ pub(crate) fn start_hfxo() -> Result<()> {
 }
 
 pub(crate) fn now() -> u32 {
-    unsafe {
-        write(TIMER + 0x040, 1);
-        read(TIMER + 0x540)
-    }
+    let timer = unsafe { &*pac::TIMER0::ptr() };
+    timer.tasks_capture[0].write(|w| w.tasks_capture().set_bit());
+    timer.cc[0].read().bits()
 }
 
 #[cfg(not(feature = "cc310-entropy"))]

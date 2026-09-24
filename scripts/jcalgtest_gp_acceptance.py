@@ -4,6 +4,7 @@ import argparse
 import pathlib
 import subprocess
 import tempfile
+import time
 
 from device_cbor import decode
 from jcvm_transport_acceptance import load_cap, lv
@@ -15,15 +16,22 @@ PACKAGE = bytes.fromhex("4A43416C6754657374")
 APPLET = bytes.fromhex("4A43416C675465737431")
 
 
-def probe(client):
-    selected = client.raw(bytes([0, 0xA4, 4, 0, len(APPLET)]) + APPLET)
+def probe(client, timings=False):
+    def raw(label, command):
+        start = time.perf_counter_ns()
+        result = client.raw(command)
+        if timings:
+            print(f"{label}: {(time.perf_counter_ns() - start) / 1_000_000:.2f} ms", flush=True)
+        return result
+
+    selected = raw("select", bytes([0, 0xA4, 4, 0, len(APPLET)]) + APPLET)
     assert selected[-2:] == b"\x90\x00", selected.hex()
-    version = client.raw(bytes.fromhex("B0E100000100"))
+    version = raw("version", bytes.fromhex("B0E100000100"))
     assert version == b"1.8.2_jc305\x90\x00", version.hex()
-    digest = client.raw(bytes.fromhex("B075150003040000"))
+    digest = raw("digest factory", bytes.fromhex("B075150003040000"))
     assert digest[:2] == bytes.fromhex("1500") and digest[-2:] == b"\x90\x00", digest.hex()
     for pin_type in (2, 3):
-        result = client.raw(bytes.fromhex("B075240003") + bytes([pin_type, 0, 0, 0]))
+        result = raw(f"OwnerPIN type {pin_type}", bytes.fromhex("B075240003") + bytes([pin_type, 0, 0, 0]))
         assert result[:2] == bytes.fromhex("2400") and result[-2:] == b"\x90\x00", result.hex()
 
 
@@ -34,7 +42,12 @@ def main():
                         help="32-byte board management key")
     parser.add_argument("--select-only", action="store_true",
                         help="Check the applet already installed on a board")
+    parser.add_argument("--timings", action="store_true", help="Print host-observed latency for each probe APDU")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="Repeat the probe sequence within one card session")
     args = parser.parse_args()
+    if args.repeat < 1:
+        parser.error("--repeat must be positive")
     if args.reader and args.management_key is None:
         parser.error("--management-key is required with --reader")
     if args.management_key and len(args.management_key.read_bytes()) != 32:
@@ -62,7 +75,8 @@ def main():
                 assert discovery[:4] == [2, 2, 1, 0]
                 load_cap(client, discovery[4], PACKAGE, IMAGE.read_bytes())
                 client.command(0xE6, lv(PACKAGE, APPLET, APPLET, b"\0", b"\xc9\0", b""), p1=0x0C)
-            probe(client)
+            for _ in range(args.repeat):
+                probe(client, args.timings)
         finally:
             client.close()
         if args.reader:
@@ -72,7 +86,8 @@ def main():
         client = Client(keys, state, "serve-jcvm-managed")
         try:
             client.connect()
-            probe(client)
+            for _ in range(args.repeat):
+                probe(client, args.timings)
         finally:
             client.close()
     print("PASS: unsigned JCAlgTest CAP loads through SCP03 and survives reboot")

@@ -156,9 +156,10 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             session: &mut StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>,
             cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
-        // Renew only through the explicit idle hook. This reserve is a maintenance
-        // threshold, not a promise that any applet command fits the remaining space.
-        if session.remaining_commits()? > 1024 { return Ok(()); }
+        // The global monotonic counter is not replenished by epoch renewal. Renew only
+        // when the active slot is nearly out of append frames, leaving one APDU in reserve.
+        if session.remaining_append_frames()? > 1 { return Ok(()); }
+        if session.remaining_commits()? <= 1 { return Ok(()); }
         if self.upload.is_some() { return Ok(()); }
         session.release_idle_memory()?;
         self.storage.renew_epoch(aid, session, &mut self.staging,

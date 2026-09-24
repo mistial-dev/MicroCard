@@ -122,6 +122,8 @@ impl Nvm {
             return Err(Error::Bounds);
         }
         let nvmc = unsafe { &*pac::NVMC::ptr() };
+        #[cfg(feature = "latency-trace")]
+        let trace_start = now();
         nvmc.config.write(|w| w.wen().een());
         let result = (|| {
             for page in (base..base + size).step_by(4096) {
@@ -133,6 +135,10 @@ impl Nvm {
             Ok(())
         })();
         nvmc.config.write(|w| w.wen().ren());
+        #[cfg(feature = "latency-trace")]
+        if result.is_ok() {
+            crate::trace::erase(trace_start, base, size);
+        }
         result
     }
 
@@ -144,6 +150,10 @@ impl Nvm {
             return Ok(());
         }
         let nvmc = unsafe { &*pac::NVMC::ptr() };
+        #[cfg(feature = "latency-trace")]
+        let trace_start = now();
+        #[cfg(feature = "latency-trace")]
+        let mut trace_words = 0u32;
         nvmc.config.write(|w| w.wen().wen());
         let result = (|| {
             let end = offset + bytes.len();
@@ -165,12 +175,18 @@ impl Nvm {
                     continue;
                 }
                 unsafe { write(base + pos, word) }
+                #[cfg(feature = "latency-trace")]
+                {
+                    trace_words += 1;
+                }
                 Self::ready()?;
                 feed();
             }
             Ok(())
         })();
         nvmc.config.write(|w| w.wen().ren());
+        #[cfg(feature = "latency-trace")]
+        crate::trace::program(trace_start, trace_words);
         result
     }
 

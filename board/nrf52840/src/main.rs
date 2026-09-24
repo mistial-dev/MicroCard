@@ -10,6 +10,8 @@ mod jcvm;
 mod platform;
 mod recovery;
 mod storage;
+#[cfg(feature = "latency-trace")]
+mod trace;
 #[cfg(feature = "usb-ccid")]
 mod usb_ccid;
 use cortex_m_rt::entry;
@@ -47,7 +49,8 @@ use diagnostics::report_usb_failure;
 use diagnostics::{led_color, led_init, LedColor};
 use hardware::Hardware;
 use platform::{
-    enable_instruction_cache, start_hfxo, BoardIdentity, BoardResetReport, BoardWatchdog,
+    enable_instruction_cache, start_hfxo, start_monotonic_timer, BoardIdentity, BoardResetReport,
+    BoardWatchdog,
 };
 #[cfg(feature = "usb-ccid")]
 use platform::{feed, now};
@@ -140,6 +143,7 @@ fn main() -> ! {
     #[cfg(feature = "dongle-layout")]
     ensure_clean_bootloader_handoff();
     enable_instruction_cache();
+    start_monotonic_timer();
     unsafe {
         // Nordic PS Debug and trace: Fxx+ needs both HwDisabled and SwDisable.
         // Respect the provisioned hardware policy; never rewrite UICR at startup.
@@ -336,11 +340,15 @@ fn main() -> ! {
                     // One APDU is in flight at a time, so the runtime answers it
                     // synchronously and hands the reply straight back to the class.
                     if let Some(request) = responder.take_request() {
+                        #[cfg(feature = "latency-trace")]
+                        trace::apdu_start();
                         let mut wait_extension_at = match class.did_start_processing() {
                             usbd_ccid::Status::ReceivedData(_) => Some(now().wrapping_add(750_000)),
                             usbd_ccid::Status::Idle => None,
                         };
                         let reply = endpoint.exchange_with_cancel(&request, &mut || {
+                            #[cfg(feature = "latency-trace")]
+                            trace::cancel_poll();
                             feed();
                             if !usb_ccid::power_ready() {
                                 return true;
@@ -354,6 +362,8 @@ fn main() -> ! {
                             {
                                 wait_extension_at = match class.send_wait_extension() {
                                     usbd_ccid::Status::ReceivedData(_) => {
+                                        #[cfg(feature = "latency-trace")]
+                                        trace::wait_extension();
                                         Some(now().wrapping_add(750_000))
                                     }
                                     usbd_ccid::Status::Idle => None,
@@ -361,6 +371,8 @@ fn main() -> ! {
                             }
                             false
                         });
+                        #[cfg(feature = "latency-trace")]
+                        trace::apdu_end();
                         let mut outgoing = heapless::Vec::new();
                         if outgoing.extend_from_slice(&reply).is_ok()
                             && responder.respond(outgoing).is_ok()
@@ -381,13 +393,16 @@ fn main() -> ! {
                     if maintenance_at
                         .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
                     {
-                        if endpoint
+                        #[cfg(feature = "latency-trace")]
+                        let maintenance_start = now();
+                        let maintenance_result = endpoint
                             .maintenance_with_cancel(&mut || {
                                 feed();
                                 false
-                            })
-                            .is_err()
-                        {
+                            });
+                        #[cfg(feature = "latency-trace")]
+                        trace::maintenance(maintenance_start, maintenance_result.is_err());
+                        if maintenance_result.is_err() {
                             // Startup recovery owns an uncertain published renewal.
                             cortex_m::peripheral::SCB::sys_reset();
                         }

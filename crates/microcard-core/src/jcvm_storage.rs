@@ -13,6 +13,8 @@ use microcard_engine_jcvm::{
 };
 use zeroize::Zeroizing;
 mod patch;
+#[cfg(feature = "latency-trace")]
+mod trace;
 mod session;
 pub use session::Session;
 mod banks;
@@ -216,6 +218,8 @@ impl<F: Flash> Store<F> {
     }
 
     pub(crate) fn commit_view(&mut self, view: PersistentView<'_>, provider: &mut impl CryptoProvider) -> Result<()> {
+        #[cfg(feature = "latency-trace")]
+        trace::capture_view(view);
         let (instance, statics) = view.metadata();
         if snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())? > self.maximum {
             return Err(Error::Quota);
@@ -229,15 +233,24 @@ impl<F: Flash> Store<F> {
             if capacity != 0 {
                 match patch::encode_view(view, before_length, self.journal.generation(), capacity) {
                     Ok(delta) => {
+                        #[cfg(feature = "latency-trace")]
+                        trace::patch(delta.len());
                         self.journal.append_owned_with(delta, provider)?;
                         self.heap_length = Some(view.heap_bytes());
                         return Ok(());
                     }
-                    Err(Error::Quota) => {},
+                    Err(Error::Quota) => {
+                        #[cfg(feature = "latency-trace")]
+                        trace::fallback(3);
+                    },
                     Err(error) => return Err(error),
                 }
             }
+            #[cfg(feature = "latency-trace")]
+            if capacity == 0 { trace::fallback(2); }
         }
+        #[cfg(feature = "latency-trace")]
+        if self.heap_length.is_none() { trace::fallback(1); }
         let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
         self.journal.commit_owned_with(snapshot, provider)?;
         self.heap_length = Some(view.heap_bytes());

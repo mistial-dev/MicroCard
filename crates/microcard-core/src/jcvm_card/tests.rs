@@ -262,6 +262,7 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     let old = *card.storage.registry.state().unwrap().instances()
         .find(|instance| instance.aid.as_slice() == aid).unwrap();
     let preparations = card.storage.heaps.preparations;
+    // Counter capacity is global and an epoch bump cannot replenish it.
     {
         let mut bank = card.storage.heaps.banks[usize::from(old.heap_bank)].borrow_mut();
         bank.leave_nonce_reservations_for_test(1024);
@@ -283,6 +284,17 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
         .find(|instance| instance.aid == old.aid).unwrap();
     assert_eq!(unchanged.identity, old.identity);
     card.maintenance_with_cancel(&mut || false).unwrap();
+    let current = card.storage.registry.state().unwrap().instances()
+        .find(|instance| instance.aid == old.aid).unwrap();
+    assert_eq!(current.identity, old.identity);
+    assert_eq!(card.storage.heaps.preparations, preparations);
+    // Exercise the authenticated handoff independently of the idle threshold.
+    let (selected_aid, mut live) = card.selected.take().unwrap();
+    live.release_idle_memory().unwrap();
+    card.storage.renew_epoch(selected_aid, &mut live, &mut card.staging,
+        &mut card.scratch, &mut card.provider).unwrap();
+    live.restore_idle_memory().unwrap();
+    card.selected = Some((selected_aid, live));
     let current = card.storage.registry.state().unwrap().instances()
         .find(|instance| instance.aid == old.aid).unwrap();
     assert_ne!(current.identity, old.identity);

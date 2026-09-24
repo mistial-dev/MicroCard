@@ -339,6 +339,15 @@ impl<F: Flash> Journal<F> {
         Ok(append::MAX_PAYLOAD)
     }
 
+    /// Number of complete append frames left in the active epoch.
+    #[cfg(any(test, feature = "jcvm"))]
+    pub fn remaining_append_frames(&self) -> Result<usize> {
+        if self.poisoned || !self.append_enabled { return Err(Error::Storage); }
+        let at = self.append_offset.ok_or(Error::Storage)?;
+        let available = self.flash.slot_size().saturating_sub(3).saturating_sub(at);
+        Ok(available / append::FRAME_BYTES)
+    }
+
     /// Append one bounded authenticated change without erasing a snapshot slot.
     /// Quota requires a new full snapshot; uncertain writes require recovery.
     #[cfg(any(test, feature = "jcvm"))]

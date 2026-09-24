@@ -74,6 +74,11 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.store.journal.remaining_commits()
     }
 
+    pub(crate) fn remaining_append_frames(&self) -> Result<usize> {
+        self.installed()?;
+        self.store.journal.remaining_append_frames()
+    }
+
     pub(crate) fn release_idle_memory(&mut self) -> Result<()> {
         self.installed()?;
         self.card.as_mut().ok_or(Error::Missing)?.release_idle_memory();

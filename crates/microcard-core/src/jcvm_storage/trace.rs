@@ -1,0 +1,49 @@
+//! Development-only view of patch decisions, readable through a debug probe.
+use core::sync::atomic::{AtomicU32, Ordering};
+
+use microcard_engine_jcvm::applet::PersistentView;
+
+#[repr(C)]
+pub struct PatchTrace {
+    reason: AtomicU32,
+    heap_start: AtomicU32,
+    heap_end: AtomicU32,
+    static_start: AtomicU32,
+    static_end: AtomicU32,
+    snapshot_required: AtomicU32,
+    patch_bytes: AtomicU32,
+}
+
+#[no_mangle]
+pub static MICROCARD_JCVM_PATCH_TRACE: PatchTrace = PatchTrace {
+    reason: AtomicU32::new(0),
+    heap_start: AtomicU32::new(0),
+    heap_end: AtomicU32::new(0),
+    static_start: AtomicU32::new(0),
+    static_end: AtomicU32::new(0),
+    snapshot_required: AtomicU32::new(0),
+    patch_bytes: AtomicU32::new(0),
+};
+
+pub(super) fn capture_view(view: PersistentView<'_>) {
+    let trace = &MICROCARD_JCVM_PATCH_TRACE;
+    let writes = view.pending_writes();
+    let heap = writes.and_then(|value| value.heap_range());
+    let statics = writes.and_then(|value| value.static_range());
+    trace.reason.store(0, Ordering::Relaxed);
+    trace.heap_start.store(heap.as_ref().map_or(0, |range| range.start) as u32, Ordering::Relaxed);
+    trace.heap_end.store(heap.as_ref().map_or(0, |range| range.end) as u32, Ordering::Relaxed);
+    trace.static_start.store(statics.as_ref().map_or(0, |range| range.start) as u32, Ordering::Relaxed);
+    trace.static_end.store(statics.as_ref().map_or(0, |range| range.end) as u32, Ordering::Relaxed);
+    trace.snapshot_required.store(writes.is_none_or(|value| value.snapshot_required()) as u32, Ordering::Relaxed);
+    trace.patch_bytes.store(0, Ordering::Relaxed);
+}
+
+pub(super) fn fallback(reason: u32) {
+    MICROCARD_JCVM_PATCH_TRACE.reason.store(reason, Ordering::Relaxed);
+}
+
+pub(super) fn patch(bytes: usize) {
+    MICROCARD_JCVM_PATCH_TRACE.reason.store(4, Ordering::Relaxed);
+    MICROCARD_JCVM_PATCH_TRACE.patch_bytes.store(bytes as u32, Ordering::Relaxed);
+}
