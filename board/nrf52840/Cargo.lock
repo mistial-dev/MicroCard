@@ -1123,8 +1123,6 @@ dependencies = [
 [[package]]
 name = "usbd-ccid"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58fb96f99caab23718dbb9ef7aaea53e5f890fafe0e4af802c78e7b91fc95c46"
 dependencies = [
  "delog",
  "embedded-time",

@@ -123,11 +123,25 @@ The DK release gate also needs sealed provisioning, secure boot/update policy,
 debug lockout, and independent cryptographic review before deployment as a
 production secure element. A robust USB DK test target is the nearer milestone.
 
-The connected PCA10056 DK's J-Link enumerates and reports a 3.3 V target
-reference, but probe-rs, OpenOCD, and direct J-Link SWD commands cannot read
-the target's debug-port ID, including under reset. An authorized recovery
-attempt failed before erasure. The MicroCard CCID reader is connected to the
-DK's target USB port J3: the running target authenticates SCP03 with the local
-development key and reports the older MC04 discovery format. This proves the
-target is running, but the JCVM image has not been flashed. Physical DK JCVM
-acceptance and the full JCAlgTest run remain pending debug-link recovery.
+On 2026-09-24 the external J-Link EDU Mini V2 connected to DK P18 Debug In read
+the nRF52840 SWD ID. Nordic recovery, key provisioning, and verified JCVM ELF
+download then succeeded. With the target powered at J3, this command passed on
+the physical DK:
+
+```sh
+python3 scripts/jcvm_board_acceptance.py \
+  --reader 'MicroCard MicroCard virtual smart card' \
+  --management-key .keys/first-test-management.key
+```
+
+It authenticated SCP03, loaded the unsigned OpenFIPS201 CAP, installed it, and
+selected its PIV applet. The `usbd-ccid` 0.5.0 crate initially rejected the
+`SetDataRateAndClockFrequency` request sent by macOS after a fresh reset. The
+local library patch responds with the fixed descriptor values; three consecutive
+SWD resets followed by SCP03 and PIV selection passed. Allow about two seconds
+after reset for macOS reader enumeration. The linked development image uses
+**230,392 text, 148 data, and 198,284 BSS bytes**.
+
+OwnerPINx behavior, full JCAlgTest, flash interruption, and production
+provisioning remain release work. The physical smoke result does not imply
+P71D321 compatibility.
