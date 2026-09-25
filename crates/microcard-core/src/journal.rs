@@ -43,6 +43,36 @@ impl AsMut<[u8; 16]> for JournalKey {
 pub const OVERHEAD: usize = 43;
 const HEADER_BYTES: usize = 24;
 
+/// JCVM records carry an append sequence and a separately advanced security anchor.
+/// The low word changes for every authenticated record; the high word changes only
+/// when the card's security policy protects PIN retry state from rollback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Durability { Ordinary, Anchored }
+
+#[cfg(feature = "jcvm")]
+impl From<microcard_engine_jcvm::host::CheckpointReason> for Durability {
+    fn from(reason: microcard_engine_jcvm::host::CheckpointReason) -> Self {
+        use microcard_engine_jcvm::host::CheckpointReason;
+        match reason {
+            CheckpointReason::ApduEnd | CheckpointReason::TransactionCommit => Self::Ordinary,
+            CheckpointReason::Installation | CheckpointReason::OwnerPin => Self::Anchored,
+        }
+    }
+}
+
+fn anchor(generation: u64, append_enabled: bool) -> u64 {
+    if append_enabled { generation >> 32 } else { generation }
+}
+
+fn next_generation(generation: u64, append_enabled: bool, durability: Durability) -> Result<u64> {
+    if !append_enabled { return generation.checked_add(1).ok_or(Error::Quota); }
+    let sequence = (generation as u32).checked_add(1).ok_or(Error::Quota)?;
+    let anchored = anchor(generation, true)
+        .checked_add(u64::from(durability == Durability::Anchored)).ok_or(Error::Quota)?;
+    if anchored == 0 || anchored > u32::MAX as u64 { return Err(Error::Quota); }
+    Ok((anchored << 32) | u64::from(sequence))
+}
+
 struct RecordHeader {
     append_enabled: bool,
     generation: u64,
@@ -71,7 +101,7 @@ enum CandidateRead {
 impl RecordHeader {
     fn encode(&self) -> [u8; HEADER_BYTES] {
         let mut bytes = [0; HEADER_BYTES];
-        bytes[..4].copy_from_slice(if self.append_enabled { b"MJ05" } else { b"MJ03" });
+        bytes[..4].copy_from_slice(if self.append_enabled { b"MJ07" } else { b"MJ03" });
         bytes[4..12].copy_from_slice(&self.generation.to_le_bytes());
         bytes[12..20].copy_from_slice(&self.attempt.to_le_bytes());
         bytes[20..24].copy_from_slice(&self.payload_length.to_le_bytes());
@@ -80,8 +110,8 @@ impl RecordHeader {
 
     fn decode(bytes: &[u8; HEADER_BYTES], capacity: usize, reserved_nonce: u64) -> Result<Self> {
         if matches!(&bytes[..4], b"MJ01" | b"MJ02") { return Err(Error::IncompatibleState); }
-        if &bytes[..4] == b"MJ04" { return Err(Error::IncompatibleState); }
-        let append_enabled = match &bytes[..4] { b"MJ03" => false, b"MJ05" => true, _ => return Err(Error::Storage) };
+        if matches!(&bytes[..4], b"MJ04" | b"MJ05" | b"MJ06") { return Err(Error::IncompatibleState); }
+        let append_enabled = match &bytes[..4] { b"MJ03" => false, b"MJ07" => true, _ => return Err(Error::Storage) };
         let header = Self {
             append_enabled,
             generation: u64::from_le_bytes(bytes[4..12].try_into().unwrap()),
@@ -90,6 +120,9 @@ impl RecordHeader {
         };
         if header.attempt == 0 || header.attempt > reserved_nonce
             || header.payload_length < 16 || header.payload_length as usize > capacity {
+            return Err(Error::Storage);
+        }
+        if append_enabled && (anchor(header.generation, true) == 0 || header.generation as u32 == 0) {
             return Err(Error::Storage);
         }
         Ok(header)
@@ -119,6 +152,7 @@ pub trait Flash {
 pub struct Journal<F: Flash> {
     flash: F,
     generation: u64,
+    base_attempt: Option<u64>,
     active: Option<usize>,
     append_offset: Option<usize>,
     append_enabled: bool,
@@ -171,7 +205,7 @@ impl<F: Flash> Journal<F> {
             append_enabled: bool, apply: impl FnMut(&mut Zeroizing<Vec<u8>>, u64, &[u8]) -> Result<()>)
             -> Result<(Self, Option<Zeroizing<Vec<u8>>>)> {
         let mut journal = Self {
-            flash, generation: 0, active: None, append_offset: None, append_enabled, slot_count: 0, poisoned: true, key: key.into(),
+            flash, generation: 0, base_attempt: None, active: None, append_offset: None, append_enabled, slot_count: 0, poisoned: true, key: key.into(),
         };
         let data = journal.recover_with_replay(provider, apply)?;
         Ok((journal, data))
@@ -258,8 +292,9 @@ impl<F: Flash> Journal<F> {
             }
             None => (None, 0, None, None),
         };
-        let reconciled = reconcile_generation(&mut self.flash, generation);
+        let reconciled = reconcile_generation(&mut self.flash, anchor(generation, self.append_enabled));
         self.generation = generation;
+        self.base_attempt = selected.map(|meta| meta.attempt);
         self.active = active;
         self.append_offset = append_offset;
         self.slot_count = slot_count;
@@ -326,7 +361,7 @@ impl<F: Flash> Journal<F> {
         let (generation, append_offset) = if self.append_enabled {
             let append_start = (HEADER_BYTES + n).next_multiple_of(4);
             match append::replay(&self.flash, &self.key, slot, append_start,
-                    decoded.generation, provider,
+                    append::Epoch { generation: decoded.generation, attempt: decoded.attempt }, provider,
                     |base, delta| apply(&mut plaintext, base, delta)) {
                 Ok(result) => result,
                 Err(Error::Format | Error::Authentication) => return Ok(CandidateRead::Corrupt),
@@ -375,8 +410,9 @@ impl<F: Flash> Journal<F> {
 
     /// Remaining successful commits, bounded by both independent counters.
     pub fn remaining_commits(&self) -> Result<u64> {
-        if self.poisoned || self.flash.monotonic_generation()? != self.generation { return Err(Error::Storage); }
-        let generations = self.flash.monotonic_capacity().checked_sub(self.generation).ok_or(Error::Storage)?;
+        let anchored = anchor(self.generation, self.append_enabled);
+        if self.poisoned || self.flash.monotonic_generation()? != anchored { return Err(Error::Storage); }
+        let generations = self.flash.monotonic_capacity().checked_sub(anchored).ok_or(Error::Storage)?;
         let attempts = self.flash.nonce_capacity().checked_sub(self.flash.nonce_generation()?).ok_or(Error::Storage)?;
         Ok(generations.min(attempts))
     }
@@ -410,34 +446,41 @@ impl<F: Flash> Journal<F> {
         if self.poisoned { return Err(Error::Storage); }
         let at = self.append_offset.ok_or(Error::Quota)?;
         let length = data.len();
-        append::append(self, at, data, provider)?;
+        append::append(self, at, data, Durability::Anchored, provider)?;
         self.append_offset = append::frame_end(&self.flash, at, length).ok();
         Ok(())
     }
 
     /// Encode a bounded change directly into the authenticated append frame.
     #[cfg(any(test, feature = "jcvm"))]
-    pub fn append_encoded_with(&mut self, length: usize, provider: &mut impl CryptoProvider,
+    pub fn append_encoded_with(&mut self, length: usize, durability: Durability, provider: &mut impl CryptoProvider,
             encode: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<()> {
         if self.poisoned { return Err(Error::Storage); }
         let at = self.append_offset.ok_or(Error::Quota)?;
-        append::append_encoded(self, at, length, provider, encode)?;
+        append::append_encoded(self, at, length, durability, provider, encode)?;
         self.append_offset = append::frame_end(&self.flash, at, length).ok();
         Ok(())
     }
 
     /// Consume a zeroizing snapshot, reusing its allocation for the encrypted record.
     pub fn commit_owned_with(&mut self, data: Zeroizing<Vec<u8>>, provider: &mut impl CryptoProvider) -> Result<()> {
-        self.commit_owned_with_nonce(data, provider, None)
+        self.commit_owned_with_nonce(data, Durability::Anchored, provider, None)
+    }
+
+    #[cfg(feature = "jcvm")]
+    pub(crate) fn commit_owned_with_reason(&mut self, data: Zeroizing<Vec<u8>>,
+            reason: microcard_engine_jcvm::host::CheckpointReason,
+            provider: &mut impl CryptoProvider) -> Result<()> {
+        self.commit_owned_with_nonce(data, reason.into(), provider, None)
     }
 
     #[cfg(feature = "jcvm")]
     pub(crate) fn commit_owned_with_reserved(&mut self, data: Zeroizing<Vec<u8>>,
             nonce: ReservedNonce, provider: &mut impl CryptoProvider) -> Result<()> {
-        self.commit_owned_with_nonce(data, provider, Some(nonce.0))
+        self.commit_owned_with_nonce(data, Durability::Anchored, provider, Some(nonce.0))
     }
 
-    fn commit_owned_with_nonce(&mut self, data: Zeroizing<Vec<u8>>,
+    fn commit_owned_with_nonce(&mut self, data: Zeroizing<Vec<u8>>, durability: Durability,
             provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<()> {
         if self.poisoned {
             return Err(Error::Storage);
@@ -446,14 +489,14 @@ impl<F: Flash> Journal<F> {
         if size < OVERHEAD || data.len() > size - OVERHEAD {
             return Err(Error::Quota);
         }
-        let generation = self.generation.checked_add(1).ok_or(Error::Storage)?;
-        if generation > self.flash.monotonic_capacity() {
+        let generation = next_generation(self.generation, self.append_enabled, durability)?;
+        if anchor(generation, self.append_enabled) > self.flash.monotonic_capacity() {
             return Err(Error::Quota);
         }
         let slot = self
             .active
             .map_or(0, |active| (active + 1) % self.slot_count);
-        let record = self.seal_record(data, generation, provider, reserved)?;
+        let (record, attempt) = self.seal_record(data, generation, provider, reserved)?;
         // Any flash error from here may leave a published record or reclaim intent.
         // Only recovery can determine which generation is safe to extend.
         self.poisoned = true;
@@ -467,24 +510,28 @@ impl<F: Flash> Journal<F> {
             self.flash.program(active, size - 2, &[0])?;
         }
         self.generation = generation;
+        self.base_attempt = Some(attempt);
         self.active = Some(slot);
         self.append_offset = Some(record.len().next_multiple_of(4));
-        self.flash.advance_monotonic(generation)?;
+        if durability == Durability::Anchored {
+            self.flash.advance_monotonic(anchor(generation, self.append_enabled))?;
+        }
         self.poisoned = false;
         Ok(())
     }
     /// Reserve the nonce only after staging succeeds, then authenticate the exact header.
     fn seal_record(&mut self, data: Zeroizing<Vec<u8>>, generation: u64,
-            provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<Zeroizing<Vec<u8>>> {
+            provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<(Zeroizing<Vec<u8>>, u64)> {
         let (record, payload_length) = prepare_record(data)?;
         let attempt = match reserved {
             Some(value) if value != 0 && self.flash.nonce_generation()? == value => value,
             Some(_) => return Err(Error::Storage),
             None => self.flash.reserve_nonce()?,
         };
-        encrypt_record(record, &self.key, RecordHeader {
+        let record = encrypt_record(record, &self.key, RecordHeader {
             append_enabled: self.append_enabled, generation, attempt, payload_length,
-        }, provider)
+        }, &nonce(attempt), provider)?;
+        Ok((record, attempt))
     }
 
     pub fn into_flash(self) -> F {
@@ -522,13 +569,14 @@ fn prepare_record(mut data: Zeroizing<Vec<u8>>) -> Result<(Zeroizing<Vec<u8>>, u
 }
 
 fn encrypt_record(mut record: Zeroizing<Vec<u8>>, key: &JournalKey, header: RecordHeader,
+    nonce: &[u8; 13],
     provider: &mut impl CryptoProvider) -> Result<Zeroizing<Vec<u8>>> {
     record[..HEADER_BYTES].copy_from_slice(&header.encode());
     let (aad, ciphertext) = record.split_at_mut(HEADER_BYTES);
     let written =
         match provider.aes_ccm_encrypt_in_place(
             key.as_ref(),
-            &nonce(header.attempt),
+            nonce,
             aad,
             ciphertext,
         ) {

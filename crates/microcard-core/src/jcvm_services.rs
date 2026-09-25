@@ -1,12 +1,12 @@
 //! Java Card's supported algorithms use the same providers as transport and persistence.
 use crate::{crypto::CryptoProvider, hal::Entropy};
-use microcard_engine_jcvm::{Error, Result, host::Host};
+use microcard_engine_jcvm::{Error, Result, host::{Host, CheckpointReason}};
 use microcard_engine_jcvm::applet::PersistentView;
 
 mod ecdsa;
 mod ec_parameters;
 
-type Checkpoint<'a, P> = dyn FnMut(PersistentView<'_>, &mut P) -> crate::Result<()> + 'a;
+type Checkpoint<'a, P> = dyn FnMut(PersistentView<'_>, CheckpointReason, &mut P) -> crate::Result<()> + 'a;
 
 pub struct Services<'a, P> {
     provider: &'a mut P,
@@ -119,13 +119,13 @@ impl<P: CryptoProvider> Services<'_, P> {
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
-    fn checkpoint(&mut self, state: PersistentView<'_>) -> Result<()> {
+    fn checkpoint(&mut self, state: PersistentView<'_>, reason: CheckpointReason) -> Result<()> {
         let Some(checkpoint) = self.checkpoint.as_mut() else {
             #[cfg(feature = "latency-trace")]
             crate::jcvm_storage::record_session_error(3, 0);
             return Err(Error::Storage);
         };
-        if let Err(error) = checkpoint(state, self.provider) {
+        if let Err(error) = checkpoint(state, reason, self.provider) {
             #[cfg(feature = "latency-trace")]
             crate::jcvm_storage::record_session_error(4, error.clone() as u32);
             self.persistence_error = Some(error);

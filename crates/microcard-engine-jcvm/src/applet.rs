@@ -408,7 +408,7 @@ impl AppletInstance {
             heap: heap.image(), statics: &self.statics,
             instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer,
             projection: Some(&heap),
-        })?;
+        }, crate::host::CheckpointReason::ApduEnd)?;
         self.pending_writes = heap::PendingWrites::default();
         Ok(())
     }

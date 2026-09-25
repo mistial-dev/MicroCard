@@ -16,7 +16,7 @@ struct TestHost {
 }
 
 impl Host for TestHost {
-    fn checkpoint(&mut self, view: PersistentView<'_>) -> microcard_engine_jcvm::Result<()> {
+    fn checkpoint(&mut self, view: PersistentView<'_>, _: microcard_engine_jcvm::host::CheckpointReason) -> microcard_engine_jcvm::Result<()> {
         let mut heap = vec![0; view.heap_bytes()];
         let saved = view.save_into(&mut heap)?;
         let statics = saved.statics.to_vec();

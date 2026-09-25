@@ -127,7 +127,7 @@ pub(in crate::natives) fn call(
                         instance,
                         buffer: jcre.buffer,
                         projection: None,
-                    })?;
+                    }, crate::host::CheckpointReason::TransactionCommit)?;
                 }
                 heap.commit_transaction()?;
                 if !jcre.installing {

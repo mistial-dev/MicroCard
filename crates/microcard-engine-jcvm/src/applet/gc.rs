@@ -205,7 +205,7 @@ mod tests {
 
     struct Capture { heap: Vec<u8>, calls: usize, snapshot: bool, ranges: Vec<core::ops::Range<usize>> }
     impl crate::host::Host for Capture {
-        fn checkpoint(&mut self, view: crate::applet::PersistentView<'_>) -> Result<()> {
+        fn checkpoint(&mut self, view: crate::applet::PersistentView<'_>, _: crate::host::CheckpointReason) -> Result<()> {
             self.snapshot = view.pending_writes().is_none_or(|writes| writes.snapshot_required());
             self.ranges = view.pending_writes().map_or_else(Vec::new, |writes| writes.heap_ranges().collect());
             self.heap = view.heap.to_vec();

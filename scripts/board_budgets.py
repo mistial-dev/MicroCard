@@ -106,10 +106,10 @@ def main():
     text_limits = {
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
-        "dongle": 244_000, "jcvm_development_debug": 120_000,
-        # MJ05 packs small heap changes and cut registry use from 911 to 76
-        # words in the full DK support scan; the added parser costs ~1.2 KiB.
-        "jcvm_usb_ccid": 238_000, "jcvm_dongle": 239_000,
+        "dongle": 244_000, "jcvm_development_debug": 121_000,
+        # MJ07 separates ordinary records from security anchors and compacts
+        # heap slots without registry rotation. This costs under 1 KiB per link.
+        "jcvm_usb_ccid": 239_000, "jcvm_dongle": 240_000,
     }
     failures = []
     for name, result in variants.items():

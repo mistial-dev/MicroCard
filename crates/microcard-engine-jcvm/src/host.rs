@@ -8,11 +8,19 @@ use crate::{Error, Result};
 
 pub const SHA256_STATE_BYTES: usize = 256;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckpointReason {
+    Installation,
+    ApduEnd,
+    OwnerPin,
+    TransactionCommit,
+}
+
 /// The services an applet's cryptography needs.
 pub trait Host {
     /// Return only after this state is durable. Failure stops execution and requires
     /// recovery; cryptographic availability alone does not imply storage support.
-    fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>) -> Result<()> {
+    fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>, _reason: CheckpointReason) -> Result<()> {
         Err(Error::Storage)
     }
     /// Current command protection, in GlobalPlatform SecureChannel bit assignments.
@@ -107,5 +115,5 @@ pub struct NoHost;
 
 impl Host for NoHost {
     // This explicitly volatile engine host is used without a persistent session.
-    fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>) -> Result<()> { Ok(()) }
+    fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>, _reason: CheckpointReason) -> Result<()> { Ok(()) }
 }

@@ -175,20 +175,27 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         })
     }
 
-    fn renew_epoch_if_needed(&mut self, aid: Aid,
+    fn maintain_epoch_if_needed(&mut self, aid: Aid,
             session: &mut StoredSession<<B::HeapBanks as HeapBanks>::Bank, B::ImageFlash>,
             cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         if cancel() { return Err(Error::Cancelled); }
-        // The heap bank's counters are replenished by renewal. Leave one commit
-        // available for an APDU that arrives before idle maintenance runs.
-        if session.remaining_append_frames()? > 1 && session.remaining_commits()? > 1 {
+        // Reclaim ordinary append space without rotating the heap key or writing
+        // the registry. Reserve identity renewal for exhausted counter pages.
+        let remaining = session.remaining_commits()?;
+        if session.remaining_append_frames()? > 1 && remaining > 1 {
             return Ok(());
         }
         if self.upload.is_some() { return Ok(()); }
         session.release_idle_memory()?;
-        self.storage.renew_epoch(aid, session, &mut self.staging,
-            &mut self.scratch, &mut self.provider, cancel)?;
-        session.restore_idle_memory()?;
+        let maintenance = if remaining > 1 {
+            session.compact_idle(&mut self.provider)
+        } else {
+            self.storage.renew_epoch(aid, session, &mut self.staging,
+                &mut self.scratch, &mut self.provider, cancel)
+        };
+        let restored = session.restore_idle_memory();
+        maintenance?;
+        restored?;
         #[cfg(feature = "latency-trace")]
         crate::jcvm_storage::renewal_phase(5);
         if cancel() { return Err(Error::Cancelled); }
@@ -198,14 +205,14 @@ impl<B: JcvmBackend> JcvmEngine<B> {
     fn maintain_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
         // Any maintenance error drops the old journal handle before returning.
-        self.renew_epoch_if_needed(aid, &mut session, cancel)?;
+        self.maintain_epoch_if_needed(aid, &mut session, cancel)?;
         self.selected = Some((aid, session));
         Ok(())
     }
 
     fn prepare_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
-        let result = self.renew_epoch_if_needed(aid, &mut session, cancel);
+        let result = self.maintain_epoch_if_needed(aid, &mut session, cancel);
         self.selected = Some((aid, session));
         result
     }
@@ -290,7 +297,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             session.restore_volatile(&cached.state)?;
             self.retained.remove(index);
         }
-        self.renew_epoch_if_needed(aid, &mut session, cancel)?;
+        self.maintain_epoch_if_needed(aid, &mut session, cancel)?;
         let response = session.process(&command, true, &mut self.provider, cancel)?;
         let selected = session.selected()?;
         self.selected = Some((aid, session));

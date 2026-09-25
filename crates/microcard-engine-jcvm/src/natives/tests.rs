@@ -65,7 +65,7 @@ fn idle() -> Jcre {
 fn lifecycle_checkpoints_before_success_and_survives_callback_and_abort() {
     struct Storage { saved: alloc::vec::Vec<u8>, fail: bool }
     impl crate::host::Host for Storage {
-        fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>) -> Result<()> {
+        fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>, _: crate::host::CheckpointReason) -> Result<()> {
             if self.fail { return Err(Error::Storage); }
             self.saved.resize(state.heap_bytes(), 0);
             state.save_into(&mut self.saved)?;
@@ -433,7 +433,8 @@ fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
         &[(true, pin), (true, replacement), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
     struct PinCheckpoint { saved: alloc::vec::Vec<u8>, fail: bool }
     impl crate::host::Host for PinCheckpoint {
-        fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>) -> Result<()> {
+        fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>, reason: crate::host::CheckpointReason) -> Result<()> {
+            assert_eq!(reason, crate::host::CheckpointReason::OwnerPin);
             if self.fail { return Err(Error::Storage); }
             self.saved.resize(state.heap_bytes(), 0);
             state.save_into(&mut self.saved)?;

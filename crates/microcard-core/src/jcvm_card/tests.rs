@@ -271,10 +271,10 @@ fn authenticated_lifecycle_binds_load_requests_and_recovers_installed_applets() 
     card.upload = Some(Upload { load: old.load, domain: old.domain, hash: None,
         receiver: LoadReceiver::new(Payload::JavaCard, MAX_PACKAGE_BYTES) });
     assert!(card.staging.is_empty());
-    card.renew_epoch_if_needed(selected_aid, &mut live, &mut || false).unwrap();
+    card.maintain_epoch_if_needed(selected_aid, &mut live, &mut || false).unwrap();
     assert_eq!(card.storage.heaps.preparations, preparations);
     card.upload = None;
-    assert_eq!(card.renew_epoch_if_needed(selected_aid, &mut live, &mut || true), Err(Error::Cancelled));
+    assert_eq!(card.maintain_epoch_if_needed(selected_aid, &mut live, &mut || true), Err(Error::Cancelled));
     assert_eq!(card.storage.heaps.preparations, preparations);
     card.selected = Some((selected_aid, live));
     let reply = card.process_plain_with_cancel(&[0, 0x20, 0, 0x80], &mut || false).unwrap();

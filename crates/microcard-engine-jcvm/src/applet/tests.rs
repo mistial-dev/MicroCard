@@ -101,7 +101,7 @@
     fn deletion_request_survives_reboot_and_runs_before_the_next_process() {
         struct Capture { snapshots: Vec<(Vec<u8>, Vec<u8>, Reference)> }
         impl crate::host::Host for Capture {
-            fn checkpoint(&mut self, view: PersistentView<'_>) -> Result<()> {
+            fn checkpoint(&mut self, view: PersistentView<'_>, _: crate::host::CheckpointReason) -> Result<()> {
                 let mut bytes = vec![0; view.heap_bytes()];
                 let saved = view.save_into(&mut bytes)?;
                 let statics = saved.statics.to_vec();
@@ -501,7 +501,7 @@
         #[derive(Default)]
         struct CheckpointHost { saved: Vec<(Vec<u8>, Vec<u8>, Reference)>, fail_at: Option<usize>, calls: usize }
         impl Host for CheckpointHost {
-            fn checkpoint(&mut self, state: PersistentView<'_>) -> Result<()> {
+            fn checkpoint(&mut self, state: PersistentView<'_>, _: crate::host::CheckpointReason) -> Result<()> {
                 self.calls += 1;
                 if self.fail_at == Some(self.calls) { return Err(Error::Storage); }
                 let mut heap = vec![0; state.heap_bytes()];

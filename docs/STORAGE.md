@@ -32,12 +32,14 @@ decrypted journal plaintext remain in zeroizing, fallibly reserved buffers.
 
 The MJ03 journal encrypts and authenticates each snapshot with AES-CCM. The storage key is derived from both device-specific SCP03 management keys through a domain-separated AES-CMAC operation. Recovery rejects a wrong key and any changed authenticated header, ciphertext or tag, then revalidates all state invariants and stored package signatures.
 
-An append-only generation anchor lives outside the journal slots. A commit writes and closes the authenticated journal record before advancing the anchor. On recovery, a journal exactly one generation ahead finishes that interrupted advance. A journal behind the anchor, more than one generation ahead, or absent after ownership was established fails closed. Anchor capacity is checked before any journal mutation. The nRF52840 programs one previously erased 32-bit word per generation in a 4 KiB region. Recovery accepts only a contiguous programmed prefix followed by erased words; a hole, partial value, or other word is corruption. This provides 1,024 runtime commits and the runtime never erases the anchor.
+An append-only generation anchor lives outside the journal slots. MJ03 management commits and JCVM PIN security checkpoints write and close an authenticated record before advancing that anchor. On recovery, a record exactly one anchor ahead finishes an interrupted advance. A record behind the anchor, more than one ahead, or absent after ownership was established fails closed. Anchor capacity is checked before any anchored mutation. The nRF52840 programs one previously erased 32-bit word per advance in a 4 KiB region. Recovery accepts only a contiguous programmed prefix followed by erased words; a hole, partial value, or other word is corruption. Each epoch has 1,024 anchor advances; the runtime never erases an anchor under the same key.
 
-A second append-only counter reserves each encryption nonce before use. Failed attempts
-consume nonce capacity without advancing the committed generation. Its separate 4 KiB
-region provides 1,024 attempts; neither counter is erased in service. Exhausting either
-counter refuses further commits, while the last committed snapshot remains readable.
+A second append-only counter reserves each snapshot encryption nonce before use.
+Failed snapshot attempts consume nonce capacity without advancing the committed
+generation. MJ07 appends derive unique nonces from that snapshot attempt and their
+one-use offsets. The separate 4 KiB nonce region provides 1,024 snapshot attempts;
+neither counter is erased under its current key. Exhausting either counter refuses
+further anchored commits or snapshots until authenticated epoch renewal.
 MJ01/MJ02 records are rejected rather than migrated. See [the wire contract](PROTOCOL.md#durable-activation).
 
 MC04 rotates complete snapshots through three 64 KiB slots. JCVM uses two 8 KiB registry slots and two 64 KiB slots per heap bank. Before reusing a slot, the active record receives a reclaim-start marker. The target slot is erased and programmed, its commit marker is written last, and the prior active record then receives a reclaim-complete marker. Recovery accepts the prior record during an interrupted target erase or program and otherwise selects the highest authenticated generation. Host fault injection covers every byte mutation while recycling the three-slot ring. Earlier two-slot board layouts and word-per-generation anchors have no conversion path.
@@ -50,7 +52,7 @@ authorize a retry or consume another nonce. The byte-cut recovery sweep checks t
 alongside recovery of the previous or newly committed state.
 
 JCVM checkpoint changes can follow a snapshot in bounded, word-aligned append
-records. Append-enabled snapshots and records use the distinct MJ05 authenticated
+records. Append-enabled snapshots and records use the distinct MJ07 authenticated
 header. Each record holds at most 980 plaintext bytes and ends with a four-byte
 commit marker. Heap and
 static patches share a bounded CBOR envelope tied to the base generation and
@@ -58,16 +60,21 @@ instance. Recovery validates the complete envelope before changing scratch state
 then selects the latest complete chain and reconciles its generation anchor.
 Partially programmed tails require rotation to a new full snapshot. Oversized
 changes and transaction commits also use snapshots. Snapshot-only readers reject
-MJ05 even before the first append, so an interrupted
+MJ07 even before the first append, so an interrupted
 counter advance cannot hide an appended record. JCVM rejects old MJ03 heap journals
-and MJ04 append journals without erasing them. MC04 retains MJ03 and does not include the append scanner.
+and MJ04/MJ05/MJ06 append journals without erasing them. MC04 retains MJ03 and does not include the append scanner.
 
-Appending reserves a fresh nonce and advances the generation counter just as a full
-snapshot does. It avoids a slot erase but does not extend counter lifetime. These
-records serve JCVM checkpoints, including completed bytecode instructions. Native
-internal failure boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
+Appending derives its AES-CCM nonce from the snapshot's reserved attempt and the
+record's flash offset in a separate nonce domain. A torn append closes the epoch,
+so an offset with any programmed bytes cannot be retried. Ordinary APDU completion
+advances the authenticated record sequence without programming the monotonic
+security anchor. OwnerPIN checkpoints advance both and must finish before their
+methods return. Explicit transaction commits persist synchronously before return
+without consuming a security anchor. Ordinary writes commit once at APDU
+completion, including an applet-generated Java exception. Native internal failure
+boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
 
-The MJ05 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
+The MJ07 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
 is a CBOR byte string encoding `[1, base_generation, before_length, after_length,
 [[offset, replacement_bytes], ...]]`. Each patch has at most 64 nonempty, ordered,
 nonoverlapping spans. Replay checks both patches completely, exact base lengths and
@@ -80,12 +87,16 @@ Each next offset follows the prior record's authenticated length, rounded up to
 four bytes. The marker occupies the last word of that span; unused padding stays
 erased. A torn record closes the epoch, so recovery never guesses where its
 successor would have started. The record's
-header, ciphertext, and tag use the existing 24-byte header, AES-CCM provider, and
-`MCJN3 || attempt_le64` nonce construction; MJ05 is authenticated in the header.
+header, ciphertext, and tag use the existing 24-byte header and AES-CCM provider.
+Snapshots use `MCJN3 || attempt_le64`; appends use `A || attempt_le64 ||
+offset_le32`. MJ07 is authenticated in the header. The header generation stores the
+security-anchor count in its high 32 bits and the record sequence in its low 32 bits.
+Recovery accepts a sequence step with an unchanged anchor or one anchor step;
+it rejects a lost anchored checkpoint when the physical counter is ahead.
 
 ## JCVM counter renewal
 
-Durable APDU, PIN, and transaction commits eventually exhaust the heap counters.
+Snapshots and PIN checkpoints eventually exhaust the heap counters.
 Resetting them under the existing key would reuse nonces and remove the rollback
 anchor. Moving to a spare heap bank is insufficient: both supported board banks
 may contain installed applets. Both JCVM layouts already reserve a separate 64 KiB
@@ -118,12 +129,14 @@ or saved-heap copy are needed. The simulator invokes the explicit idle hook afte
 flushing its response. USB gives the `usbd-ccid` response a bounded drain interval
 while continuing to poll, then invokes
 the hook; the first pending deadline is retained under continuous traffic. The hook
-renews a selected session when either counter has 1024 or fewer commits remaining.
-APDU selection and execution never start renewal. Active uploads defer maintenance
+compacts a nearly full append slot under the same key and reserves one fresh
+snapshot nonce without touching the registry or security anchor. It rotates the
+heap key through the authenticated registry protocol only when either local
+counter is nearly exhausted. Active uploads defer maintenance
 without aborting the upload. A maintenance failure drops selection; host processes
 exit and the board reboots so startup recovery can resolve pending ownership. This
 threshold does not guarantee that every command fits the remaining counter space.
-`SeedRecord` now authenticates a bounded initial MJ05 record (generation/attempt 1),
+`SeedRecord` now authenticates a bounded initial MJ07 record (anchor/sequence/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,
 reserves nonce 1, copies and reads back the exact record, publishes the marker, and
@@ -141,7 +154,7 @@ The transition is serialized with uploads and management changes:
 1. At a command boundary with no active transaction or upload, reserve a fresh
    identity from the registry nonce counter. Derive the new heap key from the root,
    bank, identity, and image digest using the existing heap-key derivation.
-2. Serialize the committed heap with the new identity, encrypt its initial MJ05
+2. Serialize the committed heap with the new identity, encrypt its initial MJ07
    record exactly once, and write it to staging. Use generation/attempt 1 for this
    new key. Authenticate and validate the staged record before publishing metadata.
    A failed attempt abandons the identity; a later attempt reserves another one.

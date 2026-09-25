@@ -167,7 +167,7 @@ pub(crate) fn checkpoint_committed(heap: &mut Heap, host: &mut dyn crate::host::
     host.checkpoint(crate::applet::PersistentView {
         heap: heap.image(), statics, instance, buffer: jcre.buffer,
         projection: Some(heap),
-    })?;
+    }, crate::host::CheckpointReason::OwnerPin)?;
     heap.mark_checkpointed();
     Ok(())
 }

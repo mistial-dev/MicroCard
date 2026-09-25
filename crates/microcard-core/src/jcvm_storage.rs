@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use microcard_engine_jcvm::{
     applet::{AppletInstance, PersistentState, PersistentView, Sizes},
     cap::LoadFile,
+    host::CheckpointReason,
 };
 use zeroize::Zeroizing;
 mod patch;
@@ -124,6 +125,11 @@ mod tests {
         assert_eq!(AppletInstance::validate_persistent(&file, Sizes { heap_bytes: replayed.len() - 1, ..sizes },
             PersistentState { heap: &replayed, statics, instance }), Err(microcard_engine_jcvm::Error::Bounds));
         store.commit(&card, &mut SoftwareCrypto).unwrap();
+        let anchors = store.journal.flash_mut().monotonic_generation().unwrap();
+        let attempts = store.journal.flash_mut().nonce_generation().unwrap();
+        store.compact_view(card.persistent_view().unwrap(), &mut SoftwareCrypto).unwrap();
+        assert_eq!(store.journal.flash_mut().monotonic_generation().unwrap(), anchors);
+        assert_eq!(store.journal.flash_mut().nonce_generation().unwrap(), attempts + 1);
         let flash = store.into_flash();
         for (key, installation) in [([2; 16], [4; 16]), ([3; 16], [5; 16])] {
             assert!(Store::open(
@@ -231,10 +237,11 @@ impl<F: Flash> Store<F> {
     /// Commit state of the applet installed from the image passed to `open`.
     /// The caller must roll back live mutations if this operation fails.
     pub fn commit(&mut self, card: &AppletInstance, provider: &mut impl CryptoProvider) -> Result<()> {
-        self.commit_view(card.persistent_view().map_err(|_| Error::Format)?, provider)
+        self.commit_view(card.persistent_view().map_err(|_| Error::Format)?, CheckpointReason::Installation, provider)
     }
 
-    pub(crate) fn commit_view(&mut self, view: PersistentView<'_>, provider: &mut impl CryptoProvider) -> Result<()> {
+    pub(crate) fn commit_view(&mut self, view: PersistentView<'_>, reason: CheckpointReason,
+        provider: &mut impl CryptoProvider) -> Result<()> {
         #[cfg(feature = "latency-trace")]
         trace::capture_view(view);
         let (instance, statics) = view.metadata();
@@ -256,7 +263,7 @@ impl<F: Flash> Store<F> {
                     Ok(length) => {
                         #[cfg(feature = "latency-trace")]
                         trace::patch(length);
-                        self.journal.append_encoded_with(length, provider, |output| {
+                        self.journal.append_encoded_with(length, reason.into(), provider, |output| {
                             patch::encode_view_into(view, before_length, generation, output)
                         })?;
                         #[cfg(feature = "latency-trace")]
@@ -277,9 +284,19 @@ impl<F: Flash> Store<F> {
         #[cfg(feature = "latency-trace")]
         if self.heap_length.is_none() { trace::fallback(1); }
         let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
-        self.journal.commit_owned_with(snapshot, provider)?;
+        self.journal.commit_owned_with_reason(snapshot, reason, provider)?;
         #[cfg(feature = "latency-trace")]
         trace::committed_snapshot();
+        self.heap_length = Some(view.heap_bytes());
+        Ok(())
+    }
+
+    /// Reclaim append space while idle, preserving the current heap key and
+    /// security anchor. A new snapshot attempt still reserves a fresh nonce.
+    pub(crate) fn compact_view(&mut self, view: PersistentView<'_>,
+        provider: &mut impl CryptoProvider) -> Result<()> {
+        let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
+        self.journal.commit_owned_with_reason(snapshot, CheckpointReason::ApduEnd, provider)?;
         self.heap_length = Some(view.heap_bytes());
         Ok(())
     }

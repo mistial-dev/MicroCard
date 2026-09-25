@@ -81,6 +81,12 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.store.journal.remaining_append_frames()
     }
 
+    pub(crate) fn compact_idle(&mut self, provider: &mut impl CryptoProvider) -> Result<()> {
+        self.installed()?;
+        let view = self.card.as_ref().ok_or(Error::Missing)?.persistent_view().map_err(engine_error)?;
+        self.store.compact_view(view, provider)
+    }
+
     pub(crate) fn release_idle_memory(&mut self) -> Result<()> {
         self.installed()?;
         self.card.as_mut().ok_or(Error::Missing)?.release_idle_memory();
@@ -142,7 +148,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         }
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            let mut checkpoint = |view: PersistentView<'_>, provider: &mut _| self.store.commit_view(view, provider);
+            let mut checkpoint = |view: PersistentView<'_>, reason, provider: &mut _| self.store.commit_view(view, reason, provider);
             let mut services = Services::new(provider).with_checkpoint(&mut checkpoint);
             let result = self.card.as_mut().ok_or(Error::Missing)?
                 .deselect_with_cancel(&file, &mut services, cancel)
@@ -284,7 +290,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         let protected_length = if command.len() > 5 { 5 + usize::from(command[4]) } else { 5.min(command.len()) };
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            let mut checkpoint = |view: PersistentView<'_>, provider: &mut _| self.store.commit_view(view, provider);
+            let mut checkpoint = |view: PersistentView<'_>, reason, provider: &mut _| self.store.commit_view(view, reason, provider);
             let mut services = match security {
                 Some(level) => Services::verified(provider, command.get(..protected_length).ok_or(Error::Format)?, level),
                 None => Services::new(provider),

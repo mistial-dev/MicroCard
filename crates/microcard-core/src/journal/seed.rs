@@ -16,8 +16,8 @@ impl<'a> SeedRecord<'a> {
         if !(Self::MIN_BYTES..=Self::MAX_BYTES).contains(&length) { return Err(Error::Quota); }
         let (record, payload_length) = prepare_record(snapshot)?;
         encrypt_record(record, &key, RecordHeader {
-            append_enabled: true, generation: 1, attempt: 1, payload_length,
-        }, provider)
+            append_enabled: true, generation: next_generation(0, true, Durability::Anchored)?, attempt: 1, payload_length,
+        }, &nonce(1), provider)
     }
 
     pub fn authenticate(bytes: &'a [u8], key: &JournalKey, provider: &mut impl CryptoProvider,
@@ -27,7 +27,7 @@ impl<'a> SeedRecord<'a> {
             .ok_or(Error::Format)?.try_into().map_err(|_| Error::Format)?;
         let fields = RecordHeader::decode(header, bytes.len() - HEADER_BYTES, 1)?;
         if !fields.append_enabled { return Err(Error::IncompatibleState); }
-        if fields.generation != 1 || fields.attempt != 1
+        if fields.generation != next_generation(0, true, Durability::Anchored)? || fields.attempt != 1
             || fields.payload_length as usize != bytes.len() - HEADER_BYTES {
             return Err(Error::Format);
         }

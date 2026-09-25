@@ -168,7 +168,8 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut hardware=Hardware;
   // This raw corpus runner is explicitly volatile. Durable acceptance uses
   // serve-jcvm-managed and its authenticated storage checkpoint callback.
-  let mut volatile_checkpoint = |_: microcard_engine_jcvm::applet::PersistentView<'_>, _: &mut _| Ok(());
+  let mut volatile_checkpoint = |_: microcard_engine_jcvm::applet::PersistentView<'_>,
+      _: microcard_engine_jcvm::host::CheckpointReason, _: &mut _| Ok(());
   let mut host=microcard_core::jcvm_services::Services::new(&mut hardware)
    .with_checkpoint(&mut volatile_checkpoint);
   // The standalone simulator installs under the module AID with no privileges.
