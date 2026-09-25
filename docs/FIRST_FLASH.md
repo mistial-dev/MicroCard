@@ -69,3 +69,24 @@ Power-cycle the DK after both writes. The key page is read/write locked by reset
 ## After first flash
 
 Hardware acceptance still needs actual USB/RNG/ACL behavior, reboot and interrupted-flash tests, peak heap/stack, watchdog behavior and latency measurements. Snapshot wear leveling, production key protection, full library/type coverage and firmware update trust remain production work. They must not be confused with the first-test-build stopping point.
+
+## Factory reset a development DK
+
+`scripts/factory_reset_dk.py` checks the selected DK bundle's firmware and
+layout hashes and the 32-byte management key before contacting the probe. Its
+default is a dry run. Add `--execute` to erase **all target flash**, program
+the key at the selected engine layout's address, flash the firmware, verify
+both writes, and reset. This destroys all applets, journal state, previous
+management keys, and any other target-flash contents. It does not alter the
+external J-Link firmware.
+
+```sh
+python3 scripts/factory_reset_dk.py \
+  --bundle artifacts/development-firmware/jcvm/dk \
+  --management-key .keys/first-test-management.key \
+  --probe 1366:1020:000802009660
+# Review the printed steps, then repeat with --execute.
+```
+
+Use a bundle built for the intended engine; a different firmware layout cannot
+decode the previous engine's state. Keep the key file outside shared artifacts.
