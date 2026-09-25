@@ -18,6 +18,9 @@ pub struct ClassSpec {
     pub super_class: u16,
     /// Words of field this class declares on its own account.
     pub declared_size: u8,
+    /// First reference field and number of consecutive reference fields declared here.
+    pub first_reference: u8,
+    pub reference_count: u8,
     /// Method component offsets of the public virtual methods, in token order.
     pub public: Vec<u16>,
     /// The same for the package-visible namespace.
@@ -34,6 +37,8 @@ impl Default for ClassSpec {
         Self {
             super_class: 0xffff,
             declared_size: 0,
+            first_reference: 0,
+            reference_count: 0,
             public: Vec::new(),
             package: Vec::new(),
             interface: false,
@@ -170,7 +175,7 @@ impl Package {
             }
             class.push(spec.implements.len() as u8);
             class.extend_from_slice(&spec.super_class.to_be_bytes());
-            class.extend_from_slice(&[spec.declared_size, 0, 0, 0]);
+            class.extend_from_slice(&[spec.declared_size, spec.first_reference, spec.reference_count, 0]);
             class.push(spec.public.len() as u8);
             class.push(0);
             class.push(spec.package.len() as u8);

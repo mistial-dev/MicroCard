@@ -77,7 +77,8 @@ impl<'a> Linked<'a> {
     /// Recovery and object deletion must agree on which words keep objects alive.
     pub fn visit_instance_references(&self, class: u16, payload: &[u8],
             mut visit: impl FnMut(u16) -> Result<()>) -> Result<()> {
-        if payload.len() != usize::from(self.instance_words(class)?) * 2 {
+        let mut words = self.instance_words(class)?;
+        if payload.len() != usize::from(words) * 2 {
             return Err(Error::Format);
         }
         let mut class = ClassRef::Internal(class);
@@ -85,10 +86,8 @@ impl<'a> Linked<'a> {
             let ClassRef::Internal(offset) = class else { return Ok(()); };
             let declaration = self.classes.at(offset)?;
             if declaration.is_interface() { return Err(Error::Format); }
-            let inherited = match declaration.super_class {
-                ClassRef::Internal(parent) => self.instance_words(parent)?,
-                _ => 0,
-            };
+            let inherited = words.checked_sub(u16::from(declaration.declared_instance_size))
+                .ok_or(Error::Format)?;
             for index in 0..u16::from(declaration.reference_count) {
                 let at = (usize::from(inherited)
                     + usize::from(declaration.first_reference_token)
@@ -97,6 +96,7 @@ impl<'a> Linked<'a> {
                 visit(u16::from_be_bytes([word[0], word[1]]))?;
             }
             class = declaration.super_class;
+            words = inherited;
         }
         Err(Error::Format)
     }
@@ -446,11 +446,15 @@ mod tests {
             classes: vec![
                 ClassSpec {
                     declared_size: 2,
+                    first_reference: 1,
+                    reference_count: 1,
                     ..ClassSpec::default()
                 },
                 ClassSpec {
                     super_class: 0,
                     declared_size: 2,
+                    first_reference: 0,
+                    reference_count: 1,
                     ..ClassSpec::default()
                 },
             ],
@@ -476,6 +480,14 @@ mod tests {
         assert_eq!(linked.instance_field(0).unwrap(), 1);
         // The subclass field sits after everything the superclass declared.
         assert_eq!(linked.instance_field(1).unwrap(), 3);
+        let payload = [0, 0, 0x12, 0x34, 0xab, 0xcd, 0, 0];
+        let mut references = vec![];
+        linked.visit_instance_references(subclass, &payload, |reference| {
+            references.push(reference);
+            Ok(())
+        }).unwrap();
+        assert_eq!(references, vec![0xabcd, 0x1234]);
+        assert_eq!(linked.visit_instance_references(subclass, &payload[..6], |_| Ok(())), Err(Error::Format));
     }
 
     #[test]
