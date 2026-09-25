@@ -243,13 +243,16 @@ def main():
         check_lifecycle(client, 0x0f)
         client.close()
 
-        # Consume only nonce reservations in the closed host fixture. The committed
-        # heap remains intact; selecting it must renew before the next callback.
-        nonces = state / "heap0/nonces.bin"
-        counter = nonces.read_bytes()
-        reserve = len(counter) - 1024 * 4
-        assert reserve > 0 and counter[reserve:] == b"\xff" * (1024 * 4)
-        nonces.write_bytes(b"\0" * reserve + counter[reserve:])
+        # Leave one nonce reservation in each closed heap bank. Whichever bank
+        # owns the selected applet must renew before the next callback.
+        counters = []
+        for bank in (0, 1):
+            nonces = state / f"heap{bank}/nonces.bin"
+            counter = nonces.read_bytes()
+            reserve = len(counter) - 4
+            assert reserve > 0 and counter[reserve:] == b"\xff" * 4
+            nonces.write_bytes(b"\0" * reserve + counter[reserve:])
+            counters.append((nonces, reserve, len(counter)))
         registry_before = files(state / "registry")
 
         mark_phase("forced_renewal")
@@ -260,10 +263,11 @@ def main():
         # The simulator delivers the APDU response before running the same idle
         # maintenance hook as the board. A following command proves renewal finished.
         read_certificate(client, certificate_object)
-        renewed_nonces = nonces.read_bytes()
-        expected_erased = b"\xff" * (len(counter) - reserve + 4)
-        assert renewed_nonces[reserve - 4:] == expected_erased, (
-            len(counter), reserve, renewed_nonces[reserve - 8:reserve + 8].hex())
+        # Renewal can be scheduled by the certificate read itself. The simulator
+        # cannot handle this next command until that idle maintenance completes.
+        assert piv(client, 0xa4, instance, p1=4, le=256) == selected
+        assert any(nonces.read_bytes()[reserve - 4:] == b"\xff" * (length - reserve + 4)
+                   for nonces, reserve, length in counters), "no selected heap bank renewed"
         assert files(state / "registry") != registry_before, "renewal must publish its new identity"
         mark_phase("post_renewal")
         client.connect()
