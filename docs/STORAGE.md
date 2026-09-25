@@ -49,6 +49,19 @@ NVMC skips pages that are already erased. This spreads wear within the allocated
 slots but does not change the chip's finite page endurance. Historical per-page
 measurements are in [the DK release record](JCVM_DK_RELEASE.md).
 
+At `e986aad`, a fresh-provision host run of the pinned JCAlgTest 1.8.3
+`ALG_SUPPORT_BASIC` client completed 4,511 CSV lines with no error rows. With
+`microcard-sim` built using `--features heap-metrics`, the complete run recorded
+four 64 KiB heap-slot erases, 360 heap program calls totaling 30,177 requested
+bytes, two heap nonce reservations, and one heap security-anchor advance. It also
+recorded six 8 KiB registry erases and 14 registry program calls totaling 566
+requested bytes. These are host file-flash calls over provisioning **and** the
+scan, not NVMC word traffic or a lifetime estimate. JCAlgTest stores supported
+factory results in applet fields, so their state is persistent by applet choice;
+the zero-anchor ordinary records do not make those objects transient. Reproduce
+with `cargo build -p microcard-sim --features heap-metrics` and
+`MICROCARD_FLASH_REPORT=/tmp/microcard-flash.jsonl python3 scripts/jcalgtest_host_client.py --source work/jcalgtest-client-src --output /tmp/microcard-jcalgtest-wear --mode ALG_SUPPORT_BASIC`, using fresh report and output paths.
+
 The simulator requires `monotonic.bin`, `nonces.bin`, and both slot files to appear as one storage set. Existing state without the nonce counter has no upgrade route. Removing the whole state directory represents fresh provisioning. On nRF52840, a one-way ownership word shares the management-key erase page. Firmware programs it before the first journal commit and rejects both markerless existing state and a programmed marker paired with completely erased journals and anchor. Because flash cannot restore a programmed bit without erasing the page and its keys, ordinary out-of-band persistent-state erasure requires fresh management keys. A debugger that can erase and rewrite the key page can still defeat this policy. Production debug lock and verified firmware boot remain required. Runtime management has no reset or anchor-erase command.
 
 Once a commit starts modifying journal slots, any flash error disables further commits
