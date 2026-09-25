@@ -251,11 +251,14 @@ impl<F: Flash> Store<F> {
                 Err(error) => return Err(error),
             };
             if capacity != 0 {
-                match patch::encode_view(view, before_length, self.journal.generation(), capacity) {
-                    Ok(delta) => {
+                let generation = self.journal.generation();
+                match patch::view_size(view, before_length, generation, capacity) {
+                    Ok(length) => {
                         #[cfg(feature = "latency-trace")]
-                        trace::patch(delta.len());
-                        self.journal.append_owned_with(delta, provider)?;
+                        trace::patch(length);
+                        self.journal.append_encoded_with(length, provider, |output| {
+                            patch::encode_view_into(view, before_length, generation, output)
+                        })?;
                         #[cfg(feature = "latency-trace")]
                         trace::committed_patch();
                         self.heap_length = Some(view.heap_bytes());

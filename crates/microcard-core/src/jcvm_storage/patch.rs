@@ -111,8 +111,8 @@ fn write_record(output: &mut [u8], changes: impl Iterator<Item = core::ops::Rang
     writer.finish()
 }
 
-pub(super) fn encode_view(view: microcard_engine_jcvm::applet::PersistentView<'_>,
-        before_length: usize, generation: u64, maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
+pub(super) fn view_size(view: microcard_engine_jcvm::applet::PersistentView<'_>,
+        before_length: usize, generation: u64, maximum: usize) -> Result<usize> {
     let writes = view.pending_writes().ok_or(Error::Quota)?;
     if writes.snapshot_required() { return Err(Error::Quota); }
     let (instance, statics) = view.metadata();
@@ -124,7 +124,19 @@ pub(super) fn encode_view(view: microcard_engine_jcvm::applet::PersistentView<'_
         argument_size(heap_size as u64), heap_size, argument_size(static_size as u64), static_size]
         .into_iter().try_fold(0usize, |size, part| size.checked_add(part).ok_or(Error::Quota))?;
     if total > maximum { return Err(Error::Quota); }
-    let mut encoder = Encoder::with_capacity(maximum, total)?;
+    Ok(total)
+}
+
+pub(super) fn encode_view_into(view: microcard_engine_jcvm::applet::PersistentView<'_>,
+        before_length: usize, generation: u64, output: &mut [u8]) -> Result<()> {
+    let writes = view.pending_writes().ok_or(Error::Quota)?;
+    if writes.snapshot_required() { return Err(Error::Quota); }
+    let (instance, statics) = view.metadata();
+    let static_range = writes.static_range().filter(|range| !range.is_empty());
+    let static_changes = static_range.clone().into_iter();
+    let heap_size = record_size(writes.heap_ranges(), before_length, view.heap_bytes(), generation)?;
+    let static_size = record_size(static_changes.clone(), statics.len(), statics.len(), generation)?;
+    let mut encoder = SliceEncoder::new(output);
     encoder.array(4)?;
     encoder.unsigned(1)?;
     encoder.unsigned(u64::from(instance))?;
@@ -138,7 +150,7 @@ pub(super) fn encode_view(view: microcard_engine_jcvm::applet::PersistentView<'_
             output.copy_from_slice(statics.get(range).ok_or(Error::Bounds)?);
             Ok(())
         }))?;
-    Ok(Zeroizing::new(encoder.finish()))
+    encoder.finish()
 }
 
 pub(super) fn replay_snapshot(snapshot: &mut Zeroizing<Vec<u8>>, generation: u64,

@@ -400,6 +400,17 @@ impl<F: Flash> Journal<F> {
         Ok(())
     }
 
+    /// Encode a bounded change directly into the authenticated append frame.
+    #[cfg(any(test, feature = "jcvm"))]
+    pub fn append_encoded_with(&mut self, length: usize, provider: &mut impl CryptoProvider,
+            encode: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<()> {
+        if self.poisoned { return Err(Error::Storage); }
+        let at = self.append_offset.ok_or(Error::Quota)?;
+        append::append_encoded(self, at, length, provider, encode)?;
+        self.append_offset = at.checked_add(append::FRAME_BYTES);
+        Ok(())
+    }
+
     /// Consume a zeroizing snapshot, reusing its allocation for the encrypted record.
     pub fn commit_owned_with(&mut self, data: Zeroizing<Vec<u8>>, provider: &mut impl CryptoProvider) -> Result<()> {
         if self.poisoned {

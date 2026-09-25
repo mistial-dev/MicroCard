@@ -40,18 +40,52 @@ pub(super) fn replay(flash: &impl Flash, key: &JournalKey, slot: usize, mut at: 
 
 pub(super) fn append<F: Flash>(journal: &mut Journal<F>, at: usize, data: Zeroizing<Vec<u8>>,
         provider: &mut impl CryptoProvider) -> Result<()> {
+    let (slot, end, generation) = prepare_append(journal, at, data.len())?;
+    let record = journal.seal_record(data, generation, provider)?;
+    publish(journal, slot, at, end, generation, &record)
+}
+
+/// Fill the plaintext in its final record buffer before reserving a nonce.
+pub(super) fn append_encoded<F: Flash>(journal: &mut Journal<F>, at: usize, length: usize,
+        provider: &mut impl CryptoProvider, encode: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<()> {
+    let (slot, end, generation) = prepare_append(journal, at, length)?;
+    let mut record = Zeroizing::new([0u8; FRAME_BYTES]);
+    let record_length = HEADER_BYTES + length + 16;
+    encode(&mut record[HEADER_BYTES..HEADER_BYTES + length])?;
+    let attempt = journal.flash.reserve_nonce()?;
+    let header = RecordHeader {
+        append_enabled: journal.append_enabled,
+        generation,
+        attempt,
+        payload_length: u32::try_from(length + 16).map_err(|_| Error::Quota)?,
+    };
+    record[..HEADER_BYTES].copy_from_slice(&header.encode());
+    let (aad, ciphertext) = record[..record_length].split_at_mut(HEADER_BYTES);
+    let written = provider.aes_ccm_encrypt_in_place(
+        journal.key.as_ref(), &nonce(attempt), aad, ciphertext,
+    )?;
+    if written != ciphertext.len() { return Err(Error::Storage); }
+    publish(journal, slot, at, end, generation, &record[..record_length])
+}
+
+fn prepare_append<F: Flash>(journal: &Journal<F>, at: usize, length: usize)
+        -> Result<(usize, usize, u64)> {
     if journal.poisoned { return Err(Error::Storage); }
     if !journal.append_enabled { return Err(Error::IncompatibleState); }
     let slot = journal.active.ok_or(Error::Storage)?;
     let end = frame_end(&journal.flash, at)?;
-    if data.len() > MAX_PAYLOAD { return Err(Error::Quota); }
+    if length > MAX_PAYLOAD { return Err(Error::Quota); }
     let generation = journal.generation.checked_add(1).ok_or(Error::Quota)?;
     if generation > journal.flash.monotonic_capacity() { return Err(Error::Quota); }
     // Never program over a previous attempt, including an incomplete one.
     if !erased(&journal.flash, slot, at)? { return Err(Error::Storage); }
-    let record = journal.seal_record(data, generation, provider)?;
+    Ok((slot, end, generation))
+}
+
+fn publish<F: Flash>(journal: &mut Journal<F>, slot: usize, at: usize, end: usize,
+        generation: u64, record: &[u8]) -> Result<()> {
     journal.poisoned = true;
-    journal.flash.program(slot, at, &record)?;
+    journal.flash.program(slot, at, record)?;
     journal.flash.program(slot, end - MARKER_BYTES, &[0; MARKER_BYTES])?;
     journal.flash.advance_monotonic(generation)?;
     journal.generation = generation;
@@ -145,11 +179,17 @@ fn append_frames_authenticate_and_publish_only_after_the_marker() {
 fn journal_recovery_selects_appended_state_and_rotates_after_a_torn_tail() {
     let mut journal = open(MemoryFlash::new(4096)).unwrap();
     journal.commit(b"base").unwrap();
+    let nonce = journal.flash.nonce_generation().unwrap();
+    assert_eq!(journal.append_encoded_with(5, &mut SoftwareCrypto, |_| Err(Error::Format)), Err(Error::Format));
+    assert_eq!(journal.flash.nonce_generation().unwrap(), nonce);
     let base = journal.into_flash();
     for cut in 0..=60 {
         let mut journal = open(base.clone()).unwrap();
         journal.flash.fail_after = Some(cut);
-        let _ = journal.append_owned_with(Zeroizing::new(b"patch".to_vec()), &mut SoftwareCrypto);
+        let _ = journal.append_encoded_with(5, &mut SoftwareCrypto, |output| {
+            output.copy_from_slice(b"patch");
+            Ok(())
+        });
         journal.flash.fail_after = None;
         let value = journal.recover_with_replay(&mut SoftwareCrypto, |state, generation, bytes| {
             assert_eq!(generation, 1);
@@ -159,7 +199,10 @@ fn journal_recovery_selects_appended_state_and_rotates_after_a_torn_tail() {
         }).unwrap().unwrap();
         assert_eq!(value.as_slice(), if cut >= 53 { b"patch".as_slice() } else { b"base".as_slice() });
         if cut > 4 && cut < 53 {
-            assert_eq!(journal.append_owned_with(Zeroizing::new(b"retry".to_vec()), &mut SoftwareCrypto), Err(Error::Quota));
+            assert_eq!(journal.append_encoded_with(5, &mut SoftwareCrypto, |output| {
+                output.copy_from_slice(b"retry");
+                Ok(())
+            }), Err(Error::Quota));
         }
         // Rotation writes a complete state to the other slot and remains recoverable.
         journal.commit(b"final").unwrap();
