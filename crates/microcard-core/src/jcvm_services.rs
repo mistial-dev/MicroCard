@@ -19,12 +19,25 @@ pub struct Services<'a, P> {
     security_level: u8,
     reset_requested: bool,
     checkpoint: Option<&'a mut Checkpoint<'a, P>>,
+    #[cfg(feature = "volatile-jcvm-host")]
+    volatile: bool,
     persistence_error: Option<crate::Error>,
 }
 
 impl<'a, P> Services<'a, P> {
     pub fn new(provider: &'a mut P) -> Self {
-        Self { provider, command: None, security_level: 0, reset_requested: false, checkpoint: None, persistence_error: None }
+        Self { provider, command: None, security_level: 0, reset_requested: false, checkpoint: None,
+            #[cfg(feature = "volatile-jcvm-host")]
+            volatile: false, persistence_error: None }
+    }
+
+    /// Raw host corpus execution has no durable store. Managed sessions must
+    /// supply a checkpoint callback instead.
+    #[cfg(feature = "volatile-jcvm-host")]
+    pub fn volatile(provider: &'a mut P) -> Self {
+        let mut services = Self::new(provider);
+        services.volatile = true;
+        services
     }
 
     pub(crate) fn reset_requested(&self) -> bool { self.reset_requested }
@@ -40,7 +53,9 @@ impl<'a, P> Services<'a, P> {
 
     // Only the persistent session's Verified-command entry point grants this context.
     pub(crate) fn verified(provider: &'a mut P, command: &'a [u8], level: u8) -> Self {
-        Self { provider, command: Some(command), security_level: 0x80 | level, reset_requested: false, checkpoint: None, persistence_error: None }
+        Self { provider, command: Some(command), security_level: 0x80 | level, reset_requested: false, checkpoint: None,
+            #[cfg(feature = "volatile-jcvm-host")]
+            volatile: false, persistence_error: None }
     }
 }
 
@@ -125,6 +140,8 @@ impl<P: CryptoProvider> Services<'_, P> {
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     fn ensure_checkpoint_capacity(&mut self, count: u32) -> Result<()> {
+        #[cfg(feature = "volatile-jcvm-host")]
+        if self.volatile { return Ok(()); }
         let Some(checkpoint) = self.checkpoint.as_mut() else { return Err(Error::Storage); };
         if let Err(error) = checkpoint(CheckpointRequest::Capacity(count), self.provider) {
             self.persistence_error = Some(error);
@@ -134,6 +151,8 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn checkpoint(&mut self, state: PersistentView<'_>, reason: CheckpointReason) -> Result<()> {
+        #[cfg(feature = "volatile-jcvm-host")]
+        if self.volatile { return Ok(()); }
         let Some(checkpoint) = self.checkpoint.as_mut() else {
             #[cfg(feature = "latency-trace")]
             crate::jcvm_storage::record_session_error(3, 0);
