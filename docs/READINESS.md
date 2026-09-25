@@ -208,9 +208,11 @@ Makerdiary JCVM result. An earlier MakerDiary image booted, enumerated over USB 
 SCP03, and loaded, installed, persisted, and selected the then-signed OpenFIPS201 fixture.
 The current unsigned CAP load path has also run on the nRF52840 DK: SCP03 loaded,
 installed, and selected JCAlgTest, and selection succeeded again after reset.
-The upstream static-performance scan is still incomplete. A later JCAlgTest APDU
-panicked in the VM after successful renewal; its CSV is diagnostic evidence, not
-a valid algorithm or performance result. The [development DK factory-reset command](FIRST_FLASH.md#factory-reset-a-development-dk)
+The upstream static-performance scan is still incomplete. After roughly 2,170
+APDUs, an OwnerPIN probe exhausted the 192 KiB Rust allocator with the JCAlgTest
+persistent heap near 62 KiB. Retained SWD trace identified the allocation failure;
+the partial CSV is diagnostic evidence, not a valid algorithm or performance result.
+Repeated idle renewal also makes some probes take about 7.5 seconds. The [development DK factory-reset command](FIRST_FLASH.md#factory-reset-a-development-dk)
 erases and reprovisions the target when a clean state is needed.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
