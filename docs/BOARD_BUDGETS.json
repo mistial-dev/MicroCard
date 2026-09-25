@@ -63,7 +63,7 @@
       }
     },
     "jcvm_usb_ccid": {
-      "text_bytes": 235356,
+      "text_bytes": 235452,
       "data_bytes": 148,
       "bss_bytes": 204788,
       "ceilings": {
@@ -73,7 +73,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 236640,
+      "text_bytes": 236736,
       "data_bytes": 148,
       "bss_bytes": 204804,
       "ceilings": {

@@ -60,7 +60,7 @@ impl PendingWrites {
         if let Some(range) = other.statics.range() { self.statics(range.start, range.len()); }
         self.snapshot |= other.snapshot;
     }
-    pub(super) fn heap(&mut self, at: usize, length: usize) {
+    pub(crate) fn heap(&mut self, at: usize, length: usize) {
         if length == 0 { return; }
         let mut span = Span::default();
         if span.include(at, length).is_none() { self.snapshot = true; return; }
@@ -83,7 +83,7 @@ impl PendingWrites {
         self.heap[position] = span;
         self.heap_count += 1;
     }
-    pub(super) fn statics(&mut self, at: usize, length: usize) {
+    pub(crate) fn statics(&mut self, at: usize, length: usize) {
         if self.statics.include(at, length).is_none() { self.snapshot = true; }
     }
     pub(crate) fn require_snapshot(&mut self) { self.snapshot = true; }

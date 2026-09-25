@@ -66,11 +66,12 @@ fn relocated(reference: Reference, index: &[u32]) -> Result<Reference> {
     Ok(index[position] as u16)
 }
 
-fn rewrite_slot(bytes: &mut [u8], at: usize, index: &[u32]) -> Result<()> {
+fn rewrite_slot(bytes: &mut [u8], at: usize, index: &[u32]) -> Result<bool> {
     let old = bytes.get(at..at + 2).ok_or(Error::Bounds)?;
-    let next = relocated(u16::from_be_bytes([old[0], old[1]]), index)?;
-    bytes[at..at + 2].copy_from_slice(&next.to_be_bytes());
-    Ok(())
+    let old = u16::from_be_bytes([old[0], old[1]]);
+    let next = relocated(old, index)?;
+    if next != old { bytes[at..at + 2].copy_from_slice(&next.to_be_bytes()); }
+    Ok(next != old)
 }
 
 impl AppletInstance {
@@ -123,6 +124,16 @@ impl AppletInstance {
             at = end;
         }
         if next == used { return Ok(false); }
+        // A dead suffix needs no relocation. Publish the shorter heap length
+        // with the request-bit patch instead of copying live objects or writing
+        // a full snapshot.
+        if queue.iter().all(|entry| (entry >> 16) as u16 == *entry as u16) {
+            bytes[next..].fill(0);
+            self.heap_used = next;
+            self.words.fill(0);
+            self.tags.fill(0);
+            return Ok(true);
+        }
         // All fallible reference checks happen before the first mutation.
         at = 2;
         while at < used {
@@ -139,25 +150,38 @@ impl AppletInstance {
         for slot in self.statics.get(..static_references).ok_or(Error::Bounds)?.chunks_exact(2) {
             relocated(u16::from_be_bytes([slot[0], slot[1]]), &queue)?;
         }
-        let instance = relocated(self.instance.ok_or(Error::Missing)?, &queue)?;
+        let old_instance = self.instance.ok_or(Error::Missing)?;
+        let instance = relocated(old_instance, &queue)?;
         let apdu = relocated(self.apdu, &queue)?;
         let buffer = relocated(self.buffer, &queue)?;
+        let mut writes = self.pending_writes;
         at = 2;
         while at < used {
             let info = Info::read(bytes, used, at as Reference)?;
             let end = object_end(at, info)?;
             if bit_is_set(&marked, at as Reference) {
-                visit_reference_slots(&linked, info, at + heap::HEADER, |slot| rewrite_slot(bytes, slot, &queue))?;
+                let destination = relocated(at as Reference, &queue)? as usize;
+                visit_reference_slots(&linked, info, at + heap::HEADER, |slot| {
+                    if rewrite_slot(bytes, slot, &queue)? && destination == at {
+                        writes.heap(slot, 2);
+                    }
+                    Ok(())
+                })?;
             }
             at = end;
         }
-        for at in (0..static_references).step_by(2) { rewrite_slot(&mut self.statics, at, &queue)?; }
+        for at in (0..static_references).step_by(2) {
+            if rewrite_slot(&mut self.statics, at, &queue)? { writes.statics(at, 2); }
+        }
         for entry in &queue {
             let old = (entry >> 16) as usize;
             let new = (*entry as u16) as usize;
             let info = Info::read(bytes, used, old as Reference)?;
             let end = object_end(old, info)?;
-            bytes.copy_within(old..end, new);
+            if old != new {
+                bytes.copy_within(old..end, new);
+                writes.heap(new, end - old);
+            }
         }
         bytes[next..].fill(0);
         self.heap_used = next;
@@ -166,7 +190,8 @@ impl AppletInstance {
         self.buffer = buffer;
         self.words.fill(0);
         self.tags.fill(0);
-        self.pending_writes.require_snapshot();
+        if instance != old_instance { writes.require_snapshot(); }
+        self.pending_writes = writes;
         Ok(true)
     }
 }
@@ -178,9 +203,11 @@ mod tests {
     use crate::vm::heap::Heap;
     use alloc::vec;
 
-    struct Capture { heap: Vec<u8>, calls: usize }
+    struct Capture { heap: Vec<u8>, calls: usize, snapshot: bool, ranges: Vec<core::ops::Range<usize>> }
     impl crate::host::Host for Capture {
         fn checkpoint(&mut self, view: crate::applet::PersistentView<'_>) -> Result<()> {
+            self.snapshot = view.pending_writes().is_none_or(|writes| writes.snapshot_required());
+            self.ranges = view.pending_writes().map_or_else(Vec::new, |writes| writes.heap_ranges().collect());
             self.heap = view.heap.to_vec();
             self.calls += 1;
             Ok(())
@@ -213,9 +240,10 @@ mod tests {
         card.instance = Some(root);
         card.statics[..2].copy_from_slice(&static_root.to_be_bytes());
         let before = card.heap_used;
-        let mut host = Capture { heap: Vec::new(), calls: 0 };
+        let mut host = Capture { heap: Vec::new(), calls: 0, snapshot: false, ranges: Vec::new() };
         card.service_object_deletion(&file, &mut host).unwrap();
         assert_eq!(host.calls, 1);
+        assert!(host.snapshot);
         assert_eq!(host.heap, card.heap[..card.heap_used]);
         assert_eq!(host.heap[0], 3);
         assert_eq!(card.heap_used, before - 2 * (heap::HEADER + 2));
@@ -251,11 +279,46 @@ mod tests {
         card.pending_writes.merge(heap.pending_writes());
         card.heap_used = heap.used();
         card.instance = Some(root);
-        let mut host = Capture { heap: Vec::new(), calls: 0 };
+        // Model an earlier durable APDU: the request bit is already on flash.
+        card.pending_writes = heap::PendingWrites::default();
+        let mut host = Capture { heap: Vec::new(), calls: 0, snapshot: false, ranges: Vec::new() };
         card.service_object_deletion(&file, &mut host).unwrap();
         assert_eq!(host.calls, 1);
+        assert!(!host.snapshot);
         assert_eq!(card.heap_used, card.runtime_bytes + heap::HEADER + 2);
         let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert!(heap.new_object(0, 1, 1).is_ok());
+    }
+
+    #[test]
+    fn relocating_a_child_keeps_the_instance_and_uses_a_patch() {
+        let package = Package {
+            classes: vec![ClassSpec { declared_size: 1, reference_count: 1, ..ClassSpec::default() }],
+            ..Package::default()
+        }.build();
+        let file = LoadFile::parse(&package).unwrap();
+        let mut card = AppletInstance::new(&file, super::super::Sizes::default()).unwrap();
+        let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        let root = heap.new_object(0, 1, 1).unwrap();
+        let dead = heap.new_object(0, 1, 1).unwrap();
+        let child = heap.new_object(0, 1, 1).unwrap();
+        heap.put_word(root, 0, child).unwrap();
+        heap.request_object_deletion().unwrap();
+        card.heap_used = heap.used();
+        card.instance = Some(root);
+        card.pending_writes = heap::PendingWrites::default();
+        let before = card.heap[..card.heap_used].to_vec();
+        let mut host = Capture { heap: Vec::new(), calls: 0, snapshot: false, ranges: Vec::new() };
+        card.service_object_deletion(&file, &mut host).unwrap();
+        assert_eq!(host.calls, 1);
+        assert!(!host.snapshot);
+        assert_eq!(card.instance, Some(root));
+        assert_eq!(Heap::resume(&mut card.heap, card.heap_used).unwrap().get_word(root, 0), Ok(dead));
+        let mut replayed = before;
+        replayed.truncate(card.heap_used);
+        for range in host.ranges {
+            replayed[range.clone()].copy_from_slice(&host.heap[range]);
+        }
+        assert_eq!(replayed, host.heap, "tracked ranges must replay the compacted heap");
     }
 }

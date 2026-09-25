@@ -35,6 +35,17 @@ def probe(client, timings=False):
         assert result[:2] == bytes.fromhex("2400") and result[-2:] == b"\x90\x00", result.hex()
 
 
+def deletion_timings(client, repeats):
+    for _ in range(repeats):
+        reset = client.raw(bytes.fromhex("B0E2000000"))
+        assert reset == b"\x90\x00", reset.hex()
+        start = time.perf_counter_ns()
+        result = client.raw(bytes.fromhex("B075150003040000"))
+        elapsed = (time.perf_counter_ns() - start) / 1_000_000
+        assert result[:2] == bytes.fromhex("1500") and result[-2:] == b"\x90\x00", result.hex()
+        print(f"digest factory after deletion request: {elapsed:.2f} ms", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reader", help="Exact PC/SC reader name; omit for host JCVM")
@@ -45,9 +56,13 @@ def main():
     parser.add_argument("--timings", action="store_true", help="Print host-observed latency for each probe APDU")
     parser.add_argument("--repeat", type=int, default=1,
                         help="Repeat the probe sequence within one card session")
+    parser.add_argument("--deletion-probes", type=int, default=0,
+                        help="Time factory calls after the applet requests object deletion")
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
+    if args.deletion_probes < 0:
+        parser.error("--deletion-probes must be nonnegative")
     if args.reader and args.management_key is None:
         parser.error("--management-key is required with --reader")
     if args.management_key and len(args.management_key.read_bytes()) != 32:
@@ -77,6 +92,7 @@ def main():
                 client.command(0xE6, lv(PACKAGE, APPLET, APPLET, b"\0", b"\xc9\0", b""), p1=0x0C)
             for _ in range(args.repeat):
                 probe(client, args.timings)
+            deletion_timings(client, args.deletion_probes)
         finally:
             client.close()
         if args.reader:
