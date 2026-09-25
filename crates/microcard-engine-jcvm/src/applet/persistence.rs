@@ -344,6 +344,7 @@ impl AppletInstance {
                         return Err(Error::Format);
                     }
                     if info.length == 6 {
+                        natives::visit_native_references(info, payload, valid_reference)?;
                         // NEW can be durable before KeyPair's constructor runs. Only
                         // the exact zero state is unconstructed, never a partial pair.
                         if class.id == ClassId::KeyPair && payload.iter().all(|byte| *byte == 0) {
@@ -352,10 +353,8 @@ impl AppletInstance {
                         let word =
                             |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);
                         let material = word(2);
-                        valid_reference(material)?;
                         if class.id == ClassId::Signature {
                             let pending = word(5);
-                            valid_reference(pending)?;
                             if word(0) != 33 || word(3) > 1
                                 || (word(3) == 1 && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2))) {
                                 return Err(Error::Format);
@@ -380,7 +379,6 @@ impl AppletInstance {
                         }
                         if class.id == ClassId::KeyPair {
                             let private = word(5);
-                            valid_reference(private)?;
                             if word(0) != 5 || word(1) != 256 || material == 0 || private == 0 {
                                 return Err(Error::Format);
                             }
@@ -410,7 +408,6 @@ impl AppletInstance {
                         }
                         if class.id == ClassId::Cipher {
                             let pending = word(5);
-                            valid_reference(pending)?;
                             if !matches!(word(0), 13 | 14) || pending == 0 || word(3) > 1
                                 || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2))) {
                                 return Err(Error::Format);

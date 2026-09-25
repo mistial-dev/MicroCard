@@ -130,6 +130,22 @@ pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops
     Ok(None)
 }
 
+/// Native state uses heap handles too. Recovery and object deletion must trace
+/// these words with the same rules as Java reference fields.
+pub(crate) fn visit_native_references(info: heap::Info, payload: &[u8],
+        mut visit: impl FnMut(u16) -> Result<()>) -> Result<()> {
+    if info.kind != heap::KIND_OBJECT || info.length != STATE_WORDS { return Ok(()); }
+    let Some(class) = super::api_class(info.class) else { return Ok(()); };
+    if payload.len() != STATE_WORDS as usize * 2 { return Err(Error::Format); }
+    let word = |index: usize| u16::from_be_bytes([payload[index * 2], payload[index * 2 + 1]]);
+    visit(word(MATERIAL))?;
+    if matches!(class.id,
+        ClassId::Cipher | ClassId::MessageDigest | ClassId::Signature | ClassId::KeyPair
+        | ClassId::OwnerPINxWithPredecrement)
+    { visit(word(PENDING))?; }
+    Ok(())
+}
+
 pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
     heap.visit_objects(|_, info, payload| {
         if let Some(range) = native_volatile_range(info)? { payload[range].fill(0); }
