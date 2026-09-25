@@ -1,7 +1,7 @@
 //! Bounded state changes carried inside an authenticated journal record.
 use crate::{cbor::{Decoder, Encoder}, Error, Result};
 use alloc::vec::Vec;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 const MAX_SPANS: usize = 64;
 
@@ -130,6 +130,11 @@ pub(super) fn replay_snapshot(snapshot: &mut Zeroizing<Vec<u8>>, generation: u64
     let instance = source.unsigned()?;
     let heap = source.bytes(maximum)?;
     let statics = source.bytes(maximum)?;
+    let base = snapshot.as_ptr() as usize;
+    let heap_at = heap.as_ptr() as usize - base;
+    let static_at = statics.as_ptr() as usize - base;
+    let heap_before = heap.len();
+    let static_before = statics.len();
     source.finish()?;
     let mut record = Decoder::new(delta);
     record.record(4)?;
@@ -138,28 +143,51 @@ pub(super) fn replay_snapshot(snapshot: &mut Zeroizing<Vec<u8>>, generation: u64
     let heap_patch = record.bytes(maximum)?;
     let static_patch = record.bytes(maximum)?;
     record.finish()?;
-    let heap_length = validate(heap_patch, generation, heap.len(), maximum)?;
-    let static_length = validate(static_patch, generation, statics.len(), maximum)?;
-    if super::snapshot_size(instance, heap_length, static_length)? > maximum { return Err(Error::Quota); }
-    let capacity = super::snapshot_size(instance, heap_length, static_length)?;
-    let mut encoder = Encoder::with_capacity(maximum, capacity)?;
-    encoder.array(7)?;
-    encoder.unsigned(1)?;
-    encoder.unsigned(1)?;
-    encoder.bytes(&image)?;
-    encoder.bytes(&installation)?;
-    encoder.unsigned(instance)?;
-    encoder.bytes_with(heap_length, |output| {
-        let common = heap.len().min(output.len());
-        output[..common].copy_from_slice(&heap[..common]);
-        apply_spans(heap_patch, output)
-    })?;
-    encoder.bytes_with(static_length, |output| {
-        let common = statics.len().min(output.len());
-        output[..common].copy_from_slice(&statics[..common]);
-        apply_spans(static_patch, output)
-    })?;
-    *snapshot = Zeroizing::new(encoder.finish());
+    let heap_length = validate(heap_patch, generation, heap_before, maximum)?;
+    let static_length = validate(static_patch, generation, static_before, maximum)?;
+    let new_total = super::snapshot_size(instance, heap_length, static_length)?;
+    if new_total > maximum { return Err(Error::Quota); }
+    let mut prefix = Encoder::new(96);
+    prefix.array(7)?;
+    prefix.unsigned(1)?;
+    prefix.unsigned(1)?;
+    prefix.bytes(&image)?;
+    prefix.bytes(&installation)?;
+    prefix.unsigned(instance)?;
+    prefix.bytes_header(heap_length)?;
+    let prefix = prefix.finish();
+    let mut static_header = Encoder::new(9);
+    static_header.bytes_header(static_length)?;
+    let static_header = static_header.finish();
+    let new_heap_at = prefix.len();
+    let new_static_at = new_heap_at + heap_length + static_header.len();
+    if new_static_at.checked_add(static_length) != Some(new_total) {
+        return Err(Error::Format);
+    }
+    let old_total = snapshot.len();
+    snapshot.try_reserve_exact(new_total.saturating_sub(old_total)).map_err(|_| Error::Quota)?;
+    if new_total > old_total { snapshot.resize(new_total, 0); }
+    let common_heap = heap_before.min(heap_length);
+    let common_static = static_before.min(static_length);
+    // Move the static field first when it shifts right, so an expanded heap
+    // cannot overwrite its source. Otherwise move the heap first.
+    if new_static_at > static_at {
+        snapshot.copy_within(static_at..static_at + common_static, new_static_at);
+    }
+    snapshot.copy_within(heap_at..heap_at + common_heap, new_heap_at);
+    if new_static_at <= static_at {
+        snapshot.copy_within(static_at..static_at + common_static, new_static_at);
+    }
+    snapshot[new_heap_at + common_heap..new_heap_at + heap_length].fill(0);
+    snapshot[new_static_at + common_static..new_static_at + static_length].fill(0);
+    snapshot[..prefix.len()].copy_from_slice(&prefix);
+    snapshot[new_static_at - static_header.len()..new_static_at].copy_from_slice(&static_header);
+    apply_spans(heap_patch, &mut snapshot[new_heap_at..new_heap_at + heap_length])?;
+    apply_spans(static_patch, &mut snapshot[new_static_at..new_static_at + static_length])?;
+    if new_total < old_total {
+        snapshot[new_total..old_total].zeroize();
+        snapshot.truncate(new_total);
+    }
     Ok(())
 }
 
@@ -284,11 +312,15 @@ mod tests {
                 delta.bytes(&encode_diff(&[5, 6], &[7], 11, 128).unwrap()).unwrap();
                 let delta = delta.finish();
                 let mut saved = snapshot(before, &[5, 6]);
+                let reserve = 256 - saved.len();
+                saved.try_reserve_exact(reserve).unwrap();
+                let buffer = saved.as_ptr();
                 let original = saved.clone();
                 assert!(replay_snapshot(&mut saved, 12, &delta, 256).is_err());
                 assert_eq!(saved, original);
                 replay_snapshot(&mut saved, 11, &delta, 256).unwrap();
                 assert_eq!(saved, snapshot(after, &[7]));
+                assert_eq!(saved.as_ptr(), buffer, "replay must reuse its bounded snapshot buffer");
             }
         }
         let before = [0; MAX_SPANS * 2 + 1];

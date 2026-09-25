@@ -216,6 +216,10 @@ impl Encoder {
         self.argument(2, bytes.len() as u64)?;
         self.append(bytes)
     }
+    #[cfg(feature = "jcvm")]
+    pub(crate) fn bytes_header(&mut self, length: usize) -> Result<()> {
+        self.argument(2, length as u64)
+    }
     /// Fill a byte string in the final encoding buffer. A rejected fill clears and
     /// removes the entire field, so a partial secret cannot escape through finish.
     pub fn bytes_with(

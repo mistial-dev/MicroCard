@@ -50,6 +50,24 @@ struct RecordHeader {
     payload_length: u32,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CandidateMeta {
+    slot: usize,
+    base_generation: u64,
+    attempt: u64,
+    payload_length: usize,
+    generation: u64,
+    append_offset: Option<usize>,
+    reclaim_started: bool,
+    reclaim_complete: bool,
+}
+
+enum CandidateRead {
+    Absent,
+    Corrupt,
+    Valid(CandidateMeta, Zeroizing<Vec<u8>>),
+}
+
 impl RecordHeader {
     fn encode(&self) -> [u8; HEADER_BYTES] {
         let mut bytes = [0; HEADER_BYTES];
@@ -181,120 +199,56 @@ impl<F: Flash> Journal<F> {
     fn recover_with_replay_mode(&mut self, provider: &mut impl CryptoProvider,
             apply: impl FnMut(&mut Zeroizing<Vec<u8>>, u64, &[u8]) -> Result<()>,
             allow_unreconciled: bool) -> Result<Option<Zeroizing<Vec<u8>>>> {
-        #[cfg(any(test, feature = "jcvm"))]
         let mut apply = apply;
-        #[cfg(not(any(test, feature = "jcvm")))]
-        let _ = apply;
         self.poisoned = true;
-        let flash = &mut self.flash;
-        let key = &self.key;
-        let slot_count = flash.slot_count();
+        let slot_count = self.flash.slot_count();
         if !(2..=8).contains(&slot_count) {
             return Err(Error::Storage);
         }
-        let size = flash.slot_size();
+        let size = self.flash.slot_size();
         if size < OVERHEAD {
             return Err(Error::Storage);
         }
-        let reserved_nonce = flash.nonce_generation()?;
-        if reserved_nonce > flash.nonce_capacity() { return Err(Error::Storage); }
-        let mut selected = None;
+        let reserved_nonce = self.flash.nonce_generation()?;
+        if reserved_nonce > self.flash.nonce_capacity() { return Err(Error::Storage); }
+        let mut selected: Option<CandidateMeta> = None;
         let mut saw_non_erased = false;
         let mut saw_corrupt_committed = false;
         for slot in 0..slot_count {
-            if !flash.is_erased(slot)? {
+            if !self.flash.is_erased(slot)? {
                 saw_non_erased = true;
             }
-            let mut tail = [0; 3];
-            flash.read(slot, size - tail.len(), &mut tail)?;
-            if tail[2] != 0 {
-                continue;
-            }
-            let mut header = [0; HEADER_BYTES];
-            flash.read(slot, 0, &mut header)?;
-            let decoded = match RecordHeader::decode(&header, size - HEADER_BYTES - 3, reserved_nonce) {
-                Ok(decoded) => decoded,
-                Err(Error::IncompatibleState) => return Err(Error::IncompatibleState),
-                Err(_) => {
-                    saw_corrupt_committed = true;
-                    continue;
+            match self.read_candidate(slot, size, reserved_nonce, provider, &mut apply)? {
+                CandidateRead::Absent => {}
+                CandidateRead::Corrupt => saw_corrupt_committed = true,
+                CandidateRead::Valid(meta, _plaintext) => {
+                    if selected.is_none_or(|current| meta.generation > current.generation) {
+                        selected = Some(meta);
+                    }
                 }
-            };
-            if decoded.append_enabled != self.append_enabled { return Err(Error::IncompatibleState); }
-            let generation = decoded.generation;
-            let attempt = decoded.attempt;
-            let n = decoded.payload_length as usize;
-            let mut plaintext = crate::crypto::zeroizing_buffer(n)?;
-            flash.read(slot, header.len(), &mut plaintext)?;
-            let nonce = nonce(attempt);
-            match provider.aes_ccm_decrypt_in_place(key.as_ref(), &nonce, &header, &mut plaintext) {
-                Ok(written) if written == n - 16 => plaintext.truncate(written),
-                Ok(_) => {
-                    plaintext.zeroize();
-                    return Err(Error::Storage);
-                }
-                Err(Error::Authentication) => {
-                    plaintext.zeroize();
-                    saw_corrupt_committed = true;
-                    continue;
-                }
-                Err(error) => {
-                    plaintext.zeroize();
-                    return Err(error);
-                }
-            }
-            #[cfg(any(test, feature = "jcvm"))]
-            let append_start = (HEADER_BYTES + n).next_multiple_of(4);
-            #[cfg(any(test, feature = "jcvm"))]
-            let replayed = if self.append_enabled {
-                append::replay(flash, key, slot, append_start, generation, provider,
-                    |base, delta| apply(&mut plaintext, base, delta))
-            } else { Ok((generation, None)) };
-            #[cfg(any(test, feature = "jcvm"))]
-            let (generation, append_offset) = match replayed {
-                Ok(result) => result,
-                Err(Error::Format | Error::Authentication) => {
-                    saw_corrupt_committed = true;
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            #[cfg(not(any(test, feature = "jcvm")))]
-            let append_offset = None;
-            let reclaim_started = tail[0] == 0;
-            let reclaim_complete = tail[1] == 0;
-            if reclaim_complete && !reclaim_started {
-                saw_corrupt_committed = true;
-                continue;
-            }
-            if selected
-                .as_ref()
-                .is_none_or(|(_, g, _, _, _, _)| generation > *g)
-            {
-                selected = Some((
-                    slot,
-                    generation,
-                    plaintext,
-                    reclaim_started,
-                    reclaim_complete,
-                    if reclaim_started { None } else { append_offset },
-                ));
             }
         }
         // A reclaim intent on the surviving record authorizes fallback only while
         // a target slot is being replaced. Completion closes that narrow recovery window.
         let interrupted_reclaim = selected
-            .as_ref()
-            .is_some_and(|(_, _, _, started, complete, _)| *started && !*complete);
+            .is_some_and(|candidate| candidate.reclaim_started && !candidate.reclaim_complete);
         if (saw_corrupt_committed && !interrupted_reclaim) || (saw_non_erased && selected.is_none())
         {
             return Err(Error::Storage);
         }
+        // Do not retain one full snapshot while authenticating another. Re-read
+        // only the selected record after every committed slot has been checked.
         let (active, generation, data, append_offset) = match selected {
-            Some((s, g, d, _, _, offset)) => (Some(s), g, Some(d), offset),
+            Some(meta) => {
+                let data = match self.read_candidate(meta.slot, size, reserved_nonce, provider, &mut apply)? {
+                    CandidateRead::Valid(reloaded, data) if reloaded == meta => data,
+                    _ => return Err(Error::Storage),
+                };
+                (Some(meta.slot), meta.generation, Some(data), meta.append_offset)
+            }
             None => (None, 0, None, None),
         };
-        let reconciled = reconcile_generation(flash, generation);
+        let reconciled = reconcile_generation(&mut self.flash, generation);
         self.generation = generation;
         self.active = active;
         self.append_offset = append_offset;
@@ -305,6 +259,93 @@ impl<F: Flash> Journal<F> {
         }
         Ok(data)
     }
+
+    fn read_candidate(
+        &mut self,
+        slot: usize,
+        size: usize,
+        reserved_nonce: u64,
+        provider: &mut impl CryptoProvider,
+        apply: &mut impl FnMut(&mut Zeroizing<Vec<u8>>, u64, &[u8]) -> Result<()>,
+    ) -> Result<CandidateRead> {
+        #[cfg(not(any(test, feature = "jcvm")))]
+        let _ = apply;
+        #[cfg(all(feature = "latency-trace", feature = "jcvm"))]
+        crate::jcvm_storage::renewal_phase(50 + slot as u32);
+        let mut tail = [0; 3];
+        self.flash.read(slot, size - tail.len(), &mut tail)?;
+        if tail[2] != 0 {
+            return Ok(CandidateRead::Absent);
+        }
+        let mut header = [0; HEADER_BYTES];
+        self.flash.read(slot, 0, &mut header)?;
+        let decoded = match RecordHeader::decode(&header, size - HEADER_BYTES - 3, reserved_nonce) {
+            Ok(decoded) => decoded,
+            Err(Error::IncompatibleState) => return Err(Error::IncompatibleState),
+            Err(_) => return Ok(CandidateRead::Corrupt),
+        };
+        if decoded.append_enabled != self.append_enabled {
+            return Err(Error::IncompatibleState);
+        }
+        let n = decoded.payload_length as usize;
+        let capacity = if self.append_enabled { size - OVERHEAD + 16 } else { n };
+        let mut plaintext = crate::crypto::zeroizing_buffer(capacity)?;
+        plaintext.truncate(n);
+        #[cfg(all(feature = "latency-trace", feature = "jcvm"))]
+        crate::jcvm_storage::renewal_phase(60 + slot as u32);
+        self.flash.read(slot, header.len(), &mut plaintext)?;
+        let nonce = nonce(decoded.attempt);
+        match provider.aes_ccm_decrypt_in_place(self.key.as_ref(), &nonce, &header, &mut plaintext) {
+            Ok(written) if written == n - 16 => plaintext.truncate(written),
+            Ok(_) => {
+                plaintext.zeroize();
+                return Err(Error::Storage);
+            }
+            Err(Error::Authentication) => {
+                plaintext.zeroize();
+                return Ok(CandidateRead::Corrupt);
+            }
+            Err(error) => {
+                plaintext.zeroize();
+                return Err(error);
+            }
+        }
+        #[cfg(all(feature = "latency-trace", feature = "jcvm"))]
+        crate::jcvm_storage::renewal_phase(70 + slot as u32);
+        #[cfg(any(test, feature = "jcvm"))]
+        let (generation, append_offset) = if self.append_enabled {
+            let append_start = (HEADER_BYTES + n).next_multiple_of(4);
+            match append::replay(&mut self.flash, &self.key, slot, append_start,
+                    decoded.generation, provider,
+                    |base, delta| apply(&mut plaintext, base, delta)) {
+                Ok(result) => result,
+                Err(Error::Format | Error::Authentication) => return Ok(CandidateRead::Corrupt),
+                Err(error) => return Err(error),
+            }
+        } else {
+            (decoded.generation, None)
+        };
+        #[cfg(not(any(test, feature = "jcvm")))]
+        let (generation, append_offset) = (decoded.generation, None);
+        #[cfg(all(feature = "latency-trace", feature = "jcvm"))]
+        crate::jcvm_storage::renewal_phase(80 + slot as u32);
+        let reclaim_started = tail[0] == 0;
+        let reclaim_complete = tail[1] == 0;
+        if reclaim_complete && !reclaim_started {
+            return Ok(CandidateRead::Corrupt);
+        }
+        Ok(CandidateRead::Valid(CandidateMeta {
+            slot,
+            base_generation: decoded.generation,
+            attempt: decoded.attempt,
+            payload_length: n,
+            generation,
+            append_offset: if reclaim_started { None } else { append_offset },
+            reclaim_started,
+            reclaim_complete,
+        }, plaintext))
+    }
+
     #[cfg(feature = "software-crypto")]
     pub fn commit(&mut self, data: &[u8]) -> Result<()> {
         self.commit_with(data, &mut SoftwareCrypto)
@@ -1205,7 +1246,9 @@ mod tests {
             recovered.as_ref().map(|bytes| bytes.as_slice()),
             Some(b"provider-backed journal".as_slice())
         );
-        assert_eq!((provider.encrypts, provider.decrypts), (1, 1));
+        // Candidate authentication drops its scratch buffer before the
+        // selected record is loaded into the returned snapshot.
+        assert_eq!((provider.encrypts, provider.decrypts), (1, 2));
 
         struct FailingProvider;
         impl CryptoProvider for FailingProvider {

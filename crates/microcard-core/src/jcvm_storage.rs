@@ -165,8 +165,14 @@ impl<F: Flash> Store<F> {
         provider: &mut impl CryptoProvider,
     ) -> Result<(Self, Option<AppletInstance>)> {
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
+        #[cfg(feature = "latency-trace")]
+        trace::renewal_phase(40);
         let (mut store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
+        #[cfg(feature = "latency-trace")]
+        trace::renewal_phase(41);
         let card = decode_card(snapshot, &file, sizes, store.image, installation)?;
+        #[cfg(feature = "latency-trace")]
+        trace::renewal_phase(42);
         store.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
         Ok((store, card))
     }
@@ -275,8 +281,15 @@ impl<F: Flash> Store<F> {
         key: JournalKey,
         provider: &mut impl CryptoProvider,
     ) -> Result<Zeroizing<Vec<u8>>> {
+        #[cfg(feature = "latency-trace")]
+        trace::renewal_phase(43);
         let snapshot = encode_snapshot(view, self.image, installation, self.maximum)?;
-        crate::journal::SeedRecord::seal_new_epoch(snapshot, key, provider)
+        #[cfg(feature = "latency-trace")]
+        trace::renewal_phase(44);
+        let record = crate::journal::SeedRecord::seal_new_epoch(snapshot, key, provider)?;
+        #[cfg(feature = "latency-trace")]
+        trace::renewal_phase(45);
+        Ok(record)
     }
 
     pub fn into_flash(self) -> F {

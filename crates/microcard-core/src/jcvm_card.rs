@@ -121,8 +121,12 @@ impl<B: JcvmBackend> JcvmEngine<B> {
     /// by running install, and each temporary session is dropped before opening another.
     pub fn open(backend: B) -> Result<Self> {
         let (mut storage, mut provider, mut staging, mut scratch) = backend.into_parts();
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(30);
         storage.registry.recover_renewal(&storage.images, &mut storage.heaps,
             &storage.heap_key, &staging, &mut scratch, &mut provider)?;
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(31);
         staging.reset();
         for load in storage
             .registry
@@ -130,6 +134,8 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             .loads()
             .filter(|load| load.image.is_some())
         {
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::renewal_phase(32);
             storage.registry.with_package(
                 load.aid,
                 &storage.images,
@@ -138,7 +144,11 @@ impl<B: JcvmBackend> JcvmEngine<B> {
                 |_| Ok(()),
             )?;
         }
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(33);
         for instance in storage.registry.state()?.instances() {
+            #[cfg(feature = "latency-trace")]
+            crate::jcvm_storage::renewal_phase(34);
             storage.registry.open_session(
                 instance.aid,
                 &storage.images,
@@ -148,6 +158,8 @@ impl<B: JcvmBackend> JcvmEngine<B> {
                 &mut provider,
             )?;
         }
+        #[cfg(feature = "latency-trace")]
+        crate::jcvm_storage::renewal_phase(35);
         Ok(Self {
             storage,
             provider,

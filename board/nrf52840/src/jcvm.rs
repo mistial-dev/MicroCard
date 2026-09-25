@@ -44,7 +44,10 @@ impl HeapBanks for Heaps {
     }
 }
 
-type Staging = BoundedFlashStaging<StagingNvm, { microcard_core::jcvm_package::MAX_PACKAGE_BYTES }>;
+// The same bank also stages authenticated heap-renewal records. Those can be
+// larger than a CAP, so bound uploads by the physical bank here; CAP parsing
+// retains its separate MAX_PACKAGE_BYTES limit.
+type Staging = BoundedFlashStaging<StagingNvm, { 64 * 1024 }>;
 pub(super) struct BoardBackend {
     storage: Storage<Nvm, Nvm, Heaps>,
     hardware: Hardware,
