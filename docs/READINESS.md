@@ -56,10 +56,13 @@ bytes and initialization flags clear together. Durable snapshots exclude transie
 values and PIN validation. JCVM digest calls borrow input directly and stage only
 the fixed digest, validating output bounds and provider lengths before publication. These bounds do not prove that peak workloads fit the
 board's reserved heap.
-Short-lived ordinary objects are still allocated in the persistent heap even
-when they never escape an APDU. Avoiding those flash writes requires a bounded
-RAM nursery with reference promotion and checkpoint coverage; it is not provided
-by the transient-array clear-event mechanism.
+Ordinary `new` objects consume persistent Java Card memory even if their local
+reference dies at the APDU boundary. Java Card 3.0.5
+[does not run object deletion automatically](https://docs.oracle.com/javacard/3.0.5/prognotes/JCPCL.pdf);
+the applet must request it. A RAM nursery cannot silently reclaim these objects
+without changing observable memory accounting. Applets should use Java Card
+transient arrays for scratch data and request deletion when persistent objects
+become unreachable. Any future nursery must preserve these semantics.
 
 ## Required before the pre-hardware release candidate
 

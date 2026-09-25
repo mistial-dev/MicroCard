@@ -49,6 +49,13 @@ NVMC skips pages that are already erased. This spreads wear within the allocated
 slots but does not change the chip's finite page endurance. Historical per-page
 measurements are in [the DK release record](JCVM_DK_RELEASE.md).
 
+Ordinary `new` objects remain persistent allocations even when unreachable at
+the end of an APDU. The Java Card 3.0.5
+[object-deletion guidance](https://docs.oracle.com/javacard/3.0.5/prognotes/JCPCL.pdf)
+says deletion runs only after an applet request. The VM therefore keeps their
+allocation and quota charge until `JCSystem.requestObjectDeletion()` is serviced.
+Applet scratch belongs in transient arrays, whose payloads are never journaled.
+
 At `e986aad`, a fresh-provision host run of the pinned JCAlgTest 1.8.3
 `ALG_SUPPORT_BASIC` client completed 4,511 CSV lines with no error rows. With
 `microcard-sim` built using `--features heap-metrics`, the complete run recorded

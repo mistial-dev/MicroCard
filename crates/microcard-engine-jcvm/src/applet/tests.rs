@@ -15,6 +15,7 @@
         #[allow(dead_code)]
         pub const SLOAD_1: u8 = 29;
         pub const ASTORE_0: u8 = 43;
+        pub const POP: u8 = 59;
         pub const DUP: u8 = 61;
         pub const SRETURN: u8 = 120;
         pub const RETURN: u8 = 122;
@@ -23,6 +24,7 @@
         pub const INVOKESPECIAL: u8 = 140;
         pub const INVOKESTATIC: u8 = 141;
         pub const NEW: u8 = 143;
+        pub const NEWARRAY: u8 = 144;
     }
 
     const FRAMEWORK_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x00, 0x62, 0x01, 0x01];
@@ -119,6 +121,21 @@
             heap: heap.image(), statics: &[], instance, buffer, projection: Some(&heap),
         };
         assert!(!grown.same_state_after_deletion_request(before_length, before_header).unwrap());
+    }
+
+    #[test]
+    fn unreferenced_new_array_remains_allocated_without_deletion_request() {
+        let package = applet(vec![op::SCONST_1, op::NEWARRAY, 11, op::POP, op::RETURN], 2).build();
+        let file = LoadFile::parse(&package).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
+        card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
+        card.process(&file, &mut crate::host::NoHost, &[0, 0xa4, 4, 0, 0], true).unwrap();
+        let first = card.heap_used;
+        card.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false).unwrap();
+        let second = card.heap_used;
+        assert!(second > first);
+        card.process(&file, &mut crate::host::NoHost, &[0, 1, 0, 0, 0], false).unwrap();
+        assert_eq!(card.heap_used - second, second - first);
     }
 
     #[test]
