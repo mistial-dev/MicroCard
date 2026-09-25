@@ -65,6 +65,7 @@ fn idle() -> Jcre {
 fn lifecycle_checkpoints_before_success_and_survives_callback_and_abort() {
     struct Storage { saved: alloc::vec::Vec<u8>, fail: bool }
     impl crate::host::Host for Storage {
+        fn ensure_checkpoint_capacity(&mut self, _count: u32) -> Result<()> { Ok(()) }
         fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>, _: crate::host::CheckpointReason) -> Result<()> {
             if self.fail { return Err(Error::Storage); }
             self.saved.resize(state.heap_bytes(), 0);
@@ -435,8 +436,11 @@ fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
     assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(1));
     invoke_security(ClassId::OwnerPIN, MethodId::update,
         &[(true, pin), (true, replacement), (false, 0), (false, 4)], &mut heap, &mut frame, &mut host).unwrap();
-    struct PinCheckpoint { saved: alloc::vec::Vec<u8>, fail: bool }
+    struct PinCheckpoint { saved: alloc::vec::Vec<u8>, fail: bool, no_capacity: bool }
     impl crate::host::Host for PinCheckpoint {
+        fn ensure_checkpoint_capacity(&mut self, _count: u32) -> Result<()> {
+            if self.no_capacity { Err(Error::Storage) } else { Ok(()) }
+        }
         fn checkpoint(&mut self, state: crate::applet::PersistentView<'_>, reason: crate::host::CheckpointReason) -> Result<()> {
             assert_eq!(reason, crate::host::CheckpointReason::OwnerPin);
             if self.fail { return Err(Error::Storage); }
@@ -445,7 +449,7 @@ fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
             Ok(())
         }
     }
-    let mut checkpoint = PinCheckpoint { saved: vec![], fail: false };
+    let mut checkpoint = PinCheckpoint { saved: vec![], fail: false, no_capacity: false };
     jcre.instance = Some(pin);
     jcre.buffer = destination;
     for value in [(pin, true), (original, true), (0, false), (4, false)] {
@@ -462,6 +466,14 @@ fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
         "PIN checkpoint must not publish the conditional PIN update");
     assert_eq!(saved.get_word(pin, 4), Ok(2));
     assert_eq!(saved.get_word(pin, 3), Ok(0));
+    checkpoint.no_capacity = true;
+    for value in [(pin, true), (replacement, true), (0, false), (4, false)] {
+        frame.push_raw(value).unwrap();
+    }
+    assert!(matches!(security::call(ClassId::OwnerPIN, MethodId::check, signature, &mut heap,
+        &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]), Err(Error::Storage)));
+    assert_eq!(heap.get_word(pin, 4), Ok(2), "capacity failure must precede retry mutation");
+    checkpoint.no_capacity = false;
     // Save a conditional image first, then overwrite it through the non-atomic API.
     heap.byte_slice_mut(destination, 0, 4).unwrap().fill(7);
     for (reference, value) in [(true, replacement), (false, 0), (true, destination), (false, 0), (false, 4)] {

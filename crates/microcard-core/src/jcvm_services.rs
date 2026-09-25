@@ -6,7 +6,12 @@ use microcard_engine_jcvm::applet::PersistentView;
 mod ecdsa;
 mod ec_parameters;
 
-type Checkpoint<'a, P> = dyn FnMut(PersistentView<'_>, CheckpointReason, &mut P) -> crate::Result<()> + 'a;
+pub(crate) enum CheckpointRequest<'a> {
+    Capacity(u32),
+    Commit(PersistentView<'a>, CheckpointReason),
+}
+
+type Checkpoint<'a, P> = dyn FnMut(CheckpointRequest<'_>, &mut P) -> crate::Result<()> + 'a;
 
 pub struct Services<'a, P> {
     provider: &'a mut P,
@@ -26,7 +31,7 @@ impl<'a, P> Services<'a, P> {
 
     /// The caller supplies the storage boundary. Persistent sessions must not return
     /// success until the supplied state is recoverable after interruption.
-    pub fn with_checkpoint(mut self, checkpoint: &'a mut Checkpoint<'a, P>) -> Self {
+    pub(crate) fn with_checkpoint(mut self, checkpoint: &'a mut Checkpoint<'a, P>) -> Self {
         self.checkpoint = Some(checkpoint);
         self
     }
@@ -119,13 +124,22 @@ impl<P: CryptoProvider> Services<'_, P> {
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
+    fn ensure_checkpoint_capacity(&mut self, count: u32) -> Result<()> {
+        let Some(checkpoint) = self.checkpoint.as_mut() else { return Err(Error::Storage); };
+        if let Err(error) = checkpoint(CheckpointRequest::Capacity(count), self.provider) {
+            self.persistence_error = Some(error);
+            return Err(Error::Storage);
+        }
+        Ok(())
+    }
+
     fn checkpoint(&mut self, state: PersistentView<'_>, reason: CheckpointReason) -> Result<()> {
         let Some(checkpoint) = self.checkpoint.as_mut() else {
             #[cfg(feature = "latency-trace")]
             crate::jcvm_storage::record_session_error(3, 0);
             return Err(Error::Storage);
         };
-        if let Err(error) = checkpoint(state, reason, self.provider) {
+        if let Err(error) = checkpoint(CheckpointRequest::Commit(state, reason), self.provider) {
             #[cfg(feature = "latency-trace")]
             crate::jcvm_storage::record_session_error(4, error.clone() as u32);
             self.persistence_error = Some(error);

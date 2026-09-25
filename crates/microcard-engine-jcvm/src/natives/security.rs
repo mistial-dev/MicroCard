@@ -153,6 +153,11 @@ pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
 }
 
 // Persist unconditional PIN changes without publishing conditional heap/static writes.
+pub(crate) fn ensure_checkpoint_capacity(count: u32, host: &mut dyn crate::host::Host, jcre: &Jcre) -> Result<()> {
+    if !jcre.installing && count != 0 { host.ensure_checkpoint_capacity(count)?; }
+    Ok(())
+}
+
 pub(crate) fn checkpoint_committed(changed: bool, heap: &mut Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
         _context: heap::Context, statics: &[u8]) -> Result<()> {
     if jcre.installing || !changed || !heap.has_uncheckpointed_writes() { return Ok(()); }
@@ -480,6 +485,9 @@ pub fn call(
         (ClassId::GPSystem, MethodId::setCardContentState) => {
             let state = frame.pop_short()?;
             let previous = if jcre.installing { None } else { Some(heap.lifecycle()?) };
+            if !jcre.installing && Heap::valid_lifecycle(state as u8) && previous != Some(state as u8) {
+                ensure_checkpoint_capacity(1, host, jcre)?;
+            }
             let accepted = !jcre.installing && heap.set_lifecycle(state as u8)?;
             if accepted { checkpoint_committed(previous != Some(state as u8), heap, host, jcre, context, statics)?; }
             frame.push_short(i16::from(accepted))?;

@@ -66,6 +66,18 @@ mod tests {
     }
 
     #[test]
+    fn security_checkpoint_admission_counts_possible_pin_writes() {
+        let image = include_bytes!(
+            "../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
+        );
+        let (mut store, _) = Store::open(MemoryFlash::new(65536), [3; 16], image,
+            [4; 16], Sizes::default(), &mut SoftwareCrypto).unwrap();
+        store.journal.flash_mut().leave_nonce_reservations_for_test(1);
+        assert_eq!(store.ensure_checkpoint_capacity(1), Ok(()));
+        assert_eq!(store.ensure_checkpoint_capacity(2), Err(Error::Quota));
+    }
+
+    #[test]
     fn authenticated_state_is_bound_to_installation_and_snapshot_contract() {
         let image = include_bytes!(
             "../../microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb"
@@ -168,6 +180,11 @@ mod tests {
 }
 
 impl<F: Flash> Store<F> {
+    fn ensure_checkpoint_capacity(&self, count: u32) -> Result<()> {
+        if self.journal.remaining_commits()? < u64::from(count) { return Err(Error::Quota); }
+        Ok(())
+    }
+
     /// The flash region and key belong exclusively to this applet-state journal.
     /// A mismatch is an error, never permission to reinstall or erase storage.
     pub fn open(

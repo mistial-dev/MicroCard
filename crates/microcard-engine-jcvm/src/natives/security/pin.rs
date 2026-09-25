@@ -1,5 +1,5 @@
 //! OwnerPIN state, transaction exceptions and durable retry checkpoints.
-use super::{COUNTER, KIND, MATERIAL, READY, SIZE, checkpoint_committed};
+use super::{COUNTER, KIND, MATERIAL, READY, SIZE, checkpoint_committed, ensure_checkpoint_capacity};
 use crate::natives::{Jcre, Native, new_exception, new_native, word_field, REASON_FIELD};
 use crate::jcvm_api::{ClassId, MethodId};
 use crate::vm::{frame::Frame, heap::{self, Heap}};
@@ -155,12 +155,15 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
             }
             let tries = heap.get_word(this, COUNTER)?;
             let validated = heap.get_word(this, READY)? != 0;
+            let first_checkpoint = (!predecremented && tries != 0) || validated;
+            let possible_success = tries != 0;
+            ensure_checkpoint_capacity(u32::from(first_checkpoint) + u32::from(possible_success), host, jcre)?;
             // Presentation spends the attempt durably before comparing.
             if !predecremented {
                 heap.put_word_unconditional(this, COUNTER, tries.saturating_sub(1))?;
             }
             heap.put_word_unconditional(this, READY, 0)?;
-            checkpoint_committed((!predecremented && tries != 0) || validated,
+            checkpoint_committed(first_checkpoint,
                 heap, host, jcre, context, statics)?;
             if candidate == crate::vm::NULL {
                 return Ok(Native::Threw(new_exception(heap, ClassId::NullPointerException, context)?));
@@ -212,6 +215,7 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
             let actual = pin_class(heap, this, declared, context)?;
             clear_predecrement(heap, this, actual)?;
             if heap.get_word(this, READY)? != 0 {
+                ensure_checkpoint_capacity(1, host, jcre)?;
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
                 heap.put_word_unconditional(this, READY, 0)?;
@@ -224,6 +228,7 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
             let limit = heap.get_word(this, KIND)?;
             let changed = heap.get_word(this, COUNTER)? != limit
                 || heap.get_word(this, READY)? != 0;
+            if changed { ensure_checkpoint_capacity(1, host, jcre)?; }
             heap.put_word_unconditional(this, COUNTER, limit)?;
             heap.put_word_unconditional(this, READY, 0)?;
             checkpoint_committed(changed, heap, host, jcre, context, statics)?;
@@ -267,6 +272,7 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
             let tries = heap.get_word(this, COUNTER)?;
             let validated = heap.get_word(this, READY)? != 0;
             let next = tries.saturating_sub(1);
+            if tries != 0 || validated { ensure_checkpoint_capacity(1, host, jcre)?; }
             heap.put_word_unconditional(this, COUNTER, next)?;
             heap.put_word_unconditional(this, READY, 0)?;
             checkpoint_committed(tries != 0 || validated, heap, host, jcre, context, statics)?;

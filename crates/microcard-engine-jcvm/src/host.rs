@@ -18,6 +18,11 @@ pub enum CheckpointReason {
 
 /// The services an applet's cryptography needs.
 pub trait Host {
+    /// Check capacity before an immediate security-state mutation. This does not
+    /// reserve flash or replace the checkpoint's write-error handling.
+    fn ensure_checkpoint_capacity(&mut self, _count: u32) -> Result<()> {
+        Err(Error::Storage)
+    }
     /// Return only after this state is durable. Failure stops execution and requires
     /// recovery; cryptographic availability alone does not imply storage support.
     fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>, _reason: CheckpointReason) -> Result<()> {
@@ -115,5 +120,6 @@ pub struct NoHost;
 
 impl Host for NoHost {
     // This explicitly volatile engine host is used without a persistent session.
+    fn ensure_checkpoint_capacity(&mut self, _count: u32) -> Result<()> { Ok(()) }
     fn checkpoint(&mut self, _state: crate::applet::PersistentView<'_>, _reason: CheckpointReason) -> Result<()> { Ok(()) }
 }

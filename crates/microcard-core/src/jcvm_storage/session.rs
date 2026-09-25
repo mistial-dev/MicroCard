@@ -1,6 +1,6 @@
 //! One installed applet with durable command boundaries.
 use super::*;
-use crate::{hal::Entropy, image_store::CodeImage, jcvm_services::Services};
+use crate::{hal::Entropy, image_store::CodeImage, jcvm_services::{CheckpointRequest, Services}};
 use microcard_engine_jcvm::applet::Response;
 
 pub struct Session<F: Flash, I: CodeImage = Vec<u8>> {
@@ -148,7 +148,10 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         }
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            let mut checkpoint = |view: PersistentView<'_>, reason, provider: &mut _| self.store.commit_view(view, reason, provider);
+            let mut checkpoint = |request: CheckpointRequest<'_>, provider: &mut _| match request {
+                CheckpointRequest::Capacity(count) => self.store.ensure_checkpoint_capacity(count),
+                CheckpointRequest::Commit(view, reason) => self.store.commit_view(view, reason, provider),
+            };
             let mut services = Services::new(provider).with_checkpoint(&mut checkpoint);
             let result = self.card.as_mut().ok_or(Error::Missing)?
                 .deselect_with_cancel(&file, &mut services, cancel)
@@ -290,7 +293,10 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         let protected_length = if command.len() > 5 { 5 + usize::from(command[4]) } else { 5.min(command.len()) };
         let result = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
-            let mut checkpoint = |view: PersistentView<'_>, reason, provider: &mut _| self.store.commit_view(view, reason, provider);
+            let mut checkpoint = |request: CheckpointRequest<'_>, provider: &mut _| match request {
+                CheckpointRequest::Capacity(count) => self.store.ensure_checkpoint_capacity(count),
+                CheckpointRequest::Commit(view, reason) => self.store.commit_view(view, reason, provider),
+            };
             let mut services = match security {
                 Some(level) => Services::verified(provider, command.get(..protected_length).ok_or(Error::Format)?, level),
                 None => Services::new(provider),

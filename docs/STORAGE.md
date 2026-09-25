@@ -99,6 +99,12 @@ without consuming a security anchor. Ordinary writes commit once at APDU
 completion, including an applet-generated Java exception. Native internal failure
 boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
 
+PIN and card-state methods check capacity for their possible immediate security
+checkpoints before mutating RAM. A PIN check needs room for both the retry
+decrement and possible successful validation. This is an admission check, not a
+guarantee against flash I/O failure; a failed write still requires authenticated
+recovery. Read-only APDUs do not perform this check.
+
 An OpenFIPS201 cold selection changes one applet-owned persistent byte, so it
 does commit. A subsequent unchanged reselection after deselect performs no
 flash program or erase and no journal encryption in the host fault model.
