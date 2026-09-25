@@ -58,7 +58,9 @@ impl<F: crate::journal::Flash> Store<F> {
         let instance = *self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Missing)?;
         if !staging.is_empty() { return Err(Error::Busy); }
         if staging.persistent_capacity() == 0 { return Err(Error::Unsupported); }
-        if self.journal.remaining_commits()? < 3 { return Err(Error::Quota); }
+        // Publication and recovery each need one registry record. The identity
+        // reservation supplies the publication nonce rather than burning a third.
+        if self.journal.remaining_commits()? < 2 { return Err(Error::Quota); }
         let size = heaps.slot_size(instance.heap_bank)?;
         if size < crate::journal::OVERHEAD { return Err(Error::Bounds); }
         let prepared = (|| {
