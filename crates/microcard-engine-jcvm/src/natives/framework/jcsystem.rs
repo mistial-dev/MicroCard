@@ -64,7 +64,11 @@ pub(in crate::natives) fn call(
         }
         MethodId::isObjectDeletionSupported => frame.push_short(0)?,
         MethodId::getVersion => frame.push_short(0x0305)?,
-        MethodId::requestObjectDeletion => {}
+        MethodId::requestObjectDeletion => {
+            let exception = new_exception(heap, ClassId::SystemException, context)?;
+            heap.put_word_unconditional(exception, REASON_FIELD, 6)?; // ILLEGAL_USE
+            return Ok(Native::Threw(exception));
+        }
         MethodId::getTransactionDepth => {
             frame.push_short(i16::from(heap.transaction_remaining().is_some()))?;
         }

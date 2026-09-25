@@ -552,6 +552,21 @@ fn contacted_transport_parameters_and_buffered_receive_match_the_runtime() {
 }
 
 #[test]
+fn unsupported_object_deletion_reports_and_throws_consistently() {
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let mut jcre = Jcre::new(0, 0);
+    assert!(matches!(jcsystem(MethodId::isObjectDeletionSupported, 0, &mut heap, &mut frame, 1,
+        &mut jcre, &mut [], &mut crate::host::NoHost), Ok(Native::Returned)));
+    assert_eq!(frame.pop_short(), Ok(0));
+    let Native::Threw(exception) = jcsystem(MethodId::requestObjectDeletion, 0, &mut heap, &mut frame, 1,
+        &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
+        else { panic!("unsupported object deletion returned success"); };
+    assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(6));
+}
+
+#[test]
 fn apdu_cla_flags_follow_channel_encoding_and_reject_reserved_values() {
     let (mut slab, mut words, mut tags) = setup(0);
     let mut heap = Heap::new(&mut slab).unwrap();

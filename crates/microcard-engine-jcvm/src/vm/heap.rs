@@ -35,9 +35,8 @@ pub type Context = u8;
 
 /// One slab of objects, allocated from the front.
 ///
-/// There is no collector. Java Card makes object deletion a request the runtime may ignore,
-/// and every call to it in the applets this engine targets is guarded by a check that the
-/// card supports it, so a bump allocator is a complete implementation of the contract.
+/// This is currently bump-only. Until object deletion is implemented, the API
+/// reports it unsupported and rejects deletion requests with SystemException.
 pub struct Heap<'a> {
     bytes: &'a mut [u8],
     next: usize,

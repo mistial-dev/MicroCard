@@ -315,7 +315,7 @@ impl<F: Flash> Journal<F> {
         #[cfg(any(test, feature = "jcvm"))]
         let (generation, append_offset) = if self.append_enabled {
             let append_start = (HEADER_BYTES + n).next_multiple_of(4);
-            match append::replay(&mut self.flash, &self.key, slot, append_start,
+            match append::replay(&self.flash, &self.key, slot, append_start,
                     decoded.generation, provider,
                     |base, delta| apply(&mut plaintext, base, delta)) {
                 Ok(result) => result,
