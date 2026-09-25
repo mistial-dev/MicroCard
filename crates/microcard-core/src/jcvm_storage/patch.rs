@@ -1,5 +1,5 @@
 //! Bounded state changes carried inside an authenticated journal record.
-use crate::{cbor::{Decoder, Encoder}, Error, Result};
+use crate::{cbor::{argument_size, Decoder, Encoder, SliceEncoder}, Error, Result};
 use alloc::vec::Vec;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -29,6 +29,7 @@ fn span_end(offset: usize, bytes: &[u8], length: usize, previous_end: usize) -> 
 
 /// Borrow tracked writes; no previous heap image or allocated span list is required.
 /// Too many spans or an oversized encoding asks the caller to use a snapshot.
+#[cfg(test)]
 pub(super) fn encode<'a>(changes: impl Iterator<Item = (usize, &'a [u8])> + Clone,
         before_length: usize, after_length: usize, generation: u64, maximum: usize)
         -> Result<Zeroizing<Vec<u8>>> {
@@ -73,50 +74,68 @@ pub(super) fn encode_heap_window(view: microcard_engine_jcvm::applet::Persistent
     encode(change.into_iter(), before_length, view.heap_bytes(), generation, maximum)
 }
 
-fn encode_heap_ranges(view: microcard_engine_jcvm::applet::PersistentView<'_>,
-        ranges: impl Iterator<Item = core::ops::Range<usize>> + Clone,
-        before_length: usize, generation: u64, maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
-    let count = ranges.clone().count();
+fn record_size(changes: impl Iterator<Item = core::ops::Range<usize>> + Clone,
+        before_length: usize, after_length: usize, generation: u64) -> Result<usize> {
+    let count = changes.clone().count();
     if count > MAX_SPANS { return Err(Error::Quota); }
-    let mut encoder = Encoder::new(maximum);
-    encoder.array(5)?;
-    encoder.unsigned(1)?;
-    encoder.unsigned(generation)?;
-    encoder.unsigned(before_length as u64)?;
-    encoder.unsigned(view.heap_bytes() as u64)?;
-    encoder.array(count)?;
+    let mut size = [5, 1, generation, before_length as u64, after_length as u64, count as u64]
+        .into_iter().map(argument_size).sum::<usize>();
     let mut previous_end = 0;
-    for range in ranges {
-        if range.start >= range.end || range.end > view.heap_bytes() || range.start < previous_end {
+    for range in changes {
+        if range.start >= range.end || range.end > after_length || range.start < previous_end {
             return Err(Error::Bounds);
         }
-        if range.len() > maximum { return Err(Error::Quota); }
-        let mut bytes = crate::crypto::zeroizing_buffer(range.len())?;
-        view.save_range(range.start, &mut bytes).map_err(|_| Error::Format)?;
-        encoder.array(2)?;
-        encoder.unsigned(range.start as u64)?;
-        encoder.bytes(&bytes)?;
+        size = [argument_size(2), argument_size(range.start as u64),
+            argument_size(range.len() as u64), range.len()]
+            .into_iter().try_fold(size, |total, part| total.checked_add(part).ok_or(Error::Quota))?;
         previous_end = range.end;
     }
-    Ok(Zeroizing::new(encoder.finish()))
+    Ok(size)
+}
+
+fn write_record(output: &mut [u8], changes: impl Iterator<Item = core::ops::Range<usize>> + Clone,
+        before_length: usize, after_length: usize, generation: u64,
+        mut contents: impl FnMut(core::ops::Range<usize>, &mut [u8]) -> Result<()>) -> Result<()> {
+    let mut writer = SliceEncoder::new(output);
+    writer.array(5)?;
+    writer.unsigned(1)?;
+    writer.unsigned(generation)?;
+    writer.unsigned(before_length as u64)?;
+    writer.unsigned(after_length as u64)?;
+    writer.array(changes.clone().count())?;
+    for range in changes {
+        writer.array(2)?;
+        writer.unsigned(range.start as u64)?;
+        writer.bytes_with(range.len(), |output| contents(range, output))?;
+    }
+    writer.finish()
 }
 
 pub(super) fn encode_view(view: microcard_engine_jcvm::applet::PersistentView<'_>,
         before_length: usize, generation: u64, maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
     let writes = view.pending_writes().ok_or(Error::Quota)?;
     if writes.snapshot_required() { return Err(Error::Quota); }
-    let heap = encode_heap_ranges(view, writes.heap_ranges(), before_length, generation, maximum)?;
     let (instance, statics) = view.metadata();
-    let range = writes.static_range().unwrap_or(0..0);
-    let bytes = statics.get(range.clone()).ok_or(Error::Bounds)?;
-    let change = (!bytes.is_empty()).then_some((range.start, bytes));
-    let statics = encode(change.into_iter(), statics.len(), statics.len(), generation, maximum)?;
-    let mut encoder = Encoder::new(maximum);
+    let static_range = writes.static_range().filter(|range| !range.is_empty());
+    let static_changes = static_range.clone().into_iter();
+    let heap_size = record_size(writes.heap_ranges(), before_length, view.heap_bytes(), generation)?;
+    let static_size = record_size(static_changes.clone(), statics.len(), statics.len(), generation)?;
+    let total = [argument_size(4), argument_size(1), argument_size(u64::from(instance)),
+        argument_size(heap_size as u64), heap_size, argument_size(static_size as u64), static_size]
+        .into_iter().try_fold(0usize, |size, part| size.checked_add(part).ok_or(Error::Quota))?;
+    if total > maximum { return Err(Error::Quota); }
+    let mut encoder = Encoder::with_capacity(maximum, total)?;
     encoder.array(4)?;
     encoder.unsigned(1)?;
     encoder.unsigned(u64::from(instance))?;
-    encoder.bytes(&heap)?;
-    encoder.bytes(&statics)?;
+    encoder.bytes_with(heap_size, |output| write_record(output, writes.heap_ranges(),
+        before_length, view.heap_bytes(), generation,
+        |range, output| view.save_range(range.start, output).map_err(|_| Error::Format)))?;
+    encoder.bytes_with(static_size, |output| write_record(output, static_changes,
+        statics.len(), statics.len(), generation, |range, output| {
+            output.copy_from_slice(statics.get(range).ok_or(Error::Bounds)?);
+            Ok(())
+        }))?;
     Ok(Zeroizing::new(encoder.finish()))
 }
 
@@ -256,6 +275,15 @@ mod tests {
         apply(&golden, 7, &mut state, 6).unwrap();
         assert_eq!(state, [1, 9, 8, 4, 5, 7]);
         assert_eq!(encode_diff(&initial, &state, 7, golden.len()).unwrap().as_slice(), golden);
+        let ranges = [1..3, 5..6];
+        let length = record_size(ranges.iter().cloned(), 6, 6, 7).unwrap();
+        assert_eq!(length, golden.len());
+        let mut direct = [0; 15];
+        write_record(&mut direct, ranges.into_iter(), 6, 6, 7, |range, output| {
+            output.copy_from_slice(&state[range]);
+            Ok(())
+        }).unwrap();
+        assert_eq!(direct, golden, "the direct writer preserves the authenticated wire format");
         assert!(matches!(encode_diff(&initial, &state, 7, golden.len() - 1), Err(Error::Quota)));
         // Every truncation must leave even the first otherwise-valid span untouched.
         for end in 0..golden.len() {

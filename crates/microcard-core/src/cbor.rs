@@ -14,6 +14,56 @@ pub(crate) fn argument_size(value: u64) -> usize {
     }
 }
 
+fn argument_bytes(major: u8, value: u64) -> ([u8; 9], usize) {
+    let mut header = [0; 9];
+    let length = argument_size(value) - 1;
+    let additional = match length { 0 => value as u8, 1 => 24, 2 => 25, 4 => 26, _ => 27 };
+    header[0] = major << 5 | additional;
+    header[1..1 + length].copy_from_slice(&value.to_be_bytes()[8 - length..]);
+    (header, 1 + length)
+}
+
+/// Write a known-length nested record directly into its final byte string.
+/// The enclosing encoder owns the allocation and clears it if a fill fails.
+#[cfg(feature = "jcvm")]
+pub(crate) struct SliceEncoder<'a> {
+    output: &'a mut [u8],
+    at: usize,
+}
+
+#[cfg(feature = "jcvm")]
+impl<'a> SliceEncoder<'a> {
+    pub(crate) fn new(output: &'a mut [u8]) -> Self { Self { output, at: 0 } }
+
+    fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        let end = self.at.checked_add(bytes.len()).ok_or(Error::Quota)?;
+        self.output.get_mut(self.at..end).ok_or(Error::Quota)?.copy_from_slice(bytes);
+        self.at = end;
+        Ok(())
+    }
+
+    fn argument(&mut self, major: u8, value: u64) -> Result<()> {
+        let (bytes, length) = argument_bytes(major, value);
+        self.append(&bytes[..length])
+    }
+
+    pub(crate) fn array(&mut self, length: usize) -> Result<()> { self.argument(4, length as u64) }
+    pub(crate) fn unsigned(&mut self, value: u64) -> Result<()> { self.argument(0, value) }
+    pub(crate) fn bytes_with(&mut self, length: usize,
+            fill: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<()> {
+        let end = self.at.checked_add(argument_size(length as u64))
+            .and_then(|at| at.checked_add(length)).ok_or(Error::Quota)?;
+        if end > self.output.len() { return Err(Error::Quota); }
+        self.argument(2, length as u64)?;
+        let start = self.at;
+        self.at += length;
+        fill(&mut self.output[start..self.at])
+    }
+    pub(crate) fn finish(self) -> Result<()> {
+        if self.at == self.output.len() { Ok(()) } else { Err(Error::Format) }
+    }
+}
+
 pub struct Decoder<'a> {
     remaining: &'a [u8],
 }
@@ -191,12 +241,8 @@ impl Encoder {
     }
 
     fn argument(&mut self, major: u8, value: u64) -> Result<()> {
-        let mut header = [0; 9];
-        let length = argument_size(value) - 1;
-        let additional = match length { 0 => value as u8, 1 => 24, 2 => 25, 4 => 26, _ => 27 };
-        header[0] = major << 5 | additional;
-        header[1..1 + length].copy_from_slice(&value.to_be_bytes()[8 - length..]);
-        self.append(&header[..1 + length])
+        let (header, length) = argument_bytes(major, value);
+        self.append(&header[..length])
     }
 
     pub fn unsigned(&mut self, value: u64) -> Result<()> {
