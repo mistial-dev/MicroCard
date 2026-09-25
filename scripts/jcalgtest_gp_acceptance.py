@@ -46,6 +46,15 @@ def deletion_timings(client, repeats):
         print(f"digest factory after deletion request: {elapsed:.2f} ms", flush=True)
 
 
+def deletion_noop_probes(client, repeats):
+    # The upstream extended scan requests deletion before unsupported factory
+    # probes. Neither command changes durable applet state when there is no garbage.
+    for _ in range(repeats):
+        assert client.raw(bytes.fromhex("B0E2000000")) == b"\x90\x00"
+        result = client.raw(bytes.fromhex("B075150003FF0000"))
+        assert result[0] == 0x15 and result[1] != 0 and result[-2:] == b"\x90\x00", result.hex()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reader", help="Exact PC/SC reader name; omit for host JCVM")
@@ -58,11 +67,15 @@ def main():
                         help="Repeat the probe sequence within one card session")
     parser.add_argument("--deletion-probes", type=int, default=0,
                         help="Time factory calls after the applet requests object deletion")
+    parser.add_argument("--deletion-noop-probes", type=int, default=0,
+                        help="Repeat deletion requests followed by unsupported factories")
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
     if args.deletion_probes < 0:
         parser.error("--deletion-probes must be nonnegative")
+    if args.deletion_noop_probes < 0:
+        parser.error("--deletion-noop-probes must be nonnegative")
     if args.reader and args.management_key is None:
         parser.error("--management-key is required with --reader")
     if args.management_key and len(args.management_key.read_bytes()) != 32:
@@ -93,6 +106,7 @@ def main():
             for _ in range(args.repeat):
                 probe(client, args.timings)
             deletion_timings(client, args.deletion_probes)
+            deletion_noop_probes(client, args.deletion_noop_probes)
         finally:
             client.close()
         if args.reader:

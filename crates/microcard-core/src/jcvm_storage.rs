@@ -32,6 +32,7 @@ pub struct Store<F: Flash> {
     installation: [u8; 16],
     maximum: usize,
     heap_length: Option<usize>,
+    heap_header: Option<u8>,
 }
 
 #[cfg(all(test, feature = "software-crypto"))]
@@ -187,6 +188,8 @@ impl<F: Flash> Store<F> {
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(42);
         store.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
+        store.heap_header = card.as_ref().map(|card| card.persistent_view()
+            .and_then(PersistentView::heap_header).map_err(|_| Error::Format)).transpose()?;
         Ok((store, card))
     }
 
@@ -198,7 +201,7 @@ impl<F: Flash> Store<F> {
         provider.sha256_into(verified_image, &mut image)?;
         let (journal, snapshot) = Journal::open_with_replay(flash, key, provider,
             |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, maximum))?;
-        Ok((Self { journal, image, installation, maximum, heap_length: None }, snapshot))
+        Ok((Self { journal, image, installation, maximum, heap_length: None, heap_header: None }, snapshot))
     }
 
     pub(crate) fn validate_journal(flash: F, key: impl Into<JournalKey>, verified_image: &[u8],
@@ -231,6 +234,8 @@ impl<F: Flash> Store<F> {
             self.installation,
         )?;
         self.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
+        self.heap_header = card.as_ref().map(|card| card.persistent_view()
+            .and_then(PersistentView::heap_header).map_err(|_| Error::Format)).transpose()?;
         Ok(card)
     }
 
@@ -243,7 +248,15 @@ impl<F: Flash> Store<F> {
     pub(crate) fn commit_view(&mut self, view: PersistentView<'_>, reason: CheckpointReason,
         provider: &mut impl CryptoProvider) -> Result<()> {
         #[cfg(feature = "latency-trace")]
-        trace::capture_view(view);
+        trace::capture_view(view, reason);
+        let heap_header = view.heap_header().map_err(|_| Error::Format)?;
+        if reason == CheckpointReason::ApduEnd {
+            if let Some((length, header)) = self.heap_length.zip(self.heap_header) {
+                if view.same_state_after_deletion_request(length, header).map_err(|_| Error::Format)? {
+                    return Ok(());
+                }
+            }
+        }
         let (instance, statics) = view.metadata();
         let required = snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())?;
         #[cfg(feature = "latency-trace")]
@@ -267,8 +280,9 @@ impl<F: Flash> Store<F> {
                             patch::encode_view_into(view, before_length, generation, output)
                         })?;
                         #[cfg(feature = "latency-trace")]
-                        trace::committed_patch();
+                        trace::committed_patch(length);
                         self.heap_length = Some(view.heap_bytes());
+                        self.heap_header = Some(heap_header);
                         return Ok(());
                     }
                     Err(Error::Quota) => {
@@ -284,10 +298,13 @@ impl<F: Flash> Store<F> {
         #[cfg(feature = "latency-trace")]
         if self.heap_length.is_none() { trace::fallback(1); }
         let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
+        #[cfg(feature = "latency-trace")]
+        let snapshot_bytes = snapshot.len();
         self.journal.commit_owned_with_reason(snapshot, reason, provider)?;
         #[cfg(feature = "latency-trace")]
-        trace::committed_snapshot();
+        trace::committed_snapshot(snapshot_bytes);
         self.heap_length = Some(view.heap_bytes());
+        self.heap_header = Some(heap_header);
         Ok(())
     }
 
@@ -296,8 +313,13 @@ impl<F: Flash> Store<F> {
     pub(crate) fn compact_view(&mut self, view: PersistentView<'_>,
         provider: &mut impl CryptoProvider) -> Result<()> {
         let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
+        #[cfg(feature = "latency-trace")]
+        let snapshot_bytes = snapshot.len();
         self.journal.commit_owned_with_reason(snapshot, CheckpointReason::ApduEnd, provider)?;
+        #[cfg(feature = "latency-trace")]
+        trace::idle_compaction(snapshot_bytes);
         self.heap_length = Some(view.heap_bytes());
+        self.heap_header = Some(view.heap_header().map_err(|_| Error::Format)?);
         Ok(())
     }
 

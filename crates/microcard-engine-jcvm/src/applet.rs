@@ -374,18 +374,20 @@ impl AppletInstance {
             let answer = self.callback(file, host, Callback::Select, (incoming, expected), &mut budget, cancel)?;
             if answer.aborted || answer.exception.is_some() || answer.returned == 0 {
                 if cancel() { return Err(Error::Cancelled); }
+                self.service_object_deletion(file)?;
                 self.checkpoint_dirty(host)?;
                 return Ok(Response { data: Vec::new(), sw: 0x6999 });
             }
             self.selected = true;
         }
         // Selection is decided by select(), not by the status that process() returns.
-        self.service_object_deletion(file, host)?;
+        self.service_object_deletion(file)?;
         let answer = self.callback(file, host, Callback::Process { selecting }, (incoming, expected), &mut budget, cancel)?;
         let heap = Heap::resume(&mut self.heap, self.heap_used)?;
         let sw = if answer.aborted { SW_UNKNOWN } else { answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception)) };
         drop(heap);
         if cancel() { return Err(Error::Cancelled); }
+        self.service_object_deletion(file)?;
         self.checkpoint_dirty(host)?;
         Ok(Response { data: answer.data, sw })
     }
@@ -397,6 +399,7 @@ impl AppletInstance {
     ) -> Result<()> {
         self.deselect_inner(file, host, cancel, false)?;
         if cancel() { return Err(Error::Cancelled); }
+        self.service_object_deletion(file)?;
         self.checkpoint_dirty(host)
     }
 
@@ -413,13 +416,12 @@ impl AppletInstance {
         Ok(())
     }
 
-    fn service_object_deletion(&mut self, file: &LoadFile, host: &mut impl Host) -> Result<()> {
+    fn service_object_deletion(&mut self, file: &LoadFile) -> Result<()> {
         if !Heap::resume(&mut self.heap, self.heap_used)?.object_deletion_requested()? { return Ok(()); }
         self.collect_unreachable(file)?;
         let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
         heap.clear_object_deletion_request()?;
         self.pending_writes.merge(heap.pending_writes());
-        self.checkpoint_dirty(host)?;
         Ok(())
     }
 

@@ -2,6 +2,7 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use microcard_engine_jcvm::applet::PersistentView;
+use microcard_engine_jcvm::host::CheckpointReason;
 
 #[repr(C)]
 pub struct PatchTrace {
@@ -17,6 +18,11 @@ pub struct PatchTrace {
     heap_bytes: AtomicU32,
     append_commits: AtomicU32,
     snapshot_commits: AtomicU32,
+    checkpoint_attempts: [AtomicU32; 4],
+    fallback_counts: [AtomicU32; 4],
+    patch_payload_bytes: AtomicU32,
+    snapshot_payload_bytes: AtomicU32,
+    idle_compactions: AtomicU32,
 }
 
 #[no_mangle]
@@ -33,6 +39,11 @@ pub static MICROCARD_JCVM_PATCH_TRACE: PatchTrace = PatchTrace {
     heap_bytes: AtomicU32::new(0),
     append_commits: AtomicU32::new(0),
     snapshot_commits: AtomicU32::new(0),
+    checkpoint_attempts: [const { AtomicU32::new(0) }; 4],
+    fallback_counts: [const { AtomicU32::new(0) }; 4],
+    patch_payload_bytes: AtomicU32::new(0),
+    snapshot_payload_bytes: AtomicU32::new(0),
+    idle_compactions: AtomicU32::new(0),
 };
 
 #[no_mangle]
@@ -63,8 +74,15 @@ pub(crate) fn renewal_phase(stage: u32) {
     let _ = stage;
 }
 
-pub(super) fn capture_view(view: PersistentView<'_>) {
+pub(super) fn capture_view(view: PersistentView<'_>, reason: CheckpointReason) {
     let trace = &MICROCARD_JCVM_PATCH_TRACE;
+    let reason_index = match reason {
+        CheckpointReason::Installation => 0,
+        CheckpointReason::ApduEnd => 1,
+        CheckpointReason::OwnerPin => 2,
+        CheckpointReason::TransactionCommit => 3,
+    };
+    trace.checkpoint_attempts[reason_index].fetch_add(1, Ordering::Relaxed);
     let writes = view.pending_writes();
     let heap = writes.and_then(|value| value.heap_range());
     let statics = writes.and_then(|value| value.static_range());
@@ -85,6 +103,9 @@ pub(super) fn capacity(snapshot: usize, maximum: usize, heap: usize) {
 
 pub(super) fn fallback(reason: u32) {
     MICROCARD_JCVM_PATCH_TRACE.reason.store(reason, Ordering::Relaxed);
+    if (reason as usize) < MICROCARD_JCVM_PATCH_TRACE.fallback_counts.len() {
+        MICROCARD_JCVM_PATCH_TRACE.fallback_counts[reason as usize].fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub(super) fn patch(bytes: usize) {
@@ -92,10 +113,17 @@ pub(super) fn patch(bytes: usize) {
     MICROCARD_JCVM_PATCH_TRACE.patch_bytes.store(bytes as u32, Ordering::Relaxed);
 }
 
-pub(super) fn committed_patch() {
+pub(super) fn committed_patch(bytes: usize) {
     MICROCARD_JCVM_PATCH_TRACE.append_commits.fetch_add(1, Ordering::Relaxed);
+    MICROCARD_JCVM_PATCH_TRACE.patch_payload_bytes.fetch_add(bytes as u32, Ordering::Relaxed);
 }
 
-pub(super) fn committed_snapshot() {
+pub(super) fn committed_snapshot(bytes: usize) {
     MICROCARD_JCVM_PATCH_TRACE.snapshot_commits.fetch_add(1, Ordering::Relaxed);
+    MICROCARD_JCVM_PATCH_TRACE.snapshot_payload_bytes.fetch_add(bytes as u32, Ordering::Relaxed);
+}
+
+pub(super) fn idle_compaction(bytes: usize) {
+    MICROCARD_JCVM_PATCH_TRACE.idle_compactions.fetch_add(1, Ordering::Relaxed);
+    committed_snapshot(bytes);
 }

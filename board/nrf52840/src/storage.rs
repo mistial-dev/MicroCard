@@ -181,29 +181,38 @@ impl Nvm {
         let nvmc = unsafe { &*pac::NVMC::ptr() };
         #[cfg(feature = "latency-trace")]
         let trace_start = now();
-        nvmc.config.write(|w| w.wen().een());
+        nvmc.config.write(|w| w.wen().ren());
+        #[cfg(feature = "latency-trace")]
+        let mut erased_pages = 0usize;
         let result = (|| {
             for page in (base..base + size).step_by(4096) {
+                // The target slot is not live. Pages left blank by a shorter
+                // predecessor need no erase cycle before this slot is reused.
+                let bytes = unsafe { core::slice::from_raw_parts(page as *const u8, 4096) };
+                if bytes.iter().all(|byte| *byte == 0xff) { continue; }
                 #[cfg(feature = "latency-trace")]
                 crate::trace::record(crate::trace::event::ERASE_PAGE_START, page as u32);
+                nvmc.config.write(|w| w.wen().een());
                 nvmc.erasepage()
                     .write(|w| unsafe { w.erasepage().bits(page as u32) });
                 Self::ready()?;
+                nvmc.config.write(|w| w.wen().ren());
                 #[cfg(feature = "latency-trace")]
-                crate::trace::record(crate::trace::event::ERASE_PAGE_DONE, page as u32);
+                {
+                    erased_pages += 1;
+                    #[cfg(feature = "engine-jcvm")]
+                    crate::trace::erase_page(page);
+                    crate::trace::record(crate::trace::event::ERASE_PAGE_DONE, page as u32);
+                }
                 feed();
                 #[cfg(feature = "usb-ccid")]
-                {
-                    nvmc.config.write(|w| w.wen().ren());
-                    Self::yield_flash();
-                    nvmc.config.write(|w| w.wen().een());
-                }
+                Self::yield_flash();
             }
             Ok(())
         })();
         nvmc.config.write(|w| w.wen().ren());
         #[cfg(feature = "latency-trace")]
-        if result.is_ok() {
+        if result.is_ok() && erased_pages != 0 {
             crate::trace::erase(trace_start, base, size);
         }
         result
@@ -249,6 +258,8 @@ impl Nvm {
                 #[cfg(feature = "latency-trace")]
                 {
                     trace_words += 1;
+                    #[cfg(feature = "engine-jcvm")]
+                    crate::trace::program_word(base + pos);
                 }
                 Self::ready()?;
                 feed();

@@ -299,7 +299,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
                 .process_with_cancel(&file, &mut services, command, selecting, cancel)
                 .map_err(|error| {
                     #[cfg(feature = "latency-trace")]
-                    super::record_session_error(1, error.clone() as u32);
+                    super::record_session_error(1, error as u32);
                     let result = services.take_persistence_error().unwrap_or_else(|| engine_error(error));
                     #[cfg(feature = "latency-trace")]
                     super::record_session_error(2, result.clone() as u32);

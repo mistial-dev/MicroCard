@@ -107,9 +107,10 @@ def main():
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
         "dongle": 244_000, "jcvm_development_debug": 121_000,
-        # MJ07 separates ordinary records from security anchors and compacts
-        # heap slots without registry rotation. This costs under 1 KiB per link.
-        "jcvm_usb_ccid": 239_000, "jcvm_dongle": 240_000,
+        # MJ07 separates ordinary records from security anchors. Coalescing
+        # object deletion and skipping blank-page erases add measured code to
+        # the dongle profile; leave less than 300 bytes of bounded headroom.
+        "jcvm_usb_ccid": 239_000, "jcvm_dongle": 240_500,
     }
     failures = []
     for name, result in variants.items():

@@ -44,6 +44,12 @@ MJ01/MJ02 records are rejected rather than migrated. See [the wire contract](PRO
 
 MC04 rotates complete snapshots through three 64 KiB slots. JCVM uses two 8 KiB registry slots and two 64 KiB slots per heap bank. Before reusing a slot, the active record receives a reclaim-start marker. The target slot is erased and programmed, its commit marker is written last, and the prior active record then receives a reclaim-complete marker. Recovery accepts the prior record during an interrupted target erase or program and otherwise selects the highest authenticated generation. Host fault injection covers every byte mutation while recycling the three-slot ring. Earlier two-slot board layouts and word-per-generation anchors have no conversion path.
 
+The JCVM slots alternate, spreading reuse across their 32 physical data pages.
+NVMC skips pages that are already erased. The opt-in SWD trace counts erases and
+programmed words for each physical heap-bank page; it writes no diagnostic data
+to flash. This spreads wear within the allocated slots but does not change the
+chip's finite page endurance.
+
 The simulator requires `monotonic.bin`, `nonces.bin`, and both slot files to appear as one storage set. Existing state without the nonce counter has no upgrade route. Removing the whole state directory represents fresh provisioning. On nRF52840, a one-way ownership word shares the management-key erase page. Firmware programs it before the first journal commit and rejects both markerless existing state and a programmed marker paired with completely erased journals and anchor. Because flash cannot restore a programmed bit without erasing the page and its keys, ordinary out-of-band persistent-state erasure requires fresh management keys. A debugger that can erase and rewrite the key page can still defeat this policy. Production debug lock and verified firmware boot remain required. Runtime management has no reset or anchor-erase command.
 
 Once a commit starts modifying journal slots, any flash error disables further commits
@@ -73,6 +79,16 @@ methods return. Explicit transaction commits persist synchronously before return
 without consuming a security anchor. Ordinary writes commit once at APDU
 completion, including an applet-generated Java exception. Native internal failure
 boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
+
+Java Card transient-array payloads stay in RAM and are cleared on reset or
+deselection. Their headers and stable references remain persistent; ordinary
+allocation patches carry only those headers, and recovery zero-fills the new
+payload. A [`requestObjectDeletion()`](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/JCSystem.html)
+call is serviced after its callback and before the command's final checkpoint,
+as required before the next `process()`.
+If no object was reclaimed and the request marker returned to its authenticated
+value, the command writes no heap record. A request already made durable by an
+earlier checkpoint is still serviced after reboot, and its clearing is persisted.
 
 The MJ07 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
 is a CBOR byte string encoding `[1, base_generation, before_length, after_length,

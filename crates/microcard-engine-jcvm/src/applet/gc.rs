@@ -241,7 +241,8 @@ mod tests {
         card.statics[..2].copy_from_slice(&static_root.to_be_bytes());
         let before = card.heap_used;
         let mut host = Capture { heap: Vec::new(), calls: 0, snapshot: false, ranges: Vec::new() };
-        card.service_object_deletion(&file, &mut host).unwrap();
+        card.service_object_deletion(&file).unwrap();
+        card.checkpoint_dirty(&mut host).unwrap();
         assert_eq!(host.calls, 1);
         assert!(host.snapshot);
         assert_eq!(host.heap, card.heap[..card.heap_used]);
@@ -282,7 +283,8 @@ mod tests {
         // Model an earlier durable APDU: the request bit is already on flash.
         card.pending_writes = heap::PendingWrites::default();
         let mut host = Capture { heap: Vec::new(), calls: 0, snapshot: false, ranges: Vec::new() };
-        card.service_object_deletion(&file, &mut host).unwrap();
+        card.service_object_deletion(&file).unwrap();
+        card.checkpoint_dirty(&mut host).unwrap();
         assert_eq!(host.calls, 1);
         assert!(!host.snapshot);
         assert_eq!(card.heap_used, card.runtime_bytes + heap::HEADER + 2);
@@ -309,7 +311,8 @@ mod tests {
         card.pending_writes = heap::PendingWrites::default();
         let before = card.heap[..card.heap_used].to_vec();
         let mut host = Capture { heap: Vec::new(), calls: 0, snapshot: false, ranges: Vec::new() };
-        card.service_object_deletion(&file, &mut host).unwrap();
+        card.service_object_deletion(&file).unwrap();
+        card.checkpoint_dirty(&mut host).unwrap();
         assert_eq!(host.calls, 1);
         assert!(!host.snapshot);
         assert_eq!(card.instance, Some(root));

@@ -13,6 +13,8 @@ mod undo;
 use undo::Undo;
 mod writes;
 pub use writes::PendingWrites;
+#[cfg(feature = "latency-trace")]
+mod trace;
 
 /// Object kinds, which is the element type for an array.
 pub const KIND_OBJECT: u8 = 0;
@@ -141,7 +143,8 @@ impl<'a> Heap<'a> {
         Ok(self.bytes[0] & DELETION_REQUESTED != 0)
     }
 
-    /// The request survives reset and transaction abort, then idle maintenance clears it.
+    /// A request present in authenticated state survives reset and transaction
+    /// abort. Ordinary APDUs service it before their final checkpoint.
     pub(crate) fn request_object_deletion(&mut self) -> Result<()> {
         self.lifecycle()?;
         if self.bytes[0] & DELETION_REQUESTED == 0 {
@@ -278,7 +281,11 @@ impl<'a> Heap<'a> {
 
     pub fn remember_static(&mut self, at: usize, before: &[u8]) -> Result<()> {
         if let Some((_, undo)) = &mut self.transaction { undo.record(at, before, true)?; }
-        else { self.pending_writes.statics(at, before.len()); }
+        else {
+            self.pending_writes.statics(at, before.len());
+            #[cfg(feature = "latency-trace")]
+            trace::static_write(before.len());
+        }
         Ok(())
     }
 
@@ -288,7 +295,11 @@ impl<'a> Heap<'a> {
                 // Abort wipes the entire allocation tail; only pre-existing payloads
                 // need before-images. Committed projections also exclude this tail.
                 if at < *start { undo.record(at, &self.bytes[at..at + length], false)?; }
-            } else { self.pending_writes.heap(at, length); }
+            } else {
+                self.pending_writes.heap(at, length);
+                #[cfg(feature = "latency-trace")]
+                trace::heap_write(length);
+            }
         }
         Ok(())
     }
@@ -325,7 +336,7 @@ impl<'a> Heap<'a> {
         Ok(())
     }
 
-    fn allocate(&mut self, class: u16, length: u16, kind: u8, owner: Context) -> Result<Reference> {
+    fn allocate(&mut self, class: u16, length: u16, kind: u8, owner: Context, clear_event: u8) -> Result<Reference> {
         if self.aborted_allocations { return Err(Error::TransactionAborted); }
         let range = self.allocation_range(self.next, kind, length)?;
         let at = range.start;
@@ -333,18 +344,23 @@ impl<'a> Heap<'a> {
         self.bytes[at..end].fill(0);
         self.bytes[at..at + 2].copy_from_slice(&class.to_be_bytes());
         self.bytes[at + 2..at + 4].copy_from_slice(&length.to_be_bytes());
-        self.bytes[at + 4] = kind;
+        self.bytes[at + 4] = kind | (clear_event << 4);
         self.bytes[at + 5] = owner;
         self.next = end;
-        // Transient payloads reset, but their headers and stable handles persist.
+        #[cfg(feature = "latency-trace")]
+        trace::allocation(end - at);
+        // Transient payloads are rebuilt as zero-filled RAM on recovery. Only
+        // their headers and stable handles belong in an ordinary flash patch.
         // Transactional allocation tails are published only by commit.
-        if self.transaction.is_none() { self.pending_writes.heap(at, end - at); }
+        if self.transaction.is_none() {
+            self.pending_writes.heap(at, if clear_event == 0 { end - at } else { HEADER });
+        }
         Ok(at as Reference)
     }
 
     /// An instance of a class, with `words` words of field, all zero.
     pub fn new_object(&mut self, class: u16, words: u16, owner: Context) -> Result<Reference> {
-        self.allocate(class, words, KIND_OBJECT, owner)
+        self.allocate(class, words, KIND_OBJECT, owner, 0)
     }
 
     /// An array of `length` elements, all zero or null.
@@ -353,20 +369,23 @@ impl<'a> Heap<'a> {
             return Err(Error::Format);
         }
         let class = if kind == KIND_REFERENCE { ANY_REFERENCE_CLASS } else { 0 };
-        self.allocate(class, length, kind, owner)
+        self.allocate(class, length, kind, owner, 0)
     }
 
     /// A reference array whose elements must be assignment-compatible with the named class.
     pub fn new_reference_array(&mut self, component_class: u16, length: u16,
             owner: Context) -> Result<Reference> {
         if component_class == ANY_REFERENCE_CLASS { return Err(Error::Format); }
-        self.allocate(component_class, length, KIND_REFERENCE, owner)
+        self.allocate(component_class, length, KIND_REFERENCE, owner, 0)
     }
 
     pub fn new_transient_array(&mut self, kind: u8, length: u16, owner: Context, event: u8) -> Result<Reference> {
         if !matches!(event, CLEAR_ON_RESET | CLEAR_ON_DESELECT) { return Err(Error::Format); }
-        let reference = self.new_array(kind, length, owner)?;
-        self.bytes[reference as usize + 4] |= event << 4;
+        if !(KIND_BOOLEAN..=KIND_REFERENCE).contains(&kind) { return Err(Error::Format); }
+        let class = if kind == KIND_REFERENCE { ANY_REFERENCE_CLASS } else { 0 };
+        let reference = self.allocate(class, length, kind, owner, event)?;
+        #[cfg(feature = "latency-trace")]
+        trace::transient_array(length as usize * if matches!(kind, KIND_BOOLEAN | KIND_BYTE) { 1 } else if kind == KIND_INT { 4 } else { 2 });
         Ok(reference)
     }
 
@@ -822,7 +841,7 @@ mod tests {
         heap.mark_checkpointed();
         let transient = heap.new_transient_array(KIND_BYTE, 1, 1, CLEAR_ON_DESELECT).unwrap();
         assert!(heap.has_uncheckpointed_writes(), "transient allocation headers persist");
-        assert_eq!(heap.pending_writes().heap_range(), Some(transient as usize..heap.used()));
+        assert_eq!(heap.pending_writes().heap_range(), Some(transient as usize..transient as usize + HEADER));
         assert_eq!(heap.pending_writes().static_range(), None);
         assert!(!heap.pending_writes().snapshot_required());
         heap.mark_checkpointed();

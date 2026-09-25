@@ -84,6 +84,23 @@ impl PersistentCursor<'_> {
 impl<'a> PersistentView<'a> {
     pub fn heap_bytes(self) -> usize { self.projection.map_or(self.heap.len(), Heap::committed_bytes) }
 
+    /// The runtime's version and pending-deletion marker live outside objects
+    /// and are never part of a Java transaction.
+    pub fn heap_header(self) -> Result<u8> {
+        self.heap.first().copied().ok_or(Error::Bounds)
+    }
+
+    /// A deletion request serviced in this APDU may set and clear only the
+    /// runtime marker. If its final value matches flash, nothing changed.
+    pub fn same_state_after_deletion_request(self, before_length: usize, before_header: u8) -> Result<bool> {
+        let Some(writes) = self.pending_writes() else { return Ok(false); };
+        Ok(self.heap_bytes() == before_length
+            && self.heap_header()? == before_header
+            && !writes.snapshot_required()
+            && writes.static_range().is_none()
+            && writes.heap_ranges().eq(core::iter::once(0..1)))
+    }
+
     pub fn cursor(self) -> Result<PersistentCursor<'a>> {
         let total = self.heap_bytes();
         if total < 2 || !total.is_multiple_of(2) { return Err(Error::Bounds); }

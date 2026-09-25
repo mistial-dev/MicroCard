@@ -315,11 +315,43 @@ The scan used 42 additional snapshot attempts. Each completed rollover erases
 one 64 KiB slot (16 flash pages); two slots alternate, so this workload is
 approximately 21 erase cycles per page per full scan. Nordic specifies
 [10,000 erase cycles per nRF52840 page](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/nvmc.html).
-That suggests roughly 476 identical scans to the rated limit, before margins,
-other writes, and any failed attempts. It is a workload estimate, not a safe
-service-life guarantee. Normal crypto APDUs that do not change persistent state
-do not use this budget. Continuous write-heavy use needs a measured wear policy
-or higher-endurance storage.
+That suggested roughly 476 identical scans to the rated limit in the MJ07
+baseline, before margins, other writes, and failed attempts. It was a workload
+estimate, not a safe service-life guarantee, and does **not** apply to the
+current deletion-request behavior. Normal crypto APDUs that do not change
+persistent state do not use this budget. Continuous write-heavy use still needs
+a measured service-life target or higher-endurance storage.
+
+An opt-in SWD wear trace on the same installed JCAlgTest applet identified the
+cause: the client requests object deletion before nearly every probe. Servicing
+each request on a later APDU journaled both setting and clearing a runtime bit.
+The traced baseline completed all **8,607 probes** with **17,309 append
+commits**, **29 idle compactions**, **451,058 programmed heap words**, and
+**464 physical heap-page erases**. Each of the 32 data pages in the two slots
+received 14 or 15 erases, so the existing slot alternation distributed this
+wear evenly. A new page allocator would not address the unnecessary writes.
+
+Servicing the request before the command-boundary checkpoint and omitting a
+net-zero marker patch produced another complete **8,607/8,607** run with zero
+error rows. Its SWD trace counted **186 append commits**, **zero idle
+compactions**, **5,595 programmed heap words**, and **zero heap-page erases**.
+The untouched CSV, upstream log, analyzer output, exact ELF, and trace are in
+`/private/tmp/microcard-jcalgtest-wearfix-direct-dk-20260925`; the ELF SHA-256
+is `8bf4a03947e72a46640ee9c0d1995d85c70b80247592057f68d9021fdae2f74b`.
+These figures cover a previously installed applet, not a fresh provisioning
+run. They measure this scan, not a general bound on persistent write traffic.
+The trace build is opt-in; normal firmware carries no per-page counters.
+The subsequent build also omits transient-array payloads from allocation
+patches. Its exact ELF SHA-256 is
+`7f9c7732ff5211a32db7bfb6d45a863fa5692834a9a145ebb0c954cfd0aa837b`.
+The untouched result and analysis in
+`/private/tmp/microcard-jcalgtest-wearfix-final-dk-20260925` confirm
+**8,607/8,607 probes and zero error rows** with **15.5 ms host PC/SC median,
+17 ms p95, and 645 ms maximum** across 17,222 APDUs. The declared P71D321
+gap remains 233 probes. The target's debug port did not permit an SWD counter
+read after this flash, so the preceding build's wear counts must not be
+attributed to this exact ELF.
+
 After installing the applet with `scripts/jcalgtest_gp_acceptance.py`, the
 physical scan used this command. Reader index `2` was the MicroCard reader on
 this host; check the client's reader list before repeating it elsewhere.

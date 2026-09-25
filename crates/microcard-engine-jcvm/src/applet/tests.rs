@@ -98,7 +98,31 @@
     }
 
     #[test]
-    fn deletion_request_survives_reboot_and_runs_before_the_next_process() {
+    fn a_serviced_deletion_request_is_a_net_zero_persistent_write() {
+        let mut bytes = vec![0; 128];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        heap.initialize_lifecycle();
+        let buffer = heap.new_transient_array(heap::KIND_BYTE, 4, 1, heap::CLEAR_ON_RESET).unwrap();
+        let instance = heap.new_object(1, 0, 1).unwrap();
+        heap.mark_checkpointed();
+        let before_length = heap.used();
+        let before_header = heap.image()[0];
+        heap.request_object_deletion().unwrap();
+        heap.clear_object_deletion_request().unwrap();
+        let view = PersistentView {
+            heap: heap.image(), statics: &[], instance, buffer, projection: Some(&heap),
+        };
+        assert!(view.same_state_after_deletion_request(before_length, before_header).unwrap());
+        assert!(!view.same_state_after_deletion_request(before_length, before_header | 0x80).unwrap());
+        heap.new_object(1, 0, 1).unwrap();
+        let grown = PersistentView {
+            heap: heap.image(), statics: &[], instance, buffer, projection: Some(&heap),
+        };
+        assert!(!grown.same_state_after_deletion_request(before_length, before_header).unwrap());
+    }
+
+    #[test]
+    fn deletion_runs_at_the_command_boundary_and_a_durable_request_survives_reboot() {
         struct Capture { snapshots: Vec<(Vec<u8>, Vec<u8>, Reference)> }
         impl crate::host::Host for Capture {
             fn checkpoint(&mut self, view: PersistentView<'_>, _: crate::host::CheckpointReason) -> Result<()> {
@@ -116,6 +140,7 @@
         let file = LoadFile::parse(&bytes).unwrap();
         let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
         card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
+        let before = card.heap_used;
         let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
         card.pending_writes.merge(heap.pending_writes());
@@ -123,17 +148,25 @@
         let mut host = Capture { snapshots: Vec::new() };
         assert_eq!(card.process(&file, &mut host, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, SW_SUCCESS);
         assert_eq!(host.snapshots.len(), 1);
-        let (saved_heap, saved_statics, instance) = &host.snapshots[0];
-        assert_eq!(saved_heap[0], 0x83);
-        let mut restored = AppletInstance::restore(&file, Sizes::default(), PersistentState {
-            heap: saved_heap, statics: saved_statics, instance: *instance,
-        }).unwrap();
+        assert!(card.heap_used < before + heap::HEADER + 16);
+        assert_eq!(host.snapshots[0].0[0], 3, "the request is serviced before publication");
+
+        // A previously checkpointed request, for example at a PIN boundary,
+        // must still be honored before the next process after power loss.
+        let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+        heap.request_object_deletion().unwrap();
+        card.pending_writes.merge(heap.pending_writes());
+        card.heap_used = heap.used();
+        let mut committed = vec![0; card.heap_used];
+        let state = card.save_into(&mut committed).unwrap();
+        assert_eq!(state.heap[0], 0x83);
+        let mut restored = AppletInstance::restore(&file, Sizes::default(), state).unwrap();
         let before = restored.heap_used;
         assert_eq!(restored.process(&file, &mut host, &[0, 1, 0, 0, 0], false).unwrap().sw, SW_SUCCESS);
         assert!(restored.heap_used < before);
-        assert_eq!(host.snapshots.len(), 3);
-        assert_eq!(host.snapshots[1].0[0], 3, "deletion must checkpoint before process");
-        assert_eq!(host.snapshots[2].0[0], 0x83, "process may request another cycle");
+        assert_eq!(host.snapshots.len(), 2);
+        assert_eq!(host.snapshots[1].0[0], 3);
     }
 
     #[test]

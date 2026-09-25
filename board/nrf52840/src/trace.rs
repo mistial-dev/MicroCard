@@ -7,6 +7,52 @@ use core::{
 
 use crate::platform::now;
 
+#[cfg(feature = "engine-jcvm")]
+const HEAP_PAGE_BYTES: usize = 4096;
+#[cfg(feature = "engine-jcvm")]
+const HEAP_PAGES: usize = (crate::layout::HEAP1_BASE + crate::layout::HEAP1_BYTES
+    - crate::layout::HEAP0_BASE) / HEAP_PAGE_BYTES;
+
+/// Per-page wear in this boot, readable over SWD. Only the opt-in trace build
+/// carries these counters; it does not write them to flash.
+#[repr(C)]
+#[cfg(feature = "engine-jcvm")]
+pub(crate) struct FlashWearTrace {
+    heap_base: u32,
+    page_count: u32,
+    erase_pages: [AtomicU32; HEAP_PAGES],
+    program_words: [AtomicU32; HEAP_PAGES],
+}
+
+#[no_mangle]
+#[cfg(feature = "engine-jcvm")]
+pub(crate) static MICROCARD_FLASH_WEAR_TRACE: FlashWearTrace = FlashWearTrace {
+    heap_base: crate::layout::HEAP0_BASE as u32,
+    page_count: HEAP_PAGES as u32,
+    erase_pages: [const { AtomicU32::new(0) }; HEAP_PAGES],
+    program_words: [const { AtomicU32::new(0) }; HEAP_PAGES],
+};
+
+#[cfg(feature = "engine-jcvm")]
+fn heap_page(address: usize) -> Option<usize> {
+    let offset = address.checked_sub(crate::layout::HEAP0_BASE)?;
+    (offset < HEAP_PAGES * HEAP_PAGE_BYTES).then_some(offset / HEAP_PAGE_BYTES)
+}
+
+#[cfg(feature = "engine-jcvm")]
+pub(crate) fn erase_page(address: usize) {
+    if let Some(page) = heap_page(address) {
+        MICROCARD_FLASH_WEAR_TRACE.erase_pages[page].fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "engine-jcvm")]
+pub(crate) fn program_word(address: usize) {
+    if let Some(page) = heap_page(address) {
+        MICROCARD_FLASH_WEAR_TRACE.program_words[page].fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 const MAGIC: u32 = 0x4d43_5452;
 const VERSION: u32 = 2;
 const EVENTS: usize = 128;

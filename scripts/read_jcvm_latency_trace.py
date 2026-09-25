@@ -18,6 +18,15 @@ PATCH_FIELDS = (
     "snapshot_required", "patch_bytes",
     "snapshot_bytes", "maximum_bytes", "heap_bytes",
     "append_commits", "snapshot_commits",
+    "checkpoint_install", "checkpoint_apdu", "checkpoint_pin",
+    "checkpoint_transaction", "fallback_unused", "fallback_first",
+    "fallback_no_frame", "fallback_oversize", "patch_payload_bytes",
+    "snapshot_payload_bytes", "idle_compactions",
+)
+HEAP_FIELDS = (
+    "allocations", "allocated_bytes", "transient_arrays",
+    "transient_payload_bytes", "dirty_heap_writes", "dirty_heap_bytes",
+    "dirty_static_writes", "dirty_static_bytes",
 )
 MAXIMUM_FIELDS = (
     "max_apdu_us", "erase_calls", "erase_us", "program_words",
@@ -52,6 +61,8 @@ def symbols(elf):
             "MICROCARD_JCVM_CORE_ERROR",
             "MICROCARD_JCVM_CHECKPOINT_ERROR",
             "MICROCARD_MAX_APDU_TRACE",
+            "MICROCARD_FLASH_WEAR_TRACE",
+            "MICROCARD_JCVM_HEAP_TRACE",
         ):
             addresses[parts[2]] = int(parts[0], 16)
     if len(addresses) < 6:
@@ -77,6 +88,8 @@ def main():
     parser.add_argument("--probe", required=True, help="probe-rs selector, such as VID:PID:serial")
     parser.add_argument("--events", type=int, default=24,
                         help="number of latest retained events to print (default: 24)")
+    parser.add_argument("--wear-pages", action="store_true",
+                        help="print individual heap-page counters")
     parser.add_argument("--legacy-patch", action="store_true",
                         help="decode the ten-field patch trace from earlier diagnostic images")
     args = parser.parse_args()
@@ -105,6 +118,11 @@ def main():
     for name, value in patch_values.items():
         label = f" ({PATCH_REASONS.get(value, 'unknown')})" if name == "reason" else ""
         print(f"  {name}: {value}{label}")
+    if "MICROCARD_JCVM_HEAP_TRACE" in addresses:
+        heap_values = read_words(addresses["MICROCARD_JCVM_HEAP_TRACE"], len(HEAP_FIELDS), args.probe)
+        print("JCVM heap activity since boot:")
+        for name, value in zip(HEAP_FIELDS, heap_values):
+            print(f"  {name}: {value}")
     engine_error = read_words(addresses["MICROCARD_JCVM_ENGINE_ERROR"], 1, args.probe)[0]
     core_error = read_words(addresses["MICROCARD_JCVM_CORE_ERROR"], 1, args.probe)[0]
     checkpoint_error = read_words(addresses["MICROCARD_JCVM_CHECKPOINT_ERROR"], 1, args.probe)[0]
@@ -115,6 +133,20 @@ def main():
         print("Slowest APDU and run totals:")
         for name, value in zip(MAXIMUM_FIELDS, maximum):
             print(f"  {name}: {value}")
+    if "MICROCARD_FLASH_WEAR_TRACE" in addresses:
+        wear = addresses["MICROCARD_FLASH_WEAR_TRACE"]
+        heap_base, page_count = read_words(wear, 2, args.probe)
+        if page_count == 0 or page_count > 256 or heap_base % 4096:
+            raise RuntimeError("invalid flash wear trace layout")
+        values = read_words(wear + 8, page_count * 2, args.probe)
+        erases, programmed = values[:page_count], values[page_count:]
+        print(f"Heap flash pages since boot: erases={sum(erases)} "
+              f"programmed_words={sum(programmed)} max_erase={max(erases)}")
+        if args.wear_pages:
+            for page, (erase_count, word_count) in enumerate(zip(erases, programmed)):
+                if erase_count or word_count:
+                    print(f"  {heap_base + page * 4096:#08x}: "
+                          f"erases={erase_count} programmed_words={word_count}")
     retained = read_words(
         addresses["MICROCARD_RETAINED_TRACE"],
         RETAINED_HEADER_WORDS + RETAINED_EVENTS * RETAINED_EVENT_WORDS,
