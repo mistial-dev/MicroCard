@@ -11,6 +11,7 @@ use crate::vm::heap::{self, Heap};
 use crate::host::SHA256_STATE_BYTES;
 use crate::{Error, Result};
 extern crate alloc;
+use alloc::vec::Vec;
 use zeroize::Zeroizing;
 mod ec;
 mod pin;
@@ -42,6 +43,33 @@ const PSEUDO_SEED_DOMAIN: &[u8] = b"MicroCard JCVM PRNG seed v1";
 const PSEUDO_STEP_DOMAIN: &[u8] = b"MicroCard JCVM PRNG step v1";
 const SECURE_SEED_DOMAIN: &[u8] = b"MicroCard JCVM secure seed v1";
 const SECURE_MASK_DOMAIN: &[u8] = b"MicroCard JCVM secure mask v1";
+
+// Most APDU crypto results fit here. Larger Java Card arrays still use bounded
+// staging so a provider failure cannot expose a partial write to the applet.
+struct StagedBytes {
+    inline: Zeroizing<[u8; 256]>,
+    overflow: Option<Zeroizing<Vec<u8>>>,
+    length: usize,
+}
+
+impl StagedBytes {
+    fn new(length: usize) -> Result<Self> {
+        let overflow = if length > 256 {
+            let mut bytes = Zeroizing::new(Vec::new());
+            bytes.try_reserve_exact(length).map_err(|_| Error::Quota)?;
+            bytes.resize(length, 0);
+            Some(bytes)
+        } else { None };
+        Ok(Self { inline: Zeroizing::new([0; 256]), overflow, length })
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        match &mut self.overflow {
+            Some(bytes) => bytes.as_mut_slice(),
+            None => &mut self.inline[..self.length],
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct SecureRandom;
@@ -593,10 +621,10 @@ pub fn call(
             // Stage output only: input may overlap it at any offset. A provider failure
             // must publish neither partial ciphertext nor updated streaming state.
             *budget = budget.checked_sub(total as u32).ok_or(Error::Quota)?;
-            let mut result = Zeroizing::new(alloc::vec::Vec::new());
-            result.try_reserve_exact(written).map_err(|_| Error::Quota)?;
+            let mut staged = StagedBytes::new(written)?;
+            let result = staged.as_mut();
             let byte = |at: usize| if at < count { prior[1 + at] } else { message[at - count] };
-            for at in 0..written { result.push(byte(at)); }
+            for (at, output) in result.iter_mut().enumerate() { *output = byte(at); }
             let cbc = word_field(heap, this, KIND)? == 13;
             let encrypt = word_field(heap, this, COUNTER)? == 2;
             let mut next_iv = Zeroizing::new([0u8; 16]);
@@ -606,7 +634,7 @@ pub fn call(
                 *next_iv = *iv;
                 if written != 0 {
                     if !encrypt { next_iv.copy_from_slice(&result[written - 16..]); }
-                    host.aes128_cbc(&key_bytes, &iv, &mut result, encrypt)?;
+                    host.aes128_cbc(&key_bytes, &iv, result, encrypt)?;
                     if encrypt { next_iv.copy_from_slice(&result[written - 16..]); }
                 }
                 if method == MethodId::doFinal { next_iv.fill(0); }
@@ -619,7 +647,7 @@ pub fn call(
             tail[0] = (total - written) as u8;
             if method == MethodId::update && (total != 0 || prior[0] & 0x80 != 0) { tail[0] |= 0x80; }
             for at in written..total { tail[1 + at - written] = byte(at); }
-            heap.byte_slice_mut(output, out_offset as usize, written)?.copy_from_slice(&result);
+            heap.byte_slice_mut(output, out_offset as usize, written)?.copy_from_slice(result);
             heap.byte_slice_mut(pending, 0, 16)?.copy_from_slice(&tail[..]);
             if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&next_iv[..]); }
             frame.push_short(written as i16)?;
@@ -637,9 +665,8 @@ pub fn call(
             if length == 0 { return crypto_exception(heap, context, 1); }
             heap.byte_slice(array, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            let mut result = Zeroizing::new(alloc::vec::Vec::new());
-            result.try_reserve_exact(length as usize).map_err(|_| Error::Quota)?;
-            result.resize(length as usize, 0);
+            let mut staged = StagedBytes::new(length as usize)?;
+            let result = staged.as_mut();
             let algorithm = word_field(heap, this, KIND)? as u8;
             let service = RandomService::from_algorithm(algorithm)?;
             let state = heap.get_word(this, MATERIAL)?;
@@ -660,7 +687,7 @@ pub fn call(
                     store_pseudo_chain(heap, state, &chain)?;
                 }
                 RandomService::Secure(_) => {
-                    host.random(&mut result)?;
+                    host.random(result)?;
                     if seeded {
                         let mut chain = Zeroizing::new([0u8; 32]);
                         chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
@@ -674,7 +701,7 @@ pub fn call(
                     }
                 }
             }
-            heap.byte_slice_mut(array, offset as usize, length as usize)?.copy_from_slice(&result);
+            heap.byte_slice_mut(array, offset as usize, length as usize)?.copy_from_slice(result);
             if method == MethodId::nextBytes {
                 frame.push_short(offset.wrapping_add(length))?;
             }

@@ -300,6 +300,19 @@ fn random_data_methods_obey_return_contracts_and_reject_empty_requests() {
     assert_eq!(host.random_calls, random_calls + 1);
     assert_eq!(host.digest_calls, digest_calls, "reset must clear the optional secure seed mask");
     assert_eq!(heap.byte_slice(output, 0, 6).unwrap(), &[0x42; 6]);
+
+    // Cross the inline staging boundary. Either size must keep the caller's
+    // array unchanged when an entropy provider fails after writing into staging.
+    let large = heap.new_array(heap::KIND_BYTE, 257, 1).unwrap();
+    for length in [256, 257] {
+        heap.byte_slice_mut(large, 0, length).unwrap().fill(0x55);
+        host.fail_random = true;
+        assert!(matches!(invoke_security(ClassId::RandomData, MethodId::generateData,
+            &[(true, secure), (true, large), (false, 0), (false, length as u16)],
+            &mut heap, &mut frame, &mut host), Err(Error::Storage)));
+        assert!(heap.byte_slice(large, 0, length).unwrap().iter().all(|byte| *byte == 0x55));
+        host.fail_random = false;
+    }
 }
 
 #[test]
