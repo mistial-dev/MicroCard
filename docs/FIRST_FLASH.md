@@ -72,7 +72,7 @@ Power-cycle the DK after both writes. The key page is read/write locked by reset
 
 ## After first flash
 
-Hardware acceptance still needs actual USB/RNG/ACL behavior, reboot and interrupted-flash tests, peak heap/stack, watchdog behavior and latency measurements. Snapshot wear leveling, production key protection, full library/type coverage and firmware update trust remain production work. They must not be confused with the first-test-build stopping point.
+Hardware acceptance still needs actual USB/RNG/ACL behavior, reboot and interrupted-flash tests, peak heap/stack, watchdog behavior and latency measurements. MC04 snapshot endurance, JCVM workload-based service life, production key protection, full library/type coverage and firmware update trust remain production work. The [JCVM DK wear record](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk) covers one measured workload, not a lifetime guarantee. These requirements must not be confused with the first-test-build stopping point.
 
 ## Factory reset a development DK
 

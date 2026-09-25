@@ -139,7 +139,7 @@ need board testing.
 
 ## Hardware acceptance still required
 
-Run the host SCP03 scenarios through USB CCID. Verify enumeration, SELECT, counter storage, shared-domain storage, echo and protected commands. Capture GlobalPlatformPro CCID and SCP03 vectors after physical enumeration. Power-cycle after activation and after counter changes. Interrupt power during erase/program operations, then verify complete old/new state. Measure peak memory, maximum-case P-256 verification latency, watchdog behavior, entropy failure, flash endurance and ACL behavior. The current snapshot journal erases many pages per commit. Production wear leveling is not implemented.
+Run the host SCP03 scenarios through USB CCID. Verify enumeration, SELECT, counter storage, shared-domain storage, echo and protected commands. Capture GlobalPlatformPro CCID and SCP03 vectors after physical enumeration. Power-cycle after activation and after counter changes. Interrupt power during erase/program operations, then verify complete old/new state. Measure peak memory, maximum-case P-256 verification latency, watchdog behavior, entropy failure, flash endurance and ACL behavior. MC04 still rotates full snapshots. JCVM appends bounded patches and alternates two heap slots; the [DK wear record](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk) measures this distribution and the reduction from removing unnecessary writes. Neither profile has a production service-life guarantee.
 
 ## Development debug access
 
