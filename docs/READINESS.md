@@ -56,6 +56,10 @@ bytes and initialization flags clear together. Durable snapshots exclude transie
 values and PIN validation. JCVM digest calls borrow input directly and stage only
 the fixed digest, validating output bounds and provider lengths before publication. These bounds do not prove that peak workloads fit the
 board's reserved heap.
+Short-lived ordinary objects are still allocated in the persistent heap even
+when they never escape an APDU. Avoiding those flash writes requires a bounded
+RAM nursery with reference promotion and checkpoint coverage; it is not provided
+by the transient-array clear-event mechanism.
 
 ## Required before the pre-hardware release candidate
 
@@ -94,7 +98,10 @@ board's reserved heap.
   reboot does not preserve PIN validation. These paths still need complete physical
   NIST execution and fault-injection coverage.
 - Complete the remaining JCVM native API audit against Java Card 3.0.5, including
-  internal failure boundaries. Instruction, transaction, PIN, and lifecycle changes
+  internal failure boundaries. `JCSystem.getAvailableMemory` reports the common
+  object slab's remaining capacity for all three memory types, an upper bound
+  under the documented shared-pool model. Qualify peak use rather than inferring
+  three independent capacities. Instruction, transaction, PIN, and lifecycle changes
   checkpoint committed state while excluding open applet transactions. Existing tests
   cover rollback, allocation and undo exhaustion, partial construction, cancellation,
   failed providers, and failed persistence. OpenFIPS201 and the vendored JCAlgTest run
@@ -111,10 +118,12 @@ board's reserved heap.
   to recover interrupted bank replacement. Root registry counters remain finite;
   host memory bounds remain required, with physical service-life testing later.
   See [renewal and recovery invariants](STORAGE.md#jcvm-counter-renewal).
-- Qualify the Makerdiary JCVM memory bound. Its current image links at 232,240 text
-  bytes, 148 data bytes, and 198,284 BSS bytes, within the 440 KiB firmware region.
-  All seven profiles link, but three flash optimization ceilings still fail; none
-  were raised. [Board budgets](BOARD_BUDGETS.json) contain the exact measurements.
+- Qualify the Makerdiary JCVM memory bound. The current USB CCID image links at
+  238,868 text bytes, 148 data bytes, and 204,820 BSS bytes. All eight board
+  profiles link and pass their current budgets; the dongle JCVM image uses
+  240,208 text bytes against a 240,500-byte ceiling. These link figures do not
+  prove runtime stack and heap peaks. [Board budgets](BOARD_BUDGETS.json) contain
+  the exact measurements.
   Earlier 2026-09-20 UF2 attempts used an invalid family and were ignored by the
   bootloader. The corrected image later booted, enumerated over USB CCID, passed its
   CC310 startup checks, and ran the signed OpenFIPS201 load/install/select smoke test.

@@ -255,6 +255,17 @@ Full type and dataflow verification is deferred. In its place the operand stack 
 
 ## Volatile and persistent memory
 
+The execution stack, APDU working bytes, transaction undo log, and transient
+array contents are RAM state. Java Card `new` objects and ordinary arrays are
+persistent by default; their reachable fields and elements are committed at a
+durability boundary. A transient array keeps a stable object identity across
+reset, but its elements are cleared rather than restored from flash. This is a
+semantic distinction, not a decision made from a flash-traffic trace.
+The current runtime also persists short-lived `new` objects that remain only
+on the operand stack. A future RAM nursery could avoid that write, but would
+need to promote an object and its reachable graph before storing a reference
+into persistent state, including synchronous checkpoints inside one command.
+
 Array clear events occupy spare bits in the existing six-byte object header. The heap
 can clear reset-scoped arrays across contexts and deselection-scoped arrays for one
 context without reallocating objects or changing references. `JCSystem.isTransient`
@@ -266,6 +277,13 @@ division by zero, array bounds, and allocation failures remain catchable with a 
 heap and commit log. Operand-stack and structural errors remain interpreter failures.
 Snapshots with an incompatible runtime prefix are explicitly rejected.
 These event meanings follow [the Java Card API](https://docs.oracle.com/cd/E59935_01/api/javacard/framework/JCSystem.html).
+The current heap uses one RAM slab and one capacity figure for persistent objects
+and both transient classes. `JCSystem.getAvailableMemory` consequently reports
+that shared remaining capacity for all three memory types. The Java Card 3.0.5
+API allows implementation-dependent memory to share a pool and reports only an
+upper bound, not a promise that any object of that size will fit. The answer
+does not claim independent transient capacity; physical peak use still needs
+qualification for supported applets.
 
 CAP static array initializers and non-default primitive values are applied before
 installation. Recovery restores the saved values rather than overwriting them with

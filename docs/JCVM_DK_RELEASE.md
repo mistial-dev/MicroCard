@@ -340,7 +340,8 @@ The untouched CSV, upstream log, analyzer output, exact ELF, and trace are in
 is `8bf4a03947e72a46640ee9c0d1995d85c70b80247592057f68d9021fdae2f74b`.
 These figures cover a previously installed applet, not a fresh provisioning
 run. They measure this scan, not a general bound on persistent write traffic.
-The trace build is opt-in; normal firmware carries no per-page counters.
+The per-page SWD counters were diagnostic code for these measurements and were
+removed afterward. Normal firmware carries no per-page counters.
 The subsequent build also omits transient-array payloads from allocation
 patches. Its exact ELF SHA-256 is
 `7f9c7732ff5211a32db7bfb6d45a863fa5692834a9a145ebb0c954cfd0aa837b`.

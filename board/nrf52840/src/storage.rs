@@ -182,8 +182,6 @@ impl Nvm {
         #[cfg(feature = "latency-trace")]
         let trace_start = now();
         nvmc.config.write(|w| w.wen().ren());
-        #[cfg(feature = "latency-trace")]
-        let mut erased_pages = 0usize;
         let result = (|| {
             for page in (base..base + size).step_by(4096) {
                 // The target slot is not live. Pages left blank by a shorter
@@ -198,12 +196,7 @@ impl Nvm {
                 Self::ready()?;
                 nvmc.config.write(|w| w.wen().ren());
                 #[cfg(feature = "latency-trace")]
-                {
-                    erased_pages += 1;
-                    #[cfg(feature = "engine-jcvm")]
-                    crate::trace::erase_page(page);
-                    crate::trace::record(crate::trace::event::ERASE_PAGE_DONE, page as u32);
-                }
+                crate::trace::record(crate::trace::event::ERASE_PAGE_DONE, page as u32);
                 feed();
                 #[cfg(feature = "usb-ccid")]
                 Self::yield_flash();
@@ -212,7 +205,7 @@ impl Nvm {
         })();
         nvmc.config.write(|w| w.wen().ren());
         #[cfg(feature = "latency-trace")]
-        if result.is_ok() && erased_pages != 0 {
+        if result.is_ok() {
             crate::trace::erase(trace_start, base, size);
         }
         result
@@ -256,11 +249,7 @@ impl Nvm {
                 }
                 unsafe { write(base + pos, word) }
                 #[cfg(feature = "latency-trace")]
-                {
-                    trace_words += 1;
-                    #[cfg(feature = "engine-jcvm")]
-                    crate::trace::program_word(base + pos);
-                }
+                { trace_words += 1; }
                 Self::ready()?;
                 feed();
                 #[cfg(feature = "usb-ccid")]

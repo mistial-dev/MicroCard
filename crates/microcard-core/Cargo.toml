@@ -14,7 +14,7 @@ mc04 = ["dep:microcard-memory"]
 jcvm = ["dep:microcard-engine-jcvm"]
 fuzzing = []
 hal-conformance = []
-latency-trace = ["microcard-engine-jcvm?/latency-trace"]
+latency-trace = []
 # Optional SCP03 capabilities. The advertised i parameter and the accepted security
 # levels are derived from this set, so a build cannot offer a mode it does not implement.
 scp03-rmac = []

@@ -13,8 +13,6 @@ mod undo;
 use undo::Undo;
 mod writes;
 pub use writes::PendingWrites;
-#[cfg(feature = "latency-trace")]
-mod trace;
 
 /// Object kinds, which is the element type for an array.
 pub const KIND_OBJECT: u8 = 0;
@@ -281,11 +279,7 @@ impl<'a> Heap<'a> {
 
     pub fn remember_static(&mut self, at: usize, before: &[u8]) -> Result<()> {
         if let Some((_, undo)) = &mut self.transaction { undo.record(at, before, true)?; }
-        else {
-            self.pending_writes.statics(at, before.len());
-            #[cfg(feature = "latency-trace")]
-            trace::static_write(before.len());
-        }
+        else { self.pending_writes.statics(at, before.len()); }
         Ok(())
     }
 
@@ -295,11 +289,7 @@ impl<'a> Heap<'a> {
                 // Abort wipes the entire allocation tail; only pre-existing payloads
                 // need before-images. Committed projections also exclude this tail.
                 if at < *start { undo.record(at, &self.bytes[at..at + length], false)?; }
-            } else {
-                self.pending_writes.heap(at, length);
-                #[cfg(feature = "latency-trace")]
-                trace::heap_write(length);
-            }
+            } else { self.pending_writes.heap(at, length); }
         }
         Ok(())
     }
@@ -347,8 +337,6 @@ impl<'a> Heap<'a> {
         self.bytes[at + 4] = kind | (clear_event << 4);
         self.bytes[at + 5] = owner;
         self.next = end;
-        #[cfg(feature = "latency-trace")]
-        trace::allocation(end - at);
         // Transient payloads are rebuilt as zero-filled RAM on recovery. Only
         // their headers and stable handles belong in an ordinary flash patch.
         // Transactional allocation tails are published only by commit.
@@ -384,8 +372,6 @@ impl<'a> Heap<'a> {
         if !(KIND_BOOLEAN..=KIND_REFERENCE).contains(&kind) { return Err(Error::Format); }
         let class = if kind == KIND_REFERENCE { ANY_REFERENCE_CLASS } else { 0 };
         let reference = self.allocate(class, length, kind, owner, event)?;
-        #[cfg(feature = "latency-trace")]
-        trace::transient_array(length as usize * if matches!(kind, KIND_BOOLEAN | KIND_BYTE) { 1 } else if kind == KIND_INT { 4 } else { 2 });
         Ok(reference)
     }
 

@@ -7,7 +7,6 @@ license.workspace = true
 # Mnemonics for error messages and tooling. A card build leaves this off, because the names
 # cost flash and nothing on the card prints them.
 diagnostics = []
-latency-trace = []
 [dependencies]
 microcard-memory = { path = "../microcard-memory" }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
