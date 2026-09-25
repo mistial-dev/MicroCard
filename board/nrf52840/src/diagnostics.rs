@@ -129,7 +129,14 @@ pub(crate) fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> !
             let powered = crate::usb_ccid::power_ready();
             if powered && !attempted {
                 attempted = true;
-                usb_stack = crate::initialize_usb();
+                // Startup has failed before RTIC can dispatch tasks. There is no
+                // concurrent peripheral owner in this terminal diagnostic path.
+                let peripherals = unsafe { nrf52840_pac::Peripherals::steal() };
+                if let Some((requester, responder)) = crate::APDU_CHANNEL.split() {
+                    usb_stack =
+                        crate::initialize_usb(peripherals.CLOCK, peripherals.USBD, requester)
+                            .map(|(device, class)| (device, class, responder));
+                }
             }
             if let Some((device, class, responder)) = usb_stack.as_mut() {
                 if powered {

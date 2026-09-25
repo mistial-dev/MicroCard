@@ -34,7 +34,7 @@ struct RetainedTrace {
     events: [Event; EVENTS],
 }
 
-// cortex-m-rt excludes .uninit from startup clearing. Only the main loop writes this.
+// cortex-m-rt excludes .uninit from startup clearing. RTIC tasks serialize writes.
 #[link_section = ".uninit.microcard_trace"]
 #[no_mangle]
 static mut MICROCARD_RETAINED_TRACE: MaybeUninit<RetainedTrace> = MaybeUninit::uninit();
@@ -61,6 +61,7 @@ pub(crate) mod event {
     #[cfg(feature = "development-recovery")]
     pub const HARD_FAULT: u32 = 15;
     pub const RENEW_PHASE: u32 = 16;
+    pub const PANIC_FILE: u32 = 17;
 }
 
 #[no_mangle]
@@ -89,37 +90,41 @@ pub(crate) fn boot(reset_reason: u32) {
 }
 
 pub(crate) fn record(kind: u32, detail: u32) {
-    let trace = retained();
-    unsafe {
-        if (*trace).magic != MAGIC {
-            return;
+    cortex_m::interrupt::free(|_| {
+        let trace = retained();
+        unsafe {
+            if (*trace).magic != MAGIC {
+                return;
+            }
+            let index = (*trace).next as usize % EVENTS;
+            let sequence = (*trace).next.wrapping_add(1);
+            let entry = &mut (*trace).events[index];
+            entry.sequence = 0;
+            entry.time_us = now();
+            entry.kind = kind;
+            entry.detail = detail;
+            core::sync::atomic::compiler_fence(Ordering::Release);
+            entry.sequence = sequence;
+            (*trace).next = sequence;
         }
-        let index = (*trace).next as usize % EVENTS;
-        let sequence = (*trace).next.wrapping_add(1);
-        let entry = &mut (*trace).events[index];
-        entry.sequence = 0;
-        entry.time_us = now();
-        entry.kind = kind;
-        entry.detail = detail;
-        core::sync::atomic::compiler_fence(Ordering::Release);
-        entry.sequence = sequence;
-        (*trace).next = sequence;
-    }
+    });
 }
 
 pub(crate) fn usb_poll() {
-    let trace = retained();
-    unsafe {
-        let at = now();
-        let last = (*trace).last_poll_us;
-        if last != 0 {
-            let gap = at.wrapping_sub(last);
-            if gap > (*trace).max_poll_gap_us {
-                (*trace).max_poll_gap_us = gap;
+    cortex_m::interrupt::free(|_| {
+        let trace = retained();
+        unsafe {
+            let at = now();
+            let last = (*trace).last_poll_us;
+            if last != 0 {
+                let gap = at.wrapping_sub(last);
+                if gap > (*trace).max_poll_gap_us {
+                    (*trace).max_poll_gap_us = gap;
+                }
             }
+            (*trace).last_poll_us = at;
         }
-        (*trace).last_poll_us = at;
-    }
+    });
 }
 
 #[repr(C)]

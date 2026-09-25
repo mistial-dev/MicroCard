@@ -13,6 +13,8 @@ pub type ApduChannel =
     interchange::Channel<heapless::Vec<u8, APDU_BYTES>, heapless::Vec<u8, APDU_BYTES>>;
 pub type ApduResponder<'a> =
     interchange::Responder<'a, heapless::Vec<u8, APDU_BYTES>, heapless::Vec<u8, APDU_BYTES>>;
+pub type ApduRequester<'a> =
+    interchange::Requester<'a, heapless::Vec<u8, APDU_BYTES>, heapless::Vec<u8, APDU_BYTES>>;
 pub type CcidClass<'a> = usbd_ccid::Ccid<'a, 'a, UsbBus, APDU_BYTES>;
 
 /// The HAL's USB peripheral borrows a started external oscillator, so the type system
