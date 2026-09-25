@@ -63,6 +63,8 @@ pub struct Package {
     pub extra: Vec<(u8, u8, Vec<u8>)>,
     /// Bytes of static field image, all starting at zero.
     pub static_bytes: u16,
+    /// Reference words at the front of the static image.
+    pub static_references: u16,
     /// Constant pool entries, each already four bytes.
     pub constants: Vec<[u8; 4]>,
     /// Exception handlers, each already eight bytes.
@@ -84,6 +86,7 @@ impl Default for Package {
             max_locals: 0,
             extra: Vec::new(),
             static_bytes: 0,
+            static_references: 0,
             constants: Vec::new(),
             handlers: Vec::new(),
             classes: vec![ClassSpec::default()],
@@ -195,8 +198,9 @@ impl Package {
         }
         // An image of only default value fields, which start at zero.
         let mut statics = Vec::from(self.static_bytes.to_be_bytes());
-        statics.extend_from_slice(&[0, 0, 0, 0]);
-        statics.extend_from_slice(&self.static_bytes.to_be_bytes());
+        statics.extend_from_slice(&self.static_references.to_be_bytes());
+        statics.extend_from_slice(&[0, 0]);
+        statics.extend_from_slice(&(self.static_bytes - self.static_references * 2).to_be_bytes());
         statics.extend_from_slice(&[0, 0]);
         let ref_location = vec![0, 0, 0, 0];
 

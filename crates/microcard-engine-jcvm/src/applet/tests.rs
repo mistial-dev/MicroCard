@@ -307,7 +307,7 @@
             ),
             Err(Error::IncompatibleState)
         ));
-        for case in 0..30 {
+        for case in 0..31 {
             let mut invalid = saved_heap.clone();
             let root = match case {
                 0 => instance + 2, // A field is not an object handle.
@@ -339,9 +339,10 @@
                 23 => { invalid[pin as usize + heap::HEADER + 3] = 65; instance } // Exceeds configured PIN capacity.
                 24 => { invalid[unconstructed_pair as usize + heap::HEADER + 1] = 5; instance }
                 25 => { invalid[..2].fill(0); instance } // Pre-lifecycle heap format.
-                26 => { invalid[0] = 3; instance } // Unknown header version.
+                26 => { invalid[0] = 2; instance } // Previous heap version.
                 27 => { invalid[1] = 0x80; instance } // Invalid application state.
                 28 => { invalid.truncate(invalid.len() - 1); instance }
+                30 => { invalid[0] = 4; instance } // Unknown header version.
                 _ => {
                     let at = typed_references as usize + heap::HEADER;
                     invalid[at..at + 2].copy_from_slice(&explicit_exception.to_be_bytes());

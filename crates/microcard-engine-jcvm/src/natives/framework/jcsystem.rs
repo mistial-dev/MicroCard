@@ -62,12 +62,10 @@ pub(in crate::natives) fn call(
             let reference = frame.pop_reference()?;
             frame.push_short(i16::from(heap.transient_event(reference)?))?;
         }
-        MethodId::isObjectDeletionSupported => frame.push_short(0)?,
+        MethodId::isObjectDeletionSupported => frame.push_short(1)?,
         MethodId::getVersion => frame.push_short(0x0305)?,
         MethodId::requestObjectDeletion => {
-            let exception = new_exception(heap, ClassId::SystemException, context)?;
-            heap.put_word_unconditional(exception, REASON_FIELD, 6)?; // ILLEGAL_USE
-            return Ok(Native::Threw(exception));
+            heap.request_object_deletion()?;
         }
         MethodId::getTransactionDepth => {
             frame.push_short(i16::from(heap.transaction_remaining().is_some()))?;

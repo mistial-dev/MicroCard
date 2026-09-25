@@ -75,10 +75,10 @@ impl<'a> Linked<'a> {
 
     /// Visit exactly the reference fields described by each class in the hierarchy.
     /// Recovery and object deletion must agree on which words keep objects alive.
-    pub fn visit_instance_references(&self, class: u16, payload: &[u8],
-            mut visit: impl FnMut(u16) -> Result<()>) -> Result<()> {
+    pub fn visit_instance_reference_offsets(&self, class: u16, payload_len: usize,
+            mut visit: impl FnMut(usize) -> Result<()>) -> Result<()> {
         let mut words = self.instance_words(class)?;
-        if payload.len() != usize::from(words) * 2 {
+        if payload_len != usize::from(words) * 2 {
             return Err(Error::Format);
         }
         let mut class = ClassRef::Internal(class);
@@ -92,8 +92,8 @@ impl<'a> Linked<'a> {
                 let at = (usize::from(inherited)
                     + usize::from(declaration.first_reference_token)
                     + usize::from(index)) * 2;
-                let word = payload.get(at..at + 2).ok_or(Error::Bounds)?;
-                visit(u16::from_be_bytes([word[0], word[1]]))?;
+                if at + 2 > payload_len { return Err(Error::Bounds); }
+                visit(at)?;
             }
             class = declaration.super_class;
             words = inherited;
@@ -482,12 +482,12 @@ mod tests {
         assert_eq!(linked.instance_field(1).unwrap(), 3);
         let payload = [0, 0, 0x12, 0x34, 0xab, 0xcd, 0, 0];
         let mut references = vec![];
-        linked.visit_instance_references(subclass, &payload, |reference| {
-            references.push(reference);
+        linked.visit_instance_reference_offsets(subclass, payload.len(), |at| {
+            references.push(u16::from_be_bytes([payload[at], payload[at + 1]]));
             Ok(())
         }).unwrap();
         assert_eq!(references, vec![0xabcd, 0x1234]);
-        assert_eq!(linked.visit_instance_references(subclass, &payload[..6], |_| Ok(())), Err(Error::Format));
+        assert_eq!(linked.visit_instance_reference_offsets(subclass, 6, |_| Ok(())), Err(Error::Format));
     }
 
     #[test]

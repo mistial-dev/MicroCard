@@ -17,9 +17,12 @@ fn native_reference_walk_includes_private_state_handles() {
             .find(|entry| entry.id == id).map(|entry| native_class(package, entry.token))).unwrap();
         let info = heap::Info { class, length: 6, kind: heap::KIND_OBJECT, owner: 1, clear_event: 0 };
         let mut references = vec![];
-        visit_native_references(info, &payload, |reference| { references.push(reference); Ok(()) }).unwrap();
+        visit_native_reference_offsets(info, payload.len(), |at| {
+            references.push(u16::from_be_bytes([payload[at], payload[at + 1]]));
+            Ok(())
+        }).unwrap();
         assert_eq!(references, if pending { vec![0x1234, 0x5678] } else { vec![0x1234] });
-        assert_eq!(visit_native_references(info, &payload[..10], |_| Ok(())), Err(Error::Format));
+        assert_eq!(visit_native_reference_offsets(info, 10, |_| Ok(())), Err(Error::Format));
     }
 }
 
@@ -85,7 +88,7 @@ fn lifecycle_checkpoints_before_success_and_survives_callback_and_abort() {
     frame.push_short(0x0f).unwrap();
     call(setter, &mut heap, &mut storage, &mut frame, 1, &mut jcre).unwrap();
     assert_eq!(frame.pop_short().unwrap(), 1);
-    assert_eq!(&storage.saved[..2], &[2, 0x0f]);
+    assert_eq!(&storage.saved[..2], &[3, 0x0f]);
     let used = storage.saved.len();
     let saved = Heap::resume(&mut storage.saved, used).unwrap();
     assert_eq!(saved.get_word(instance, 0), Ok(0));
@@ -98,7 +101,7 @@ fn lifecycle_checkpoints_before_success_and_survives_callback_and_abort() {
     frame.push_short(0x17).unwrap();
     assert!(matches!(call(setter, &mut heap, &mut storage, &mut frame, 1,
         &mut next), Err(Error::Storage)));
-    assert_eq!(&storage.saved[..2], &[2, 0x0f]);
+    assert_eq!(&storage.saved[..2], &[3, 0x0f]);
 }
 
 #[test]
@@ -586,18 +589,18 @@ fn contacted_transport_parameters_and_buffered_receive_match_the_runtime() {
 }
 
 #[test]
-fn unsupported_object_deletion_reports_and_throws_consistently() {
+fn object_deletion_request_is_logged_for_the_next_process_boundary() {
     let (mut slab, mut words, mut tags) = setup(0);
     let mut heap = Heap::new(&mut slab).unwrap();
+    heap.initialize_lifecycle();
     let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
     let mut jcre = Jcre::new(0, 0);
     assert!(matches!(jcsystem(MethodId::isObjectDeletionSupported, 0, &mut heap, &mut frame, 1,
         &mut jcre, &mut [], &mut crate::host::NoHost), Ok(Native::Returned)));
-    assert_eq!(frame.pop_short(), Ok(0));
-    let Native::Threw(exception) = jcsystem(MethodId::requestObjectDeletion, 0, &mut heap, &mut frame, 1,
-        &mut jcre, &mut [], &mut crate::host::NoHost).unwrap()
-        else { panic!("unsupported object deletion returned success"); };
-    assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(6));
+    assert_eq!(frame.pop_short(), Ok(1));
+    assert!(matches!(jcsystem(MethodId::requestObjectDeletion, 0, &mut heap, &mut frame, 1,
+        &mut jcre, &mut [], &mut crate::host::NoHost), Ok(Native::Returned)));
+    assert!(heap.object_deletion_requested().unwrap());
 }
 
 #[test]

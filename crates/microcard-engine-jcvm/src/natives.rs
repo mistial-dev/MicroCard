@@ -18,7 +18,7 @@ mod security;
 #[cfg(test)]
 use framework::{apdu_call as apdu, jcsystem_call as jcsystem, util_call as util};
 pub(crate) use security::native_volatile_range;
-pub(crate) use security::visit_native_references;
+pub(crate) use security::visit_native_reference_offsets;
 pub(crate) use security::{ec_key_clear_event, ec_key_kind, symmetric_key_clear_event};
 
 /// A class the card provides, encoded so it cannot collide with a class in a package.

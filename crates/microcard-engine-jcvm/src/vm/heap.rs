@@ -24,7 +24,8 @@ pub const KIND_REFERENCE: u8 = 6;
 pub const CLEAR_ON_RESET: u8 = 1;
 pub const CLEAR_ON_DESELECT: u8 = 2;
 const KIND_MASK: u8 = 0x0f;
-const HEAP_VERSION: u8 = 2;
+const HEAP_VERSION: u8 = 3;
+const DELETION_REQUESTED: u8 = 0x80;
 pub const ANY_REFERENCE_CLASS: u16 = u16::MAX;
 
 /// Bytes of header every object carries: class or element type, length, kind and owner.
@@ -35,8 +36,8 @@ pub type Context = u8;
 
 /// One slab of objects, allocated from the front.
 ///
-/// This is currently bump-only. Until object deletion is implemented, the API
-/// reports it unsupported and rejects deletion requests with SystemException.
+/// Ordinary allocation bumps a pointer. Requested object deletion compacts the
+/// slab between callbacks, so the normal instruction path needs no free list.
 pub struct Heap<'a> {
     bytes: &'a mut [u8],
     next: usize,
@@ -126,9 +127,37 @@ impl<'a> Heap<'a> {
     }
 
     pub(crate) fn lifecycle(&self) -> Result<u8> {
-        if self.bytes[0] != HEAP_VERSION { return Err(Error::IncompatibleState); }
+        if !Self::valid_version(self.bytes[0]) { return Err(Error::IncompatibleState); }
         if !Self::valid_lifecycle(self.bytes[1]) { return Err(Error::Format); }
         Ok(self.bytes[1])
+    }
+
+    pub(crate) fn valid_version(value: u8) -> bool {
+        value & !DELETION_REQUESTED == HEAP_VERSION
+    }
+
+    pub(crate) fn object_deletion_requested(&self) -> Result<bool> {
+        self.lifecycle()?;
+        Ok(self.bytes[0] & DELETION_REQUESTED != 0)
+    }
+
+    /// The request survives reset and transaction abort, then idle maintenance clears it.
+    pub(crate) fn request_object_deletion(&mut self) -> Result<()> {
+        self.lifecycle()?;
+        if self.bytes[0] & DELETION_REQUESTED == 0 {
+            self.bytes[0] |= DELETION_REQUESTED;
+            self.pending_writes.heap(0, 1);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn clear_object_deletion_request(&mut self) -> Result<()> {
+        self.lifecycle()?;
+        if self.bytes[0] & DELETION_REQUESTED != 0 {
+            self.bytes[0] = HEAP_VERSION;
+            self.pending_writes.heap(0, 1);
+        }
+        Ok(())
     }
 
     pub(crate) fn valid_lifecycle(state: u8) -> bool {
@@ -625,6 +654,24 @@ mod tests {
     use alloc::vec;
 
     #[test]
+    fn deletion_request_survives_abort_and_resume_but_rejects_old_heap_version() {
+        let mut bytes = vec![0; 64];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        heap.initialize_lifecycle();
+        heap.begin_transaction(16).unwrap();
+        heap.request_object_deletion().unwrap();
+        assert!(!heap.abort_transaction(&mut []).unwrap());
+        assert!(heap.object_deletion_requested().unwrap());
+        let used = heap.used();
+        let resumed = Heap::resume(&mut bytes, used).unwrap();
+        assert!(resumed.object_deletion_requested().unwrap());
+        assert!(!Heap::valid_version(2));
+        let mut resumed = resumed;
+        resumed.clear_object_deletion_request().unwrap();
+        assert!(!resumed.object_deletion_requested().unwrap());
+    }
+
+    #[test]
     fn rollback_covers_payload_writes_but_preserves_transients_and_unconditional_state() {
         let mut bytes = vec![0; 512];
         let mut heap = Heap::new(&mut bytes).unwrap();
@@ -671,7 +718,7 @@ mod tests {
         let mut projected_statics = [0; 2];
         let remaining = heap.transaction_remaining();
         assert_eq!(heap.copy_committed_state(&statics, &mut projected, &mut projected_statics), Ok(heap.used()));
-        assert_eq!(&projected[..2], &[2, 0x0f]);
+        assert_eq!(&projected[..2], &[3, 0x0f]);
         assert_eq!(projected_statics, [4, 5]);
         // Windows can split words and overlapping before-images without publishing
         // conditional values. They must agree with the existing full projection.

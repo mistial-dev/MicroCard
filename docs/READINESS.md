@@ -222,10 +222,13 @@ persistent heap near 62 KiB. Retained SWD trace identified the allocation failur
 the partial CSV is diagnostic evidence, not a valid algorithm or performance result.
 Repeated idle renewal also makes some probes take about 7.5 seconds. The [development DK factory-reset command](FIRST_FLASH.md#factory-reset-a-development-dk)
 erases and reprovisions the target when a clean state is needed.
-The P71D321 profile reports object deletion support. JCVM currently has a
-bump-only heap, so it must report deletion unsupported and throw
-`SystemException.ILLEGAL_USE` on a request; a collector that reclaims
-unreachable objects is required before claiming P71D321 compatibility.
+The P71D321 profile reports object deletion support. JCVM now logs a deletion
+request in authenticated heap version 3 and compacts unreachable objects before
+the next `process()` callback. Host tests cover inherited fields, native handles,
+cycles, transaction abort, and reboot-visible requests. Version 2 media is
+rejected without erasure. The full physical JCAlgTest scan must still prove
+this behavior under allocator pressure and USB time extensions before
+P71D321 compatibility can be claimed.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
 Makerdiary and cover both engine builds, CC310 independent vectors and

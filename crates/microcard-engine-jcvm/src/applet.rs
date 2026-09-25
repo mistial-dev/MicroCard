@@ -21,6 +21,7 @@ use crate::{Error, Result};
 use alloc::vec::Vec;
 use zeroize::Zeroize;
 mod persistence;
+mod gc;
 pub use persistence::{PersistentState, PersistentView, VolatileState};
 
 /// Status words the runtime environment produces itself, ISO 7816-4.
@@ -379,6 +380,7 @@ impl AppletInstance {
             self.selected = true;
         }
         // Selection is decided by select(), not by the status that process() returns.
+        self.service_object_deletion(file, host)?;
         let answer = self.callback(file, host, Callback::Process { selecting }, (incoming, expected), &mut budget, cancel)?;
         let heap = Heap::resume(&mut self.heap, self.heap_used)?;
         let sw = if answer.aborted { SW_UNKNOWN } else { answer.exception.map_or(SW_SUCCESS, |exception| status_word(&heap, exception)) };
@@ -408,6 +410,16 @@ impl AppletInstance {
             projection: Some(&heap),
         })?;
         self.pending_writes = heap::PendingWrites::default();
+        Ok(())
+    }
+
+    fn service_object_deletion(&mut self, file: &LoadFile, host: &mut impl Host) -> Result<()> {
+        if !Heap::resume(&mut self.heap, self.heap_used)?.object_deletion_requested()? { return Ok(()); }
+        self.collect_unreachable(file)?;
+        let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
+        heap.clear_object_deletion_request()?;
+        self.pending_writes.merge(heap.pending_writes());
+        self.checkpoint_dirty(host)?;
         Ok(())
     }
 

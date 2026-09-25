@@ -86,7 +86,7 @@ impl PendingWrites {
     pub(super) fn statics(&mut self, at: usize, length: usize) {
         if self.statics.include(at, length).is_none() { self.snapshot = true; }
     }
-    pub(super) fn require_snapshot(&mut self) { self.snapshot = true; }
+    pub(crate) fn require_snapshot(&mut self) { self.snapshot = true; }
 }
 
 #[cfg(test)]

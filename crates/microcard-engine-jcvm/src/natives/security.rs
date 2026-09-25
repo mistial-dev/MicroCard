@@ -132,17 +132,16 @@ pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops
 
 /// Native state uses heap handles too. Recovery and object deletion must trace
 /// these words with the same rules as Java reference fields.
-pub(crate) fn visit_native_references(info: heap::Info, payload: &[u8],
-        mut visit: impl FnMut(u16) -> Result<()>) -> Result<()> {
+pub(crate) fn visit_native_reference_offsets(info: heap::Info, payload_len: usize,
+        mut visit: impl FnMut(usize) -> Result<()>) -> Result<()> {
     if info.kind != heap::KIND_OBJECT || info.length != STATE_WORDS { return Ok(()); }
     let Some(class) = super::api_class(info.class) else { return Ok(()); };
-    if payload.len() != STATE_WORDS as usize * 2 { return Err(Error::Format); }
-    let word = |index: usize| u16::from_be_bytes([payload[index * 2], payload[index * 2 + 1]]);
-    visit(word(MATERIAL))?;
+    if payload_len != STATE_WORDS as usize * 2 { return Err(Error::Format); }
+    visit(MATERIAL * 2)?;
     if matches!(class.id,
         ClassId::Cipher | ClassId::MessageDigest | ClassId::Signature | ClassId::KeyPair
         | ClassId::OwnerPINxWithPredecrement)
-    { visit(word(PENDING))?; }
+    { visit(PENDING * 2)?; }
     Ok(())
 }
 

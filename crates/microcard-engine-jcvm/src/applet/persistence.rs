@@ -251,7 +251,7 @@ impl AppletInstance {
             return Err(Error::Bounds);
         }
         // Runtime objects have deterministic handles and a zeroed APDU buffer.
-        if saved.heap[0] != 2 { return Err(Error::IncompatibleState); }
+        if !Heap::valid_version(saved.heap[0]) { return Err(Error::IncompatibleState); }
         if !Heap::valid_lifecycle(saved.heap[1])
             || saved.heap.get(2..self.runtime_bytes) != Some(&self.heap[2..self.runtime_bytes]) {
             return Err(Error::Format);
@@ -344,7 +344,9 @@ impl AppletInstance {
                         return Err(Error::Format);
                     }
                     if info.length == 6 {
-                        natives::visit_native_references(info, payload, valid_reference)?;
+                        natives::visit_native_reference_offsets(info, payload.len(), |at| {
+                            valid_reference(u16::from_be_bytes([payload[at], payload[at + 1]]))
+                        })?;
                         // NEW can be durable before KeyPair's constructor runs. Only
                         // the exact zero state is unconstructed, never a partial pair.
                         if class.id == ClassId::KeyPair && payload.iter().all(|byte| *byte == 0) {
@@ -479,7 +481,9 @@ impl AppletInstance {
                     }
                 } else {
                     if linked.instance_words(info.class)? != info.length { return Err(Error::Format); }
-                    linked.visit_instance_references(info.class, payload, storable_reference)?;
+                    linked.visit_instance_reference_offsets(info.class, payload.len(), |at| {
+                        storable_reference(u16::from_be_bytes([payload[at], payload[at + 1]]))
+                    })?;
                 }
             }
             Ok(())
