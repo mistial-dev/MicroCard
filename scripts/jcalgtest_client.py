@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +46,7 @@ def main():
         return
     if not client_args:
         parser.error("pass upstream client arguments after --, or use --build-only")
+    started = time.time_ns()
     result = subprocess.run([*command, *client_args], cwd=source, check=False)
     if "-outpath" in client_args:
         index = client_args.index("-outpath")
@@ -54,6 +56,11 @@ def main():
                 output = source / output
             output.mkdir(parents=True, exist_ok=True)
             (output / "client-exit-code.txt").write_text(f"{result.returncode}\n")
+            if result.returncode == 0 and not any(
+                path.stat().st_size > 0 and path.stat().st_mtime_ns >= started
+                for path in output.glob("*.csv")
+            ):
+                raise RuntimeError("JCAlgTest exited without a new CSV; reader selection or the scan failed")
     result.check_returncode()
 
 
