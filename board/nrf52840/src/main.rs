@@ -43,6 +43,45 @@ use usb_device::{
     device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
     LangID,
 };
+#[cfg(feature = "latency-trace")]
+struct TracedHeap(embedded_alloc::LlffHeap);
+
+#[cfg(feature = "latency-trace")]
+unsafe impl core::alloc::GlobalAlloc for TracedHeap {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        let result = unsafe { core::alloc::GlobalAlloc::alloc(&self.0, layout) };
+        if result.is_null() {
+            trace::record(trace::event::OOM_SIZE, layout.size() as u32);
+            trace::record(trace::event::OOM_FREE, self.0.free() as u32);
+        }
+        result
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        unsafe { core::alloc::GlobalAlloc::dealloc(&self.0, ptr, layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: core::alloc::Layout, new_size: usize) -> *mut u8 {
+        let result = unsafe { core::alloc::GlobalAlloc::realloc(&self.0, ptr, layout, new_size) };
+        if result.is_null() {
+            trace::record(trace::event::OOM_SIZE, new_size as u32);
+            trace::record(trace::event::OOM_FREE, self.0.free() as u32);
+        }
+        result
+    }
+}
+
+#[cfg(feature = "latency-trace")]
+impl TracedHeap {
+    unsafe fn init(&self, start: usize, size: usize) {
+        unsafe { self.0.init(start, size) }
+    }
+}
+
+#[cfg(feature = "latency-trace")]
+#[global_allocator]
+static HEAP: TracedHeap = TracedHeap(embedded_alloc::LlffHeap::empty());
+#[cfg(not(feature = "latency-trace"))]
 #[global_allocator]
 static HEAP: embedded_alloc::LlffHeap = embedded_alloc::LlffHeap::empty();
 static mut HEAP_MEMORY: [u8; 196608] = [0; 196608];
@@ -319,6 +358,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     #[cfg(not(feature = "development-recovery"))]
     cortex_m::peripheral::SCB::sys_reset();
 }
+
 
 #[cfg(feature = "development-recovery")]
 #[exception]

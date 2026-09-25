@@ -62,6 +62,8 @@ pub(crate) mod event {
     pub const HARD_FAULT: u32 = 15;
     pub const RENEW_PHASE: u32 = 16;
     pub const PANIC_FILE: u32 = 17;
+    pub const OOM_SIZE: u32 = 18;
+    pub const OOM_FREE: u32 = 19;
 }
 
 #[no_mangle]
