@@ -53,7 +53,9 @@ def main():
  parser.add_argument('--development-only',action='store_true',
                      help='build a flashable hardware-iteration bundle without the checkpoint gate')
  args=parser.parse_args()
- features=[f'engine-{args.engine}',*[f for f in args.features.split(',') if f]]
+ features=list(dict.fromkeys([f'engine-{args.engine}',
+                            *(['usb-ccid'] if args.engine=='jcvm' else []),
+                            *[f for f in args.features.split(',') if f]]))
  if f"engine-{'jcvm' if args.engine=='mc04' else 'mc04'}" in features:parser.error('features select a different engine')
  if not args.development_only:
   run(sys.executable,'scripts/check.py','--checkpoint');run('cargo','clippy','--all-targets','--','-D','warnings')

@@ -27,7 +27,12 @@ class FactoryResetTest(unittest.TestCase):
                     "layout": layout.name,
                     "layout_sha256": hashlib.sha256(layout.read_bytes()).hexdigest(),
                     "sha256": {"microcard.elf": hashlib.sha256(firmware.read_bytes()).hexdigest()},
+                    "board_features": ["engine-jcvm", "usb-ccid"] if engine == "jcvm" else ["engine-mc04"],
                 }
+                if engine == "jcvm":
+                    (bundle / "manifest.json").write_text(json.dumps({**manifest, "board_features": ["engine-jcvm"]}))
+                    with self.assertRaisesRegex(ValueError, "usb-ccid"):
+                        checked_bundle(bundle, key)
                 (bundle / "manifest.json").write_text(json.dumps(manifest))
                 selected, address = checked_bundle(bundle, key)
                 self.assertEqual((selected, address), (firmware, expected_address))

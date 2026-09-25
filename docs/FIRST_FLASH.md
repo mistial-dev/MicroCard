@@ -11,6 +11,10 @@ python3 scripts/prepare_first_flash.py --engine mc04
 python3 scripts/prepare_first_flash.py --engine jcvm
 ```
 
+The JCVM bundle includes `usb-ccid` by default so a freshly provisioned DK
+enumerates as a smart-card reader. The reset command rejects a headless JCVM
+bundle before erasing the target.
+
 Each engine has its own ignored `artifacts/first-flash/<engine>/dk/` directory containing
 ELF, Intel HEX, binary, and a SHA-256 manifest. MC04 also includes both sample micro
 images, metadata, and maps. The script runs host acceptance, Clippy, the release

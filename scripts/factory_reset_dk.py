@@ -18,6 +18,8 @@ def checked_bundle(bundle: pathlib.Path, management_key: pathlib.Path) -> tuple[
     expected_layouts = {"jcvm": "memory-dk-jcvm.x", "mc04": "memory-dk.x"}
     if manifest.get("layout") != expected_layouts.get(manifest.get("engine")):
         raise ValueError("factory reset requires a DK firmware bundle")
+    if manifest["engine"] == "jcvm" and "usb-ccid" not in manifest.get("board_features", []):
+        raise ValueError("JCVM DK firmware must include usb-ccid")
     layout = ROOT / "board/nrf52840" / manifest["layout"]
     if hashlib.sha256(layout.read_bytes()).hexdigest() != manifest["layout_sha256"]:
         raise ValueError("the bundle's flash layout has changed")
