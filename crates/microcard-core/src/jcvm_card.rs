@@ -556,12 +556,12 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
         self.select_application(command, cancel)
     }
 
-    fn process_plain_with_cancel(&mut self, command: &Command<'_>, cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+    fn process_plain_with_cancel(&mut self, raw: &[u8], cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
         // Any command may mutate persistent state. Renew before invoking Java code
         // when the active bank can no longer guarantee one durable checkpoint.
         self.prepare_selected(cancel)?;
         let (aid, session) = self.selected.as_mut().ok_or(Error::Missing)?;
-        let result = session.process(&command.encode()?, false, &mut self.provider, cancel);
+        let result = session.process(raw, false, &mut self.provider, cancel);
         if session.take_security_reset() && self.storage.registry.state()?.instances()
             .any(|instance| instance.aid == *aid && instance.domain == Aid::isd()) {
             self.reset_requested = true;

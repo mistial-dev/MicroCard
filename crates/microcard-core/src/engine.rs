@@ -15,7 +15,7 @@ pub trait CardEngine {
     fn select_plain_with_cancel(&mut self, _command: &Command<'_>, _cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
         Err(crate::Error::Unauthorized)
     }
-    fn process_plain_with_cancel(&mut self, _command: &Command<'_>, _cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
+    fn process_plain_with_cancel(&mut self, _raw: &[u8], _cancel: &mut dyn FnMut() -> bool) -> Result<Vec<u8>> {
         Err(crate::Error::Unauthorized)
     }
     fn take_security_reset(&mut self) -> bool { false }

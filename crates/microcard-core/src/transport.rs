@@ -119,7 +119,7 @@ impl<C: CardEngine> Endpoint<C> {
             let result = if c.ins == 0xa4 && c.p1 == 4 {
                 self.card.select_plain_with_cancel(&c, should_cancel)
             } else {
-                self.card.process_plain_with_cancel(&c, should_cancel)
+                self.card.process_plain_with_cancel(raw, should_cancel)
             };
             if self.card.take_security_reset() { self.session = None; }
             return match result {
