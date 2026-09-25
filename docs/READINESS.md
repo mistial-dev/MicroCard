@@ -208,6 +208,14 @@ Makerdiary JCVM result. An earlier MakerDiary image booted, enumerated over USB 
 SCP03, and loaded, installed, persisted, and selected the then-signed OpenFIPS201 fixture.
 The current unsigned CAP load path has also run on the nRF52840 DK: SCP03 loaded,
 installed, and selected JCAlgTest, and selection succeeded again after reset.
+On `9bc9fa2`, the diagnostic DK image (`microcard.elf` SHA-256
+`88752fe10608a6051434fb51a8d6c220f809102334e374f0b8f488d80bbb85b6`)
+was verified over SWD and reset. Three repeated physical select/probe sequences
+passed. Warm host-observed select was 5.7–5.8 ms, digest factory 18.9–19.7 ms,
+and OwnerPIN factories 19.1–20.0 ms. The retained SWD trace recorded 20 APDUs,
+9 authenticated append commits, 306 programmed words, and one erase since reset;
+the final patch was 75 bytes. This is a patch-path smoke, not a complete
+JCAlgTest scan or a journal-rollover result.
 The upstream static-performance scan is still incomplete. After roughly 2,170
 APDUs, an OwnerPIN probe exhausted the 192 KiB Rust allocator with the JCAlgTest
 persistent heap near 62 KiB. Retained SWD trace identified the allocation failure;
