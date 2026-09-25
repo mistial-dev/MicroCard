@@ -79,6 +79,10 @@ without consuming a security anchor. Ordinary writes commit once at APDU
 completion, including an applet-generated Java exception. Native internal failure
 boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
 
+An OpenFIPS201 cold selection changes one applet-owned persistent byte, so it
+does commit. A subsequent unchanged reselection after deselect performs no
+flash program or erase and no journal encryption in the host fault model.
+
 Java Card transient-array payloads stay in RAM and are cleared on reset or
 deselection. Their headers and stable references remain persistent; ordinary
 allocation patches carry only those headers, and recovery zero-fills the new

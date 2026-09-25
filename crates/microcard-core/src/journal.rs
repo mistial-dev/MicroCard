@@ -717,9 +717,9 @@ pub(crate) struct FlashMetrics {
     pub(crate) erased_bytes: usize,
 }
 impl MemoryFlash {
-    #[cfg(all(test, feature = "mc04"))]
+    #[cfg(test)]
     pub(crate) fn reset_metrics(&mut self) { self.metrics = FlashMetrics::default(); }
-    #[cfg(all(test, feature = "mc04"))]
+    #[cfg(test)]
     pub(crate) fn metrics(&self) -> FlashMetrics { self.metrics }
     #[cfg(all(test, feature = "jcvm", feature = "software-crypto"))]
     pub(crate) fn leave_nonce_reservations_for_test(&mut self, remaining: usize) {

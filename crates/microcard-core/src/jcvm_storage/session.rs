@@ -443,6 +443,19 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_reselection_does_not_program_flash() {
+        let mut provider = Provider::default();
+        let mut session = installed_session(&mut provider);
+        assert_eq!(session.process(&SELECT, true, &mut provider, &mut || false).unwrap().sw, 0x9000);
+        session.deselect(&mut provider, &mut || false).unwrap();
+        session.store.journal.flash_mut().reset_metrics();
+        let encryptions = provider.encryptions.get();
+        assert_eq!(session.process(&SELECT, true, &mut provider, &mut || false).unwrap().sw, 0x9000);
+        assert_eq!(session.store.journal.flash_mut().metrics(), Default::default());
+        assert_eq!(provider.encryptions.get(), encryptions);
+    }
+
+    #[test]
     fn ordinary_object_definition_commits_once_and_cancel_does_not_publish() {
         let mut last_poll = None;
         for failure in [None, Some(false), Some(true)] {
