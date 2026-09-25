@@ -56,7 +56,9 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             }
             // Exact equality to the live committed projection validates the replacement
             // without constructing a second applet or trusting unsanitized transient data.
-            let mut window = zeroize::Zeroizing::new([0u8; 64]);
+            // save_range scans object metadata to mask transient bytes. Bound the
+            // stack buffer while avoiding hundreds of whole-heap scans here.
+            let mut window = zeroize::Zeroizing::new([0u8; 1024]);
             for (index, chunk) in saved.heap.chunks(window.len()).enumerate() {
                 live.save_range(index * window.len(), &mut window[..chunk.len()]).map_err(engine_error)?;
                 if window[..chunk.len()] != *chunk { return Err(Error::KeyMismatch); }
