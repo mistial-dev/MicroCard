@@ -128,9 +128,11 @@ pub(super) fn encode_view(view: microcard_engine_jcvm::applet::PersistentView<'_
     encoder.array(4)?;
     encoder.unsigned(1)?;
     encoder.unsigned(u64::from(instance))?;
+    let mut projection = view.cursor().map_err(|_| Error::Format)?;
     encoder.bytes_with(heap_size, |output| write_record(output, writes.heap_ranges(),
         before_length, view.heap_bytes(), generation,
-        |range, output| view.save_range(range.start, output).map_err(|_| Error::Format)))?;
+        |range, output| projection.save_range(range.start, output).map_err(|_| Error::Format)))?;
+    projection.finish().map_err(|_| Error::Format)?;
     encoder.bytes_with(static_size, |output| write_record(output, static_changes,
         statics.len(), statics.len(), generation, |range, output| {
             output.copy_from_slice(statics.get(range).ok_or(Error::Bounds)?);

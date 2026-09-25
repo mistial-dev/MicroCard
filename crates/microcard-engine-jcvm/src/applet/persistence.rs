@@ -19,8 +19,76 @@ pub struct PersistentView<'a> {
     pub(crate) projection: Option<&'a Heap<'a>>,
 }
 
+/// Projects sorted heap ranges while validating each object only once.
+pub struct PersistentCursor<'a> {
+    view: PersistentView<'a>,
+    cursor: usize,
+    last_end: usize,
+    found_buffer: bool,
+}
+
+impl PersistentCursor<'_> {
+    pub fn save_range(&mut self, at: usize, output: &mut [u8]) -> Result<()> {
+        let result = (|| {
+            let total = self.view.heap_bytes();
+            let end = at.checked_add(output.len()).filter(|end| *end <= total).ok_or(Error::Bounds)?;
+            if at < self.last_end { return Err(Error::Bounds); }
+            if let Some(heap) = self.view.projection { heap.project_heap_range(at, output)?; }
+            else { output.copy_from_slice(self.view.heap.get(at..end).ok_or(Error::Bounds)?); }
+            while self.cursor < total {
+                let reference = u16::try_from(self.cursor).map_err(|_| Error::Bounds)?;
+                let info = heap::Info::read(self.view.heap, total, reference)?;
+                let payload = self.cursor + heap::HEADER;
+                let length = info.length as usize * info.element_size();
+                let next = (payload + length).next_multiple_of(2);
+                if reference == self.view.buffer {
+                    if info.kind != heap::KIND_BYTE { return Err(Error::Type); }
+                    self.found_buffer = true;
+                }
+                if next <= at { self.cursor = next; continue; }
+                if self.cursor >= end { break; }
+                let clear = if reference == self.view.buffer || info.clear_event != 0 { Some(0..length) }
+                else { natives::native_volatile_range(info)? };
+                if let Some(range) = clear {
+                    let lo = at.max(payload + range.start);
+                    let hi = end.min(payload + range.end);
+                    if lo < hi { output[lo - at..hi - at].fill(0); }
+                }
+                if next > end { break; }
+                self.cursor = next;
+            }
+            self.last_end = end;
+            Ok(())
+        })();
+        if result.is_err() { output.zeroize(); }
+        result
+    }
+
+    pub fn finish(mut self) -> Result<()> {
+        let total = self.view.heap_bytes();
+        while self.cursor < total {
+            let reference = u16::try_from(self.cursor).map_err(|_| Error::Bounds)?;
+            let info = heap::Info::read(self.view.heap, total, reference)?;
+            if reference == self.view.buffer {
+                if info.kind != heap::KIND_BYTE { return Err(Error::Type); }
+                self.found_buffer = true;
+            }
+            self.cursor = (self.cursor + heap::HEADER + info.length as usize * info.element_size())
+                .next_multiple_of(2);
+        }
+        if self.cursor != total || !self.found_buffer { return Err(Error::Format); }
+        Ok(())
+    }
+}
+
 impl<'a> PersistentView<'a> {
     pub fn heap_bytes(self) -> usize { self.projection.map_or(self.heap.len(), Heap::committed_bytes) }
+
+    pub fn cursor(self) -> Result<PersistentCursor<'a>> {
+        let total = self.heap_bytes();
+        if total < 2 || !total.is_multiple_of(2) { return Err(Error::Bounds); }
+        Ok(PersistentCursor { view: self, cursor: 2, last_end: 0, found_buffer: false })
+    }
 
     pub fn metadata(self) -> (Reference, &'a [u8]) { (self.instance, self.statics) }
 
@@ -32,33 +100,9 @@ impl<'a> PersistentView<'a> {
     /// Copy a sanitized window without allocating a complete heap projection.
     pub fn save_range(self, at: usize, output: &mut [u8]) -> Result<()> {
         let result = (|| {
-            let total = self.heap_bytes();
-            let end = at.checked_add(output.len()).filter(|end| *end <= total).ok_or(Error::Bounds)?;
-            if total < 2 || !total.is_multiple_of(2) { return Err(Error::Bounds); }
-            if let Some(heap) = self.projection { heap.project_heap_range(at, output)?; }
-            else { output.copy_from_slice(self.heap.get(at..end).ok_or(Error::Bounds)?); }
-            let mut cursor = 2;
-            let mut found_buffer = false;
-            while cursor < total {
-                let reference = u16::try_from(cursor).map_err(|_| Error::Bounds)?;
-                let info = heap::Info::read(self.heap, total, reference)?;
-                let payload = cursor + heap::HEADER;
-                let length = info.length as usize * info.element_size();
-                let clear = if reference == self.buffer {
-                    if info.kind != heap::KIND_BYTE { return Err(Error::Type); }
-                    found_buffer = true;
-                    Some(0..length)
-                } else if info.clear_event != 0 { Some(0..length) }
-                else { natives::native_volatile_range(info)? };
-                if let Some(range) = clear {
-                    let lo = at.max(payload + range.start);
-                    let hi = end.min(payload + range.end);
-                    if lo < hi { output[lo - at..hi - at].fill(0); }
-                }
-                cursor = (payload + length).next_multiple_of(2);
-            }
-            if cursor != total || !found_buffer { return Err(Error::Format); }
-            Ok(())
+            let mut cursor = self.cursor()?;
+            cursor.save_range(at, output)?;
+            cursor.finish()
         })();
         if result.is_err() { output.zeroize(); }
         result

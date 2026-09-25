@@ -111,6 +111,13 @@ mod tests {
         let mut expected = alloc::vec![0; view.heap_bytes()];
         view.save_into(&mut expected).unwrap();
         assert_eq!(replayed, expected);
+        let mut projected = alloc::vec![0; view.heap_bytes()];
+        let mut cursor = view.cursor().unwrap();
+        for (index, chunk) in projected.chunks_mut(127).enumerate() {
+            cursor.save_range(index * 127, chunk).unwrap();
+        }
+        cursor.finish().unwrap();
+        assert_eq!(projected, expected, "one heap walk must sanitize every split window");
         let (instance, statics) = view.metadata();
         AppletInstance::restore(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
         AppletInstance::validate_persistent(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
