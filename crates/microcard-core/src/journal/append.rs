@@ -41,7 +41,7 @@ pub(super) fn replay(flash: &impl Flash, key: &JournalKey, slot: usize, mut at: 
 pub(super) fn append<F: Flash>(journal: &mut Journal<F>, at: usize, data: Zeroizing<Vec<u8>>,
         provider: &mut impl CryptoProvider) -> Result<()> {
     let (slot, end, generation) = prepare_append(journal, at, data.len())?;
-    let record = journal.seal_record(data, generation, provider)?;
+    let record = journal.seal_record(data, generation, provider, None)?;
     publish(journal, slot, at, end, generation, &record)
 }
 
@@ -119,6 +119,19 @@ fn open(flash: MemoryFlash) -> Result<Journal<MemoryFlash>> {
     Journal::open_with_replay(flash, [3; 16], &mut SoftwareCrypto, |state, _, bytes| {
         state.clear(); state.extend_from_slice(bytes); Ok(())
     }).map(|(journal, _)| journal)
+}
+
+#[cfg(all(test, feature = "software-crypto"))]
+#[test]
+fn exhausted_slot_reopens_as_renewable() {
+    let mut journal = open(MemoryFlash::new(4096)).unwrap();
+    journal.commit(b"base").unwrap();
+    while journal.remaining_append_frames().unwrap() > 0 {
+        journal.append_owned_with(Zeroizing::new(b"next".to_vec()), &mut SoftwareCrypto).unwrap();
+    }
+    let recovered = open(journal.into_flash()).unwrap();
+    assert_eq!(recovered.remaining_append_frames(), Ok(0));
+    assert_eq!(recovered.append_capacity(), Err(Error::Quota));
 }
 
 #[cfg(all(test, feature = "software-crypto"))]

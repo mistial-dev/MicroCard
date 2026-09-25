@@ -611,12 +611,12 @@ impl<F: crate::journal::Flash> Store<F> {
         Ok(())
     }
 
-    fn reserve_heap_identity(&mut self) -> Result<[u8; 16]> {
+    fn reserve_heap_identity(&mut self) -> Result<([u8; 16], crate::journal::ReservedNonce)> {
         self.state()?;
         let nonce = self.journal.reserve_identity_nonce()?;
         let mut identity = *b"\0\0\0\0\0\0\0\0JCVMv1\0\0";
-        identity[..8].copy_from_slice(&nonce.to_le_bytes());
-        Ok(identity)
+        identity[..8].copy_from_slice(&nonce.value().to_le_bytes());
+        Ok((identity, nonce))
     }
 
     /// Prepare and commit an unreferenced heap before publishing the instance.
@@ -640,7 +640,7 @@ impl<F: crate::journal::Flash> Store<F> {
         if next.in_use(aid) { return Err(Error::Busy); }
         if !(1..=MAX_INSTANCES).contains(&heaps.bank_count()) { return Err(Error::Storage); }
         let bank = (0..heaps.bank_count() as u8).find(|bank| !next.instances().any(|i| i.heap_bank == *bank)).ok_or(Error::Quota)?;
-        let identity = self.reserve_heap_identity()?;
+        let (identity, nonce) = self.reserve_heap_identity()?;
         let (image, sizes, digest) = self.session_image(load, images, scratch, provider, |package| {
             next.register(package, module, aid, identity, bank).map(|_| ())
         })?;
@@ -654,7 +654,7 @@ impl<F: crate::journal::Flash> Store<F> {
         // this heap remains an orphan until a later authorized installation reclaims it.
         drop(session);
         if cancel() { return Err(Error::Cancelled); }
-        self.commit(next, provider)?;
+        self.commit_snapshot_reserved(next, nonce, provider)?;
         Ok((*self.state()?.instances().find(|instance| instance.aid == aid).ok_or(Error::Storage)?, volatile))
     }
 
@@ -749,6 +749,17 @@ impl<F: crate::journal::Flash> Store<F> {
 
     fn commit_snapshot(&mut self, next: Registry, provider: &mut impl crate::crypto::CryptoProvider) -> Result<()> {
         let result = self.journal.commit_owned_with(zeroize::Zeroizing::new(next.encode()?), provider);
+        self.finish_commit_snapshot(next, result, provider)
+    }
+
+    fn commit_snapshot_reserved(&mut self, next: Registry, nonce: crate::journal::ReservedNonce,
+            provider: &mut impl crate::crypto::CryptoProvider) -> Result<()> {
+        let result = self.journal.commit_owned_with_reserved(zeroize::Zeroizing::new(next.encode()?), nonce, provider);
+        self.finish_commit_snapshot(next, result, provider)
+    }
+
+    fn finish_commit_snapshot(&mut self, next: Registry, result: Result<()>,
+            provider: &mut impl crate::crypto::CryptoProvider) -> Result<()> {
         match result {
             Ok(()) => {
                 self.state = next;

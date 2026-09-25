@@ -242,6 +242,20 @@ behavior, and reset state through Java bytecode. Full physical JCAlgTest,
 flash interruption, and production provisioning remain release work. The
 physical smoke result does not imply P71D321 compatibility.
 
+A later range-GC image stopped its extended scan after roughly 6,500 CSV rows;
+that partial CSV is diagnostic only. SWD showed that the applet image and heap
+journal authenticated on restart, but selection could not pass the pre-command
+renewal check. A full append slot reopened with no append offset, and
+`remaining_append_frames` incorrectly reported a storage error instead of zero.
+After that fix, the next check exposed a separate resource limit: the registry
+had used all **1,024 nonce words**, including one extra nonce for each heap
+identity reservation, while only **684 commit words** were used. Installation
+and renewal now use their reserved identity nonce for the same registry
+publication, without reusing it for another encryption. The one-time counter
+pages still have finite capacity; repeated full scans need a tested registry
+epoch rollover or a fresh development-card provision. No incomplete scan is a
+release result.
+
 Classify a completed raw DK scan without changing its upstream CSV or log:
 
 ```sh

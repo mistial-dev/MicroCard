@@ -248,7 +248,7 @@ fn renewal_recovery_authenticates_before_reclaim_and_never_reencrypts_the_heap()
     // A separate interruption starts from the same pre-publication state. The pending
     // marker reaches flash, but its anchor cannot advance until reboot.
     let mut interrupted = Store::open(before_publication, [3; 16], initial, &mut provider).unwrap();
-    let before_anchor = 4 + 4 + 1 + 4096 + 40 + store.state.encode().unwrap().len() + 1 + 1;
+    let before_anchor = 4 + 1 + 4096 + 40 + store.state.encode().unwrap().len() + 1 + 1;
     interrupted.journal.flash_mut().fail_after = Some(before_anchor);
     let mut protected = BoundedFlashStaging::<_, 65536>::new(Scratch(alloc::vec![0xff; 65536]));
     assert_eq!(interrupted.begin_renewal(first.aid, &live, &images, &heaps, &root, &mut protected, &mut scratch, &mut provider), Err(Error::Storage));

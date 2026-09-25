@@ -63,7 +63,7 @@ impl<F: crate::journal::Flash> Store<F> {
         if size < crate::journal::OVERHEAD { return Err(Error::Bounds); }
         let prepared = (|| {
             let (image, sizes, digest) = Self::session_image_from(self.state()?, instance.load, images, scratch, provider, |_| Ok(()))?;
-            let identity = self.reserve_heap_identity()?;
+            let (identity, nonce) = self.reserve_heap_identity()?;
             let key = crate::jcvm_storage::heap_key(provider, root, instance.heap_bank, &identity, &digest)?;
             #[cfg(feature = "latency-trace")]
             crate::jcvm_storage::renewal_phase(10);
@@ -94,13 +94,13 @@ impl<F: crate::journal::Flash> Store<F> {
             let renewal = Renewal { aid, bank: instance.heap_bank, old_identity: instance.identity,
                 new_identity: identity, package_digest, record_length: record.len() as u32, record_digest: hash };
             let mut next = *self.state()?; next.renewal = Some(renewal); next.validate()?;
-            Ok((renewal, next))
+            Ok((renewal, next, nonce))
         })();
-        let (renewal, next) = match prepared {
+        let (renewal, next, nonce) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => { staging.reset(); return Err(error); }
         };
-        if let Err(error) = self.commit(next, provider) {
+        if let Err(error) = self.commit_snapshot_reserved(next, nonce, provider) {
             // Publication can succeed even when its acknowledgment fails.
             if matches!(self.pending_renewal(), Ok(None)) { staging.reset(); }
             return Err(error);

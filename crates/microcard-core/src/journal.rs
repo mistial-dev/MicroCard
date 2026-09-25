@@ -125,14 +125,23 @@ pub struct Journal<F: Flash> {
     poisoned: bool,
     key: JournalKey,
 }
+
+#[cfg(feature = "jcvm")]
+pub(crate) struct ReservedNonce(u64);
+
+#[cfg(feature = "jcvm")]
+impl ReservedNonce {
+    pub(crate) fn value(&self) -> u64 { self.0 }
+}
+
 impl<F: Flash> Journal<F> {
     /// Domain-separated consumers may burn counter values for fresh identities.
     #[cfg(feature = "jcvm")]
-    pub(crate) fn reserve_identity_nonce(&mut self) -> Result<u64> {
+    pub(crate) fn reserve_identity_nonce(&mut self) -> Result<ReservedNonce> {
         if self.poisoned { return Err(Error::Storage); }
         let value = self.flash.reserve_nonce()?;
         if value == 0 || value > self.flash.nonce_capacity() { return Err(Error::Storage); }
-        Ok(value)
+        Ok(ReservedNonce(value))
     }
     #[cfg(feature = "software-crypto")]
     pub fn open(
@@ -384,7 +393,9 @@ impl<F: Flash> Journal<F> {
     #[cfg(any(test, feature = "jcvm"))]
     pub fn remaining_append_frames(&self) -> Result<usize> {
         if self.poisoned || !self.append_enabled { return Err(Error::Storage); }
-        let at = self.append_offset.ok_or(Error::Storage)?;
+        // A full slot reopens with no append offset. That is a renewal trigger,
+        // not a corrupt journal.
+        let Some(at) = self.append_offset else { return Ok(0); };
         let available = self.flash.slot_size().saturating_sub(3).saturating_sub(at);
         Ok(available / append::FRAME_BYTES)
     }
@@ -413,6 +424,17 @@ impl<F: Flash> Journal<F> {
 
     /// Consume a zeroizing snapshot, reusing its allocation for the encrypted record.
     pub fn commit_owned_with(&mut self, data: Zeroizing<Vec<u8>>, provider: &mut impl CryptoProvider) -> Result<()> {
+        self.commit_owned_with_nonce(data, provider, None)
+    }
+
+    #[cfg(feature = "jcvm")]
+    pub(crate) fn commit_owned_with_reserved(&mut self, data: Zeroizing<Vec<u8>>,
+            nonce: ReservedNonce, provider: &mut impl CryptoProvider) -> Result<()> {
+        self.commit_owned_with_nonce(data, provider, Some(nonce.0))
+    }
+
+    fn commit_owned_with_nonce(&mut self, data: Zeroizing<Vec<u8>>,
+            provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<()> {
         if self.poisoned {
             return Err(Error::Storage);
         }
@@ -427,7 +449,7 @@ impl<F: Flash> Journal<F> {
         let slot = self
             .active
             .map_or(0, |active| (active + 1) % self.slot_count);
-        let record = self.seal_record(data, generation, provider)?;
+        let record = self.seal_record(data, generation, provider, reserved)?;
         // Any flash error from here may leave a published record or reclaim intent.
         // Only recovery can determine which generation is safe to extend.
         self.poisoned = true;
@@ -449,9 +471,13 @@ impl<F: Flash> Journal<F> {
     }
     /// Reserve the nonce only after staging succeeds, then authenticate the exact header.
     fn seal_record(&mut self, data: Zeroizing<Vec<u8>>, generation: u64,
-            provider: &mut impl CryptoProvider) -> Result<Zeroizing<Vec<u8>>> {
+            provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<Zeroizing<Vec<u8>>> {
         let (record, payload_length) = prepare_record(data)?;
-        let attempt = self.flash.reserve_nonce()?;
+        let attempt = match reserved {
+            Some(value) if value != 0 && self.flash.nonce_generation()? == value => value,
+            Some(_) => return Err(Error::Storage),
+            None => self.flash.reserve_nonce()?,
+        };
         encrypt_record(record, &self.key, RecordHeader {
             append_enabled: self.append_enabled, generation, attempt, payload_length,
         }, provider)
@@ -639,9 +665,9 @@ pub(crate) struct FlashMetrics {
     pub(crate) erased_bytes: usize,
 }
 impl MemoryFlash {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "mc04"))]
     pub(crate) fn reset_metrics(&mut self) { self.metrics = FlashMetrics::default(); }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "mc04"))]
     pub(crate) fn metrics(&self) -> FlashMetrics { self.metrics }
     #[cfg(all(test, feature = "jcvm", feature = "software-crypto"))]
     pub(crate) fn leave_nonce_reservations_for_test(&mut self, remaining: usize) {
@@ -837,6 +863,20 @@ mod tests {
     use super::*;
     use core::cell::Cell;
     const KEY: [u8; 16] = [0x33; 16];
+
+    #[cfg(all(feature = "jcvm", feature = "software-crypto"))]
+    #[test]
+    fn reserved_identity_nonce_is_the_same_nonce_used_for_publication() {
+        let (mut journal, _) = Journal::open(MemoryFlash::new(4096), KEY).unwrap();
+        let nonce = journal.reserve_identity_nonce().unwrap();
+        assert_eq!(nonce.value(), 1);
+        journal.commit_owned_with_reserved(Zeroizing::new(b"installed".to_vec()), nonce,
+            &mut SoftwareCrypto).unwrap();
+        let flash = journal.into_flash();
+        assert_eq!(flash.nonce_generation(), Ok(1));
+        let (_, recovered) = Journal::open(flash, KEY).unwrap();
+        assert_eq!(recovered.as_deref().map(Vec::as_slice), Some(b"installed".as_slice()));
+    }
 
     struct MeasuredFlash {
         inner: MemoryFlash,
