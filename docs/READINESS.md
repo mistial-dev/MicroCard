@@ -244,7 +244,9 @@ median**, **21 ms p95**, and **1,460 ms maximum** host PC/SC latency. The
 registry remained at **4/1,024** commit and nonce words and the heap security
 anchor remained at **1/1,024**; 42 additional heap snapshot nonces were used.
 Selection and factories passed after reset. [The DK evidence](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk)
-records the exact firmware and untouched upstream outputs.
+records the exact firmware, untouched upstream outputs, and a flash-endurance
+estimate. A write-heavy applet still needs a lifetime budget or higher-endurance
+storage before an always-on production claim.
 The physical performance modes and allocator-pressure qualification are still
 open; P71D321 compatibility cannot yet be claimed.
 

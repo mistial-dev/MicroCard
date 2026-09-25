@@ -311,6 +311,15 @@ factory, and both OwnerPIN factory probes passed. Selection after reboot took
 1,598 ms; the three factory probes took about 18 ms each. The finite local
 nonce page and flash-erase endurance still need a workload-based lifetime
 budget before claiming an always-on production target.
+The scan used 42 additional snapshot attempts. Each completed rollover erases
+one 64 KiB slot (16 flash pages); two slots alternate, so this workload is
+approximately 21 erase cycles per page per full scan. Nordic specifies
+[10,000 erase cycles per nRF52840 page](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/nvmc.html).
+That suggests roughly 476 identical scans to the rated limit, before margins,
+other writes, and any failed attempts. It is a workload estimate, not a safe
+service-life guarantee. Normal crypto APDUs that do not change persistent state
+do not use this budget. Continuous write-heavy use needs a measured wear policy
+or higher-endurance storage.
 After installing the applet with `scripts/jcalgtest_gp_acceptance.py`, the
 physical scan used this command. Reader index `2` was the MicroCard reader on
 this host; check the client's reader list before repeating it elsewhere.
