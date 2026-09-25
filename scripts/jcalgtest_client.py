@@ -45,7 +45,16 @@ def main():
         return
     if not client_args:
         parser.error("pass upstream client arguments after --, or use --build-only")
-    subprocess.run([*command, *client_args], cwd=source, check=True)
+    result = subprocess.run([*command, *client_args], cwd=source, check=False)
+    if "-outpath" in client_args:
+        index = client_args.index("-outpath")
+        if index + 1 < len(client_args):
+            output = Path(client_args[index + 1])
+            if not output.is_absolute():
+                output = source / output
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "client-exit-code.txt").write_text(f"{result.returncode}\n")
+    result.check_returncode()
 
 
 if __name__ == "__main__":

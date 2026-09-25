@@ -64,6 +64,10 @@ def inspect_csv(path, expected):
     }
 
 
+def client_completed(text, exit_code):
+    return "Traceback" not in text and (exit_code == "0" if exit_code is not None else "KIND REQUEST:" in text)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result", required=True, type=pathlib.Path)
@@ -85,16 +89,20 @@ def main():
                  for name, supported in probes.items()}
     metadata, comparison = inspect_csv(csvs[0], reference)
     console = args.result / "console.log"
-    text = console.read_text(errors="replace") if console.exists() else ""
+    upstream_logs = sorted(args.result.glob("ALGTEST_log_*.log"))
+    transcript = console if console.exists() else (upstream_logs[-1] if upstream_logs else None)
+    text = transcript.read_text(errors="replace") if transcript else ""
+    exit_file = args.result / "client-exit-code.txt"
+    exit_code = exit_file.read_text().strip() if exit_file.exists() else None
     times = [int(part.split(" ms", 1)[0]) for line in text.splitlines()
              if "elapsed=" in line
              for part in [line.split("elapsed=", 1)[1]]
              if " ms" in part and part.split(" ms", 1)[0].isdigit()]
     complete = (not comparison["missing_probes"] and not comparison["extra_probes"]
-                and not comparison["error_rows"] and "Traceback" not in text
-                and "KIND REQUEST:" in text)
+                and not comparison["error_rows"] and client_completed(text, exit_code))
     report = {
         "valid_extended_result": complete,
+        "client_exit_code": exit_code,
         "firmware_sha256": digest(args.elf),
         "client_commit": revision,
         "applet_sha256": digest(IMAGE),

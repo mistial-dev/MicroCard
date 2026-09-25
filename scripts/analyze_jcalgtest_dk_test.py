@@ -3,7 +3,7 @@
 import pathlib
 import tempfile
 
-from analyze_jcalgtest_dk import inspect_csv
+from analyze_jcalgtest_dk import client_completed, inspect_csv
 
 
 def main():
@@ -26,6 +26,10 @@ def main():
         assert result["error_rows"] == [
             ("javacardx.crypto.Cipher", "ALG_DES",
              "UNKONWN_ERROR-card_has_return_value_6982")]
+        assert client_completed("upstream log", "0")
+        assert not client_completed("upstream log", "1")
+        assert not client_completed("Traceback", "0")
+        assert not client_completed("KIND REQUEST:", "1")
 
 
 if __name__ == "__main__":
