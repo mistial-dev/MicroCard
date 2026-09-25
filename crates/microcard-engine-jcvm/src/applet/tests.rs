@@ -98,6 +98,45 @@
     }
 
     #[test]
+    fn deletion_request_survives_reboot_and_runs_before_the_next_process() {
+        struct Capture { snapshots: Vec<(Vec<u8>, Vec<u8>, Reference)> }
+        impl crate::host::Host for Capture {
+            fn checkpoint(&mut self, view: PersistentView<'_>) -> Result<()> {
+                let mut bytes = vec![0; view.heap_bytes()];
+                let saved = view.save_into(&mut bytes)?;
+                let statics = saved.statics.to_vec();
+                let instance = saved.instance;
+                self.snapshots.push((bytes, statics, instance));
+                Ok(())
+            }
+        }
+        let mut package = applet(vec![op::INVOKESTATIC, 0, 6, op::RETURN], 1);
+        package.constants.push([CONSTANT_STATIC_METHODREF, 0x81, 8, 18]);
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        let mut card = AppletInstance::new(&file, Sizes::default()).unwrap();
+        card.install(&file, &mut crate::host::NoHost, &[]).unwrap();
+        let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+        card.pending_writes.merge(heap.pending_writes());
+        card.heap_used = heap.used();
+        let mut host = Capture { snapshots: Vec::new() };
+        assert_eq!(card.process(&file, &mut host, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, SW_SUCCESS);
+        assert_eq!(host.snapshots.len(), 1);
+        let (saved_heap, saved_statics, instance) = &host.snapshots[0];
+        assert_eq!(saved_heap[0], 0x83);
+        let mut restored = AppletInstance::restore(&file, Sizes::default(), PersistentState {
+            heap: saved_heap, statics: saved_statics, instance: *instance,
+        }).unwrap();
+        let before = restored.heap_used;
+        assert_eq!(restored.process(&file, &mut host, &[0, 1, 0, 0, 0], false).unwrap().sw, SW_SUCCESS);
+        assert!(restored.heap_used < before);
+        assert_eq!(host.snapshots.len(), 3);
+        assert_eq!(host.snapshots[1].0[0], 3, "deletion must checkpoint before process");
+        assert_eq!(host.snapshots[2].0[0], 0x83, "process may request another cycle");
+    }
+
+    #[test]
     fn an_applet_installs_registers_selects_and_answers_a_command() {
         // process: write 0x9000 worth of nothing, then send two bytes from the buffer.
         let process = vec![
