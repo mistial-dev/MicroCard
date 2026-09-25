@@ -22,7 +22,7 @@ This page is the authoritative list of supported behavior and release blockers.
   configurations with both or neither engine and check that the unselected interpreter
   and diagnostic name tables are absent.
 - **Device formats:** bounded deterministic CBOR, MP05 packages, MDB2 bundles, and
-  MJ03 management journals and MJ04 JCVM heap journals. Old formats are rejected without automatic erasure. Packages use
+  MJ03 management journals and MJ05 JCVM heap journals. Old formats are rejected without automatic erasure. Packages use
   P-256, 65-byte uncompressed SEC1 keys, low-S signatures, and 32-byte dependency
   key hashes. Capability 21 remains reserved. [Device contracts](DEVICE_CBOR.md)
   define the bytes and bounds; [protocol](PROTOCOL.md) defines the transport.
@@ -232,8 +232,11 @@ error rows**, 23 ms median and 24 ms p95 host PC/SC latency, and a 5.28 s
 maximum for renewal. Applet selection passed after reset. The card reported
 55 supported probes; **233 P71D321-supported probes remain missing**. The
 registry used 911 of 1,024 one-time commit and nonce words, so a repeated full
-scan needs counter epoch renewal or a fresh development provision. The exact
-ELF, raw output, and commands are recorded in [the DK result](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk).
+scan needs counter epoch renewal or a fresh development provision. MJ05 compact
+append records subsequently completed the same physical scan with **76/1,024**
+registry words used, 21 ms median and 23 ms p95 host latency, and a 5.28 s
+renewal maximum. MJ04 media is intentionally incompatible. The exact ELFs, raw
+outputs, and commands are recorded in [the DK results](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk).
 The physical performance modes and allocator-pressure qualification are still
 open; P71D321 compatibility cannot yet be claimed.
 

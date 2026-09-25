@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 104168,
+      "text_bytes": 104188,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 139144,
+      "text_bytes": 139160,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 139168,
+      "text_bytes": 139184,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 232372,
+      "text_bytes": 232412,
       "data_bytes": 148,
       "bss_bytes": 203100,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 233728,
+      "text_bytes": 233776,
       "data_bytes": 148,
       "bss_bytes": 203116,
       "ceilings": {
@@ -53,7 +53,7 @@
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 119708,
+      "text_bytes": 119780,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,21 +63,21 @@
       }
     },
     "jcvm_usb_ccid": {
-      "text_bytes": 235452,
+      "text_bytes": 236612,
       "data_bytes": 148,
       "bss_bytes": 204788,
       "ceilings": {
-        "text_bytes": 236000,
+        "text_bytes": 238000,
         "data_bytes": 160,
         "bss_bytes": 207000
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 236736,
+      "text_bytes": 237904,
       "data_bytes": 148,
       "bss_bytes": 204804,
       "ceilings": {
-        "text_bytes": 237000,
+        "text_bytes": 239000,
         "data_bytes": 160,
         "bss_bytes": 207000
       }

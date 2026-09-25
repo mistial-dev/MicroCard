@@ -277,6 +277,19 @@ Renewal is currently checked on the command path, which also explains the
 multi-second tail. A replacement design must prove nonce uniqueness across
 interrupted writes and erased-slot reuse without charging ordinary commands
 against a finite global registry counter page.
+MJ05 replaces the fixed 1,024-byte append frame with a bounded, word-aligned
+record. Old MJ04 heap media is rejected without erasure. After a development
+factory reset, the normal DK image with ELF SHA-256
+`009c6e0aad163c1f5c55cb94be42764f981a78f30471d747e84ce7ba164115df`
+completed the same upstream extended scan. The untouched CSV and upstream log,
+the recorded client exit code, analyzer result, and exact ELF are in
+`/private/tmp/microcard-jcalgtest-mj05-dk-20260925`. It again produced
+**8,607/8,607 probes and zero error rows**. Host PC/SC timing was **21 ms
+median, 23 ms p95, 5,277 ms maximum**. SWD reads after the scan showed
+**76/1,024** registry commit and nonce words used, versus **911/1,024** on
+MJ04. Selection and targeted factories passed after an SWD reset. The smaller
+records extend usable lifetime, but the finite registry and slow heap erase
+remain release blockers.
 After installing the applet with `scripts/jcalgtest_gp_acceptance.py`, the
 physical scan used this command. Reader index `2` was the MicroCard reader on
 this host; check the client's reader list before repeating it elsewhere.
@@ -287,6 +300,11 @@ printf '2\n' | python3 scripts/jcalgtest_client.py \
   -op ALG_SUPPORT_EXTENDED -cardname MicroCard-DK \
   -outpath /private/tmp/microcard-jcalgtest-nonce-fix-dk-20260924 -fresh
 ```
+
+For MJ05, use `-cardname MicroCard-DK-MJ05` and
+`-outpath /private/tmp/microcard-jcalgtest-mj05-dk-20260925` after flashing the
+MJ05 image and factory resetting old heap media. The client wrapper records its
+exit status beside the untouched upstream CSV and log.
 
 Classify a completed raw DK scan without changing its upstream CSV or log:
 

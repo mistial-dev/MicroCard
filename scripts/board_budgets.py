@@ -107,7 +107,9 @@ def main():
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
         "dongle": 244_000, "jcvm_development_debug": 120_000,
-        "jcvm_usb_ccid": 236_000, "jcvm_dongle": 237_000,
+        # MJ05 packs small heap changes and cut registry use from 911 to 76
+        # words in the full DK support scan; the added parser costs ~1.2 KiB.
+        "jcvm_usb_ccid": 238_000, "jcvm_dongle": 239_000,
     }
     failures = []
     for name, result in variants.items():

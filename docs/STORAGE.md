@@ -49,25 +49,25 @@ until authenticated recovery succeeds. Clearing an injected I/O fault alone does
 authorize a retry or consume another nonce. The byte-cut recovery sweep checks this
 alongside recovery of the previous or newly committed state.
 
-JCVM checkpoint changes can follow a snapshot in fixed 1,024-byte append frames.
-Append-enabled snapshots and frames use the distinct MJ04 authenticated header.
-Each append frame holds at most 980 plaintext bytes and has a four-byte commit
-marker at a fixed position at the frame end. Heap and
+JCVM checkpoint changes can follow a snapshot in bounded, word-aligned append
+records. Append-enabled snapshots and records use the distinct MJ05 authenticated
+header. Each record holds at most 980 plaintext bytes and ends with a four-byte
+commit marker. Heap and
 static patches share a bounded CBOR envelope tied to the base generation and
 instance. Recovery validates the complete envelope before changing scratch state,
 then selects the latest complete chain and reconciles its generation anchor.
 Partially programmed tails require rotation to a new full snapshot. Oversized
 changes and transaction commits also use snapshots. Snapshot-only readers reject
-MJ04 even before the first append, so an interrupted
+MJ05 even before the first append, so an interrupted
 counter advance cannot hide an appended record. JCVM rejects old MJ03 heap journals
-without erasing them. MC04 retains MJ03 and does not include the append scanner.
+and MJ04 append journals without erasing them. MC04 retains MJ03 and does not include the append scanner.
 
 Appending reserves a fresh nonce and advances the generation counter just as a full
 snapshot does. It avoids a slot erase but does not extend counter lifetime. These
 records serve JCVM checkpoints, including completed bytecode instructions. Native
 internal failure boundaries and counter lifetime remain under review. See [JCVM durability](JCVM_PROFILE.md#transactions-and-remaining-durability-work).
 
-The MJ04 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
+The MJ05 delta plaintext is `[1, instance, heap_patch, static_patch]`, where each patch
 is a CBOR byte string encoding `[1, base_generation, before_length, after_length,
 [[offset, replacement_bytes], ...]]`. Each patch has at most 64 nonempty, ordered,
 nonoverlapping spans. Replay checks both patches completely, exact base lengths and
@@ -75,11 +75,13 @@ generation, the instance, and the resulting snapshot quota before replacing stat
 Growth is zero-initialized; truncation clears removed plaintext. Unknown versions,
 noncanonical CBOR, malformed lengths, overlaps, and trailing bytes are rejected.
 
-Frames start at the next four-byte boundary after the encrypted snapshot record,
-then advance in 1,024-byte steps without overlapping the slot's three trailer bytes.
-Their marker is at frame offset 1,020. Unused padding stays erased. The frame's
+Records start at the next four-byte boundary after the encrypted snapshot record.
+Each next offset follows the prior record's authenticated length, rounded up to
+four bytes. The marker occupies the last word of that span; unused padding stays
+erased. A torn record closes the epoch, so recovery never guesses where its
+successor would have started. The record's
 header, ciphertext, and tag use the existing 24-byte header, AES-CCM provider, and
-`MCJN3 || attempt_le64` nonce construction; MJ04 is authenticated in the header.
+`MCJN3 || attempt_le64` nonce construction; MJ05 is authenticated in the header.
 
 ## JCVM counter renewal
 
@@ -121,7 +123,7 @@ APDU selection and execution never start renewal. Active uploads defer maintenan
 without aborting the upload. A maintenance failure drops selection; host processes
 exit and the board reboots so startup recovery can resolve pending ownership. This
 threshold does not guarantee that every command fits the remaining counter space.
-`SeedRecord` now authenticates a bounded initial MJ04 record (generation/attempt 1),
+`SeedRecord` now authenticates a bounded initial MJ05 record (generation/attempt 1),
 requires caller validation of its plaintext, and retains an immutable ciphertext
 borrow. Its copy operation accepts only a wholly erased bank with empty counters,
 reserves nonce 1, copies and reads back the exact record, publishes the marker, and
@@ -139,7 +141,7 @@ The transition is serialized with uploads and management changes:
 1. At a command boundary with no active transaction or upload, reserve a fresh
    identity from the registry nonce counter. Derive the new heap key from the root,
    bank, identity, and image digest using the existing heap-key derivation.
-2. Serialize the committed heap with the new identity, encrypt its initial MJ04
+2. Serialize the committed heap with the new identity, encrypt its initial MJ05
    record exactly once, and write it to staging. Use generation/attempt 1 for this
    new key. Authenticate and validate the staged record before publishing metadata.
    A failed attempt abandons the identity; a later attempt reserves another one.

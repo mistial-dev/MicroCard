@@ -1,21 +1,27 @@
-//! Fixed append frames keep the commit marker locatable after a torn header.
+//! A torn append closes this epoch; the next snapshot starts in the other slot.
 use super::*;
-pub(super) const FRAME_BYTES: usize = 1024;
+pub(super) const MAX_FRAME_BYTES: usize = 1024;
 const MARKER_BYTES: usize = 4;
-pub(super) const MAX_PAYLOAD: usize = FRAME_BYTES - HEADER_BYTES - 16 - MARKER_BYTES;
+pub(super) const MIN_FRAME_BYTES: usize = HEADER_BYTES + 16 + MARKER_BYTES;
+pub(super) const MAX_PAYLOAD: usize = MAX_FRAME_BYTES - MIN_FRAME_BYTES;
 
-pub(super) fn frame_end(flash: &impl Flash, at: usize) -> Result<usize> {
+pub(super) fn frame_end(flash: &impl Flash, at: usize, length: usize) -> Result<usize> {
     if !at.is_multiple_of(4) { return Err(Error::Bounds); }
-    at.checked_add(FRAME_BYTES).filter(|end| *end <= flash.slot_size().saturating_sub(3))
+    if length > MAX_PAYLOAD { return Err(Error::Quota); }
+    at.checked_add(MIN_FRAME_BYTES).and_then(|end| end.checked_add(length))
+        .and_then(|end| end.checked_add(3)).map(|end| end & !3)
+        .filter(|end| *end <= flash.slot_size().saturating_sub(3))
         .ok_or(Error::Quota)
 }
 
-fn erased(flash: &impl Flash, slot: usize, at: usize) -> Result<bool> {
-    let end = frame_end(flash, at)?;
+fn erased(flash: &impl Flash, slot: usize, at: usize, end: usize) -> Result<bool> {
     let mut bytes = [0; 64];
-    for offset in (at..end).step_by(bytes.len()) {
-        flash.read(slot, offset, &mut bytes)?;
-        if bytes.iter().any(|byte| *byte != 0xff) { return Ok(false); }
+    let mut offset = at;
+    while offset < end {
+        let count = (end - offset).min(bytes.len());
+        flash.read(slot, offset, &mut bytes[..count])?;
+        if bytes[..count].iter().any(|byte| *byte != 0xff) { return Ok(false); }
+        offset += count;
     }
     Ok(true)
 }
@@ -26,14 +32,15 @@ pub(super) fn replay(flash: &impl Flash, key: &JournalKey, slot: usize, mut at: 
         mut generation: u64, provider: &mut impl CryptoProvider,
         mut apply: impl FnMut(u64, &[u8]) -> Result<()>) -> Result<(u64, Option<usize>)> {
     if !at.is_multiple_of(4) { return Err(Error::Bounds); }
-    while frame_end(flash, at).is_ok() {
+    while frame_end(flash, at, 0).is_ok() {
         let next = generation.checked_add(1).ok_or(Error::Storage)?;
-        let Some(payload) = read(flash, key, slot, at, next, provider)? else {
-            return Ok((generation, erased(flash, slot, at)?.then_some(at)));
+        let Some((payload, end)) = read(flash, key, slot, at, next, provider)? else {
+            let available = erased(flash, slot, at, flash.slot_size().saturating_sub(3))?;
+            return Ok((generation, available.then_some(at)));
         };
         apply(generation, &payload)?;
         generation = next;
-        at = at.checked_add(FRAME_BYTES).ok_or(Error::Storage)?;
+        at = end;
     }
     Ok((generation, None))
 }
@@ -49,7 +56,7 @@ pub(super) fn append<F: Flash>(journal: &mut Journal<F>, at: usize, data: Zeroiz
 pub(super) fn append_encoded<F: Flash>(journal: &mut Journal<F>, at: usize, length: usize,
         provider: &mut impl CryptoProvider, encode: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<()> {
     let (slot, end, generation) = prepare_append(journal, at, length)?;
-    let mut record = Zeroizing::new([0u8; FRAME_BYTES]);
+    let mut record = Zeroizing::new([0u8; MAX_FRAME_BYTES]);
     let record_length = HEADER_BYTES + length + 16;
     encode(&mut record[HEADER_BYTES..HEADER_BYTES + length])?;
     let attempt = journal.flash.reserve_nonce()?;
@@ -73,12 +80,11 @@ fn prepare_append<F: Flash>(journal: &Journal<F>, at: usize, length: usize)
     if journal.poisoned { return Err(Error::Storage); }
     if !journal.append_enabled { return Err(Error::IncompatibleState); }
     let slot = journal.active.ok_or(Error::Storage)?;
-    let end = frame_end(&journal.flash, at)?;
-    if length > MAX_PAYLOAD { return Err(Error::Quota); }
+    let end = frame_end(&journal.flash, at, length)?;
     let generation = journal.generation.checked_add(1).ok_or(Error::Quota)?;
     if generation > journal.flash.monotonic_capacity() { return Err(Error::Quota); }
     // Never program over a previous attempt, including an incomplete one.
-    if !erased(&journal.flash, slot, at)? { return Err(Error::Storage); }
+    if !erased(&journal.flash, slot, at, end)? { return Err(Error::Storage); }
     Ok((slot, end, generation))
 }
 
@@ -94,24 +100,33 @@ fn publish<F: Flash>(journal: &mut Journal<F>, slot: usize, at: usize, end: usiz
 }
 
 fn read(flash: &impl Flash, key: &JournalKey, slot: usize, at: usize, generation: u64,
-        provider: &mut impl CryptoProvider) -> Result<Option<Zeroizing<Vec<u8>>>> {
-    let end = frame_end(flash, at)?;
+        provider: &mut impl CryptoProvider) -> Result<Option<(Zeroizing<Vec<u8>>, usize)>> {
+    frame_end(flash, at, 0)?;
+    let mut bytes = [0; HEADER_BYTES];
+    flash.read(slot, at, &mut bytes)?;
+    if bytes.iter().all(|byte| *byte == 0xff) { return Ok(None); }
+    let reserved = flash.nonce_generation()?;
+    if reserved > flash.nonce_capacity() { return Err(Error::Storage); }
+    let header = match RecordHeader::decode(&bytes, MAX_PAYLOAD + 16, reserved) {
+        Ok(header) => header,
+        Err(Error::IncompatibleState) => return Err(Error::IncompatibleState),
+        Err(_) => return Ok(None),
+    };
+    let end = match frame_end(flash, at, header.payload_length as usize - 16) {
+        Ok(end) => end,
+        Err(Error::Quota) => return Ok(None),
+        Err(error) => return Err(error),
+    };
     let mut marker = [0; MARKER_BYTES];
     flash.read(slot, end - MARKER_BYTES, &mut marker)?;
     if marker != [0; MARKER_BYTES] { return Ok(None); }
-    let mut bytes = [0; HEADER_BYTES];
-    flash.read(slot, at, &mut bytes)?;
-    let reserved = flash.nonce_generation()?;
-    if reserved > flash.nonce_capacity() { return Err(Error::Storage); }
-    let header = RecordHeader::decode(&bytes, MAX_PAYLOAD + 16, reserved)
-        .map_err(|error| if error == Error::Storage { Error::Format } else { error })?;
     if !header.append_enabled || header.generation != generation { return Err(Error::Format); }
     let mut payload = crate::crypto::zeroizing_buffer(header.payload_length as usize)?;
     flash.read(slot, at + HEADER_BYTES, &mut payload)?;
     let written = provider.aes_ccm_decrypt_in_place(key.as_ref(), &nonce(header.attempt), &bytes, &mut payload)?;
     if written != payload.len() - 16 { return Err(Error::Storage); }
     payload.truncate(written);
-    Ok(Some(payload))
+    Ok(Some((payload, end)))
 }
 
 #[cfg(all(test, feature = "software-crypto"))]
@@ -123,15 +138,18 @@ fn open(flash: MemoryFlash) -> Result<Journal<MemoryFlash>> {
 
 #[cfg(all(test, feature = "software-crypto"))]
 #[test]
-fn exhausted_slot_reopens_as_renewable() {
+fn nearly_full_slot_reopens_with_bounded_append_capacity() {
     let mut journal = open(MemoryFlash::new(4096)).unwrap();
     journal.commit(b"base").unwrap();
+    let mut appended = 0;
     while journal.remaining_append_frames().unwrap() > 0 {
         journal.append_owned_with(Zeroizing::new(b"next".to_vec()), &mut SoftwareCrypto).unwrap();
+        appended += 1;
     }
+    assert!(appended >= 50);
     let recovered = open(journal.into_flash()).unwrap();
     assert_eq!(recovered.remaining_append_frames(), Ok(0));
-    assert_eq!(recovered.append_capacity(), Err(Error::Quota));
+    assert!(recovered.append_capacity().unwrap() < MAX_PAYLOAD);
 }
 
 #[cfg(all(test, feature = "software-crypto"))]
@@ -141,6 +159,9 @@ fn append_frames_authenticate_and_publish_only_after_the_marker() {
     journal.commit(b"base").unwrap();
     let base = journal.into_flash();
     assert!(matches!(Journal::open(base.clone(), [3; 16]), Err(Error::IncompatibleState)));
+    let mut previous_format = base.clone();
+    previous_format.slots[0][..4].copy_from_slice(b"MJ04");
+    assert!(matches!(open(previous_format), Err(Error::IncompatibleState)));
     let (mut legacy, _) = Journal::open(MemoryFlash::new(4096), [3; 16]).unwrap();
     legacy.commit(b"legacy").unwrap();
     assert!(matches!(open(legacy.into_flash()), Err(Error::IncompatibleState)));
@@ -151,7 +172,7 @@ fn append_frames_authenticate_and_publish_only_after_the_marker() {
         let result = append(&mut journal, 64, Zeroizing::new(b"patch".to_vec()), &mut SoftwareCrypto);
         journal.flash.fail_after = None;
         let recovered = read(&journal.flash, &journal.key, 0, 64, 2, &mut SoftwareCrypto).unwrap();
-        assert_eq!(recovered.as_deref().map(Vec::as_slice), (cut >= 53).then_some(b"patch".as_slice()));
+        assert_eq!(recovered.as_ref().map(|(bytes, _)| bytes.as_slice()), (cut >= 53).then_some(b"patch".as_slice()));
         if result.is_ok() { assert!(recovered.is_some()); }
         let mut values = Vec::new();
         let (generation, available) = replay(&journal.flash, &journal.key, 0, 64, 1,
@@ -160,7 +181,8 @@ fn append_frames_authenticate_and_publish_only_after_the_marker() {
         assert_eq!(values.len(), usize::from(cut >= 53));
         reconcile_generation(&mut journal.flash, generation).unwrap();
         assert_eq!(journal.flash.monotonic_generation().unwrap(), generation);
-        assert_eq!(available, if cut <= 4 { Some(64) } else if cut < 53 { None } else { Some(64 + FRAME_BYTES) });
+        let next = frame_end(&journal.flash, 64, 5).unwrap();
+        assert_eq!(available, if cut <= 4 { Some(64) } else if cut < 53 { None } else { Some(next) });
         if cut >= 4 {
             assert_eq!(append(&mut journal, 64, Zeroizing::new(b"other".to_vec()), &mut SoftwareCrypto), Err(Error::Storage));
         }
@@ -169,14 +191,21 @@ fn append_frames_authenticate_and_publish_only_after_the_marker() {
     append(&mut journal, 64, Zeroizing::new(b"patch".to_vec()), &mut SoftwareCrypto).unwrap();
     assert!(read(&journal.flash, &JournalKey::from([4; 16]), 0, 64, 2, &mut SoftwareCrypto).is_err());
     assert!(read(&journal.flash, &journal.key, 0, 64, 3, &mut SoftwareCrypto).is_err());
-    append(&mut journal, 64 + FRAME_BYTES, Zeroizing::new(b"next".to_vec()), &mut SoftwareCrypto).unwrap();
+    let next = frame_end(&journal.flash, 64, 5).unwrap();
+    append(&mut journal, next, Zeroizing::new(b"next".to_vec()), &mut SoftwareCrypto).unwrap();
+    let after_next = frame_end(&journal.flash, next, 4).unwrap();
     let mut values = Vec::new();
     assert_eq!(replay(&journal.flash, &journal.key, 0, 64, 1, &mut SoftwareCrypto,
-        |base, bytes| { values.push((base, bytes.to_vec())); Ok(()) }).unwrap(), (3, Some(64 + 2 * FRAME_BYTES)));
+        |base, bytes| { values.push((base, bytes.to_vec())); Ok(()) }).unwrap(), (3, Some(after_next)));
     assert_eq!(values, vec![(1, b"patch".to_vec()), (2, b"next".to_vec())]);
+    for length in [0u32, 15, 17, u32::MAX] {
+        let mut malformed = journal.flash.clone();
+        malformed.slots[0][64 + 20..64 + 24].copy_from_slice(&length.to_le_bytes());
+        assert!(open(malformed).is_err(), "length {length}");
+    }
     // Losing a committed suffix must not silently restore the earlier valid prefix.
     let mut missing_tail = journal.flash.clone();
-    missing_tail.slots[0][64 + FRAME_BYTES..64 + 2 * FRAME_BYTES].fill(0xff);
+    missing_tail.slots[0][next..after_next].fill(0xff);
     let (generation, _) = replay(&missing_tail, &journal.key, 0, 64, 1, &mut SoftwareCrypto,
         |_, _| Ok(())).unwrap();
     assert_eq!(generation, 2);
@@ -255,7 +284,7 @@ fn interrupted_compaction_preserves_the_latest_chain() {
     }
     // Model erase damage away from the slot header, not just a sequential byte prefix.
     let mut damaged = base;
-    damaged.slots[0][44] ^= 1;
+    damaged.slots[0][64 + HEADER_BYTES] ^= 1;
     assert!(Journal::open_with_replay(damaged.clone(), [3; 16], &mut SoftwareCrypto, replace).is_err());
     damaged.slots[1][4093] = 0; // Surviving chain records reclaim intent.
     let (_, recovered) = Journal::open_with_replay(damaged, [3; 16], &mut SoftwareCrypto, replace).unwrap();

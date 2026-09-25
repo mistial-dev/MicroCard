@@ -71,7 +71,7 @@ enum CandidateRead {
 impl RecordHeader {
     fn encode(&self) -> [u8; HEADER_BYTES] {
         let mut bytes = [0; HEADER_BYTES];
-        bytes[..4].copy_from_slice(if self.append_enabled { b"MJ04" } else { b"MJ03" });
+        bytes[..4].copy_from_slice(if self.append_enabled { b"MJ05" } else { b"MJ03" });
         bytes[4..12].copy_from_slice(&self.generation.to_le_bytes());
         bytes[12..20].copy_from_slice(&self.attempt.to_le_bytes());
         bytes[20..24].copy_from_slice(&self.payload_length.to_le_bytes());
@@ -80,7 +80,8 @@ impl RecordHeader {
 
     fn decode(bytes: &[u8; HEADER_BYTES], capacity: usize, reserved_nonce: u64) -> Result<Self> {
         if matches!(&bytes[..4], b"MJ01" | b"MJ02") { return Err(Error::IncompatibleState); }
-        let append_enabled = match &bytes[..4] { b"MJ03" => false, b"MJ04" => true, _ => return Err(Error::Storage) };
+        if &bytes[..4] == b"MJ04" { return Err(Error::IncompatibleState); }
+        let append_enabled = match &bytes[..4] { b"MJ03" => false, b"MJ05" => true, _ => return Err(Error::Storage) };
         let header = Self {
             append_enabled,
             generation: u64::from_le_bytes(bytes[4..12].try_into().unwrap()),
@@ -385,11 +386,13 @@ impl<F: Flash> Journal<F> {
         if self.poisoned { return Err(Error::Storage); }
         let at = self.append_offset.ok_or(Error::Quota)?;
         if !self.append_enabled { return Err(Error::IncompatibleState); }
-        append::frame_end(&self.flash, at)?;
-        Ok(append::MAX_PAYLOAD)
+        let available = self.flash.slot_size().saturating_sub(3).saturating_sub(at) / 4 * 4;
+        let capacity = available.saturating_sub(append::MIN_FRAME_BYTES);
+        if capacity == 0 { return Err(Error::Quota); }
+        Ok(capacity.min(append::MAX_PAYLOAD))
     }
 
-    /// Number of complete append frames left in the active epoch.
+    /// Conservative count of maximum-sized append records left in this epoch.
     #[cfg(any(test, feature = "jcvm"))]
     pub fn remaining_append_frames(&self) -> Result<usize> {
         if self.poisoned || !self.append_enabled { return Err(Error::Storage); }
@@ -397,7 +400,7 @@ impl<F: Flash> Journal<F> {
         // not a corrupt journal.
         let Some(at) = self.append_offset else { return Ok(0); };
         let available = self.flash.slot_size().saturating_sub(3).saturating_sub(at);
-        Ok(available / append::FRAME_BYTES)
+        Ok(available / append::MAX_FRAME_BYTES)
     }
 
     /// Append one bounded authenticated change without erasing a snapshot slot.
@@ -406,8 +409,9 @@ impl<F: Flash> Journal<F> {
     pub fn append_owned_with(&mut self, data: Zeroizing<Vec<u8>>, provider: &mut impl CryptoProvider) -> Result<()> {
         if self.poisoned { return Err(Error::Storage); }
         let at = self.append_offset.ok_or(Error::Quota)?;
+        let length = data.len();
         append::append(self, at, data, provider)?;
-        self.append_offset = at.checked_add(append::FRAME_BYTES);
+        self.append_offset = append::frame_end(&self.flash, at, length).ok();
         Ok(())
     }
 
@@ -418,7 +422,7 @@ impl<F: Flash> Journal<F> {
         if self.poisoned { return Err(Error::Storage); }
         let at = self.append_offset.ok_or(Error::Quota)?;
         append::append_encoded(self, at, length, provider, encode)?;
-        self.append_offset = at.checked_add(append::FRAME_BYTES);
+        self.append_offset = append::frame_end(&self.flash, at, length).ok();
         Ok(())
     }
 
