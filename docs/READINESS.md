@@ -22,7 +22,7 @@ This page is the authoritative list of supported behavior and release blockers.
   configurations with both or neither engine and check that the unselected interpreter
   and diagnostic name tables are absent.
 - **Device formats:** bounded deterministic CBOR, MP05 packages, MDB2 bundles, and
-  MJ03 management journals and MJ05 JCVM heap journals. Old formats are rejected without automatic erasure. Packages use
+  MJ03 management journals and MJ07 JCVM heap journals. Old formats are rejected without automatic erasure. Packages use
   P-256, 65-byte uncompressed SEC1 keys, low-S signatures, and 32-byte dependency
   key hashes. Capability 21 remains reserved. [Device contracts](DEVICE_CBOR.md)
   define the bytes and bounds; [protocol](PROTOCOL.md) defines the transport.
@@ -33,8 +33,10 @@ Immutable images occupy dedicated flash slots. Journal activation protects the p
 committed generation and uncertain candidates. JCVM pins a digest-verified slot so it cannot
 be reclaimed while selected and reuses that mapping without hashing it on each APDU;
 MC04 retains metadata and descriptors, borrowing verified flash images for loading,
-recovery and execution. Both board layouts reserve separate JCVM heap banks. Both journal formats reserve a durable nonce before every encryption attempt,
-independently of the committed generation, including failed attempts.
+recovery and execution. Both board layouts reserve separate JCVM heap banks.
+MC04 and JCVM snapshots reserve durable nonces before encryption, including failed
+attempts. MJ07 append records derive distinct nonces from the reserved snapshot
+attempt and their one-use flash offsets; they do not program a nonce counter.
 
 MC04 domain management separates state/recovery, authenticated commands, execution,
 native services, application staging, lifecycle changes, metadata, snapshots and
@@ -237,6 +239,12 @@ append records subsequently completed the same physical scan with **76/1,024**
 registry words used, 21 ms median and 23 ms p95 host latency, and a 5.28 s
 renewal maximum. MJ04 media is intentionally incompatible. The exact ELFs, raw
 outputs, and commands are recorded in [the DK results](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk).
+MJ07 then completed the same full scan with **zero error rows**, **20 ms
+median**, **21 ms p95**, and **1,460 ms maximum** host PC/SC latency. The
+registry remained at **4/1,024** commit and nonce words and the heap security
+anchor remained at **1/1,024**; 42 additional heap snapshot nonces were used.
+Selection and factories passed after reset. [The DK evidence](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk)
+records the exact firmware and untouched upstream outputs.
 The physical performance modes and allocator-pressure qualification are still
 open; P71D321 compatibility cannot yet be claimed.
 

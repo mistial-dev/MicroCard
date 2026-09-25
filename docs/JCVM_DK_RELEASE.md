@@ -290,6 +290,27 @@ median, 23 ms p95, 5,277 ms maximum**. SWD reads after the scan showed
 MJ04. Selection and targeted factories passed after an SWD reset. The smaller
 records extend usable lifetime, but the finite registry and slow heap erase
 remain release blockers.
+MJ07 separates the authenticated heap record sequence from its physical
+security anchor. Ordinary APDU writes and explicit transaction commits do not
+program an anchor word; OwnerPIN checkpoints do. Idle append-slot compaction
+uses a new snapshot nonce under the current key, reserving registry-backed key
+renewal for a nearly exhausted local counter. Old heap formats are rejected.
+On 2026-09-25, a freshly provisioned DK ran the same pinned upstream extended
+scan with ELF SHA-256
+`0618b26938fa787bf35a55fb20bcd628530b7cf1ca099e139d16313b1f8f4795`.
+The untouched CSV and upstream log, analyzer result, exit code, and exact ELF
+are in `/private/tmp/microcard-jcalgtest-mj07-dk-20260925`. The analyzer
+accepted **8,607/8,607 probes, zero error rows**, and found **55 supported**
+with **233 P71D321-positive probes still missing**. Across 17,222 host PC/SC
+APDUs, latency was **20 ms median, 21 ms p95, 1,460 ms maximum**. These are
+host observations, not isolated device execution times. SWD reads after
+installation showed heap-bank 0 at **1 anchor / 2 nonce words** and the
+registry at **4 / 4**. After the full scan they showed **1 / 44** and
+**4 / 4**, respectively. An SWD reset followed by selection, version, digest
+factory, and both OwnerPIN factory probes passed. Selection after reboot took
+1,598 ms; the three factory probes took about 18 ms each. The finite local
+nonce page and flash-erase endurance still need a workload-based lifetime
+budget before claiming an always-on production target.
 After installing the applet with `scripts/jcalgtest_gp_acceptance.py`, the
 physical scan used this command. Reader index `2` was the MicroCard reader on
 this host; check the client's reader list before repeating it elsewhere.
@@ -305,6 +326,12 @@ For MJ05, use `-cardname MicroCard-DK-MJ05` and
 `-outpath /private/tmp/microcard-jcalgtest-mj05-dk-20260925` after flashing the
 MJ05 image and factory resetting old heap media. The client wrapper records its
 exit status beside the untouched upstream CSV and log.
+For MJ07, use `-cardname MicroCard-DK-MJ07` and
+`-outpath /private/tmp/microcard-jcalgtest-mj07-dk-20260925`. The recorded run
+invoked the pinned upstream main class with Microsoft OpenJDK 17 in an
+interactive terminal and selected reader index `2`. A redirected client launch
+on this host reported no readers while returning exit code zero; the wrapper
+now rejects such runs when no new CSV was written.
 
 Classify a completed raw DK scan without changing its upstream CSV or log:
 
