@@ -154,12 +154,14 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
                 return pin_exception(heap, context, 2);
             }
             let tries = heap.get_word(this, COUNTER)?;
+            let validated = heap.get_word(this, READY)? != 0;
             // Presentation spends the attempt durably before comparing.
             if !predecremented {
                 heap.put_word_unconditional(this, COUNTER, tries.saturating_sub(1))?;
             }
             heap.put_word_unconditional(this, READY, 0)?;
-            checkpoint_committed(heap, host, jcre, context, statics)?;
+            checkpoint_committed((!predecremented && tries != 0) || validated,
+                heap, host, jcre, context, statics)?;
             if candidate == crate::vm::NULL {
                 return Ok(Native::Threw(new_exception(heap, ClassId::NullPointerException, context)?));
             }
@@ -182,7 +184,7 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
                 heap.put_word_unconditional(this, READY, 1)?;
-                checkpoint_committed(heap, host, jcre, context, statics)?;
+                checkpoint_committed(true, heap, host, jcre, context, statics)?;
             }
             frame.push_short(matched as i16)?;
         }
@@ -213,16 +215,18 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
                 let limit = heap.get_word(this, KIND)?;
                 heap.put_word_unconditional(this, COUNTER, limit)?;
                 heap.put_word_unconditional(this, READY, 0)?;
-                checkpoint_committed(heap, host, jcre, context, statics)?;
+                checkpoint_committed(true, heap, host, jcre, context, statics)?;
             }
         }
         MethodId::resetAndUnblock => {
             let this = frame.pop_reference()?;
             if pin_class(heap, this, declared, context)? != ClassId::OwnerPIN { return Err(Error::Type); }
             let limit = heap.get_word(this, KIND)?;
+            let changed = heap.get_word(this, COUNTER)? != limit
+                || heap.get_word(this, READY)? != 0;
             heap.put_word_unconditional(this, COUNTER, limit)?;
             heap.put_word_unconditional(this, READY, 0)?;
-            checkpoint_committed(heap, host, jcre, context, statics)?;
+            checkpoint_committed(changed, heap, host, jcre, context, statics)?;
         }
 
         MethodId::getTryLimit => {
@@ -261,10 +265,11 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
             let actual = pin_class(heap, this, declared, context)?;
             if actual != ClassId::OwnerPINxWithPredecrement { return Err(Error::Type); }
             let tries = heap.get_word(this, COUNTER)?;
+            let validated = heap.get_word(this, READY)? != 0;
             let next = tries.saturating_sub(1);
             heap.put_word_unconditional(this, COUNTER, next)?;
             heap.put_word_unconditional(this, READY, 0)?;
-            checkpoint_committed(heap, host, jcre, context, statics)?;
+            checkpoint_committed(tries != 0 || validated, heap, host, jcre, context, statics)?;
             let flag = heap.get_word(this, super::PENDING)?;
             heap.byte_slice_mut(flag, 0, 1)?[0] = 1;
             frame.push_short(next as i16)?;
@@ -278,8 +283,6 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
 #[cfg(test)]
 mod tests {
     use super::pin_matches;
-    use crate::{Result, applet::PersistentView, host::{CheckpointReason, Host}, natives::Jcre,
-        vm::heap::{Heap, KIND_BYTE, CLEAR_ON_RESET}};
 
     #[test]
     fn pin_comparison_folds_content_length_and_blocked_state_over_full_capacity() {
@@ -292,32 +295,4 @@ mod tests {
         assert!(!pin_matches(material, 4, b"12340", true));
     }
 
-    #[test]
-    fn unchanged_pin_checkpoint_does_not_publish_a_record() {
-        struct Counter(usize);
-        impl Host for Counter {
-            fn checkpoint(&mut self, _: PersistentView<'_>, _: CheckpointReason) -> Result<()> {
-                self.0 += 1;
-                Ok(())
-            }
-        }
-
-        let mut bytes = [0; 64];
-        let mut heap = Heap::new(&mut bytes).unwrap();
-        heap.initialize_lifecycle();
-        let buffer = heap.new_transient_array(KIND_BYTE, 4, 1, CLEAR_ON_RESET).unwrap();
-        let instance = heap.new_object(1, 1, 1).unwrap();
-        heap.mark_checkpointed();
-        let mut jcre = Jcre::new(0, buffer);
-        jcre.instance = Some(instance);
-        let mut host = Counter(0);
-
-        super::super::checkpoint_committed(&mut heap, &mut host, &jcre, 1, &[]).unwrap();
-        assert_eq!(host.0, 0);
-        heap.put_word_unconditional(instance, 0, 1).unwrap();
-        super::super::checkpoint_committed(&mut heap, &mut host, &jcre, 1, &[]).unwrap();
-        assert_eq!(host.0, 1);
-        super::super::checkpoint_committed(&mut heap, &mut host, &jcre, 1, &[]).unwrap();
-        assert_eq!(host.0, 1);
-    }
 }

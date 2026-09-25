@@ -98,6 +98,10 @@ fn lifecycle_checkpoints_before_success_and_survives_callback_and_abort() {
     call(getter, &mut heap, &mut storage, &mut frame, 1, &mut next).unwrap();
     assert_eq!(frame.pop_short().unwrap(), 0x0f);
     storage.fail = true;
+    heap.put_word(instance, 0, 1).unwrap();
+    frame.push_short(0x0f).unwrap();
+    call(setter, &mut heap, &mut storage, &mut frame, 1, &mut next).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 1, "unchanged card state must not anchor an ordinary write");
     frame.push_short(0x17).unwrap();
     assert!(matches!(call(setter, &mut heap, &mut storage, &mut frame, 1,
         &mut next), Err(Error::Storage)));
@@ -513,6 +517,19 @@ fn transactions_keep_pin_presentations_and_nonatomic_copies_outside_undo() {
         &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]), Err(Error::Storage)));
     assert_eq!(heap.get_word(pin, 4), Ok(2), "failure must stop before a matching PIN resets retries");
     assert_eq!(heap.get_word(pin, 3), Ok(0));
+
+    // A blocked presentation cannot turn an earlier ordinary write into an
+    // anchored PIN checkpoint. The rejecting host makes that boundary visible.
+    heap.put_word_unconditional(pin, 4, 0).unwrap();
+    heap.mark_checkpointed();
+    heap.byte_slice_mut(destination, 0, 1).unwrap()[0] = 1;
+    for value in [(pin, true), (original, true), (0, false), (4, false)] {
+        frame.push_raw(value).unwrap();
+    }
+    assert!(matches!(security::call(ClassId::OwnerPIN, MethodId::check, signature, &mut heap,
+        &mut checkpoint, &mut frame, 1, &mut jcre, &mut { u32::MAX }, &[]), Ok(Native::Returned)));
+    assert_eq!(frame.pop_short(), Ok(0));
+    assert!(heap.has_uncheckpointed_writes());
 }
 
 #[test]

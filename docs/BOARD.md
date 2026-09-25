@@ -120,8 +120,10 @@ The older [add-on experiment](NRF52840_CC310_PLATFORM_SPIKE.json) is historical 
 Test-only measurement counters are absent from firmware. Build from the board directory
 so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
-These ceilings are regression alarms based on measured links, with 5–7 KiB of
-flash headroom and about 2 KiB of static-RAM headroom for RTIC USB builds.
+These ceilings are regression alarms based on measured links. The current JCVM
+USB and dongle profiles have about 0.8–1 KiB of flash headroom; static-RAM
+headroom is about 2 KiB. The JCVM limits were revised after adding checks that
+keep unchanged PIN and card-state calls from anchoring ordinary applet writes.
 They are not the physical firmware partition size. The linker scripts set
 the actual DK and dongle code, staging, image, heap, and journal regions. The
 earlier USB ceilings were below their own recorded measurements, so the gate could
