@@ -49,25 +49,41 @@ impl<'a> Command<'a> {
         }
         Ok(c)
     }
-    pub fn encode(&self) -> Result<Vec<u8>> {
+    fn encoded_len(&self) -> Result<usize> {
         if self.data.len() > 255 || self.le.is_some_and(|x| x == 0 || x > 256) {
             return Err(Error::Bounds);
         }
-        let capacity = 4usize
+        4usize
             .checked_add(usize::from(!self.data.is_empty()))
             .and_then(|length| length.checked_add(self.data.len()))
             .and_then(|length| length.checked_add(usize::from(self.le.is_some())))
-            .ok_or(Error::Bounds)?;
-        let mut b = Vec::new();
-        b.try_reserve_exact(capacity).map_err(|_| Error::Quota)?;
-        b.extend_from_slice(&[self.cla, self.ins, self.p1, self.p2]);
+            .ok_or(Error::Bounds)
+    }
+
+    /// Encode into caller-owned storage, so a card command needs no temporary allocation.
+    pub fn encode_into<'b>(&self, output: &'b mut [u8]) -> Result<&'b [u8]> {
+        let length = self.encoded_len()?;
+        let output = output.get_mut(..length).ok_or(Error::Bounds)?;
+        output[..4].copy_from_slice(&[self.cla, self.ins, self.p1, self.p2]);
+        let mut at = 4;
         if !self.data.is_empty() {
-            b.push(self.data.len() as u8);
-            b.extend_from_slice(&self.data)
+            output[at] = self.data.len() as u8;
+            at += 1;
+            output[at..at + self.data.len()].copy_from_slice(&self.data);
+            at += self.data.len();
         }
         if let Some(le) = self.le {
-            b.push(le as u8)
+            output[at] = le as u8;
         }
+        Ok(output)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        let capacity = self.encoded_len()?;
+        let mut b = Vec::new();
+        b.try_reserve_exact(capacity).map_err(|_| Error::Quota)?;
+        b.resize(capacity, 0);
+        self.encode_into(&mut b)?;
         Ok(b)
     }
 }
@@ -103,5 +119,23 @@ mod tests {
         };
         command.zeroize_owned_data();
         assert!(command.data.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn bounded_encoding_matches_short_apdu_cases() {
+        for raw in [
+            &b"\x00\x84\x00\x00"[..],
+            &b"\x00\x84\x00\x00\x00"[..],
+            &b"\x80\xda\x00\x00\x02\x12\x34"[..],
+            &b"\x80\xda\x00\x00\x02\x12\x34\x00"[..],
+        ] {
+            let command = Command::parse(raw).unwrap();
+            let mut buffer = [0xa5; 261];
+            let encoded = command.encode_into(&mut buffer).unwrap();
+            assert_eq!(encoded, raw);
+            assert_eq!(command.encode().unwrap(), raw);
+            assert_eq!(buffer[raw.len()], 0xa5);
+            assert_eq!(command.encode_into(&mut buffer[..raw.len() - 1]), Err(Error::Bounds));
+        }
     }
 }

@@ -255,18 +255,19 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         provider: &mut (impl CryptoProvider + Entropy),
         cancel: &mut dyn FnMut() -> bool,
     ) -> Result<Response> {
-        let mut command = zeroize::Zeroizing::new(verified.command().encode()?);
+        let mut command = zeroize::Zeroizing::new([0u8; 261]);
+        let length = verified.command().encode_into(&mut command[..])?.len();
         // OpenFIPS201 requires both C-MAC and C-DECRYPTION for administrative access.
         // MAC-only transport retains ordinary applet semantics without this grant.
         if verified.level() & 3 != 3 {
-            return self.process(&command, false, provider, cancel);
+            return self.process(&command[..length], false, provider, cancel);
         }
         command[0] |= 0x04;
-        if command.len() == 4 {
-            command.try_reserve_exact(1).map_err(|_| Error::Quota)?;
-            command.push(0);
-        }
-        self.process_command(&command, false, Some(verified.level()), provider, cancel)
+        let length = if length == 4 {
+            command[4] = 0;
+            5
+        } else { length };
+        self.process_command(&command[..length], false, Some(verified.level()), provider, cancel)
     }
 
     fn process_command(

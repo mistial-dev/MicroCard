@@ -363,8 +363,10 @@ impl AppletInstance {
         let expected = expected_length(command)?;
         {
             let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
-            heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?.fill(0);
-            heap.byte_slice_mut(self.buffer, 0, command.len())?.copy_from_slice(command);
+            let buffer = heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?;
+            let (incoming, remainder) = buffer.split_at_mut(command.len());
+            incoming.copy_from_slice(command);
+            remainder.fill(0);
         }
         let mut budget = self.sizes.budget;
         if selecting {
@@ -490,7 +492,8 @@ impl AppletInstance {
                 .is_some_and(|class| class.id == ClassId::ISOException));
             if !aborted && (exception.is_none() || iso_status) {
                 let response = machine.jcre.response_data()?;
-                data.try_reserve_exact(response.len()).map_err(|_| Error::Quota)?;
+                // The transport appends the status word, so reserve its space now.
+                data.try_reserve_exact(response.len() + 2).map_err(|_| Error::Quota)?;
                 data.extend_from_slice(response);
             }
             Ok(Invocation { exception, returned, data, aborted })

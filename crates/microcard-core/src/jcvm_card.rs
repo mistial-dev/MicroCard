@@ -649,7 +649,9 @@ impl<B: JcvmBackend> CardEngine for JcvmEngine<B> {
         let result = if instance.domain == Aid::isd() {
             session.process_verified(verified, &mut self.provider, cancel)
         } else {
-            session.process(&verified.command().encode()?, false, &mut self.provider, cancel)
+            let mut command = zeroize::Zeroizing::new([0u8; 261]);
+            let length = verified.command().encode_into(&mut command[..])?.len();
+            session.process(&command[..length], false, &mut self.provider, cancel)
         };
         if session.take_security_reset() && instance.domain == Aid::isd() { self.reset_requested = true; }
         let response = match result {
