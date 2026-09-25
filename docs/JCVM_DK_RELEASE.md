@@ -56,8 +56,8 @@ The extended host scan reports **55 supported** probes against the P71D321
 reference's **288**. There are **233 missing supported** probes and **zero support
 claims outside the profile**. Both `OwnerPINBuilder` extended variants now
 construct real PIN objects. The host's pinned upstream client reported both as
-supported in a complete 8,607-probe extended scan; the physical DK passed the
-two targeted factory probes. The runner writes
+supported in a complete 8,607-probe extended scan; the physical DK later
+completed the same extended support scan. The runner writes
 the exact differences to `profile-comparison.json`; a factory result alone is
 not an algorithm acceptance. An extended run with missing or extra probes fails
 instead of passing as a partial result.
@@ -235,12 +235,12 @@ pins firmware SHA-256 `57820defebd91bbb26b61daa5a4b78674e3acb9bbc36a7d65450e84f6
 It reports **55 supported** probes against the target's **288**, leaving **233
 P71D321-supported probes unimplemented**. A complete scan establishes transport
 stability and a valid support result; it does not establish those missing
-algorithms or their operation, failure, and reboot behavior. A second scan on
-the final non-diagnostic image is still required.
+algorithms or their operation, failure, and reboot behavior. That diagnostic
+run did not qualify the later normal image.
 An independently built applet must still exercise OwnerPINx methods, transaction
-behavior, and reset state through Java bytecode. Full physical JCAlgTest,
-flash interruption, and production provisioning remain release work. The
-physical smoke result does not imply P71D321 compatibility.
+behavior, and reset state through Java bytecode. Full physical JCAlgTest
+performance modes, flash interruption, and production provisioning remain
+release work. The physical smoke result does not imply P71D321 compatibility.
 
 A later range-GC image stopped its extended scan after roughly 6,500 CSV rows;
 that partial CSV is diagnostic only. SWD showed that the applet image and heap
@@ -255,6 +255,38 @@ publication, without reusing it for another encryption. The one-time counter
 pages still have finite capacity; repeated full scans need a tested registry
 epoch rollover or a fresh development-card provision. No incomplete scan is a
 release result.
+
+After the full-slot and nonce-reservation fixes in unsigned commit `52ed5b4`,
+a freshly provisioned DK completed the pinned upstream v1.8.3
+`ALG_SUPPORT_EXTENDED` scan on the **normal, non-traced firmware**. The untouched
+CSV and console log, analysis, and exact ELF are in
+`/private/tmp/microcard-jcalgtest-nonce-fix-dk-20260924`. The ELF SHA-256 is
+`9370dd1c2e15f30bc791c814fc8aae91177c9a076771c3803f946e5d82c43ade`.
+The analyzer accepted **8,607/8,607 probes with zero error rows**. The card
+reported **55 supported** probes, leaving **233** positive P71D321 probes
+missing. Host PC/SC timing over 17,222 APDUs was **23 ms median, 24 ms p95,
+5,278 ms maximum**. Applet selection and the targeted factories passed again
+after an SWD reset. SWD counter reads after the scan showed **911/1,024**
+registry commit and nonce words used. This proves one complete support run,
+not sustainable repeated scans; registry counter epoch renewal remains required.
+Ordinary APDUs do not directly consume registry counters. They append to the
+selected applet's heap journal; when that epoch fills, renewal uses two registry
+records. The full scan's counter use therefore reflects repeated heap renewals,
+not a Java Card requirement to increment a global counter for every write.
+Renewal is currently checked on the command path, which also explains the
+multi-second tail. A replacement design must prove nonce uniqueness across
+interrupted writes and erased-slot reuse without charging ordinary commands
+against a finite global registry counter page.
+After installing the applet with `scripts/jcalgtest_gp_acceptance.py`, the
+physical scan used this command. Reader index `2` was the MicroCard reader on
+this host; check the client's reader list before repeating it elsewhere.
+
+```sh
+printf '2\n' | python3 scripts/jcalgtest_client.py \
+  --source work/jcalgtest-client-src -- \
+  -op ALG_SUPPORT_EXTENDED -cardname MicroCard-DK \
+  -outpath /private/tmp/microcard-jcalgtest-nonce-fix-dk-20260924 -fresh
+```
 
 Classify a completed raw DK scan without changing its upstream CSV or log:
 

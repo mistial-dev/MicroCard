@@ -226,9 +226,16 @@ The P71D321 profile reports object deletion support. JCVM now logs a deletion
 request in authenticated heap version 3 and compacts unreachable objects before
 the next `process()` callback. Host tests cover inherited fields, native handles,
 cycles, transaction abort, and reboot-visible requests. Version 2 media is
-rejected without erasure. The full physical JCAlgTest scan must still prove
-this behavior under allocator pressure and USB time extensions before
-P71D321 compatibility can be claimed.
+rejected without erasure. A normal, non-traced DK image at `52ed5b4` then
+completed the pinned upstream extended support scan: **8,607 probes, zero
+error rows**, 23 ms median and 24 ms p95 host PC/SC latency, and a 5.28 s
+maximum for renewal. Applet selection passed after reset. The card reported
+55 supported probes; **233 P71D321-supported probes remain missing**. The
+registry used 911 of 1,024 one-time commit and nonce words, so a repeated full
+scan needs counter epoch renewal or a fresh development provision. The exact
+ELF, raw output, and commands are recorded in [the DK result](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk).
+The physical performance modes and allocator-pressure qualification are still
+open; P71D321 compatibility cannot yet be claimed.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
 Makerdiary and cover both engine builds, CC310 independent vectors and
