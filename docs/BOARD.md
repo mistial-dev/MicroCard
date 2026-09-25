@@ -87,6 +87,11 @@ arm-none-eabi-size target/thumbv7em-none-eabihf/release/microcard-nrf52840
 
 Select exactly one of `engine-mc04` and `engine-jcvm`. Neither is a default;
 selecting neither or both fails the build. Host tooling can still include both engines.
+`usb-ccid` firmware uses RTIC with USB at priority 3, a 1 ms TIMER1/watchdog
+tick at priority 2, and a single card/APDU/maintenance owner at priority 1.
+The timer also polls USB when the controller has no new interrupt. Long NVMC
+erases still stall instruction fetch; RTIC cannot preempt a stalled CPU.
+The USB task sends standard CCID time extensions whenever the CPU can run.
 `python3 scripts/board_budgets.py --check` links both layouts, inspects symbols and
 link maps for interpreter isolation, and retains separate ELF/map artifacts under
 `artifacts/firmware/`. This is link evidence. [Host heap measurements](HEAP_MEASUREMENTS.json) cover the
@@ -115,15 +120,20 @@ The older [add-on experiment](NRF52840_CC310_PLATFORM_SPIKE.json) is historical 
 Test-only measurement counters are absent from firmware. Build from the board directory
 so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
-These ceilings are regression alarms based on measured links, with about 5–7 KiB of
-headroom. They are not the physical firmware partition size. The linker scripts set
+These ceilings are regression alarms based on measured links, with 5–7 KiB of
+flash headroom and about 2 KiB of static-RAM headroom for RTIC USB builds.
+They are not the physical firmware partition size. The linker scripts set
 the actual DK and dongle code, staging, image, heap, and journal regions. The
 earlier USB ceilings were below their own recorded measurements, so the gate could
 never pass; the current gate includes the operational JCVM DK USB profile and uses
 measured ceilings. A deliberate Java Card feature addition can raise a ceiling only
 with a new link measurement and a check that the storage layout still fits.
 
-BSS includes a 192 KiB heap reservation. These link-time sizes provide no measured peaks. Stack margin, allocator exhaustion, maximum-domain workloads and command latency require board testing.
+BSS includes a 192 KiB heap reservation. RTIC moves the USB stack and card
+endpoint from the main stack into task-owned BSS; the first-flash gate separately
+requires at least 52 KiB of unreserved RAM for stacks. These link-time sizes
+provide no measured peaks. Allocator exhaustion and maximum workloads still
+need board testing.
 
 ## Hardware acceptance still required
 

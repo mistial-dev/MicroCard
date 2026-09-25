@@ -100,8 +100,9 @@ def main():
         "jcvm_usb_ccid": artifact("jcvm-dk-usb", ["--features", "usb-ccid"], "jcvm"),
         "jcvm_dongle": artifact("jcvm-dongle", ["--features", "dongle"], "jcvm"),
     }
-    # Measured September 2026 links plus 5-7 KiB headroom. Layout linker scripts
-    # enforce the physical flash partitions independently of these regression limits.
+    # Measured links plus bounded headroom. RTIC keeps USB and endpoint task
+    # resources in BSS rather than on the main stack; the separate first-flash
+    # check still requires at least 52 KiB of unreserved RAM for stacks.
     text_limits = {
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
@@ -110,9 +111,10 @@ def main():
     }
     failures = []
     for name, result in variants.items():
+        usb_profile = name in {"usb_ccid", "dongle", "jcvm_usb_ccid", "jcvm_dongle"}
         result["ceilings"] = {"text_bytes": text_limits[name],
             "data_bytes": 0 if name == "software_reference" else 160,
-            "bss_bytes": 199_000}
+            "bss_bytes": 207_000 if usb_profile else 199_000}
         for field, ceiling in result["ceilings"].items():
             if result[field] > ceiling:
                 failures.append(f"{name} {field} {result[field]} exceeds {ceiling}")

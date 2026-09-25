@@ -3,7 +3,7 @@
   "target": "thumbv7em-none-eabihf",
   "variants": {
     "software_reference": {
-      "text_bytes": 104052,
+      "text_bytes": 104296,
       "data_bytes": 0,
       "bss_bytes": 196636,
       "ceilings": {
@@ -13,7 +13,7 @@
       }
     },
     "hardware_release": {
-      "text_bytes": 138816,
+      "text_bytes": 139272,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -23,7 +23,7 @@
       }
     },
     "development_debug": {
-      "text_bytes": 138840,
+      "text_bytes": 139296,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -33,27 +33,27 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 234324,
+      "text_bytes": 232492,
       "data_bytes": 148,
-      "bss_bytes": 198284,
+      "bss_bytes": 203100,
       "ceilings": {
         "text_bytes": 241000,
         "data_bytes": 160,
-        "bss_bytes": 199000
+        "bss_bytes": 207000
       }
     },
     "dongle": {
-      "text_bytes": 237356,
+      "text_bytes": 233856,
       "data_bytes": 148,
-      "bss_bytes": 198284,
+      "bss_bytes": 203116,
       "ceilings": {
         "text_bytes": 244000,
         "data_bytes": 160,
-        "bss_bytes": 199000
+        "bss_bytes": 207000
       }
     },
     "jcvm_development_debug": {
-      "text_bytes": 113120,
+      "text_bytes": 119588,
       "data_bytes": 148,
       "bss_bytes": 197692,
       "ceilings": {
@@ -63,23 +63,23 @@
       }
     },
     "jcvm_usb_ccid": {
-      "text_bytes": 230168,
+      "text_bytes": 228660,
       "data_bytes": 148,
-      "bss_bytes": 198284,
+      "bss_bytes": 204788,
       "ceilings": {
         "text_bytes": 236000,
         "data_bytes": 160,
-        "bss_bytes": 199000
+        "bss_bytes": 207000
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 231772,
+      "text_bytes": 229944,
       "data_bytes": 148,
-      "bss_bytes": 198284,
+      "bss_bytes": 204804,
       "ceilings": {
         "text_bytes": 237000,
         "data_bytes": 160,
-        "bss_bytes": 199000
+        "bss_bytes": 207000
       }
     }
   },

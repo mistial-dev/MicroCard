@@ -206,8 +206,12 @@ verify the engine, revision, artifact hashes, and `hardware_flashed: false` in i
 [Hardware smoke](HARDWARE_SMOKE.md) records revision-bound DK results and the current
 Makerdiary JCVM result. An earlier MakerDiary image booted, enumerated over USB CCID, opened
 SCP03, and loaded, installed, persisted, and selected the then-signed OpenFIPS201 fixture.
-The current unsigned CAP load path has passed host acceptance and links for the DK;
-it has not run on physical hardware.
+The current unsigned CAP load path has also run on the nRF52840 DK: SCP03 loaded,
+installed, and selected JCAlgTest, and selection succeeded again after reset.
+The upstream static-performance scan is still incomplete. A later JCAlgTest APDU
+panicked in the VM after successful renewal; its CSV is diagnostic evidence, not
+a valid algorithm or performance result. The [development DK factory-reset command](FIRST_FLASH.md#factory-reset-a-development-dk)
+erases and reprovisions the target when a clean state is needed.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
 Makerdiary and cover both engine builds, CC310 independent vectors and
