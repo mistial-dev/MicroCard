@@ -155,7 +155,7 @@ pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
 // Persist unconditional PIN changes without publishing conditional heap/static writes.
 pub(crate) fn checkpoint_committed(heap: &mut Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
         _context: heap::Context, statics: &[u8]) -> Result<()> {
-    if jcre.installing { return Ok(()); }
+    if jcre.installing || !heap.has_uncheckpointed_writes() { return Ok(()); }
     let instance = jcre.instance.ok_or(Error::Missing)?;
     let mut projected = Zeroizing::new(alloc::vec::Vec::new());
     let statics = if heap.transaction_remaining().is_some() {

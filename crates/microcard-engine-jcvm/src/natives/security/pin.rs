@@ -278,6 +278,8 @@ pub(super) fn call(declared: ClassId, method: MethodId, heap: &mut Heap, host: &
 #[cfg(test)]
 mod tests {
     use super::pin_matches;
+    use crate::{Result, applet::PersistentView, host::{CheckpointReason, Host}, natives::Jcre,
+        vm::heap::{Heap, KIND_BYTE, CLEAR_ON_RESET}};
 
     #[test]
     fn pin_comparison_folds_content_length_and_blocked_state_over_full_capacity() {
@@ -288,5 +290,34 @@ mod tests {
         }
         assert!(!pin_matches(material, 4, b"1234", true));
         assert!(!pin_matches(material, 4, b"12340", true));
+    }
+
+    #[test]
+    fn unchanged_pin_checkpoint_does_not_publish_a_record() {
+        struct Counter(usize);
+        impl Host for Counter {
+            fn checkpoint(&mut self, _: PersistentView<'_>, _: CheckpointReason) -> Result<()> {
+                self.0 += 1;
+                Ok(())
+            }
+        }
+
+        let mut bytes = [0; 64];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        heap.initialize_lifecycle();
+        let buffer = heap.new_transient_array(KIND_BYTE, 4, 1, CLEAR_ON_RESET).unwrap();
+        let instance = heap.new_object(1, 1, 1).unwrap();
+        heap.mark_checkpointed();
+        let mut jcre = Jcre::new(0, buffer);
+        jcre.instance = Some(instance);
+        let mut host = Counter(0);
+
+        super::super::checkpoint_committed(&mut heap, &mut host, &jcre, 1, &[]).unwrap();
+        assert_eq!(host.0, 0);
+        heap.put_word_unconditional(instance, 0, 1).unwrap();
+        super::super::checkpoint_committed(&mut heap, &mut host, &jcre, 1, &[]).unwrap();
+        assert_eq!(host.0, 1);
+        super::super::checkpoint_committed(&mut heap, &mut host, &jcre, 1, &[]).unwrap();
+        assert_eq!(host.0, 1);
     }
 }
