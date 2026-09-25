@@ -440,6 +440,7 @@ impl<'a> Heap<'a> {
 
     pub fn put_word(&mut self, reference: Reference, index: usize, value: u16) -> Result<()> {
         let (at, info) = self.slot(reference, index, false)?;
+        if self.bytes[at..at + 2] == value.to_be_bytes() { return Ok(()); }
         self.remember(at, 2, info)?;
         self.bytes[at..at + 2].copy_from_slice(&value.to_be_bytes());
         Ok(())
@@ -448,8 +449,9 @@ impl<'a> Heap<'a> {
     /// Runtime state such as a PIN presentation counter is never undone.
     pub fn put_word_unconditional(&mut self, reference: Reference, index: usize, value: u16) -> Result<()> {
         let (at, info) = self.slot(reference, index, false)?;
-        if info.clear_event == 0 { self.pending_writes.heap(at, 2); }
         let value = value.to_be_bytes();
+        if self.bytes[at..at + 2] == value { return Ok(()); }
+        if info.clear_event == 0 { self.pending_writes.heap(at, 2); }
         if let Some((_, undo)) = &mut self.transaction { undo.preserve(at, &value); }
         self.bytes[at..at + 2].copy_from_slice(&value);
         Ok(())
@@ -458,6 +460,7 @@ impl<'a> Heap<'a> {
     pub fn put_int(&mut self, reference: Reference, index: usize, value: i32) -> Result<()> {
         let (at, info) = self.slot(reference, index, false)?;
         self.slot(reference, index + 1, false)?;
+        if self.bytes[at..at + 4] == value.to_be_bytes() { return Ok(()); }
         self.remember(at, 4, info)?;
         self.bytes[at..at + 4].copy_from_slice(&value.to_be_bytes());
         Ok(())
@@ -485,6 +488,12 @@ impl<'a> Heap<'a> {
     pub fn array_put(&mut self, reference: Reference, index: usize, value: i16) -> Result<()> {
         let (at, info) = self.slot(reference, index, true)?;
         if matches!(info.kind, KIND_INT | KIND_REFERENCE) { return Err(Error::Type); }
+        let unchanged = match info.kind {
+            KIND_BOOLEAN => self.bytes[at] == (value != 0) as u8,
+            KIND_BYTE => self.bytes[at] == value as u8,
+            _ => self.bytes[at..at + 2] == value.to_be_bytes(),
+        };
+        if unchanged { return Ok(()); }
         self.remember(at, info.element_size(), info)?;
         match info.kind {
             KIND_BOOLEAN => self.bytes[at] = (value != 0) as u8,
@@ -499,6 +508,7 @@ impl<'a> Heap<'a> {
             value: Reference) -> Result<()> {
         let (at, info) = self.slot(reference, index, true)?;
         if info.kind != KIND_REFERENCE { return Err(Error::Type); }
+        if self.bytes[at..at + 2] == value.to_be_bytes() { return Ok(()); }
         self.remember(at, 2, info)?;
         self.bytes[at..at + 2].copy_from_slice(&value.to_be_bytes());
         Ok(())
@@ -522,6 +532,7 @@ impl<'a> Heap<'a> {
         if info.kind != KIND_INT {
             return Err(Error::Type);
         }
+        if self.bytes[at..at + 4] == value.to_be_bytes() { return Ok(()); }
         self.remember(at, 4, info)?;
         self.bytes[at..at + 4].copy_from_slice(&value.to_be_bytes());
         Ok(())
@@ -569,6 +580,10 @@ impl<'a> Heap<'a> {
         let info = self.info(destination)?;
         let source = source as usize + HEADER + source_offset;
         let destination = destination as usize + HEADER + destination_offset;
+        // Atomic copies must still reserve their specified commit capacity.
+        if !conditional && self.bytes[source..source + length] == self.bytes[destination..destination + length] {
+            return Ok(());
+        }
         if conditional { self.remember(destination, length, info)?; }
         microcard_memory::copy_bytes(self.bytes, source, destination, length).ok_or(Error::Bounds)?;
         if !conditional {
@@ -583,6 +598,7 @@ impl<'a> Heap<'a> {
     pub fn fill_bytes_unconditional(&mut self, reference: Reference, offset: usize, length: usize, value: u8) -> Result<()> {
         self.byte_slice(reference, offset, length)?;
         let at = reference as usize + HEADER + offset;
+        if self.bytes[at..at + length].iter().all(|byte| *byte == value) { return Ok(()); }
         if self.info(reference)?.clear_event == 0 { self.pending_writes.heap(at, length); }
         self.bytes[at..at + length].fill(value);
         if let Some((_, undo)) = &mut self.transaction { undo.preserve(at, &self.bytes[at..at + length]); }
@@ -597,6 +613,7 @@ impl<'a> Heap<'a> {
     ) -> Result<()> {
         self.byte_slice(reference, offset, value.len())?;
         let at = reference as usize + HEADER + offset;
+        if self.bytes[at..at + value.len()] == *value { return Ok(()); }
         if self.info(reference)?.clear_event == 0 {
             self.pending_writes.heap(at, value.len());
         }
@@ -652,6 +669,24 @@ mod tests {
     extern crate alloc;
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn unchanged_ordinary_writes_do_not_request_a_checkpoint() {
+        let mut bytes = vec![0; 128];
+        let mut heap = Heap::new(&mut bytes).unwrap();
+        let object = heap.new_object(1, 2, 1).unwrap();
+        let array = heap.new_array(KIND_BYTE, 4, 1).unwrap();
+        heap.mark_checkpointed();
+        heap.put_word(object, 0, 0).unwrap();
+        heap.put_int(object, 0, 0).unwrap();
+        heap.array_put(array, 0, 0).unwrap();
+        heap.fill_bytes_unconditional(array, 0, 4, 0).unwrap();
+        heap.write_bytes_unconditional(array, 0, &[0; 4]).unwrap();
+        heap.copy_bytes_unconditional(array, 0, array, 0, 4).unwrap();
+        assert!(!heap.has_uncheckpointed_writes());
+        heap.put_word(object, 0, 1).unwrap();
+        assert!(heap.has_uncheckpointed_writes());
+    }
 
     #[test]
     fn deletion_request_survives_abort_and_resume_but_rejects_old_heap_version() {
@@ -823,7 +858,7 @@ mod tests {
         heap.byte_slice_mut(created_array, 0, 8).unwrap().fill(0x55);
         // An unconditional native write to a new transactional object still cannot
         // publish that object's allocation before the transaction commits.
-        heap.put_word_unconditional(created, 0, 0x1234).unwrap();
+        heap.put_word_unconditional(created, 0, 0x5678).unwrap();
         assert!(heap.pending_writes().heap_range().is_some());
         assert_eq!(heap.pending_writes().for_committed_heap(before.len()).heap_range(), None);
         assert_eq!(heap.transaction_remaining(), Some(0));

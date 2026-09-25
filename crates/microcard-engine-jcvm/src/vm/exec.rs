@@ -1279,13 +1279,18 @@ fn write_static(machine: &mut Machine<'_, '_, '_, impl Host>, at: usize, kind: u
     if kind == KIND_REF { check_reference_store(machine, value as Reference)?; }
     let width = if kind == 3 { 4 } else { 2 };
     let bytes = machine.statics.get_mut(at..at + width).ok_or(Error::Bounds)?;
-    machine.heap.remember_static(at, bytes)?;
-    match kind {
+    let encoded = value.to_be_bytes();
+    let short = (value as i16).to_be_bytes();
+    let signed_byte = (value as i8 as i16).to_be_bytes();
+    let replacement: &[u8] = match kind {
         // A byte field keeps only the low byte, so reading it back sign extends.
-        KIND_BYTE => bytes.copy_from_slice(&(value as i8 as i16).to_be_bytes()),
-        KIND_REF | KIND_SHORT => bytes.copy_from_slice(&(value as i16).to_be_bytes()),
-        _ => bytes.copy_from_slice(&value.to_be_bytes()),
-    }
+        KIND_BYTE => &signed_byte,
+        KIND_REF | KIND_SHORT => &short,
+        _ => &encoded,
+    };
+    if bytes == replacement { return Ok(()); }
+    machine.heap.remember_static(at, bytes)?;
+    bytes.copy_from_slice(replacement);
     Ok(())
 }
 
