@@ -73,6 +73,34 @@ impl<'a> Linked<'a> {
         Err(Error::Format)
     }
 
+    /// Visit exactly the reference fields described by each class in the hierarchy.
+    /// Recovery and object deletion must agree on which words keep objects alive.
+    pub fn visit_instance_references(&self, class: u16, payload: &[u8],
+            mut visit: impl FnMut(u16) -> Result<()>) -> Result<()> {
+        if payload.len() != usize::from(self.instance_words(class)?) * 2 {
+            return Err(Error::Format);
+        }
+        let mut class = ClassRef::Internal(class);
+        for _ in 0..=u8::MAX {
+            let ClassRef::Internal(offset) = class else { return Ok(()); };
+            let declaration = self.classes.at(offset)?;
+            if declaration.is_interface() { return Err(Error::Format); }
+            let inherited = match declaration.super_class {
+                ClassRef::Internal(parent) => self.instance_words(parent)?,
+                _ => 0,
+            };
+            for index in 0..u16::from(declaration.reference_count) {
+                let at = (usize::from(inherited)
+                    + usize::from(declaration.first_reference_token)
+                    + usize::from(index)) * 2;
+                let word = payload.get(at..at + 2).ok_or(Error::Bounds)?;
+                visit(u16::from_be_bytes([word[0], word[1]]))?;
+            }
+            class = declaration.super_class;
+        }
+        Err(Error::Format)
+    }
+
     /// Words of field the superclasses of this class declare, which is where its own start.
     fn inherited_words(&self, class: u16) -> Result<u16> {
         let info = self.classes.at(class)?;

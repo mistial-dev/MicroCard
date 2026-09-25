@@ -481,33 +481,8 @@ impl AppletInstance {
                         }
                     }
                 } else {
-                    if linked.instance_words(info.class)? != info.length {
-                        return Err(Error::Format);
-                    }
-                    let mut class = ClassRef::Internal(info.class);
-                    for _ in 0..=u8::MAX {
-                        let ClassRef::Internal(offset) = class else {
-                            return Ok(());
-                        };
-                        let declaration = linked.classes().at(offset)?;
-                        if declaration.is_interface() {
-                            return Err(Error::Format);
-                        }
-                        let inherited = match declaration.super_class {
-                            ClassRef::Internal(parent) => linked.instance_words(parent)?,
-                            _ => 0,
-                        };
-                        for index in 0..u16::from(declaration.reference_count) {
-                            let at = (usize::from(inherited)
-                                + usize::from(declaration.first_reference_token)
-                                + usize::from(index))
-                                * 2;
-                            let word = payload.get(at..at + 2).ok_or(Error::Bounds)?;
-                            storable_reference(u16::from_be_bytes([word[0], word[1]]))?;
-                        }
-                        class = declaration.super_class;
-                    }
-                    return Err(Error::Format);
+                    if linked.instance_words(info.class)? != info.length { return Err(Error::Format); }
+                    linked.visit_instance_references(info.class, payload, storable_reference)?;
                 }
             }
             Ok(())
