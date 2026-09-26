@@ -164,6 +164,7 @@
         card.heap_used = heap.used();
         let mut host = Capture { snapshots: Vec::new() };
         assert_eq!(card.process(&file, &mut host, &[0, 0xa4, 4, 0, 0], true).unwrap().sw, SW_SUCCESS);
+        card.flush_ordinary(&mut host).unwrap();
         assert_eq!(host.snapshots.len(), 1);
         assert!(card.heap_used < before + heap::HEADER + 16);
         assert_eq!(host.snapshots[0].0[0], 3, "the request is serviced before publication");
@@ -181,6 +182,7 @@
         let mut restored = AppletInstance::restore(&file, Sizes::default(), state).unwrap();
         let before = restored.heap_used;
         assert_eq!(restored.process(&file, &mut host, &[0, 1, 0, 0, 0], false).unwrap().sw, SW_SUCCESS);
+        restored.flush_ordinary(&mut host).unwrap();
         assert!(restored.heap_used < before);
         assert_eq!(host.snapshots.len(), 2);
         assert_eq!(host.snapshots[1].0[0], 3);
@@ -643,15 +645,20 @@
                 polls += 1;
                 ending.ends_with("cancel") && polls == 100
             });
-            if matches!(ending, "commit-fail" | "plain-store-fail") { assert_eq!(result, Err(Error::Storage), "{ending}"); }
+            if ending == "commit-fail" { assert_eq!(result, Err(Error::Storage), "{ending}"); }
             else if ending.ends_with("cancel") { assert_eq!(result, Err(Error::Cancelled)); }
             else {
                 let expected_sw = match ending {
-                    "commit" | "abort" | "full-caught" => SW_SUCCESS,
+                    "commit" | "abort" | "full-caught" | "plain-store-fail" => SW_SUCCESS,
                     "plain-throw" => 0x6a80,
                     _ => SW_UNKNOWN,
                 };
                 assert_eq!(result.unwrap().sw, expected_sw, "{ending}");
+            }
+            if ending == "plain-store-fail" {
+                assert_eq!(card.flush_ordinary(&mut host), Err(Error::Storage));
+            } else if !ending.ends_with("cancel") && ending != "commit-fail" {
+                card.flush_ordinary(&mut host).unwrap();
             }
             let expected: u16 = if ending.starts_with("plain-") || ending.starts_with("commit") && ending != "commit-fail" { 12 } else { 9 };
             assert_eq!(card.statics, if ending == "full-caught" { 3u16 } else { expected }.to_be_bytes(), "{ending}");

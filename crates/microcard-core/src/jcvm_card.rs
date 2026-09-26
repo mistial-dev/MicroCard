@@ -182,10 +182,14 @@ impl<B: JcvmBackend> JcvmEngine<B> {
         // Reclaim ordinary append space without rotating the heap key or writing
         // the registry. Reserve identity renewal for exhausted counter pages.
         let remaining = session.remaining_commits()?;
-        if session.remaining_append_frames()? > 1 && remaining > 1 {
+        if session.append_capacity()? > 0 && remaining > 1 {
             return Ok(());
         }
         if self.upload.is_some() { return Ok(()); }
+        session.flush_ordinary(&mut self.provider)?;
+        if session.append_capacity()? > 0 && session.remaining_commits()? > 1 {
+            return Ok(());
+        }
         session.release_idle_memory()?;
         let maintenance = if remaining > 1 {
             session.compact_idle(&mut self.provider)
@@ -205,6 +209,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
     fn maintain_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
         // Any maintenance error drops the old journal handle before returning.
+        session.flush_ordinary(&mut self.provider)?;
         self.maintain_epoch_if_needed(aid, &mut session, cancel)?;
         self.selected = Some((aid, session));
         Ok(())

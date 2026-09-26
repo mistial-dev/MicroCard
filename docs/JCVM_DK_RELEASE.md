@@ -12,6 +12,18 @@ MicroCard a P71D321 card. A factory may report support only when its key import,
 generation, operation, failure, and reboot behavior passes. Algorithms marked
 unsupported in that result are not implementation targets.
 
+Ordinary applet writes now remain in RAM until the idle maintenance task
+authenticates and publishes them, normally two seconds after the first response
+in a burst. Several commands can share one flash record. A later command can
+read those writes before publication, but an unexpected power cut or VM failure
+can lose them. Selecting a different applet flushes the old applet first. `OwnerPIN`
+checkpoints, explicit `JCSystem.commitTransaction()`, and administrator security
+state still publish synchronously before their operations return. An applet that
+needs a durable atomic update must use an explicit transaction. This deliberate
+power-cut relaxation means the ordinary-write path does **not** meet Java Card's
+usual persistent-memory durability guarantee; it must be disclosed with test
+results rather than claimed as full Java Card conformance.
+
 The source result is pinned in `vendor/jcalgtest/p71d321-reference.csv.gz` and
 identified by `vendor/jcalgtest/client.lock.json`. Run
 `python3 scripts/jcalgtest_profile.py` to expand its 22 sections into a JSON
@@ -453,9 +465,9 @@ The focused physical operation check is reproducible after the pinned JCAlgTest
 applet is installed and selected:
 
 ```sh
-java scripts/ChecksumProbe.java "MicroCard MicroCard virtual smart card"
+java scripts/JCAlgTestCryptoProbe.java "MicroCard MicroCard virtual smart card"
 probe-rs reset --chip nRF52840_xxAA --probe 1366:1020:000802009660
-java scripts/ChecksumProbe.java "MicroCard MicroCard virtual smart card"
+java scripts/JCAlgTestCryptoProbe.java "MicroCard MicroCard virtual smart card"
 ```
 
 The pinned upstream static performance scan also completed on that CRC image,
@@ -475,6 +487,25 @@ physical checksum sequence then completed all four `update` and `doFinal`
 operations without a reset. The diagnostic trace showed that a near-full
 64 KiB heap slot still needs roughly two seconds for a snapshot/rollover.
 That latency and the full variable performance scan remain release work.
+
+A later diagnostic build, ELF SHA-256
+`75914568c8697c8f0f2e6c8a90ec42cacec899c8689919c2274002be1d50d25c`,
+kept a reusable snapshot buffer and queued ordinary writes for idle publication.
+The physical CRC16, CRC32, and SHA-224 operation probe completed before and
+after reset without a storage error. Its 12 APDUs produced one 167-byte heap
+patch during a 10.7 ms idle maintenance call, with 53 programmed words and no
+erase in that run. This is a focused smoke measurement, not an endurance result
+or a complete upstream performance scan.
+
+Repeating that probe on the same installed JCAlgTest applet eventually exhausted
+its 64 KiB persistent heap. Before the allocation ceiling was corrected, a
+response could succeed even though its later idle snapshot would not fit; idle
+maintenance then reset USB. The heap ceiling now accounts for the applet's
+static data, snapshot encoding, and record framing. The same near-full media
+returned a quota error before publication, and the reader stayed available.
+The transport currently maps this VM allocation failure to `6982`; reporting
+the specified Java Card resource exception remains conformance work. A fresh
+installation and complete upstream performance run are also still needed.
 
 For the full scan, pass `ALG_SUPPORT_EXTENDED` to
 `scripts/jcalgtest_client.py` with the pinned client checkout and an empty

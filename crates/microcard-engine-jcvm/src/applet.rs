@@ -387,7 +387,6 @@ impl AppletInstance {
         drop(heap);
         if cancel() { return Err(Error::Cancelled); }
         self.service_object_deletion(file)?;
-        self.checkpoint_dirty(host)?;
         Ok(Response { data: answer.data, sw })
     }
 
@@ -413,6 +412,12 @@ impl AppletInstance {
         }, crate::host::CheckpointReason::ApduEnd)?;
         self.pending_writes = heap::PendingWrites::default();
         Ok(())
+    }
+
+    /// Publish completed ordinary writes while the applet is idle. PIN and
+    /// explicit transaction checkpoints still call the host synchronously.
+    pub fn flush_ordinary(&mut self, host: &mut impl Host) -> Result<()> {
+        self.checkpoint_dirty(host)
     }
 
     fn service_object_deletion(&mut self, file: &LoadFile) -> Result<()> {

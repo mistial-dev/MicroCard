@@ -29,6 +29,7 @@ pub use banks::{heap_root, HeapBanks};
 pub struct Store<F: Flash> {
     journal: Journal<F>,
     snapshot_workspace: Zeroizing<Vec<u8>>,
+    heap_limit: usize,
     image: [u8; 32],
     installation: [u8; 16],
     maximum: usize,
@@ -99,6 +100,11 @@ mod tests {
         .unwrap();
         assert!(empty.is_none());
         let file = LoadFile::parse(image).unwrap();
+        let statics = usize::from(file.static_fields().unwrap().image_size);
+        let budget = store.maximum - crate::journal::RECORD_OVERHEAD;
+        assert!(store.heap_limit < sizes.heap_bytes);
+        assert!(snapshot_size(u64::from(u16::MAX), store.heap_limit, statics).unwrap() <= budget);
+        assert!(snapshot_size(u64::from(u16::MAX), store.heap_limit + 1, statics).unwrap() > budget);
         let mut card = AppletInstance::new(&file, sizes).unwrap();
         let aid = file.applets().unwrap().iter().next().unwrap().aid;
         let parameters = crate::globalplatform::ApplicationInstall {
@@ -204,6 +210,11 @@ impl<F: Flash> Store<F> {
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(40);
         let (mut store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
+        let heap_limit = maximum_heap_bytes(store.maximum,
+            usize::from(file.static_fields().map_err(|_| Error::Format)?.image_size),
+            sizes.heap_bytes)?;
+        let sizes = Sizes { heap_bytes: heap_limit, ..sizes };
+        store.heap_limit = heap_limit;
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(41);
         let mut workspace = snapshot.unwrap_or_else(|| Zeroizing::new(Vec::new()));
@@ -229,7 +240,7 @@ impl<F: Flash> Store<F> {
         provider.sha256_into(verified_image, &mut image)?;
         let (journal, snapshot) = Journal::open_with_replay(flash, key, provider,
             |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, maximum))?;
-        Ok((Self { journal, snapshot_workspace: Zeroizing::new(Vec::new()),
+        Ok((Self { journal, snapshot_workspace: Zeroizing::new(Vec::new()), heap_limit: maximum,
             image, installation, maximum, heap_length: None, heap_header: None }, snapshot))
     }
 
@@ -437,6 +448,24 @@ fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {
     [crate::cbor::argument_size(instance), crate::cbor::argument_size(heap as u64), heap,
         crate::cbor::argument_size(statics as u64), statics]
         .into_iter().try_fold(54usize, |size, part| size.checked_add(part).ok_or(Error::Quota))
+}
+
+fn maximum_heap_bytes(maximum: usize, statics: usize, requested: usize) -> Result<usize> {
+    // Leave framing headroom in a recovered plaintext buffer, then make the VM's
+    // allocation limit match the largest snapshot this journal can publish.
+    let maximum = maximum.checked_sub(crate::journal::RECORD_OVERHEAD).ok_or(Error::Quota)?;
+    if snapshot_size(u64::from(u16::MAX), 0, statics)? > maximum { return Err(Error::Quota); }
+    let mut low = 0;
+    let mut high = requested.min(maximum);
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if snapshot_size(u64::from(u16::MAX), middle, statics)? <= maximum {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    Ok(low)
 }
 
 pub(crate) fn validate_seed_snapshot(snapshot: &[u8], file: &LoadFile, sizes: Sizes,

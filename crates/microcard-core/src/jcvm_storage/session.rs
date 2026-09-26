@@ -25,6 +25,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         let (store, card) = verified_image.with_bytes(provider, |image, provider| {
             Store::open(flash, key, image, installation, sizes, provider)
         })?;
+        let sizes = Sizes { heap_bytes: store.heap_limit, ..sizes };
         Ok(Self {
             store,
             image: verified_image,
@@ -43,7 +44,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.recovery_required = true;
         if self.store.installation == installation { return Err(Error::KeyMismatch); }
         let live = self.card.as_ref().ok_or(Error::Missing)?.persistent_view().map_err(engine_error)?;
-        let renewed = self.image.with_bytes(provider, |image, provider| {
+        let mut renewed = self.image.with_bytes(provider, |image, provider| {
             let file = LoadFile::parse(image).map_err(|_| Error::Format)?;
             let (mut renewed, snapshot) = Store::open_snapshot(flash, key, image, installation, provider)?;
             if self.store.image != renewed.image || self.store.maximum != renewed.maximum {
@@ -66,6 +67,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
             renewed.heap_length = Some(saved.heap.len());
             Ok(renewed)
         })?;
+        renewed.heap_limit = self.store.heap_limit;
         self.store = renewed;
         self.recovery_required = false;
         Ok(())
@@ -76,9 +78,29 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.store.journal.remaining_commits()
     }
 
-    pub(crate) fn remaining_append_frames(&self) -> Result<usize> {
+    pub(crate) fn append_capacity(&self) -> Result<usize> {
         self.installed()?;
-        self.store.journal.remaining_append_frames()
+        match self.store.journal.append_capacity() {
+            Ok(capacity) => Ok(capacity),
+            Err(Error::Quota) => Ok(0),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn flush_ordinary(&mut self,
+        provider: &mut (impl CryptoProvider + Entropy)) -> Result<()> {
+        if !self.installed()? { return Ok(()); }
+        let result = {
+            let mut checkpoint = |request: CheckpointRequest<'_>, provider: &mut _| match request {
+                CheckpointRequest::Capacity(count) => self.store.ensure_checkpoint_capacity(count),
+                CheckpointRequest::Commit(view, reason) => self.store.commit_view(view, reason, provider),
+            };
+            let mut services = Services::new(provider).with_checkpoint(&mut checkpoint);
+            self.card.as_mut().ok_or(Error::Missing)?
+                .flush_ordinary(&mut services)
+                .map_err(|error| services.take_persistence_error().unwrap_or_else(|| engine_error(error)))
+        };
+        self.finish_apdu(result, provider)
     }
 
     pub(crate) fn compact_idle(&mut self, provider: &mut impl CryptoProvider) -> Result<()> {
@@ -462,14 +484,14 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_object_definition_commits_once_and_cancel_does_not_publish() {
+    fn ordinary_object_definition_flushes_once_and_cancel_does_not_publish() {
         let mut last_poll = None;
         for failure in [None, Some(false), Some(true)] {
             let mut provider = Provider::default();
             let mut session = installed_session(&mut provider);
             let select = SELECT;
             session.process(&select, true, &mut provider, &mut || false).unwrap();
-            // CREATE OBJECT publishes ordinary fields, without an applet transaction.
+            // CREATE OBJECT changes RAM first, without an applet transaction.
             let define = DEFINE_CERTIFICATE;
             let before = provider.encryptions.get();
             if failure == Some(true) { session.store.journal.flash_mut().fail_after = Some(0); }
@@ -481,11 +503,16 @@ mod tests {
             match failure {
                 None => {
                     assert_eq!(result.unwrap().sw, 0x9000);
-                    assert_eq!(provider.encryptions.get(), before + 1, "ordinary writes commit once at the APDU boundary");
+                    assert_eq!(provider.encryptions.get(), before, "ordinary APDU does not write flash");
+                    session.flush_ordinary(&mut provider).unwrap();
+                    assert_eq!(provider.encryptions.get(), before + 1, "idle flush publishes once");
                     last_poll = Some(polls);
                 }
                 Some(false) => assert_eq!(result, Err(Error::Cancelled)),
-                Some(true) => assert_eq!(result, Err(Error::Storage)),
+                Some(true) => {
+                    assert_eq!(result.unwrap().sw, 0x9000);
+                    assert_eq!(session.flush_ordinary(&mut provider), Err(Error::Storage));
+                }
             }
             let sizes = session.sizes;
             let image = session.image.clone();
@@ -510,11 +537,16 @@ mod tests {
             session.process(&select, true, &mut provider, &mut || false).unwrap();
             let define = DEFINE_CERTIFICATE;
             assert_eq!(session.process_command(&define, false, Some(3), &mut provider, &mut || false).unwrap().sw, 0x9000);
+            session.flush_ordinary(&mut provider).unwrap();
             let write = [0x04, 0xdb, 0x3f, 0xff, 0x0c, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00];
             let read = [0x00, 0xcb, 0x3f, 0xff, 0x05, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x00];
             let previous = session.process(&read, false, &mut provider, &mut || false).unwrap();
             session.store.journal.flash_mut().fail_after = Some(cut);
-            let result = session.process_command(&write, false, Some(3), &mut provider, &mut || false);
+            let result = session.process_command(&write, false, Some(3), &mut provider, &mut || false)
+                .and_then(|response| {
+                    assert_eq!(response.sw, 0x9000);
+                    session.flush_ordinary(&mut provider)
+                });
             let remaining = session.store.journal.flash_mut().fail_after.unwrap();
             if cut == usize::MAX {
                 let mutations = cut - remaining;
@@ -525,7 +557,7 @@ mod tests {
                     mutations - 6, mutations - 5, mutations - 1, mutations]);
             }
             let complete = cut >= measured.unwrap();
-            if complete { assert_eq!(result.unwrap().sw, 0x9000, "cut {cut}"); }
+            if complete { assert_eq!(result, Ok(()), "cut {cut}"); }
             else { assert_eq!(result, Err(Error::Storage), "cut {cut}"); }
             let sizes = session.sizes;
             let image = session.image.clone();
