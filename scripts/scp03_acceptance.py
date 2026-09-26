@@ -264,7 +264,7 @@ def main():
   snapshots=[]
   for file in (td/'state').glob('slot*.bin'):
    raw=file.read_bytes();generation=int.from_bytes(raw[4:12],'little');n=int.from_bytes(raw[20:24],'little')
-   if raw[:4]==b'MJ03' and raw[-1]==0 and 16<=n<=len(raw)-27:
+   if raw[:4]==b'MJ08' and raw[-4:]==bytes(4) and 16<=n<=len(raw)-24-12:
     nonce=b'MCJN3'+raw[12:20]
     try: plaintext=AESCCM(storage_key,tag_length=16).decrypt(nonce,raw[24:24+n],raw[:24])
     except Exception: continue
