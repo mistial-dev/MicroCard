@@ -7,7 +7,7 @@ use super::*;
 pub struct SeedRecord<'a> { bytes: &'a [u8] }
 impl<'a> SeedRecord<'a> {
     pub const MIN_BYTES: usize = HEADER_BYTES + 16 + 1;
-    pub const MAX_BYTES: usize = 65536 - 3;
+    pub const MAX_BYTES: usize = 65536 - TAIL_BYTES;
     /// The caller must durably reserve a unique registry identity for this key.
     /// Failure consumes the key; a retry must reserve another identity first.
     pub(crate) fn seal_new_epoch(snapshot: Zeroizing<Vec<u8>>, key: JournalKey,
@@ -46,7 +46,7 @@ impl<'a> SeedRecord<'a> {
     pub fn install_empty_bank(&self, flash: &mut impl Flash) -> Result<()> {
         let size = flash.slot_size();
         if !(2..=8).contains(&flash.slot_count()) || size < OVERHEAD
-            || self.bytes.len() > size - 3 { return Err(Error::Bounds); }
+            || self.bytes.len() > size - TAIL_BYTES { return Err(Error::Bounds); }
         if flash.monotonic_capacity() == 0 || flash.nonce_capacity() == 0 { return Err(Error::Quota); }
         if flash.monotonic_generation()? != 0 || flash.nonce_generation()? != 0 {
             return Err(Error::Storage);
@@ -62,9 +62,9 @@ impl<'a> SeedRecord<'a> {
             flash.read(0, index * 64, output)?;
             if output != expected { return Err(Error::Storage); }
         }
-        flash.program(0, size - 1, &[0])?;
-        flash.read(0, size - 1, &mut scratch[..1])?;
-        if scratch[0] != 0 { return Err(Error::Storage); }
+        flash.program(0, size - COMMITTED, &[0; 4])?;
+        flash.read(0, size - COMMITTED, &mut scratch[..4])?;
+        if scratch[..4] != [0; 4] { return Err(Error::Storage); }
         flash.advance_monotonic(1)?;
         if flash.monotonic_generation()? != 1 { return Err(Error::Storage); }
         Ok(())
@@ -101,14 +101,15 @@ mod tests {
         assert_eq!(used.slots, source.slots);
         assert_eq!(used.nonce_generation(), Ok(1));
 
-        // Nonce bytes, exact ciphertext, marker, then generation bytes.
-        let mutations = 4 + record.len() + 1 + 4;
+        // Nonce word, word-rounded ciphertext, marker word, then generation word.
+        let published_at = 4 + record.len().next_multiple_of(4) + 4;
+        let mutations = published_at + 4;
         for cut in 0..=mutations {
             let mut flash = MemoryFlash::new(1024);
             flash.fail_after = Some(cut);
             let complete = seed.install_empty_bank(&mut flash).is_ok();
             flash.fail_after = None;
-            if cut > 4 + record.len() {
+            if cut >= published_at {
                 let (_, state) = Journal::open_with_replay(flash, [3; 16], &mut SoftwareCrypto,
                     |_, _, _| Err(Error::Format)).unwrap();
                 assert_eq!(state.unwrap().as_slice(), b"committed state");

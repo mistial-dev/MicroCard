@@ -21,7 +21,7 @@ pub(super) fn frame_end(flash: &impl Flash, at: usize, length: usize) -> Result<
     if length > MAX_PAYLOAD { return Err(Error::Quota); }
     at.checked_add(MIN_FRAME_BYTES).and_then(|end| end.checked_add(length))
         .and_then(|end| end.checked_add(3)).map(|end| end & !3)
-        .filter(|end| *end <= flash.slot_size().saturating_sub(3))
+        .filter(|end| *end <= flash.slot_size().saturating_sub(TAIL_BYTES))
         .ok_or(Error::Quota)
 }
 
@@ -46,7 +46,7 @@ pub(super) fn replay(flash: &impl Flash, key: &JournalKey, slot: usize, mut at: 
     let mut generation = epoch.generation;
     while frame_end(flash, at, 0).is_ok() {
         let Some(record) = read(flash, key, slot, at, generation, epoch.attempt, provider)? else {
-            let available = erased(flash, slot, at, flash.slot_size().saturating_sub(3))?;
+            let available = erased(flash, slot, at, flash.slot_size().saturating_sub(TAIL_BYTES))?;
             return Ok((generation, available.then_some(at)));
         };
         apply(generation, &record.payload)?;
@@ -231,25 +231,26 @@ fn append_frames_authenticate_and_publish_only_after_the_marker() {
     legacy.commit(b"legacy").unwrap();
     assert!(matches!(open(legacy.into_flash()), Err(Error::IncompatibleState)));
     // The epoch nonce is reused only as input to a distinct position-derived nonce.
-    // Publication writes a 45-byte record, four marker bytes, and one anchor word.
+    // Publication writes a word-rounded 45-byte record, one marker word, and one anchor word.
+    let published_at = 45usize.next_multiple_of(4) + 4;
     for cut in 0..=60 {
         let mut journal = open(base.clone()).unwrap();
         journal.flash.fail_after = Some(cut);
         let result = append(&mut journal, 64, Zeroizing::new(b"patch".to_vec()), Durability::Anchored, &mut SoftwareCrypto);
         journal.flash.fail_after = None;
         let recovered = read(&journal.flash, &journal.key, 0, 64, generation(1, 1), 1, &mut SoftwareCrypto).unwrap();
-        assert_eq!(recovered.as_ref().map(|record| record.payload.as_slice()), (cut >= 49).then_some(b"patch".as_slice()));
+        assert_eq!(recovered.as_ref().map(|record| record.payload.as_slice()), (cut >= published_at).then_some(b"patch".as_slice()));
         if result.is_ok() { assert!(recovered.is_some()); }
         let mut values = Vec::new();
         let (generation, available) = replay(&journal.flash, &journal.key, 0, 64,
             Epoch { generation: generation(1, 1), attempt: 1 },
             &mut SoftwareCrypto, |base, bytes| { values.push((base, bytes.to_vec())); Ok(()) }).unwrap();
-        assert_eq!(generation, if cut >= 49 { self::generation(2, 2) } else { self::generation(1, 1) });
-        assert_eq!(values.len(), usize::from(cut >= 49));
+        assert_eq!(generation, if cut >= published_at { self::generation(2, 2) } else { self::generation(1, 1) });
+        assert_eq!(values.len(), usize::from(cut >= published_at));
         reconcile_generation(&mut journal.flash, anchor(generation, true)).unwrap();
         assert_eq!(journal.flash.monotonic_generation().unwrap(), anchor(generation, true));
         let next = frame_end(&journal.flash, 64, 5).unwrap();
-        assert_eq!(available, if cut == 0 { Some(64) } else if cut < 49 { None } else { Some(next) });
+        assert_eq!(available, if cut < 4 { Some(64) } else if cut < published_at { None } else { Some(next) });
         if cut > 0 {
             assert_eq!(append(&mut journal, 64, Zeroizing::new(b"other".to_vec()), Durability::Anchored, &mut SoftwareCrypto), Err(Error::Storage));
         }
@@ -300,6 +301,7 @@ fn journal_recovery_selects_appended_state_and_rotates_after_a_torn_tail() {
     assert_eq!(journal.append_encoded_with(5, Durability::Ordinary, &mut SoftwareCrypto, |_| Err(Error::Format)), Err(Error::Format));
     assert_eq!(journal.flash.nonce_generation().unwrap(), nonce);
     let base = journal.into_flash();
+    let published_at = 45usize.next_multiple_of(4) + 4;
     for cut in 0..=60 {
         let mut journal = open(base.clone()).unwrap();
         journal.flash.fail_after = Some(cut);
@@ -314,8 +316,8 @@ fn journal_recovery_selects_appended_state_and_rotates_after_a_torn_tail() {
             state.extend_from_slice(bytes);
             Ok(())
         }).unwrap().unwrap();
-        assert_eq!(value.as_slice(), if cut >= 49 { b"patch".as_slice() } else { b"base".as_slice() });
-        if cut > 0 && cut < 49 {
+        assert_eq!(value.as_slice(), if cut >= published_at { b"patch".as_slice() } else { b"base".as_slice() });
+        if cut >= 4 && cut < published_at {
             assert_eq!(journal.append_encoded_with(5, Durability::Ordinary, &mut SoftwareCrypto, |output| {
                 output.copy_from_slice(b"retry");
                 Ok(())
@@ -361,7 +363,7 @@ fn interrupted_compaction_preserves_the_latest_chain() {
     let mut damaged = base;
     damaged.slots[0][64 + HEADER_BYTES] ^= 1;
     assert!(Journal::open_with_replay(damaged.clone(), [3; 16], &mut SoftwareCrypto, replace).is_err());
-    damaged.slots[1][4093] = 0; // Surviving chain records reclaim intent.
+    damaged.slots[1][4096 - RECLAIM_STARTED..4096 - RECLAIM_STARTED + 4].fill(0);
     let (_, recovered) = Journal::open_with_replay(damaged, [3; 16], &mut SoftwareCrypto, replace).unwrap();
     assert_eq!(recovered.unwrap().as_slice(), b"latest");
 }

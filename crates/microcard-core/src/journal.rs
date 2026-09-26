@@ -40,7 +40,11 @@ impl AsMut<[u8; 16]> for JournalKey {
         &mut self.0
     }
 }
-pub const OVERHEAD: usize = 43;
+const TAIL_BYTES: usize = 12;
+const RECLAIM_STARTED: usize = TAIL_BYTES;
+const RECLAIM_COMPLETE: usize = TAIL_BYTES - 4;
+const COMMITTED: usize = TAIL_BYTES - 8;
+pub const OVERHEAD: usize = HEADER_BYTES + 16 + TAIL_BYTES;
 const HEADER_BYTES: usize = 24;
 
 /// JCVM records carry an append sequence and a separately advanced security anchor.
@@ -101,7 +105,7 @@ enum CandidateRead {
 impl RecordHeader {
     fn encode(&self) -> [u8; HEADER_BYTES] {
         let mut bytes = [0; HEADER_BYTES];
-        bytes[..4].copy_from_slice(if self.append_enabled { b"MJ07" } else { b"MJ03" });
+        bytes[..4].copy_from_slice(if self.append_enabled { b"MJ09" } else { b"MJ08" });
         bytes[4..12].copy_from_slice(&self.generation.to_le_bytes());
         bytes[12..20].copy_from_slice(&self.attempt.to_le_bytes());
         bytes[20..24].copy_from_slice(&self.payload_length.to_le_bytes());
@@ -109,9 +113,10 @@ impl RecordHeader {
     }
 
     fn decode(bytes: &[u8; HEADER_BYTES], capacity: usize, reserved_nonce: u64) -> Result<Self> {
-        if matches!(&bytes[..4], b"MJ01" | b"MJ02") { return Err(Error::IncompatibleState); }
-        if matches!(&bytes[..4], b"MJ04" | b"MJ05" | b"MJ06") { return Err(Error::IncompatibleState); }
-        let append_enabled = match &bytes[..4] { b"MJ03" => false, b"MJ07" => true, _ => return Err(Error::Storage) };
+        if matches!(&bytes[..4], b"MJ01" | b"MJ02" | b"MJ03" | b"MJ04" | b"MJ05" | b"MJ06" | b"MJ07") {
+            return Err(Error::IncompatibleState);
+        }
+        let append_enabled = match &bytes[..4] { b"MJ08" => false, b"MJ09" => true, _ => return Err(Error::Storage) };
         let header = Self {
             append_enabled,
             generation: u64::from_le_bytes(bytes[4..12].try_into().unwrap()),
@@ -317,14 +322,17 @@ impl<F: Flash> Journal<F> {
         let _ = apply;
         #[cfg(all(feature = "latency-trace", feature = "jcvm"))]
         crate::jcvm_storage::renewal_phase(50 + slot as u32);
-        let mut tail = [0; 3];
-        self.flash.read(slot, size - tail.len(), &mut tail)?;
-        if tail[2] != 0 {
-            return Ok(CandidateRead::Absent);
-        }
         let mut header = [0; HEADER_BYTES];
         self.flash.read(slot, 0, &mut header)?;
-        let decoded = match RecordHeader::decode(&header, size - HEADER_BYTES - 3, reserved_nonce) {
+        if matches!(&header[..4], b"MJ01" | b"MJ02" | b"MJ03" | b"MJ04" | b"MJ05" | b"MJ06" | b"MJ07") {
+            return Err(Error::IncompatibleState);
+        }
+        let mut tail = [0; TAIL_BYTES];
+        self.flash.read(slot, size - tail.len(), &mut tail)?;
+        if tail[TAIL_BYTES - COMMITTED..] != [0; 4] {
+            return Ok(CandidateRead::Absent);
+        }
+        let decoded = match RecordHeader::decode(&header, size - HEADER_BYTES - TAIL_BYTES, reserved_nonce) {
             Ok(decoded) => decoded,
             Err(Error::IncompatibleState) => return Err(Error::IncompatibleState),
             Err(_) => return Ok(CandidateRead::Corrupt),
@@ -374,8 +382,13 @@ impl<F: Flash> Journal<F> {
         let (generation, append_offset) = (decoded.generation, None);
         #[cfg(all(feature = "latency-trace", feature = "jcvm"))]
         crate::jcvm_storage::renewal_phase(80 + slot as u32);
-        let reclaim_started = tail[0] == 0;
-        let reclaim_complete = tail[1] == 0;
+        let reclaim_started = tail[..4] == [0; 4];
+        let reclaim_complete = tail[TAIL_BYTES - RECLAIM_COMPLETE..TAIL_BYTES - COMMITTED] == [0; 4];
+        if tail[..4] != [0; 4] && tail[..4] != [0xff; 4]
+            || tail[TAIL_BYTES - RECLAIM_COMPLETE..TAIL_BYTES - COMMITTED] != [0; 4]
+                && tail[TAIL_BYTES - RECLAIM_COMPLETE..TAIL_BYTES - COMMITTED] != [0xff; 4] {
+            return Ok(CandidateRead::Corrupt);
+        }
         if reclaim_complete && !reclaim_started {
             return Ok(CandidateRead::Corrupt);
         }
@@ -422,7 +435,7 @@ impl<F: Flash> Journal<F> {
         if self.poisoned { return Err(Error::Storage); }
         let at = self.append_offset.ok_or(Error::Quota)?;
         if !self.append_enabled { return Err(Error::IncompatibleState); }
-        let available = self.flash.slot_size().saturating_sub(3).saturating_sub(at) / 4 * 4;
+        let available = self.flash.slot_size().saturating_sub(TAIL_BYTES).saturating_sub(at) / 4 * 4;
         let capacity = available.saturating_sub(append::MIN_FRAME_BYTES);
         if capacity == 0 { return Err(Error::Quota); }
         Ok(capacity.min(append::MAX_PAYLOAD))
@@ -435,7 +448,7 @@ impl<F: Flash> Journal<F> {
         // A full slot reopens with no append offset. That is a renewal trigger,
         // not a corrupt journal.
         let Some(at) = self.append_offset else { return Ok(0); };
-        let available = self.flash.slot_size().saturating_sub(3).saturating_sub(at);
+        let available = self.flash.slot_size().saturating_sub(TAIL_BYTES).saturating_sub(at);
         Ok(available / append::MAX_FRAME_BYTES)
     }
 
@@ -501,13 +514,13 @@ impl<F: Flash> Journal<F> {
         // Only recovery can determine which generation is safe to extend.
         self.poisoned = true;
         if let Some(active) = self.active {
-            self.flash.program(active, size - 3, &[0])?;
+            self.flash.program(active, size - RECLAIM_STARTED, &[0; 4])?;
         }
         self.flash.erase(slot)?;
         self.flash.program(slot, 0, &record)?;
-        self.flash.program(slot, size - 1, &[0])?;
+        self.flash.program(slot, size - COMMITTED, &[0; 4])?;
         if let Some(active) = self.active {
-            self.flash.program(active, size - 2, &[0])?;
+            self.flash.program(active, size - RECLAIM_COMPLETE, &[0; 4])?;
         }
         self.generation = generation;
         self.base_attempt = Some(attempt);
@@ -696,11 +709,13 @@ pub fn decode_monotonic_bits(bytes: &[u8]) -> Result<u64> {
     }
     Ok(generation)
 }
-/// Host fault model. Every erased/programmed byte is a separately interruptible mutation.
+/// Host fault model. Erase may stop at any byte; a word program is indivisible.
 #[derive(Clone)]
 pub struct MemoryFlash {
     slots: Vec<Vec<u8>>,
+    slot_word_writes: Vec<Vec<u8>>,
     images: Vec<Vec<u8>>,
+    image_word_writes: Vec<Vec<u8>>,
     image_size: usize,
     monotonic: Vec<u8>,
     nonces: Vec<u8>,
@@ -736,13 +751,16 @@ impl MemoryFlash {
         if !(2..=64).contains(&image_count) || image_size == 0 { return Err(Error::Storage); }
         let mut flash = Self::new(size);
         flash.images.truncate(image_count);
+        flash.image_word_writes.truncate(image_count);
         flash.image_size = image_size;
         Ok(flash)
     }
     fn with_slots(size: usize, slot_count: usize) -> Self {
         Self {
             slots: (0..slot_count).map(|_| vec![255; size]).collect(),
+            slot_word_writes: (0..slot_count).map(|_| vec![0; size.div_ceil(4)]).collect(),
             images: (0..64).map(|_| Vec::new()).collect(),
+            image_word_writes: (0..64).map(|_| Vec::new()).collect(),
             image_size: crate::staging::MAX_PACKAGE_BYTES,
             monotonic: vec![255; size],
             nonces: vec![255; size],
@@ -818,6 +836,7 @@ impl crate::image_store::ImageFlash for MemoryFlash {
         if image.is_empty() {
             image.try_reserve_exact(self.image_size).map_err(|_| Error::Quota)?;
             image.resize(self.image_size, 255);
+            self.image_word_writes[index].resize(self.image_size.div_ceil(4), 0);
         }
         #[cfg(test)]
         { self.metrics.erase_calls += 1; }
@@ -827,6 +846,7 @@ impl crate::image_store::ImageFlash for MemoryFlash {
             #[cfg(test)]
             { self.metrics.erased_bytes += 1; }
         }
+        self.image_word_writes[index].fill(0);
         Ok(())
     }
     fn program(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<()> {
@@ -835,11 +855,20 @@ impl crate::image_store::ImageFlash for MemoryFlash {
         if old.iter().zip(bytes).any(|(old, new)| old & new != *new) { return Err(Error::Storage); }
         #[cfg(test)]
         if !bytes.is_empty() { self.metrics.program_calls += 1; }
-        for (at, byte) in bytes.iter().enumerate() {
-            self.tick()?;
-            self.images[index][offset + at] = *byte;
+        for pos in ((offset & !3)..((end + 3) & !3)).step_by(4) {
+            let word_end = (pos + 4).min(self.image_size);
+            let mut merged = self.images[index][pos..word_end].to_vec();
+            for (at, byte) in merged.iter_mut().enumerate() {
+                let location = pos + at;
+                if location >= offset && location < end { *byte = bytes[location - offset]; }
+            }
+            if merged == self.images[index][pos..word_end] { continue; }
+            if self.image_word_writes[index][pos / 4] >= 2 { return Err(Error::Storage); }
+            for _ in pos..word_end { self.tick()?; }
+            self.images[index][pos..word_end].copy_from_slice(&merged);
+            self.image_word_writes[index][pos / 4] += 1;
             #[cfg(test)]
-            { self.metrics.programmed_bytes += 1; }
+            { self.metrics.programmed_bytes += word_end - pos; }
         }
         Ok(())
     }
@@ -889,6 +918,7 @@ impl Flash for MemoryFlash {
             #[cfg(test)]
             { self.metrics.erased_bytes += 1; }
         }
+        self.slot_word_writes[s].fill(0);
         Ok(())
     }
     fn program(&mut self, s: usize, o: usize, b: &[u8]) -> Result<()> {
@@ -897,14 +927,24 @@ impl Flash for MemoryFlash {
         }
         #[cfg(test)]
         if !b.is_empty() { self.metrics.program_calls += 1; }
-        for (i, v) in b.iter().enumerate() {
-            self.tick()?;
-            if self.slots[s][o + i] & v != *v {
-                return Err(Error::Storage);
+        for pos in ((o & !3)..((o + b.len() + 3) & !3)).step_by(4) {
+            let end = (pos + 4).min(self.slot_size());
+            let mut merged = self.slots[s][pos..end].to_vec();
+            for (index, byte) in merged.iter_mut().enumerate() {
+                let location = pos + index;
+                if location >= o && location < o + b.len() {
+                    let new = b[location - o];
+                    if *byte & new != new { return Err(Error::Storage); }
+                    *byte = new;
+                }
             }
-            self.slots[s][o + i] = *v;
+            if merged == self.slots[s][pos..end] { continue; }
+            if self.slot_word_writes[s][pos / 4] >= 2 { return Err(Error::Storage); }
+            for _ in pos..end { self.tick()?; }
+            self.slots[s][pos..end].copy_from_slice(&merged);
+            self.slot_word_writes[s][pos / 4] += 1;
             #[cfg(test)]
-            { self.metrics.programmed_bytes += 1; }
+            { self.metrics.programmed_bytes += end - pos; }
         }
         Ok(())
     }
@@ -981,10 +1021,31 @@ mod tests {
 
         let mut incomplete = MemoryFlash::new(128);
         incomplete.program(0, 0, b"MJ01").unwrap();
-        assert!(matches!(
-            Journal::open(incomplete, KEY),
-            Err(Error::Storage)
-        ));
+        assert!(matches!(Journal::open(incomplete, KEY), Err(Error::IncompatibleState)));
+    }
+
+    #[test]
+    fn flash_word_limit_counts_unaligned_writes_and_resets_on_erase() {
+        let mut flash = MemoryFlash::new(128);
+        flash.program(0, 0, &[0xfe]).unwrap();
+        flash.program(0, 1, &[0xfe]).unwrap();
+        assert_eq!(flash.program(0, 2, &[0xfe]), Err(Error::Storage));
+        assert_eq!(flash.slot_word_writes[0][0], 2);
+        flash.erase(0).unwrap();
+        flash.program(0, 2, &[0xfe]).unwrap();
+        assert_eq!(flash.slot_word_writes[0][0], 1);
+    }
+
+    #[test]
+    fn previous_committed_formats_require_explicit_reset() {
+        let (mut journal, _) = Journal::open(MemoryFlash::new(128), KEY).unwrap();
+        journal.commit(b"state").unwrap();
+        let current = journal.into_flash();
+        for magic in [b"MJ03", b"MJ07"] {
+            let mut old = current.clone();
+            old.slots[0][..4].copy_from_slice(magic);
+            assert!(matches!(Journal::open(old, KEY), Err(Error::IncompatibleState)));
+        }
     }
 
     #[test]
@@ -1172,8 +1233,8 @@ mod tests {
     #[test]
     fn failed_anchor_advance_poisoned_journal_requires_successful_recovery() {
         let mut flash = MemoryFlash::new(128);
-        // nonce reservation(4) + erase(128) + record(43) + commit marker(1).
-        flash.fail_after = Some(176);
+        // Stop after the marker but before the four-byte security anchor.
+        flash.fail_after = Some(4 + 128 + 44 + 4);
         let (mut journal, _) = Journal::open(flash, KEY).unwrap();
         assert_eq!(journal.commit(b"one"), Err(Error::Storage));
         assert_eq!(journal.commit(b"two"), Err(Error::Storage));
@@ -1211,7 +1272,7 @@ mod tests {
         let (mut journal, _) = Journal::open(MemoryFlash::new(128), KEY).unwrap();
         journal.commit(b"old").unwrap();
         let mut flash = journal.into_flash();
-        flash.program(1, 0, b"MJ03partial").unwrap();
+        flash.program(1, 0, b"MJ08partial").unwrap();
         let (_, data) = Journal::open(flash, KEY).unwrap();
         assert_eq!(data.as_ref().map(|d| d.as_slice()), Some(b"old".as_slice()));
     }
