@@ -65,6 +65,7 @@ def main():
         parser.error(f"Output directory must be empty: {output}")
     subprocess.run(["python3", str(ROOT / "scripts/jcalgtest_client.py"),
                     "--source", str(source), "--build-only"], check=True, cwd=ROOT)
+    subprocess.run(["cargo", "build", "--locked", "-p", "microcard-sim"], check=True, cwd=ROOT)
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="microcard-jcalgtest-host-") as temporary:
         temporary = pathlib.Path(temporary)
