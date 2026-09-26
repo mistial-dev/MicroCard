@@ -7,7 +7,7 @@
 //! the runtime carries a reference tag per stack and local slot in its place, per
 //! docs/JCVM_PROFILE.md.
 use crate::cap::{LoadFile, Tag};
-use crate::code::{Boundaries, Limits, constant_pool_index, instruction_length, verify_targets};
+use crate::code::{constant_pool_index, instruction_length, verify_targets, Boundaries, Limits};
 use crate::{Error, Result};
 use alloc::vec::Vec;
 
@@ -89,9 +89,7 @@ pub fn verify(file: &LoadFile, scratch: &mut [u8]) -> Result<Report> {
 
     // A handler names the class it catches, unless it catches everything.
     for handler in methods.handlers() {
-        if handler.catch_type_index != 0
-            && handler.catch_type_index as usize >= constants.count()
-        {
+        if handler.catch_type_index != 0 && handler.catch_type_index as usize >= constants.count() {
             return Err(Error::Bounds);
         }
     }
@@ -135,7 +133,16 @@ pub fn verify(file: &LoadFile, scratch: &mut [u8]) -> Result<Report> {
         report.max_frame_words = report.max_frame_words.max(method.frame_words());
         report.max_stack_words = report.max_stack_words.max(method.max_stack);
         let body = offset + method.length;
-        verify_method(&methods, code, body, end, scratch, limits, &constants)?;
+        verify_method(
+            &methods,
+            code,
+            body,
+            end,
+            method.frame_words(),
+            scratch,
+            limits,
+            &constants,
+        )?;
         report.methods += 1;
     }
     // A package with no code is not one this engine can be asked to run.
@@ -151,6 +158,7 @@ fn verify_method(
     code: &[u8],
     body: usize,
     end: usize,
+    frame_words: u16,
     scratch: &mut [u8],
     limits: Limits,
     constants: &crate::cap::ConstantPool,
@@ -181,7 +189,32 @@ fn verify_method(
                 return Err(Error::Bounds);
             }
         }
+        verify_local_access(code, at, frame_words)?;
         at += instruction_length(code, at)?;
+    }
+    Ok(())
+}
+
+/// A local operand must fit the frame declared by this method. Ints occupy two words.
+fn verify_local_access(code: &[u8], at: usize, frame_words: u16) -> Result<()> {
+    let opcode = code[at];
+    let (index, width) = match opcode {
+        // Explicit local indices: loads, stores, and short/long increments.
+        21..=23 | 40..=42 | 89..=90 | 150..=151 => (
+            code[at + 1] as u16,
+            if matches!(opcode, 23 | 42 | 90 | 151) {
+                2
+            } else {
+                1
+            },
+        ),
+        // The _0.._3 forms encode the index in the opcode itself.
+        24..=35 => ((opcode - 24) as u16 % 4, if opcode >= 32 { 2 } else { 1 }),
+        43..=54 => ((opcode - 43) as u16 % 4, if opcode >= 51 { 2 } else { 1 }),
+        _ => return Ok(()),
+    };
+    if index + width > frame_words {
+        return Err(Error::Bounds);
     }
     Ok(())
 }
@@ -233,6 +266,60 @@ mod tests {
         let package = Package {
             code: vec![0x7b, 0x00, 0x00, 0x7a],
             constants: vec![[5, 0, 0, 0]],
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        verify(&file, &mut vec![0; 256]).unwrap();
+    }
+
+    #[test]
+    fn a_reachable_local_access_must_fit_the_declared_frame() {
+        // The install method has three argument words and no additional locals.
+        for code in [
+            vec![22, 3, 122],        // sload 3
+            vec![43 + 3, 122],       // astore_3
+            vec![89, 3, 1, 122],     // sinc 3
+            vec![150, 3, 0, 1, 122], // sinc_w 3
+        ] {
+            assert_eq!(
+                refuse(Package {
+                    code,
+                    ..Package::default()
+                }),
+                Error::Bounds
+            );
+        }
+        let package = Package {
+            code: vec![22, 2, 122],
+            ..Package::default()
+        };
+        let bytes = package.build();
+        let file = LoadFile::parse(&bytes).unwrap();
+        verify(&file, &mut vec![0; 256]).unwrap();
+    }
+
+    #[test]
+    fn an_int_local_needs_two_words_including_for_implicit_and_increment_forms() {
+        for code in [
+            vec![23, 2, 122],        // iload 2
+            vec![53, 122],           // istore_2
+            vec![90, 2, 1, 122],     // iinc 2
+            vec![151, 2, 0, 1, 122], // iinc_w 2
+        ] {
+            assert_eq!(
+                refuse(Package {
+                    flags: 0x05,
+                    code,
+                    ..Package::default()
+                }),
+                Error::Bounds
+            );
+        }
+        let package = Package {
+            flags: 0x05,
+            max_locals: 1,
+            code: vec![23, 2, 122],
             ..Package::default()
         };
         let bytes = package.build();
