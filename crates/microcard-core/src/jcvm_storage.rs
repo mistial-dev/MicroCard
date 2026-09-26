@@ -1,7 +1,7 @@
 //! Dedicated applet-state journal. Code remains outside the mutable snapshot.
 //! Callers authenticate the load file and supply a fresh installation identity.
 use crate::{
-    cbor::{Decoder, Encoder},
+    cbor::{Decoder, SliceEncoder},
     crypto::CryptoProvider,
     journal::{Flash, Journal, JournalKey},
     Error, Result,
@@ -28,6 +28,7 @@ pub use banks::{heap_root, HeapBanks};
 
 pub struct Store<F: Flash> {
     journal: Journal<F>,
+    snapshot_workspace: Zeroizing<Vec<u8>>,
     image: [u8; 32],
     installation: [u8; 16],
     maximum: usize,
@@ -137,10 +138,14 @@ mod tests {
         AppletInstance::validate_persistent(&file, sizes, PersistentState { heap: &replayed, statics, instance }).unwrap();
         assert_eq!(AppletInstance::validate_persistent(&file, Sizes { heap_bytes: replayed.len() - 1, ..sizes },
             PersistentState { heap: &replayed, statics, instance }), Err(microcard_engine_jcvm::Error::Bounds));
+        let workspace = store.snapshot_workspace.as_ptr();
+        assert!(store.snapshot_workspace.capacity() >= 65536);
         store.commit(&card, &mut SoftwareCrypto).unwrap();
+        assert_eq!(store.snapshot_workspace.as_ptr(), workspace);
         let anchors = store.journal.flash_mut().monotonic_generation().unwrap();
         let attempts = store.journal.flash_mut().nonce_generation().unwrap();
         store.compact_view(card.persistent_view().unwrap(), &mut SoftwareCrypto).unwrap();
+        assert_eq!(store.snapshot_workspace.as_ptr(), workspace);
         assert_eq!(store.journal.flash_mut().monotonic_generation().unwrap(), anchors);
         assert_eq!(store.journal.flash_mut().nonce_generation().unwrap(), attempts + 1);
         let flash = store.into_flash();
@@ -201,7 +206,13 @@ impl<F: Flash> Store<F> {
         let (mut store, snapshot) = Self::open_snapshot(flash, key, verified_image, installation, provider)?;
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(41);
-        let card = decode_card(snapshot, &file, sizes, store.image, installation)?;
+        let mut workspace = snapshot.unwrap_or_else(|| Zeroizing::new(Vec::new()));
+        reserve_snapshot_workspace(&mut workspace, store.maximum)?;
+        let card = decode_card((!workspace.is_empty()).then_some(workspace.as_slice()),
+            &file, sizes, store.image, installation)?;
+        workspace.fill(0);
+        workspace.clear();
+        store.snapshot_workspace = workspace;
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(42);
         store.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
@@ -218,7 +229,8 @@ impl<F: Flash> Store<F> {
         provider.sha256_into(verified_image, &mut image)?;
         let (journal, snapshot) = Journal::open_with_replay(flash, key, provider,
             |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, maximum))?;
-        Ok((Self { journal, image, installation, maximum, heap_length: None, heap_header: None }, snapshot))
+        Ok((Self { journal, snapshot_workspace: Zeroizing::new(Vec::new()),
+            image, installation, maximum, heap_length: None, heap_header: None }, snapshot))
     }
 
     pub(crate) fn validate_journal(flash: F, key: impl Into<JournalKey>, verified_image: &[u8],
@@ -241,15 +253,16 @@ impl<F: Flash> Store<F> {
             return Err(Error::KeyMismatch);
         }
         let file = LoadFile::parse(verified_image).map_err(|_| Error::Format)?;
+        self.snapshot_workspace = Zeroizing::new(Vec::new());
         let snapshot = self.journal.recover_with_replay(provider,
             |snapshot, generation, delta| patch::replay_snapshot(snapshot, generation, delta, self.maximum))?;
-        let card = decode_card(
-            snapshot,
-            &file,
-            sizes,
-            self.image,
-            self.installation,
-        )?;
+        let mut workspace = snapshot.unwrap_or_else(|| Zeroizing::new(Vec::new()));
+        reserve_snapshot_workspace(&mut workspace, self.maximum)?;
+        let card = decode_card((!workspace.is_empty()).then_some(workspace.as_slice()),
+            &file, sizes, self.image, self.installation)?;
+        workspace.fill(0);
+        workspace.clear();
+        self.snapshot_workspace = workspace;
         self.heap_length = card.as_ref().map(AppletInstance::persistent_heap_bytes);
         self.heap_header = card.as_ref().map(|card| card.persistent_view()
             .and_then(PersistentView::heap_header).map_err(|_| Error::Format)).transpose()?;
@@ -314,8 +327,7 @@ impl<F: Flash> Store<F> {
         }
         #[cfg(feature = "latency-trace")]
         if self.heap_length.is_none() { trace::fallback(1); }
-        let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
-        self.journal.commit_owned_with_reason(snapshot, reason, provider)?;
+        self.commit_snapshot(view, reason, provider)?;
         #[cfg(feature = "latency-trace")]
         trace::committed_snapshot();
         self.heap_length = Some(view.heap_bytes());
@@ -327,12 +339,24 @@ impl<F: Flash> Store<F> {
     /// security anchor. A new snapshot attempt still reserves a fresh nonce.
     pub(crate) fn compact_view(&mut self, view: PersistentView<'_>,
         provider: &mut impl CryptoProvider) -> Result<()> {
-        let snapshot = encode_snapshot(view, self.image, self.installation, self.maximum)?;
-        self.journal.commit_owned_with_reason(snapshot, CheckpointReason::ApduEnd, provider)?;
+        self.commit_snapshot(view, CheckpointReason::ApduEnd, provider)?;
         #[cfg(feature = "latency-trace")]
         trace::committed_snapshot();
         self.heap_length = Some(view.heap_bytes());
         self.heap_header = Some(view.heap_header().map_err(|_| Error::Format)?);
+        Ok(())
+    }
+
+    fn commit_snapshot(&mut self, view: PersistentView<'_>, reason: CheckpointReason,
+        provider: &mut impl CryptoProvider) -> Result<()> {
+        encode_snapshot_into(view, self.image, self.installation, self.maximum,
+            &mut self.snapshot_workspace)?;
+        let snapshot = core::mem::replace(&mut self.snapshot_workspace,
+            Zeroizing::new(Vec::new()));
+        let mut record = self.journal.commit_reusing_with_reason(snapshot, reason, provider)?;
+        record.fill(0);
+        record.clear();
+        self.snapshot_workspace = record;
         Ok(())
     }
 
@@ -361,30 +385,51 @@ impl<F: Flash> Store<F> {
 
 fn encode_snapshot(view: PersistentView<'_>, image: [u8; 32], installation: [u8; 16],
         maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
-    let (instance, statics) = view.metadata();
-    if snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())? > maximum { return Err(Error::Quota); }
-    // The fixed fields and all CBOR headers fit in 80 bytes. Reserve once so
-    // appending statics cannot double a buffer already holding the heap. Keep
-    // journal header/tag headroom so encryption can consume this allocation.
-    let capacity = view
-        .heap_bytes()
-        .checked_add(statics.len())
-        .and_then(|length| length.checked_add(80 + crate::journal::OVERHEAD))
-        .ok_or(Error::Quota)?;
-    let mut encoder = Encoder::with_capacity(maximum, capacity)?;
-    encoder.array(7)?;
-    encoder.unsigned(1)?;
-    encoder.unsigned(1)?;
-    encoder.bytes(&image)?;
-    encoder.bytes(&installation)?;
-    encoder.unsigned(u64::from(instance))?;
-    encoder.bytes_with(view.heap_bytes(), |output| {
-        view.save_into(output)
-            .map(|_| ())
-            .map_err(|_| Error::Format)
-    })?;
-    encoder.bytes(statics)?;
-    Ok(Zeroizing::new(encoder.finish()))
+    let mut output = Zeroizing::new(Vec::new());
+    reserve_snapshot_workspace(&mut output, maximum)?;
+    encode_snapshot_into(view, image, installation, maximum, &mut output)?;
+    Ok(output)
+}
+
+fn reserve_snapshot_workspace(output: &mut Zeroizing<Vec<u8>>, maximum: usize) -> Result<()> {
+    // Journal recovery already allocates a full-slot plaintext buffer. Reuse it
+    // without moving decrypted state to a second large allocation.
+    if output.capacity() >= maximum { return Ok(()); }
+    let capacity = maximum.checked_add(crate::journal::OVERHEAD).ok_or(Error::Quota)?;
+    // A Vec reallocation could leave a freed copy of decrypted card state.
+    let mut replacement = Zeroizing::new(Vec::new());
+    replacement.try_reserve_exact(capacity).map_err(|_| Error::Quota)?;
+    replacement.extend_from_slice(output);
+    *output = replacement;
+    Ok(())
+}
+
+fn encode_snapshot_into(view: PersistentView<'_>, image: [u8; 32], installation: [u8; 16],
+        maximum: usize, output: &mut Zeroizing<Vec<u8>>) -> Result<()> {
+    let result = (|| {
+        let (instance, statics) = view.metadata();
+        let length = snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())?;
+        if length > maximum || output.capacity() < length + crate::journal::RECORD_OVERHEAD {
+            return Err(Error::Quota);
+        }
+        output.resize(length, 0);
+        let mut encoder = SliceEncoder::new(output);
+        encoder.array(7)?;
+        encoder.unsigned(1)?;
+        encoder.unsigned(1)?;
+        encoder.bytes_with(image.len(), |bytes| { bytes.copy_from_slice(&image); Ok(()) })?;
+        encoder.bytes_with(installation.len(), |bytes| {
+            bytes.copy_from_slice(&installation); Ok(())
+        })?;
+        encoder.unsigned(u64::from(instance))?;
+        encoder.bytes_with(view.heap_bytes(), |bytes| {
+            view.save_into(bytes).map(|_| ()).map_err(|_| Error::Format)
+        })?;
+        encoder.bytes_with(statics.len(), |bytes| { bytes.copy_from_slice(statics); Ok(()) })?;
+        encoder.finish()
+    })();
+    if result.is_err() { output.fill(0); output.clear(); }
+    result
 }
 
 fn snapshot_size(instance: u64, heap: usize, statics: usize) -> Result<usize> {
@@ -400,12 +445,11 @@ pub(crate) fn validate_seed_snapshot(snapshot: &[u8], file: &LoadFile, sizes: Si
     AppletInstance::validate_persistent(file, sizes, saved).map_err(|_| Error::Format)
 }
 
-fn decode_card(snapshot: Option<Zeroizing<Vec<u8>>>, file: &LoadFile, sizes: Sizes,
+fn decode_card(snapshot: Option<&[u8]>, file: &LoadFile, sizes: Sizes,
         image: [u8; 32], installation: [u8; 16]) -> Result<Option<AppletInstance>> {
     snapshot.map(|bytes| {
-        let saved = decode_snapshot(&bytes, file, sizes, image, installation)?;
+        let saved = decode_snapshot(bytes, file, sizes, image, installation)?;
         let mut card = AppletInstance::restore_without_frames(file, sizes, saved).map_err(|_| Error::Format)?;
-        drop(bytes);
         card.restore_execution_frames().map_err(|_| Error::Quota)?;
         Ok(card)
     }).transpose()

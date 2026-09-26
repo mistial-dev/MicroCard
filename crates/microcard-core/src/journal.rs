@@ -44,7 +44,8 @@ const TAIL_BYTES: usize = 12;
 const RECLAIM_STARTED: usize = TAIL_BYTES;
 const RECLAIM_COMPLETE: usize = TAIL_BYTES - 4;
 const COMMITTED: usize = TAIL_BYTES - 8;
-pub const OVERHEAD: usize = HEADER_BYTES + 16 + TAIL_BYTES;
+pub(crate) const RECORD_OVERHEAD: usize = HEADER_BYTES + 16;
+pub const OVERHEAD: usize = RECORD_OVERHEAD + TAIL_BYTES;
 const HEADER_BYTES: usize = 24;
 
 /// JCVM records carry an append sequence and a separately advanced security anchor.
@@ -477,24 +478,24 @@ impl<F: Flash> Journal<F> {
 
     /// Consume a zeroizing snapshot, reusing its allocation for the encrypted record.
     pub fn commit_owned_with(&mut self, data: Zeroizing<Vec<u8>>, provider: &mut impl CryptoProvider) -> Result<()> {
-        self.commit_owned_with_nonce(data, Durability::Anchored, provider, None)
+        self.commit_owned_with_nonce(data, Durability::Anchored, provider, None).map(|_| ())
     }
 
     #[cfg(feature = "jcvm")]
-    pub(crate) fn commit_owned_with_reason(&mut self, data: Zeroizing<Vec<u8>>,
+    pub(crate) fn commit_reusing_with_reason(&mut self, data: Zeroizing<Vec<u8>>,
             reason: microcard_engine_jcvm::host::CheckpointReason,
-            provider: &mut impl CryptoProvider) -> Result<()> {
+            provider: &mut impl CryptoProvider) -> Result<Zeroizing<Vec<u8>>> {
         self.commit_owned_with_nonce(data, reason.into(), provider, None)
     }
 
     #[cfg(feature = "jcvm")]
     pub(crate) fn commit_owned_with_reserved(&mut self, data: Zeroizing<Vec<u8>>,
             nonce: ReservedNonce, provider: &mut impl CryptoProvider) -> Result<()> {
-        self.commit_owned_with_nonce(data, Durability::Anchored, provider, Some(nonce.0))
+        self.commit_owned_with_nonce(data, Durability::Anchored, provider, Some(nonce.0)).map(|_| ())
     }
 
     fn commit_owned_with_nonce(&mut self, data: Zeroizing<Vec<u8>>, durability: Durability,
-            provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<()> {
+            provider: &mut impl CryptoProvider, reserved: Option<u64>) -> Result<Zeroizing<Vec<u8>>> {
         if self.poisoned {
             return Err(Error::Storage);
         }
@@ -530,7 +531,7 @@ impl<F: Flash> Journal<F> {
             self.flash.advance_monotonic(anchor(generation, self.append_enabled))?;
         }
         self.poisoned = false;
-        Ok(())
+        Ok(record)
     }
     /// Reserve the nonce only after staging succeeds, then authenticate the exact header.
     fn seal_record(&mut self, data: Zeroizing<Vec<u8>>, generation: u64,
