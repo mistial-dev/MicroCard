@@ -160,7 +160,7 @@ pub(crate) fn initialize_usb(
         )?;
         let allocator = cortex_m::singleton!(
             : UsbBusAllocator<usb_ccid::UsbBus> = UsbBusAllocator::new(usb_ccid::UsbBus::new(
-                UsbPeripheral::new(usbd, clocks)
+                usb_ccid::BoardUsbPeripheral(UsbPeripheral::new(usbd, clocks))
             ))
         )?;
         let class = BoardCcidClass::new(allocator, requester, None);
@@ -177,13 +177,9 @@ pub(crate) fn initialize_usb(
                 .ok()?
                 .device_release(0x0100)
                 .build();
-        Some((device, class))
+        device.bus().power_ready().then_some((device, class))
     })();
 
-    #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
-    if initialized.is_none() {
-        enter_uf2();
-    }
     initialized
 }
 

@@ -112,6 +112,10 @@ mod app {
         };
         if !powered {
             if *cx.local.usb_started {
+                if !device.bus().vbus_removed() {
+                    let mut watchdog = BoardWatchdog;
+                    halt_with_diagnostic(&mut watchdog, 0x0c);
+                }
                 *cx.local.usb_started = false;
                 *cx.local.extension_at = None;
                 RESET_PENDING.store(true, Ordering::Release);
@@ -126,7 +130,10 @@ mod app {
         if !*cx.local.usb_started {
             #[cfg(all(feature = "development-recovery", feature = "dongle-layout"))]
             set_uf2_recovery_marker(0x57);
-            let _ = device.force_reset();
+            if !device.bus().vbus_present() {
+                let mut watchdog = BoardWatchdog;
+                halt_with_diagnostic(&mut watchdog, 0x0d);
+            }
             *cx.local.usb_started = true;
             #[cfg(feature = "dongle-layout")]
             {

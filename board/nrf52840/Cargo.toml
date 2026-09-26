@@ -15,7 +15,7 @@ software-sha256 = ["microcard-core/software-sha256"]
 software-hmac = ["microcard-core/software-hmac"]
 software-aes = ["microcard-core/software-aes"]
 software-p256 = ["microcard-core/software-p256"]
-usb-ccid = ["dep:nrf52840-hal", "dep:usb-device", "dep:usbd-ccid", "dep:heapless", "dep:interchange", "dep:rtic"]
+usb-ccid = ["dep:nrf52840-hal", "dep:nrf-usbd", "dep:usb-device", "dep:usbd-ccid", "dep:heapless", "dep:interchange", "dep:rtic"]
 # The Makerdiary nRF52840 MDK USB Dongle flash map, which links at the current UF2
 # bootloader's 0x1000 application origin. It carries USB CCID as its only management
 # transport, because the board has no debug probe and no serial port.
@@ -42,6 +42,7 @@ cortex-m = {version="0.7", features=["critical-section-single-core"]}
 cortex-m-rt = { version = "0.7", features = ["set-vtor"] }
 embedded-alloc = "0.6"
 nrf52840-hal = { version = "0.19", optional = true }
+nrf-usbd = { version = "0.3.0", optional = true }
 nrf52840-pac = "0.12.2"
 usb-device = { version = "0.3.2", optional = true }
 usbd-ccid = { path = "../../vendor/usbd-ccid", optional = true }
@@ -50,6 +51,8 @@ interchange = { version = "0.3", optional = true }
 rtic = { version = "2.3", default-features = false, features = ["thumbv7-backend"], optional = true }
 [build-dependencies]
 sha2 = "0.10"
+[patch.crates-io]
+nrf-usbd = { path = "../../vendor/nrf-usbd" }
 [profile.release]
 opt-level = "s"
 lto = true

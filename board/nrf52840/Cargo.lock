@@ -640,6 +640,7 @@ dependencies = [
  "heapless 0.9.3",
  "interchange",
  "microcard-core",
+ "nrf-usbd",
  "nrf52840-hal",
  "nrf52840-pac",
  "rtic",
@@ -688,8 +689,6 @@ dependencies = [
 [[package]]
 name = "nrf-usbd"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aedf862f941154442271ae9914777bd1c93f6d2e0dc9db4cafa160e55ffb9085"
 dependencies = [
  "cortex-m",
  "critical-section",

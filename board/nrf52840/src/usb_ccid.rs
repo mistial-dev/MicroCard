@@ -19,7 +19,18 @@ pub type CcidClass<'a> = usbd_ccid::Ccid<'a, 'a, UsbBus, APDU_BYTES>;
 
 /// The HAL's USB peripheral borrows a started external oscillator, so the type system
 /// refuses a bus built on the internal RC. USBD does not work from the RC source.
-pub type UsbBus = nrf52840_hal::usbd::Usbd<nrf52840_hal::usbd::UsbPeripheral<'static>>;
+pub struct BoardUsbPeripheral(pub nrf52840_hal::usbd::UsbPeripheral<'static>);
+
+// The HAL value owns the USBD peripheral and proves that HFXO has started.
+unsafe impl nrf_usbd::UsbPeripheral for BoardUsbPeripheral {
+    const REGISTERS: *const () = nrf52840_hal::pac::USBD::ptr() as *const ();
+
+    fn phy_ready() -> bool {
+        power().usbregstatus.read().outputrdy().is_ready()
+    }
+}
+
+pub type UsbBus = nrf52840_hal::usbd::Usbd<BoardUsbPeripheral>;
 
 /// VBUS is present on the USB connector.
 ///
