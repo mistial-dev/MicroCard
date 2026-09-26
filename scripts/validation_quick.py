@@ -13,7 +13,7 @@ REFERENCES = (
 def schemas():
     for name in ("mc04_schema", "mc04_opcodes", "mc04_abi", "mc04_api", "jcvm_opcodes", "jcvm_api"):
         run("python3", f"scripts/generate_{name}.py", "--check")
-    for name in ("package_envelope_test", "device_cbor_test", "prepare_first_flash_test", "doc_links", "jcvm_cap_inventory_test", "copy_audit", "profile_enforcement_audit"):
+    for name in ("package_envelope_test", "device_cbor_test", "prepare_first_flash_test", "doc_links", "jcvm_cap_inventory_test", "copy_audit", "profile_enforcement_audit", "analyze_jcalgtest_performance_test"):
         run("python3", f"scripts/{name}.py")
     run("python3", "scripts/jcvm_api_surface.py",
         "crates/microcard-engine-jcvm/tests/vectors/openfips201-standard-cs2.lfdb",
