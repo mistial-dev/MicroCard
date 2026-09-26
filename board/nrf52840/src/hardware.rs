@@ -375,6 +375,35 @@ impl Hardware {
 }
 
 impl microcard_core::crypto::CryptoProvider for Hardware {
+    fn supports_sha224(&self) -> bool {
+        cfg!(feature = "cc310-p256") || cfg!(feature = "software-sha256")
+    }
+
+    #[cfg(feature = "cc310-p256")]
+    fn sha224_stream(
+        &mut self,
+        state: &mut [u8; microcard_core::crypto::SHA256_STATE_BYTES],
+        input: &[u8],
+        mut output: Option<&mut [u8; 28]>,
+    ) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        let result = (|| {
+            self.ensure_cc310()?;
+            let pointer = output.as_mut()
+                .map_or(core::ptr::null_mut(), |value| value.as_mut_ptr());
+            let status = unsafe {
+                cc310::microcard_cc310_sha224_stream(
+                    state.as_mut_ptr(), state.len(), input.as_ptr(), input.len(), pointer)
+            };
+            if status == 0 { Ok(()) } else { Err(Error::Native) }
+        })();
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+        }
+        result
+    }
+
     #[cfg(feature = "cc310-p256")]
     fn sha256_stream(
         &mut self,

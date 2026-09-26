@@ -29,6 +29,14 @@ unsafe extern "C" {
         input_size: usize,
         output: *mut u8,
     ) -> i32;
+    #[cfg(feature = "cc310-p256")]
+    pub(super) fn microcard_cc310_sha224_stream(
+        state: *mut u8,
+        state_size: usize,
+        input: *const u8,
+        input_size: usize,
+        output: *mut u8,
+    ) -> i32;
     fn nrf_cc3xx_platform_set_abort(apis: *const AbortApis);
     #[cfg(feature = "cc310-entropy")]
     fn nrf_cc3xx_platform_init() -> i32;

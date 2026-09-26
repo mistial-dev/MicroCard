@@ -199,6 +199,17 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         Ok(())
     }
 
+    fn sha224_stream(&mut self, state: &mut [u8; microcard_engine_jcvm::host::SHA256_STATE_BYTES],
+        input: &[u8], mut output: Option<&mut [u8; 28]>) -> Result<()> {
+        let result = self.provider.sha224_stream(state, input, output.as_deref_mut());
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
     fn p256_sign_hash(&mut self, key: &[u8; 32], message: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
         Services::p256_sign_hash(self, key, message, output)
     }
@@ -230,7 +241,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_digest(&self, algorithm: u8) -> bool {
-        algorithm == 4
+        algorithm == 4 || algorithm == 7 && self.provider.supports_sha224()
     }
     fn supports_random(&self, algorithm: u8) -> bool {
         matches!(algorithm, 1 | 2)
@@ -275,22 +286,71 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         if !self.supports_digest(algorithm) {
             return Err(Error::Unsupported);
         }
-        let destination = output.get_mut(..32).ok_or(Error::Bounds)?;
-        if self
-            .provider
-            .sha256_into(message, destination.try_into().unwrap())
-            .is_err()
-        {
+        let result = match algorithm {
+            4 => self.provider.sha256_into(message,
+                output.get_mut(..32).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 32),
+            7 => self.provider.sha224_into(message,
+                output.get_mut(..28).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 28),
+            _ => unreachable!(),
+        };
+        if result.is_err() {
             output.fill(0);
             return Err(Error::Unauthorized);
         }
-        Ok(32)
+        Ok(result.unwrap())
     }
 }
 
 #[cfg(all(test, feature = "software-crypto"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha224_service_supports_one_shot_streaming_and_clears_failures() {
+        let mut provider = Provider::default();
+        let mut host = Services::new(&mut provider);
+        assert!(Host::supports_digest(&host, 7));
+        let mut output = [0xaa; 28];
+        assert_eq!(Host::digest(&mut host, 7, b"abc", &mut output), Ok(28));
+        assert_eq!(output, [
+            0x23, 0x09, 0x7d, 0x22, 0x34, 0x05, 0xd8, 0x22,
+            0x86, 0x42, 0xa4, 0x77, 0xbd, 0xa2, 0x55, 0xb3,
+            0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7,
+            0xe3, 0x6c, 0x9d, 0xa7,
+        ]);
+        let expected = output;
+        let mut state = [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES];
+        Host::sha224_stream(&mut host, &mut state, b"a", None).unwrap();
+        Host::sha224_stream(&mut host, &mut state, b"bc", Some(&mut output)).unwrap();
+        assert_eq!(state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
+        assert_eq!(output, expected);
+
+        struct Failing;
+        impl CryptoProvider for Failing {
+            fn supports_sha224(&self) -> bool { true }
+            fn sha224_stream(&mut self, state: &mut [u8; crate::crypto::SHA256_STATE_BYTES],
+                _input: &[u8], output: Option<&mut [u8; 28]>) -> crate::Result<()> {
+                state.fill(0x42);
+                if let Some(output) = output { output.fill(0x42); }
+                Err(crate::Error::Native)
+            }
+        }
+        impl Entropy for Failing {
+            fn fill_entropy(&mut self, _output: &mut [u8]) -> crate::Result<()> {
+                Err(crate::Error::Native)
+            }
+        }
+        let mut failing = Failing;
+        let mut host = Services::new(&mut failing);
+        state.fill(0xaa);
+        output.fill(0xaa);
+        assert_eq!(Host::sha224_stream(&mut host, &mut state, b"x", Some(&mut output)), Err(Error::Unauthorized));
+        assert_eq!(state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
+        assert_eq!(output, [0; 28]);
+        output.fill(0xaa);
+        assert_eq!(Host::digest(&mut host, 7, b"x", &mut output), Err(Error::Unauthorized));
+        assert_eq!(output, [0; 28]);
+    }
 
     #[derive(Default)]
     struct Provider {

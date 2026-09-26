@@ -159,8 +159,9 @@ int32_t microcard_cc310_p256_ecdh(const uint8_t *private_key,
 
 // The pinned driver's clone is a 240-byte copy, with no address fixups.
 _Static_assert(sizeof(cc3xx_hash_operation_t) == 240u, "CC310 hash context changed");
-int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
-    const uint8_t *input, size_t input_size, uint8_t *output)
+static int32_t microcard_cc310_sha2_stream(uint8_t *state, size_t state_size,
+    const uint8_t *input, size_t input_size, uint8_t *output,
+    psa_algorithm_t algorithm, size_t digest_size)
 {
     if (state == NULL || state_size != 256u || (input == NULL && input_size != 0u)) {
         return PSA_ERROR_INVALID_ARGUMENT;
@@ -171,7 +172,7 @@ int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
         for (size_t i = 0; i < state_size; ++i) {
             if (state[i] != 0u) { status = PSA_ERROR_BAD_STATE; break; }
         }
-        if (status == PSA_SUCCESS) { status = cc3xx_hash_setup(&operation, PSA_ALG_SHA_256); }
+        if (status == PSA_SUCCESS) { status = cc3xx_hash_setup(&operation, algorithm); }
     } else if (state[0] == 1u) {
         memcpy(&operation, state + 8u, sizeof(operation));
     } else {
@@ -182,8 +183,8 @@ int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
     }
     if (status == PSA_SUCCESS && output != NULL) {
         size_t written = 0u;
-        status = cc3xx_hash_finish(&operation, output, 32u, &written);
-        if (status == PSA_SUCCESS && written != 32u) { status = PSA_ERROR_CORRUPTION_DETECTED; }
+        status = cc3xx_hash_finish(&operation, output, digest_size, &written);
+        if (status == PSA_SUCCESS && written != digest_size) { status = PSA_ERROR_CORRUPTION_DETECTED; }
     }
     microcard_wipe(state, state_size);
     if (status == PSA_SUCCESS && output == NULL) {
@@ -192,7 +193,21 @@ int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
     } else {
         (void)cc3xx_hash_abort(&operation);
     }
-    if (status != PSA_SUCCESS && output != NULL) { microcard_wipe(output, 32u); }
+    if (status != PSA_SUCCESS && output != NULL) { microcard_wipe(output, digest_size); }
     microcard_wipe(&operation, sizeof(operation));
     return status;
+}
+
+int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
+    const uint8_t *input, size_t input_size, uint8_t *output)
+{
+    return microcard_cc310_sha2_stream(state, state_size, input, input_size,
+        output, PSA_ALG_SHA_256, 32u);
+}
+
+int32_t microcard_cc310_sha224_stream(uint8_t *state, size_t state_size,
+    const uint8_t *input, size_t input_size, uint8_t *output)
+{
+    return microcard_cc310_sha2_stream(state, state_size, input, input_size,
+        output, PSA_ALG_SHA_224, 28u);
 }

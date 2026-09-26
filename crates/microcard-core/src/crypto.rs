@@ -60,6 +60,26 @@ macro_rules! software_method {
 /// errors must not expose a partial result and must leave it all-zero.
 /// The same rule applies to every variable-size output buffer below.
 pub trait CryptoProvider {
+    fn supports_sha224(&self) -> bool { cfg!(feature = "software-sha256") }
+
+    fn sha224_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
+        mut output: Option<&mut [u8; 28]>) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        #[cfg(feature = "software-sha256")]
+        { streaming_sha256::run224(state, input, output) }
+        #[cfg(not(feature = "software-sha256"))]
+        {
+            let _ = input;
+            state.fill(0);
+            Err(Error::Native)
+        }
+    }
+
+    fn sha224_into(&mut self, data: &[u8], output: &mut [u8; 28]) -> Result<()> {
+        let mut state = [0; SHA256_STATE_BYTES];
+        self.sha224_stream(&mut state, data, Some(output))
+    }
+
     /// Update opaque transient state; Some(output) finalizes and clears the state.
     fn sha256_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
         mut output: Option<&mut [u8; 32]>) -> Result<()> {

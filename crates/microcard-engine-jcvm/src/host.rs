@@ -74,6 +74,14 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// SHA-224 uses the same sized opaque transient state, with a 28-byte result.
+    fn sha224_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], _input: &[u8],
+        output: Option<&mut [u8; 28]>) -> Result<()> {
+        state.fill(0);
+        if let Some(output) = output { output.fill(0); }
+        Err(Error::Unsupported)
+    }
+
     /// ECDSA over a SHA-256 digest with minimal DER output; failed signing clears output.
     fn p256_sign_hash(&mut self, _key: &[u8; 32], _hash: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
         output.fill(0);

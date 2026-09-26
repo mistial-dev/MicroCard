@@ -1,8 +1,8 @@
 import javax.smartcardio.*;
 import java.util.Arrays;
 
-// Exercise JCAlgTest's checksum operations on the physical card, not just its factories.
-public class ChecksumProbe {
+// Exercise JCAlgTest operations on the physical card, not just their factories.
+public class JCAlgTestCryptoProbe {
     private static byte[] command(CardChannel channel, int cla, int ins, byte[] data) throws Exception {
         ResponseAPDU response = channel.transmit(new CommandAPDU(cla, ins, ins == 0xa4 ? 4 : 0, 0, data, 256));
         if (response.getSW() != 0x9000) {
@@ -40,6 +40,24 @@ public class ChecksumProbe {
                     }
                     System.out.printf("CRC%d method %d: success%n", algorithm == 1 ? 16 : 32, method);
                 }
+            }
+            byte[] prepare = {0, 0, 0, 7}; // MessageDigest.ALG_SHA_224
+            byte[] result = command(channel, 0xb0, 0x34, prepare);
+            if (!Arrays.equals(result, new byte[] {(byte) 0xaa})) {
+                throw new IllegalStateException("SHA-224 prepare failed: " + Arrays.toString(result));
+            }
+            for (int method : new int[] {2, 6, 4}) { // update, doFinal, reset
+                byte[] settings = new byte[22];
+                settings[3] = 7;
+                settings[11] = (byte) method;
+                settings[13] = 9;
+                settings[19] = 1;
+                settings[21] = 1;
+                result = command(channel, 0xb0, 0x41, settings);
+                if (!Arrays.equals(result, new byte[] {(byte) 0xaa})) {
+                    throw new IllegalStateException("SHA-224 operation failed: " + Arrays.toString(result));
+                }
+                System.out.printf("SHA-224 method %d: success%n", method);
             }
         } finally {
             card.disconnect(false);

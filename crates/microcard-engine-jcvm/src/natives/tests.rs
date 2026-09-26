@@ -1162,6 +1162,66 @@ fn sha256_digest_streams_only_after_update_and_reset_discards_pending_input() {
 }
 
 #[test]
+fn sha224_digest_factory_streams_and_preserves_output_on_failure() {
+    use sha2::{Digest, Sha224};
+    struct DigestHost { fail: bool }
+    impl crate::host::Host for DigestHost {
+        fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 7 }
+        fn digest(&mut self, algorithm: u8, input: &[u8], output: &mut [u8]) -> Result<usize> {
+            assert_eq!(algorithm, 7);
+            output[..28].copy_from_slice(&Sha224::digest(input));
+            Ok(28)
+        }
+        fn sha224_stream(&mut self, state: &mut [u8; crate::host::SHA256_STATE_BYTES],
+            input: &[u8], output: Option<&mut [u8; 28]>) -> Result<()> {
+            if self.fail { return Err(Error::Unauthorized); }
+            let used = state[0] as usize;
+            state[1 + used..1 + used + input.len()].copy_from_slice(input);
+            state[0] = (used + input.len()) as u8;
+            if let Some(output) = output {
+                output.copy_from_slice(&Sha224::digest(&state[1..1 + state[0] as usize]));
+                state.fill(0);
+            }
+            Ok(())
+        }
+    }
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let input = heap.new_array(heap::KIND_BYTE, 3, 1).unwrap();
+    heap.byte_slice_mut(input, 0, 3).unwrap().copy_from_slice(b"abc");
+    let output = heap.new_array(heap::KIND_BYTE, 28, 1).unwrap();
+    let mut host = DigestHost { fail: false };
+    invoke_security(ClassId::MessageDigest, MethodId::getInstance,
+        &[(false, 7), (false, 0)], &mut heap, &mut frame, &mut host).unwrap();
+    let digest = frame.pop_reference().unwrap();
+    invoke_security(ClassId::MessageDigest, MethodId::update,
+        &[(true, digest), (true, input), (false, 0), (false, 1)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    host.fail = true;
+    assert!(invoke_security(ClassId::MessageDigest, MethodId::doFinal,
+        &[(true, digest), (true, input), (false, 1), (false, 2),
+          (true, output), (false, 0)], &mut heap, &mut frame, &mut host).is_err());
+    assert_eq!(heap.byte_slice(output, 0, 28).unwrap(), &[0; 28]);
+    host.fail = false;
+    invoke_security(ClassId::MessageDigest, MethodId::doFinal,
+        &[(true, digest), (true, input), (false, 1), (false, 2),
+          (true, output), (false, 0)], &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 28);
+    assert_eq!(heap.byte_slice(output, 0, 28).unwrap(), Sha224::digest(b"abc").as_slice());
+    invoke_security(ClassId::MessageDigest, MethodId::update,
+        &[(true, digest), (true, input), (false, 0), (false, 1)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    invoke_security(ClassId::MessageDigest, MethodId::reset,
+        &[(true, digest)], &mut heap, &mut frame, &mut host).unwrap();
+    invoke_security(ClassId::MessageDigest, MethodId::doFinal,
+        &[(true, digest), (true, input), (false, 1), (false, 2),
+          (true, output), (false, 0)], &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 28);
+    assert_eq!(heap.byte_slice(output, 0, 28).unwrap(), Sha224::digest(b"bc").as_slice());
+}
+
+#[test]
 fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
     struct Capabilities;
     impl crate::host::Host for Capabilities {

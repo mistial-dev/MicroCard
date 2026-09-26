@@ -505,7 +505,7 @@ pub fn call(
         (ClassId::MessageDigest, MethodId::reset) => {
             let this = frame.pop_reference()?;
             heap.check_access(this, context)?;
-            if word_field(heap, this, KIND)? != 4 { return Err(Error::Unsupported); }
+            if !matches!(word_field(heap, this, KIND)?, 4 | 7) { return Err(Error::Unsupported); }
             let pending = heap.get_word(this, PENDING)?;
             if pending != NULL {
                 heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.fill(0);
@@ -518,7 +518,8 @@ pub fn call(
             let this = frame.pop_reference()?;
             heap.check_access(this, context)?;
             heap.check_access(input, context)?;
-            if word_field(heap, this, KIND)? != 4 { return Err(Error::Unsupported); }
+            let algorithm = word_field(heap, this, KIND)?;
+            if !matches!(algorithm, 4 | 7) { return Err(Error::Unsupported); }
             if length < 0 || offset < 0 { return Err(Error::Bounds); }
             heap.byte_slice(input, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
@@ -532,7 +533,11 @@ pub fn call(
                 state.copy_from_slice(heap.byte_slice(pending, 0, SHA256_STATE_BYTES)?);
             }
             let message = heap.byte_slice(input, offset as usize, length as usize)?;
-            host.sha256_stream(&mut state, message, None)?;
+            if algorithm == 4 {
+                host.sha256_stream(&mut state, message, None)?;
+            } else {
+                host.sha224_stream(&mut state, message, None)?;
+            }
             let pending = if pending == NULL {
                 let array = heap.new_transient_array(heap::KIND_BYTE, SHA256_STATE_BYTES as u16,
                     context, heap::CLEAR_ON_RESET)?;
@@ -563,12 +568,18 @@ pub fn call(
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             let mut digest = Zeroizing::new([0u8; 64]);
             let pending = heap.get_word(this, PENDING)?;
-            let written = if algorithm == 4 && pending != NULL {
+            let written = if matches!(algorithm, 4 | 7) && pending != NULL {
                 let mut state = Zeroizing::new([0u8; SHA256_STATE_BYTES]);
                 state.copy_from_slice(heap.byte_slice(pending, 0, SHA256_STATE_BYTES)?);
-                let output: &mut [u8; 32] = (&mut digest[..32]).try_into().unwrap();
-                host.sha256_stream(&mut state, message, Some(output))?;
-                32
+                if algorithm == 4 {
+                    let output: &mut [u8; 32] = (&mut digest[..32]).try_into().unwrap();
+                    host.sha256_stream(&mut state, message, Some(output))?;
+                    32
+                } else {
+                    let output: &mut [u8; 28] = (&mut digest[..28]).try_into().unwrap();
+                    host.sha224_stream(&mut state, message, Some(output))?;
+                    28
+                }
             } else {
                 host.digest(algorithm, message, &mut digest[..expected])?
             };
