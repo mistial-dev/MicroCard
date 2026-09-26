@@ -503,9 +503,10 @@ response could succeed even though its later idle snapshot would not fit; idle
 maintenance then reset USB. The heap ceiling now accounts for the applet's
 static data, snapshot encoding, and record framing. The same near-full media
 returned a quota error before publication, and the reader stayed available.
-The transport currently maps this VM allocation failure to `6982`; reporting
-the specified Java Card resource exception remains conformance work. A fresh
-installation and complete upstream performance run are also still needed.
+The native crypto factory now reports a catchable
+`SystemException.NO_RESOURCE`; on the same near-full DK media, JCAlgTest
+returned its `F205` exception result while the reader stayed available.
+A fresh installation and complete upstream performance run are still needed.
 
 For the full scan, pass `ALG_SUPPORT_EXTENDED` to
 `scripts/jcalgtest_client.py` with the pinned client checkout and an empty
@@ -521,8 +522,8 @@ algorithms. At that revision, the ceilings left 328 and 206 bytes of headroom.
 The separate flash-layout
 check still enforces the actual image partition.
 
-After SHA-224 and RAM-first ordinary commits, the measured JCVM links are
-**242,360 text / 204,836 BSS bytes** for DK USB and **243,708 text / 204,852
-BSS bytes** for the dongle. The updated text ceilings leave 390 and 292 bytes
-of headroom. These are link sizes, not measured flash endurance or power-cut
-durability.
+After SHA-224, RAM-first ordinary commits, and catchable native allocation
+failure, the measured JCVM links are **242,696 text / 204,836 BSS bytes** for
+DK USB and **244,044 text / 204,852 BSS bytes** for the dongle. The updated
+text ceilings leave 304 and 306 bytes of headroom. These are link sizes, not
+measured flash endurance or power-cut durability.

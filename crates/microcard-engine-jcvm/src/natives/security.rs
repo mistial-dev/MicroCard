@@ -446,8 +446,14 @@ pub fn call(
             let pending_bytes = (class == ClassId::Cipher).then_some(if algorithm == 13 { 32 } else { 16 });
             let random_state = (class == ClassId::RandomData).then_some(RANDOM_STATE_BYTES);
             let checksum_state = (class == ClassId::Checksum).then_some(4);
-            if let Some(bytes) = pending_bytes.or(random_state).or(checksum_state) {
-                heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS), (heap::KIND_BYTE, bytes)])?;
+            let extra = pending_bytes.or(random_state).or(checksum_state);
+            let allocations = [(heap::KIND_OBJECT, STATE_WORDS), (heap::KIND_BYTE, extra.unwrap_or(0))];
+            let count = if extra.is_some() { 2 } else { 1 };
+            if let Err(error) = heap.check_allocations(&allocations[..count]) {
+                if error != Error::Quota { return Err(error); }
+                let exception = super::new_exception(heap, ClassId::SystemException, context)?;
+                heap.put_word_unconditional(exception, super::REASON_FIELD, 5)?; // NO_RESOURCE
+                return Ok(Native::Threw(exception));
             }
             let instance = new_native(heap, class, STATE_WORDS, context)?;
             heap.put_word(instance, KIND, algorithm as u16)?;

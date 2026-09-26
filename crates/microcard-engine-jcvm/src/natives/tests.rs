@@ -1222,6 +1222,31 @@ fn sha224_digest_factory_streams_and_preserves_output_on_failure() {
 }
 
 #[test]
+fn exhausted_crypto_factory_throws_without_consuming_heap() {
+    struct DigestHost;
+    impl crate::host::Host for DigestHost {
+        fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 7 }
+    }
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    reserve_runtime_exceptions(&mut heap, 1).unwrap();
+    while heap.available() >= 18 {
+        heap.new_array(heap::KIND_BYTE, 1, 1).unwrap();
+    }
+    let before = heap.used();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    for _ in 0..2 {
+        let Native::Threw(exception) = invoke_security(ClassId::MessageDigest,
+            MethodId::getInstance, &[(false, 7), (false, 0)],
+            &mut heap, &mut frame, &mut DigestHost).unwrap() else {
+            panic!("exhausted factory returned without a Java Card exception");
+        };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
+        assert_eq!(heap.used(), before);
+    }
+}
+
+#[test]
 fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
     struct Capabilities;
     impl crate::host::Host for Capabilities {
@@ -1270,19 +1295,20 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         }
     }
     for algorithm in [13, 14] {
-        let mut slab = [0; 32]; // Holder fits, its streaming-state array does not.
+        let (mut slab, mut words, mut tags) = setup(0);
         let mut heap = Heap::new(&mut slab).unwrap();
-        let mut words = [0; 16];
-        let mut tags = [0; 8];
+        reserve_runtime_exceptions(&mut heap, 1).unwrap();
+        while heap.available() >= 40 { heap.new_array(heap::KIND_BYTE, 1, 1).unwrap(); }
         let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
         frame.push_short(algorithm).unwrap();
         frame.push_short(0).unwrap();
-        let before = heap.image().to_vec();
+        let before = heap.used();
         let result = security::call(ClassId::Cipher, MethodId::getInstance,
             framework(ClassId::Cipher, MethodId::getInstance, true).method.signature,
             &mut heap, &mut Capabilities, &mut frame, 1, &mut idle(), &mut 100, &[]);
-        assert!(matches!(result, Err(Error::Quota)));
-        assert!(heap.image() == before, "failed cipher creation must not leave an incomplete holder");
+        let Ok(Native::Threw(exception)) = result else { panic!("exhausted cipher factory did not throw"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
+        assert_eq!(heap.used(), before, "failed cipher creation must not leave an incomplete holder");
     }
 
     for (class, method, token, arguments) in [

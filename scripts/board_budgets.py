@@ -110,7 +110,7 @@ def main():
         # Measured with CRC16/CRC32, SHA-224, the snapshot workspace, and
         # deferred ordinary commits. Keep less than 512 bytes of headroom;
         # flash partition bounds are checked separately by prepare_first_flash.py.
-        "jcvm_usb_ccid": 242_750, "jcvm_dongle": 244_000,
+        "jcvm_usb_ccid": 243_000, "jcvm_dongle": 244_350,
     }
     failures = []
     for name, result in variants.items():
