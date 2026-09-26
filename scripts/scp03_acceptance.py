@@ -4,7 +4,7 @@ Uses Python cryptography/OpenSSL, not the Rust implementation. Development accep
 """
 from device_cbor import management_names, manifest as encode_manifest
 from package_envelope import create as create_envelope, PREFIX as PACKAGE_PREFIX
-import hashlib, json, os, pathlib, subprocess, tempfile
+import hashlib, json, os, pathlib, subprocess, sys, tempfile
 from validation_common import prebuilt, require_artifacts
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -96,6 +96,7 @@ class Client:
  def close(self):
   if self.p.poll() is None: self.p.stdin.close()
   status=self.p.wait(timeout=5);diagnostics=self.p.stderr.read()
+  if sys.exc_info()[0] is not None: return
   assert status==0,(status,diagnostics)
   assert 'jcvm:' not in diagnostics,diagnostics
 
