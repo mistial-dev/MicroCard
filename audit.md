@@ -26,7 +26,7 @@ Section 4.3.10.1 specifies 10,000 erase cycles per page. A rotation spends one c
 
 Section 4.3.1 and the `nWRITE` row of section 4.3.10.1 allow two writes of the same 32-bit word before a page erase. The limit still applies when unchanged bits are written back as 1. The controller can only change a 1 to a 0.
 
-The previous journal layout placed commit, reclaim-start, and reclaim-complete bytes in one aligned word. Over a slot's lifetime, that caused three word writes, a confirmed `nWRITE` violation. The current journal versions use separate aligned marker words; the host flash model rejects a third write. `program_region` still does not count writes or read each word back after `READY`, so each board writer must keep the program-once invariant.
+The previous journal layout placed commit, reclaim-start, and reclaim-complete bytes in one aligned word. Over a slot's lifetime, that caused three word writes, a confirmed `nWRITE` violation. The current journal versions use separate aligned marker words; the host flash model rejects a third write. `program_region` now reads back each written word after `READY`. It does not retain an on-device write count, so each board writer must keep the program-once invariant.
 
 ### USB power-up and reconnection
 

@@ -251,6 +251,9 @@ impl Nvm {
                 #[cfg(feature = "latency-trace")]
                 { trace_words += 1; }
                 Self::ready()?;
+                if unsafe { read(base + pos) } != word {
+                    return Err(Error::Storage);
+                }
                 feed();
                 #[cfg(feature = "usb-ccid")]
                 {
