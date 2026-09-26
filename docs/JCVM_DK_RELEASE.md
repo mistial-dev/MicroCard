@@ -517,6 +517,12 @@ that option.
 
 The normal USB link grew from 239,884 to **241,172 text bytes** and the dongle
 link from 241,256 to **242,544**, an exact 1,288-byte cost for the two new
-algorithms. Their regression ceilings now allow that measured functionality
-with 328 and 206 bytes of headroom respectively. The separate flash-layout
+algorithms. At that revision, the ceilings left 328 and 206 bytes of headroom.
+The separate flash-layout
 check still enforces the actual image partition.
+
+After SHA-224 and RAM-first ordinary commits, the measured JCVM links are
+**242,360 text / 204,836 BSS bytes** for DK USB and **243,708 text / 204,852
+BSS bytes** for the dongle. The updated text ceilings leave 390 and 292 bytes
+of headroom. These are link sizes, not measured flash endurance or power-cut
+durability.

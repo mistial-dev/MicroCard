@@ -106,11 +106,11 @@ def main():
     text_limits = {
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
-        "dongle": 244_000, "jcvm_development_debug": 121_000,
-        # Include the two P71D321 ISO 3309 checksum implementations. Keep
-        # these measured limits tight; flash partition bounds are checked
-        # separately by prepare_first_flash.py.
-        "jcvm_usb_ccid": 241_500, "jcvm_dongle": 242_750,
+        "dongle": 244_000, "jcvm_development_debug": 122_000,
+        # Measured with CRC16/CRC32, SHA-224, the snapshot workspace, and
+        # deferred ordinary commits. Keep less than 512 bytes of headroom;
+        # flash partition bounds are checked separately by prepare_first_flash.py.
+        "jcvm_usb_ccid": 242_750, "jcvm_dongle": 244_000,
     }
     failures = []
     for name, result in variants.items():
