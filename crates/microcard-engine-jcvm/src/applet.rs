@@ -113,11 +113,10 @@ impl AppletInstance {
         Ok(())
     }
 
-    /// Preserve all live objects while releasing unused capacity between callbacks.
+    /// Release callback scratch before idle maintenance. Keep the heap buffer:
+    /// shrinking it allocates and can panic when the RAM arena is fragmented.
     pub fn release_idle_memory(&mut self) {
         self.release_execution_frames();
-        self.heap.truncate(self.heap_used);
-        self.heap.shrink_to_fit();
     }
 
     /// Restore the configured allocation quota before any applet instruction runs.

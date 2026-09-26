@@ -458,6 +458,24 @@ probe-rs reset --chip nRF52840_xxAA --probe 1366:1020:000802009660
 java scripts/ChecksumProbe.java "MicroCard MicroCard virtual smart card"
 ```
 
+The pinned upstream static performance scan also completed on that CRC image,
+but its result is **invalid**: four of 1,900 method rows have negative
+baseline-adjusted times. The untouched CSV and log are under
+`artifacts/physical/microcard-jcalgtest-performance-static-dk-20260926/`.
+`scripts/analyze_jcalgtest_performance.py` classifies these separately from
+unsupported algorithms, unmeasured operations, and transport failures.
+
+The first variable performance attempt then reset the DK during a checksum
+`doFinal` APDU. SWD trace on the exact diagnostic image recorded an attempted
+63,082-byte allocation, 114,360 free bytes in total, a panic, and a software
+reset. `AppletInstance::release_idle_memory` called `Vec::shrink_to_fit` before
+heap-journal maintenance; that infallible reallocation can panic in fragmented
+RAM. Keeping the already allocated heap buffer removed the panic. The same
+physical checksum sequence then completed all four `update` and `doFinal`
+operations without a reset. The diagnostic trace showed that a near-full
+64 KiB heap slot still needs roughly two seconds for a snapshot/rollover.
+That latency and the full variable performance scan remain release work.
+
 For the full scan, pass `ALG_SUPPORT_EXTENDED` to
 `scripts/jcalgtest_client.py` with the pinned client checkout and an empty
 `-outpath` directory. Select the MicroCard reader when prompted. Analyze the

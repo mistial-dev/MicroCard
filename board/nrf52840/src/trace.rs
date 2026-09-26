@@ -68,7 +68,11 @@ pub(crate) mod event {
 
 #[no_mangle]
 pub extern "C" fn microcard_trace_phase(stage: u32) {
-    record(event::RENEW_PHASE, stage);
+    // Boot recovery emits many fine-grained phases. Keep publication milestones
+    // so an earlier panic survives in the bounded retained event ring.
+    if matches!(stage, 0x1e | 0x20..=0x23 | 0x28..=0x2a) {
+        record(event::RENEW_PHASE, stage);
+    }
 }
 
 pub(crate) fn boot(reset_reason: u32) {

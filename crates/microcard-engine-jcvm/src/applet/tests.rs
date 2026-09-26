@@ -340,9 +340,12 @@
         let mut restored = AppletInstance::restore_without_frames(&file, Sizes::default(), saved).unwrap();
         assert_eq!((restored.words.capacity(), restored.tags.capacity()), (0, 0));
         let live_heap = restored.heap[..restored.heap_used].to_vec();
+        let heap_ptr = restored.heap.as_ptr();
+        let heap_capacity = restored.heap.capacity();
         restored.release_idle_memory();
-        assert_eq!(restored.heap.len(), restored.heap_used);
-        assert_eq!(restored.heap, live_heap);
+        assert_eq!(restored.heap.as_ptr(), heap_ptr);
+        assert_eq!(restored.heap.capacity(), heap_capacity);
+        assert_eq!(restored.heap[..restored.heap_used], live_heap);
         restored.restore_idle_memory().unwrap();
         assert_eq!(restored.heap.len(), Sizes::default().heap_bytes);
         assert_eq!(restored.heap[..restored.heap_used], live_heap);
