@@ -389,3 +389,24 @@ revision, PC/SC latency distribution, the complete 8,607-probe matrix, and
 all unexpected statuses. It rejects a scan that merely reaches its final
 line after the applet has failed: `6982`, `6A82`, timeouts, and transport
 errors cannot be counted as unsupported algorithms.
+
+On 2026-09-26, the DK's FICR reported QI package (`0x2004`) and AAF0 variant
+(`0x41414630`), so Nordic erratum 199 applies. The pinned `nrf-usbd` driver now
+enables its USB task workaround only around EasyDMA on affected silicon.
+Firmware SHA-256 `6ff7d9ac95edaf9415519a5ba79a802f31ceb5452ac86165e854187c9232cb9c`
+passed a complete physical extended scan: **8,607/8,607 probes, zero error
+rows, no reader loss**. The raw CSV, upstream log, console transcript, exact
+ELF, and analyzer report are preserved under
+`artifacts/physical/microcard-jcalgtest-mj09-errata199-dk-20260926/`.
+The CSV SHA-256 is
+`2327e4fa33438fe2911d339631c4e70f976b0b30cfc38c45285e2da8c265c132`.
+Host PC/SC latency across 17,222 APDUs was 14 ms median, 16 ms p95, and
+642 ms maximum. The result still lacks 233 P71D321-supported probes, so it
+does not establish profile compatibility.
+
+An opt-in SWD trace of 100 deletion/factory cycles found two page erases,
+7,906 programmed words since boot, and an 84,559 µs maximum USB polling gap.
+The cycles passed with no reader loss; their host-observed factory latency was
+18.44 ms median, 18.63 ms p95, and 285.82 ms maximum. Partial erase remains
+conditional on a measured deadline or reconnect failure. USB unplug/replug
+and physical power-cut publication tests remain open.

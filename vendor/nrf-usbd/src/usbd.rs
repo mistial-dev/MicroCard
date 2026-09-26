@@ -19,11 +19,17 @@ use usb_device::{
 use crate::pac::usbd::RegisterBlock;
 use crate::{errata, UsbPeripheral};
 
-fn dma_start() {
+fn dma_start<P: UsbPeripheral>() {
     compiler_fence(Ordering::Release);
+    if P::errata_199_applicable() {
+        errata::dma_start_199();
+    }
 }
 
-fn dma_end() {
+fn dma_end<P: UsbPeripheral>() {
+    if P::errata_199_applicable() {
+        errata::dma_end_199();
+    }
     compiler_fence(Ordering::Acquire);
 }
 
@@ -489,7 +495,7 @@ impl<T: UsbPeripheral> UsbBus for Usbd<T> {
             regs.events_endepin[i].reset();
 
             // Kick off device -> host transmission. This starts DMA, so a compiler fence is needed.
-            dma_start();
+            dma_start::<T>();
             regs.tasks_startepin[i].write(|w| w.tasks_startepin().set_bit());
             while regs.events_endepin[i]
                 .read()
@@ -497,7 +503,7 @@ impl<T: UsbPeripheral> UsbBus for Usbd<T> {
                 .bit_is_clear()
             {}
             regs.events_endepin[i].reset();
-            dma_end();
+            dma_end::<T>();
 
             // Clear EPSTATUS.EPIN[i] flag
             regs.epstatus.write(|w| unsafe { w.bits(1 << i) });
@@ -587,7 +593,7 @@ impl<T: UsbPeripheral> UsbBus for Usbd<T> {
             // MAXCNT must match SIZE
             epout[i].maxcnt.write(|w| unsafe { w.bits(size) });
 
-            dma_start();
+            dma_start::<T>();
             regs.events_endepout[i].reset();
             regs.tasks_startepout[i].write(|w| w.tasks_startepout().set_bit());
             while regs.events_endepout[i]
@@ -596,7 +602,7 @@ impl<T: UsbPeripheral> UsbBus for Usbd<T> {
                 .bit_is_clear()
             {}
             regs.events_endepout[i].reset();
-            dma_end();
+            dma_end::<T>();
 
             // TODO: ISO
 

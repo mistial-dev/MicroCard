@@ -10,4 +10,8 @@ bound readiness waits, and disable/re-enable USBD across VBUS removal. The
 register status without duplicating the USB bus implementation. The CCID class
 remains `usbd-ccid`.
 
+The board also identifies affected nRF52840 QIAA/CKAA Fx0 silicon from FICR.
+For those builds, the driver applies Nordic erratum 199 around each EasyDMA
+transfer, clearing the workaround register after the transfer completes.
+
 Keep local changes small and compare them with upstream before upgrading.

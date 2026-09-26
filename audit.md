@@ -36,11 +36,15 @@ VBUS detection is the correct pre-enable gate in `board/nrf52840/src/usb_ccid.rs
 
 The original reconnect path only called `force_reset`. It now disables USBD on VBUS removal and repeats the enable sequence on return. The driver's EasyDMA operations are synchronous inside critical sections, so software VBUS handling cannot interrupt one. In-flight transfer behavior and disconnect recovery still require physical tests.
 
-### Errata 199 is not applied
+### Errata 199 applies to the connected DK
 
 Revision 3 errata 199 applies to its listed QIAA-Fx0 and CKAA-Fx0 build codes. While a USBD EasyDMA transfer is in progress, incoming USB tasks are not performed. The published workaround writes `0x40027C1C` to `0x00000082` before a DMA transfer and clears it afterward.
 
-The pinned driver does not yet contain that write. Its synchronous transfer path has not been shown to issue a conflicting task during DMA, so this is an applicability and trace question, not an established cause of reader loss. Record the chip build code when hardware returns before enabling the workaround.
+On 2026-09-26, SWD read FICR `INFO.PACKAGE = 0x2004` (QI) and
+`INFO.VARIANT = 0x41414630` (AAF0). This is a QIAA-Fx0 build. The pinned USB
+driver now applies the documented workaround around EasyDMA transfers only on
+affected QI/CK Fx0 builds. The earlier reader loss has not been attributed to
+this erratum without a matching trace.
 
 ### Errata 171 and 187 are applied on each USBD enable
 
@@ -77,8 +81,18 @@ Errata 213 clears the watchdog configuration on wake from System OFF. The firmwa
 
 The dongle schematic uses an external buck to produce 3.3 V, a 10 µH inductor on the chip regulator pin, a 32 MHz crystal with 12 pF capacitors, and an RGB LED on P0.22 green, P0.23 red, and P0.24 blue. The firmware starts the high-frequency crystal before storage and USB, and its LED mask uses those three pins. Figure 197 shows the crystal start as part of USB enumeration. The USB bus type is built only with `ExternalOscillator`, so an image that does not take the crystal does not compile.
 
-## Physical checks after the board returns
+## Physical validation
 
-- Read the chip's build code and apply errata 199 only if the documented variant matches. A missing workaround alone does not identify the cause of the earlier reader loss.
-- Capture the opt-in SWD trace across a full registry and heap rotation. It already records page erases, programmed words, maintenance time, and maximum USB polling gap. If a page erase causes reader loss or a missed command deadline, divide erasure into bounded idle-slot steps; do not treat a partially erased slot as recoverable.
-- Exercise USB removal during an idle period and during a CCID transfer, then reconnect and confirm SCP03 and applet state recover. Repeat the complete JCAlgTest scan after these changes.
+On 2026-09-26, the patched driver completed an 8,607-probe physical JCAlgTest
+scan with no error rows or reader loss. The opt-in SWD trace then observed two
+heap-page erases during 100 deletion/factory cycles. Its maximum USB polling
+gap was 84,559 µs, but the reader remained connected and the commands passed.
+This does not justify partial erasure yet. The normal image was restored and
+OpenFIPS201 and JCAlgTest both selected after reset.
+
+Still to test: USB removal during idle and active CCID transfer, power cuts at
+publication boundaries, and a trace across a full registry and heap rotation.
+If those tests show reader loss or missed command deadlines during page erase,
+divide erasure into bounded idle-slot steps without treating a partial erase
+as recoverable. The erratum 199 workaround is present on the verified image,
+but the prior reader loss has no matching trace to identify its cause.

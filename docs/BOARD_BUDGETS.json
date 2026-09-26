@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 232968,
+      "text_bytes": 233120,
       "data_bytes": 148,
       "bss_bytes": 203116,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 234252,
+      "text_bytes": 234396,
       "data_bytes": 148,
       "bss_bytes": 203132,
       "ceilings": {
@@ -63,7 +63,7 @@
       }
     },
     "jcvm_usb_ccid": {
-      "text_bytes": 239748,
+      "text_bytes": 239900,
       "data_bytes": 148,
       "bss_bytes": 204820,
       "ceilings": {
@@ -73,7 +73,7 @@
       }
     },
     "jcvm_dongle": {
-      "text_bytes": 241104,
+      "text_bytes": 241248,
       "data_bytes": 148,
       "bss_bytes": 204836,
       "ceilings": {

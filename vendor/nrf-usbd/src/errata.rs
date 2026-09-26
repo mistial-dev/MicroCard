@@ -55,3 +55,12 @@ pub fn post_wakeup() {
         poke(0x4006EC00, 0x00009375);
     }
 }
+
+pub fn dma_start_199() {
+    // Revision 3 QIAA/CKAA Fx0 cannot accept USB tasks during EasyDMA otherwise.
+    unsafe { poke(0x40027C1C, 0x00000082) }
+}
+
+pub fn dma_end_199() {
+    unsafe { poke(0x40027C1C, 0) }
+}

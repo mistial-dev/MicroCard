@@ -28,6 +28,15 @@ unsafe impl nrf_usbd::UsbPeripheral for BoardUsbPeripheral {
     fn phy_ready() -> bool {
         power().usbregstatus.read().outputrdy().is_ready()
     }
+
+    fn errata_199_applicable() -> bool {
+        let ficr = unsafe { &*nrf52840_hal::pac::FICR::ptr() };
+        let package = ficr.info.package.read().bits();
+        let variant = ficr.info.variant.read().bits();
+        matches!(package, 0x2004 | 0x2005)
+            && variant & 0xffff_ff00 == 0x4141_4600
+            && variant & 0xff == b'0' as u32
+    }
 }
 
 pub type UsbBus = nrf52840_hal::usbd::Usbd<BoardUsbPeripheral>;

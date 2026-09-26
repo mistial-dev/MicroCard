@@ -22,4 +22,9 @@ pub unsafe trait UsbPeripheral: Send {
     fn phy_ready() -> bool {
         true
     }
+
+    /// Whether this silicon needs the USBD EasyDMA task workaround (erratum 199).
+    fn errata_199_applicable() -> bool {
+        false
+    }
 }
