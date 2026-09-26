@@ -184,17 +184,19 @@ pub(crate) fn initialize_usb(
 }
 
 fn initialize_card() -> (BoardCard, Keys) {
+    // An Fxx+ development card needs both provisioned HwDisabled and this
+    // reset-scoped write. Production builds omit development-debug.
+    #[cfg(feature = "development-debug")]
+    unsafe {
+        if read(0x10001208) & 0xff == 0x5a {
+            write(0x40000558, 0x5a);
+        }
+    }
     #[cfg(feature = "dongle-layout")]
     ensure_clean_bootloader_handoff();
     enable_instruction_cache();
     start_monotonic_timer();
     unsafe {
-        // Nordic PS Debug and trace: Fxx+ needs both HwDisabled and SwDisable.
-        // Respect the provisioned hardware policy; never rewrite UICR at startup.
-        #[cfg(feature = "development-debug")]
-        if read(0x10001208) & 0xff == 0x5a {
-            write(0x40000558, 0x5a);
-        }
         HEAP.init(core::ptr::addr_of_mut!(HEAP_MEMORY) as usize, 196608);
     }
     let mut watchdog = BoardWatchdog;

@@ -77,6 +77,9 @@ def main():
  staging=tempfile.TemporaryDirectory(prefix='.preparing-',dir=destination.parent)
  out=pathlib.Path(staging.name)/'bundle';out.mkdir()
  shutil.copy2(elf,out/'microcard.elf');run('arm-none-eabi-objcopy','-O','ihex',str(elf),str(out/'microcard.hex'))
+ if args.development_only:
+  # Nordic Fxx+ requires this UICR value as well as the opt-in startup write.
+  (out/'uicr-debug-open.bin').write_bytes(bytes((0x5a,0,0,0)))
  # Inspect load addresses rather than trusting the link succeeding.
  headers=run('arm-none-eabi-objdump','-h',str(elf),capture_output=True,text=True).stdout.splitlines()
  for i,line in enumerate(headers):

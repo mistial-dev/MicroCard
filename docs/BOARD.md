@@ -145,4 +145,11 @@ Run the host SCP03 scenarios through USB CCID. Verify enumeration, SELECT, count
 
 The default `development-debug` feature writes APPROTECT.DISABLE=0x5A at startup only if UICR.APPROTECT already contains HwDisabled (low byte 0x5A). It never writes UICR or performs recovery. This implements the software half of the Fxx-and-later development setup described in [Nordic's Debug and trace specification](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/dif.html), APPROTECT base 0x40000000, DISABLE offset 0x558. [UICR.APPROTECT](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/uicr.html) is at 0x10001208. Build with `--no-default-features --features engine-mc04,software-crypto` to omit the development unlock in the software reference build. Use `--no-default-features --features engine-mc04,cc310` for the hardware-only cross-link described in [readiness](READINESS.md). Doing so does not by itself establish a production debug policy.
 
-The connected DK currently reports a locked core. Its exact silicon revision and UICR value have not been read, so improved APPROTECT is a likely explanation. Verification of that diagnosis remains pending. The original first-flash firmware lacks this startup path. Loading the fix on a locked device may require destructive recovery. No such recovery is authorized or performed automatically. A successful compile does not prove the existing board can reset through J-Link.
+On the connected QIAA-F0 DK, erasing UICR left APPROTECT at its reset value
+and SWD locked again after reset. For a development bundle only, run
+`scripts/factory_reset_dk.py --keep-debug-open --execute` with its required
+bundle, management-key, and probe arguments. The command verifies and programs
+UICR.APPROTECT=0x5A after erasing, then the firmware writes the reset-scoped
+APPROTECT.DISABLE=0x5A. SWD memory reads were verified after a subsequent
+reset. This deliberately leaves development debug open; omit the option and
+the `development-debug` feature for a production debug-lock policy.
