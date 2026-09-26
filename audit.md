@@ -90,8 +90,26 @@ gap was 84,559 µs, but the reader remained connected and the commands passed.
 This does not justify partial erasure yet. The normal image was restored and
 OpenFIPS201 and JCAlgTest both selected after reset.
 
-Still to test: USB removal during idle and active CCID transfer, power cuts at
-publication boundaries, and a trace across a full registry and heap rotation.
+The DK's QIAA-F0 silicon follows the Fxx+ APPROTECT rule: an erased UICR
+locks SWD again on reset even if the firmware includes the software unlock.
+The development-only factory-reset option now programs UICR.APPROTECT=0x5A;
+SWD readback of `0x10001208` succeeded after a debugger-triggered reset. This
+is for diagnostic builds, not the production debug policy.
+
+Switching the DK's hub port off interrupted an active PC/SC transfer, and a
+new SCP03/PIV session succeeded after reconnect. It did **not** establish
+VBUS removal: POWER.USBREGSTATUS remained `0x3` with both companion hub
+ports off. This was a USB data-path disconnect test.
+
+The diagnostic build completed another full physical extended scan with zero
+error rows or reader loss. SWD recorded 13 page erases, 45,102 programmed
+words since boot, an 84,623 µs maximum USB polling gap, and no persistence
+error. The last persistence trace showed three snapshot commits; the counters
+do not distinguish every registry and heap epoch transition.
+
+Still to test: true VBUS removal during idle and active CCID transfer, and
+power cuts at publication boundaries. Capture finer epoch-boundary evidence
+if the release gate requires proving each physical slot handoff.
 If those tests show reader loss or missed command deadlines during page erase,
 divide erasure into bounded idle-slot steps without treating a partial erase
 as recoverable. The erratum 199 workaround is present on the verified image,

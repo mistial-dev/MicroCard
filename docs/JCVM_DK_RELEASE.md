@@ -410,3 +410,19 @@ The cycles passed with no reader loss; their host-observed factory latency was
 18.44 ms median, 18.63 ms p95, and 285.82 ms maximum. Partial erase remains
 conditional on a measured deadline or reconnect failure. USB unplug/replug
 and physical power-cut publication tests remain open.
+
+A second complete scan used opt-in `latency-trace` firmware SHA-256
+`c5588ea9b4d45e42b2afa84c8053cbacefa38a3a8e59e10c7d18cddbdee120ea`.
+It again passed all 8,607 probes with zero error rows or reader loss. Its
+untouched CSV, upstream log, analysis, exact ELF, and SWD counter dump are in
+`artifacts/physical/microcard-jcalgtest-mj09-trace-dk-20260926/`. The scan's
+SWD totals were 13 page erases and 45,102 programmed words since boot;
+maximum USB polling gap was 84,623 µs. The diagnostic image was replaced by
+the normal image, and both installed applets selected after reset.
+
+A software-controlled hub port disconnect interrupted an active PC/SC call;
+a new SCP03 session and OpenFIPS201 selection then passed. This is a data-path
+disconnect result. The nRF52840 `POWER.USBREGSTATUS` remained `0x3` when
+both companion hub ports were switched off, so the test did not remove VBUS.
+True VBUS removal and power-cut publication checks still need a physical
+power-control path.
