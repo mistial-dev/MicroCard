@@ -1172,6 +1172,10 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         fn supports_signature(&self, algorithm: u8) -> bool { algorithm == 33 }
     }
     for (class, algorithm, external, supported) in [
+        (ClassId::Checksum, 1, false, true),
+        (ClassId::Checksum, 2, false, true),
+        (ClassId::Checksum, 3, false, false),
+        (ClassId::Checksum, 1, true, false),
         (ClassId::MessageDigest, 4, false, true),
         (ClassId::MessageDigest, 5, false, false),
         (ClassId::MessageDigest, 4, true, false),
@@ -1222,7 +1226,6 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
     }
 
     for (class, method, token, arguments) in [
-        (ClassId::Checksum, MethodId::getInstance, None, 2),
         (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance, None, 2),
         (ClassId::InitializedMessageDigest_OneShot, MethodId::open, None, 1),
         (ClassId::MessageDigest_OneShot, MethodId::open, None, 1),

@@ -244,7 +244,7 @@ rejected without erasure. A normal, non-traced DK image at `52ed5b4` then
 completed the pinned upstream extended support scan: **8,607 probes, zero
 error rows**, 23 ms median and 24 ms p95 host PC/SC latency, and a 5.28 s
 maximum for renewal. Applet selection passed after reset. The card reported
-55 supported probes; **233 P71D321-supported probes remain missing**. The
+55 supported probes; **233 P71D321-supported probes were missing at that revision**. The
 registry used 911 of 1,024 one-time commit and nonce words, so a repeated full
 scan needs counter epoch renewal or a fresh development provision. MJ05 compact
 append records subsequently completed the same physical scan with **76/1,024**
@@ -261,6 +261,13 @@ estimate. A write-heavy applet still needs a lifetime budget or higher-endurance
 storage before an always-on production claim.
 The physical performance modes and allocator-pressure qualification are still
 open; P71D321 compatibility cannot yet be claimed.
+
+The 2026-09-26 DK image adds ISO 3309 CRC16 and CRC32. A complete upstream
+extended scan reports **57 supported of 288 P71D321-positive probes**, with
+**231 missing**, zero error rows, and no reader loss. Both operations also pass
+a focused physical smoke after reset, while independent checksum vectors run
+host-side. The [raw result and firmware hash](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk)
+remain the evidence for this narrower claim.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
 Makerdiary and cover both engine builds, CC310 independent vectors and

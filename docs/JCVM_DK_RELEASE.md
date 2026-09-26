@@ -52,9 +52,11 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
-The extended host scan reports **55 supported** probes against the P71D321
-reference's **288**. There are **233 missing supported** probes and **zero support
-claims outside the profile**. Both `OwnerPINBuilder` extended variants now
+The latest extended host and DK scans report **57 supported** probes against the
+P71D321 reference's **288**. There are **231 missing supported** probes and
+**zero support claims outside the profile**. Both ISO 3309 checksum factories
+now work, and their operations pass focused host vectors and a DK smoke test.
+Both `OwnerPINBuilder` extended variants now
 construct real PIN objects. The host's pinned upstream client reported both as
 supported in a complete 8,607-probe extended scan; the physical DK later
 completed the same extended support scan. The runner writes
@@ -69,7 +71,7 @@ instead of passing as a partial result.
 | CAP loading | Host accepts unsigned LFDB under SCP03; CAP 2.1 structural checks | Complete supported CAP 2.2 type/dataflow verification |
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
-| API | 104 JCAlgTest factory probes | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
+| API | 57 supported JCAlgTest probes; CRC16/CRC32 operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
 | GlobalPlatform | Host SCP03 unsigned OpenFIPS201 and JCAlgTest load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
@@ -426,3 +428,46 @@ disconnect result. The nRF52840 `POWER.USBREGSTATUS` remained `0x3` when
 both companion hub ports were switched off, so the test did not remove VBUS.
 True VBUS removal and power-cut publication checks still need a physical
 power-control path.
+
+On 2026-09-26, a development-debug USB image added Java Card 3.0.5 ISO 3309
+CRC16 and CRC32. The checksum holder keeps its intermediate state in a
+reset-cleared transient array, so `update` creates no journal-dirty state.
+Host tests compare default and seeded results with independent CRC vectors,
+including overlapping output, reset, and transaction abort. The host runner
+now rebuilds its simulator before scanning; the first same-day scan used a
+stale binary and is not evidence for the change. Its corrected scan reported
+57 supported probes, 231 P71D321-positive probes missing, and no extra claims.
+
+Firmware SHA-256 `316e59f8927e6d6a84ca141dbb8fcd82004303d70c6a593d9b9cec7b3b2686b7`
+then completed the pinned upstream extended scan on the DK: **8,607/8,607
+probes, zero error rows, no reader loss**. The untouched CSV and upstream log,
+exact ELF, analyzer report, and a focused Java probe are preserved in the
+ignored local `artifacts/physical/microcard-jcalgtest-crc-dk-20260926/`
+directory. The probe ran both checksum algorithms' `update` and `doFinal`
+methods on the physical applet and repeated them successfully after reset.
+Host PC/SC latency across 17,222 APDUs was 14 ms median, 16 ms p95, and
+519 ms maximum. This is a valid support scan and a focused operation smoke,
+not full P71D321 compatibility or an independent physical checksum vector.
+
+The focused physical operation check is reproducible after the pinned JCAlgTest
+applet is installed and selected:
+
+```sh
+java scripts/ChecksumProbe.java "MicroCard MicroCard virtual smart card"
+probe-rs reset --chip nRF52840_xxAA --probe 1366:1020:000802009660
+java scripts/ChecksumProbe.java "MicroCard MicroCard virtual smart card"
+```
+
+For the full scan, pass `ALG_SUPPORT_EXTENDED` to
+`scripts/jcalgtest_client.py` with the pinned client checkout and an empty
+`-outpath` directory. Select the MicroCard reader when prompted. Analyze the
+untouched result with `scripts/analyze_jcalgtest_dk.py` and the exact flashed
+ELF. The physical test result above used a normal SWD attach; this external
+probe did not attach under reset, though read, flash, and reset worked without
+that option.
+
+The normal USB link grew from 239,884 to **241,172 text bytes** and the dongle
+link from 241,256 to **242,544**, an exact 1,288-byte cost for the two new
+algorithms. Their regression ceilings now allow that measured functionality
+with 328 and 206 bytes of headroom respectively. The separate flash-layout
+check still enforces the actual image partition.

@@ -107,11 +107,10 @@ def main():
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
         "dongle": 244_000, "jcvm_development_debug": 121_000,
-        # The JCVM PIN boundary checks avoid anchoring unrelated ordinary
-        # writes. Keep measured images below these limits while leaving room
-        # for storage reliability fixes. Actual partition bounds remain
-        # enforced separately from these regression budgets.
-        "jcvm_usb_ccid": 240_000, "jcvm_dongle": 241_500,
+        # Include the two P71D321 ISO 3309 checksum implementations. Keep
+        # these measured limits tight; flash partition bounds are checked
+        # separately by prepare_first_flash.py.
+        "jcvm_usb_ccid": 241_500, "jcvm_dongle": 242_750,
     }
     failures = []
     for name, result in variants.items():

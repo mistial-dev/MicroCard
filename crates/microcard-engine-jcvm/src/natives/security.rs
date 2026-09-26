@@ -19,6 +19,7 @@ mod agreement;
 mod key_pair;
 mod signature;
 mod secure_channel;
+mod checksum;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
@@ -258,8 +259,7 @@ pub fn call(
     // complete argument list and report NO_SUCH_ALGORITHM instead of falling through to
     // a VM-level unimplemented-method failure.
     let unavailable_factory_arguments = match (class, method) {
-        (ClassId::Checksum, MethodId::getInstance)
-        | (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance) => Some(2),
+        (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance) => Some(2),
         (ClassId::InitializedMessageDigest_OneShot, MethodId::open)
         | (ClassId::MessageDigest_OneShot, MethodId::open)
         | (ClassId::RandomData_OneShot, MethodId::open) => Some(1),
@@ -272,6 +272,9 @@ pub fn call(
     if let Some(arguments) = unavailable_factory_arguments {
         for _ in 0..arguments { frame.pop_short()?; }
         return crypto_exception(heap, context, 3);
+    }
+    if class == ClassId::Checksum {
+        if let Some(result) = checksum::call(method, heap, frame, context, budget)? { return Ok(result); }
     }
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
     if class == ClassId::KeyAgreement {
@@ -412,6 +415,7 @@ pub fn call(
         // The algorithm holders. Each is an object carrying what it was asked for, and the
         // operation itself is the host's to answer.
         (ClassId::MessageDigest, MethodId::getInstance)
+        | (ClassId::Checksum, MethodId::getInstance)
         | (ClassId::RandomData, MethodId::getInstance)
         | (ClassId::Signature, MethodId::getInstance)
         | (ClassId::KeyAgreement, MethodId::getInstance)
@@ -423,6 +427,7 @@ pub fn call(
             let supported = match u8::try_from(algorithm) {
                 Ok(id) if !external => match class {
                     ClassId::MessageDigest => host.supports_digest(id),
+                    ClassId::Checksum => matches!(id, 1 | 2),
                     // setSeed uses the same platform SHA-256 boundary as the rest of the
                     // card, so a random holder is complete only when both services exist.
                     ClassId::RandomData => host.supports_random(id) && host.supports_digest(4),
@@ -440,7 +445,8 @@ pub fn call(
             }
             let pending_bytes = (class == ClassId::Cipher).then_some(if algorithm == 13 { 32 } else { 16 });
             let random_state = (class == ClassId::RandomData).then_some(RANDOM_STATE_BYTES);
-            if let Some(bytes) = pending_bytes.or(random_state) {
+            let checksum_state = (class == ClassId::Checksum).then_some(4);
+            if let Some(bytes) = pending_bytes.or(random_state).or(checksum_state) {
                 heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS), (heap::KIND_BYTE, bytes)])?;
             }
             let instance = new_native(heap, class, STATE_WORDS, context)?;
@@ -448,6 +454,10 @@ pub fn call(
             if let Some(bytes) = pending_bytes {
                 let pending = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
                 heap.put_word(instance, PENDING, pending)?;
+            }
+            if let Some(bytes) = checksum_state {
+                let state = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
+                heap.put_word(instance, MATERIAL, state)?;
             }
             if let Some(bytes) = random_state {
                 let service = RandomService::from_algorithm(algorithm as u8)?;
