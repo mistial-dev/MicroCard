@@ -266,6 +266,8 @@ pub fn call(
             Some(18)
         } else if (digest, cipher, padding) == (5, 5, 1) && host.supports_signature(34) {
             Some(34)
+        } else if (digest, cipher, padding) == (4, 3, 7) && host.supports_signature(40) {
+            Some(40)
         } else {
             des
         };

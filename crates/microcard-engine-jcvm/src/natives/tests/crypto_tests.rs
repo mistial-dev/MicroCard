@@ -677,7 +677,7 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
         fn supports_random(&self, algorithm: u8) -> bool { algorithm == 2 }
         fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
-        fn supports_signature(&self, algorithm: u8) -> bool { matches!(algorithm, 18 | 33) }
+        fn supports_signature(&self, algorithm: u8) -> bool { matches!(algorithm, 18 | 33 | 40) }
     }
     for (class, algorithm, external, supported) in [
         (ClassId::Checksum, 1, false, true),
@@ -745,6 +745,12 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         &mut idle(), &mut 100, &[]), Ok(Native::Returned)));
     let mac = frame.pop_reference().unwrap();
     assert_eq!(heap.get_word(mac, security::KIND), Ok(18));
+    for argument in [4, 3, 7, 0] { frame.push_short(argument).unwrap(); }
+    assert!(matches!(security::call(ClassId::Signature, MethodId::getInstance,
+        combined.method.signature, &mut heap, &mut Capabilities, &mut frame, 1,
+        &mut idle(), &mut 100, &[]), Ok(Native::Returned)));
+    let rsa = frame.pop_reference().unwrap();
+    assert_eq!(heap.get_word(rsa, security::KIND), Ok(40));
 
     for (class, method, token, arguments) in [
         (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance, None, 2),
