@@ -856,3 +856,15 @@ recovery error. The raw public values and breakpoint details are retained in
 Earlier cuts during intermediate chained chunks were useful to locate the
 write path but did not test publication of the replacement object. Other
 physical cut points and renewal remain to be exercised.
+
+The same image also passed a physical `OwnerPIN` retry checkpoint cut with
+`scripts/jcvm_physical_pin_cut.py`. The PIV status request reported six
+retries before either attempt. Cutting power after the failed-VERIFY append
+record but **before** its commit marker recovered six retries; cutting just
+**after** the marker but before anchor-counter advancement or response
+delivery recovered five. Neither pending APDU returned a status word. A
+subsequent successful verification restored six retries, which survived a
+further full power cycle. The reader and JCAlgTest selection remained
+available. Breakpoint and marker details are recorded locally in
+`artifacts/physical/microcard-pin-cut-dk-20260927/README.txt`. Physical
+interruption during anchor advancement and renewal remains open.
