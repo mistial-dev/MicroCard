@@ -1,5 +1,133 @@
 use super::*;
 
+fn padded_cipher_case(algorithm: u16, des: bool, block: usize, padding: u8) {
+    struct PadHost;
+    impl crate::host::Host for PadHost {
+        fn supports_cipher(&self, _: u8) -> bool { true }
+        fn aes128_block(&mut self, _: &[u8; 16], data: &mut [u8; 16], _: bool) -> Result<()> {
+            for byte in data { *byte ^= 0xa5; }
+            Ok(())
+        }
+        fn aes128_cbc(&mut self, _: &[u8; 16], _: &[u8; 16], data: &mut [u8], _: bool) -> Result<()> {
+            for byte in data { *byte ^= 0xa5; }
+            Ok(())
+        }
+        fn des_crypt(&mut self, _: &[u8], _: Option<&[u8; 8]>, data: &mut [u8], _: bool) -> Result<()> {
+            for byte in data { *byte ^= 0xa5; }
+            Ok(())
+        }
+    }
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let mut host = PadHost;
+    let key_class = if des { ClassId::DESKey } else { ClassId::AESKey };
+    let key = new_native(&mut heap, key_class, security::STATE_WORDS, 1).unwrap();
+    heap.put_word(key, 0, if des { 3 } else { 15 }).unwrap();
+    heap.put_word(key, 1, 128).unwrap();
+    let data = heap.new_array(heap::KIND_BYTE, 128, 1).unwrap();
+    heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x11);
+    invoke_security(key_class, MethodId::setKey, &[(true,key),(true,data),(false,0)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    invoke_security(ClassId::Cipher, MethodId::getInstance,
+        &[(false,algorithm),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+    let cipher = frame.pop_reference().unwrap();
+    let chained = matches!(algorithm, 2..=4 | 22..=24);
+    let mut init = vec![(true,cipher),(true,key),(false,2)];
+    if chained {
+        heap.byte_slice_mut(data, 96, block).unwrap().fill(0x19);
+        init.extend([(true,data),(false,96),(false,block as u16)]);
+    }
+    invoke_security(ClassId::Cipher, MethodId::init, &init, &mut heap, &mut frame, &mut host).unwrap();
+    for (at, byte) in heap.byte_slice_mut(data, 0, 21).unwrap().iter_mut().enumerate() { *byte = at as u8 + 1; }
+    invoke_security(ClassId::Cipher, MethodId::update,
+        &[(true,cipher),(true,data),(false,0),(false,5),(true,data),(false,8)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 0);
+    invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,data),(false,5),(false,16),(true,data),(false,8)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    let encrypted = frame.pop_short().unwrap() as usize;
+    let expected = 21 + (block - 21 % block);
+    assert_eq!(encrypted, expected);
+    let ciphertext = heap.byte_slice(data, 8, encrypted).unwrap().to_vec();
+    heap.byte_slice_mut(data, 0, encrypted).unwrap().copy_from_slice(&ciphertext);
+    let mut decrypt = vec![(true,cipher),(true,key),(false,1)];
+    if chained { decrypt.extend([(true,data),(false,96),(false,block as u16)]); }
+    invoke_security(ClassId::Cipher, MethodId::init, &decrypt, &mut heap, &mut frame, &mut host).unwrap();
+    invoke_security(ClassId::Cipher, MethodId::update,
+        &[(true,cipher),(true,data),(false,0),(false,block as u16),(true,data),(false,48)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), if padding == 1 { block as i16 } else { 0 });
+    invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,data),(false,block as u16),(false,(encrypted-block) as u16),(true,data),(false,48 + if padding == 1 { block as u16 } else { 0 })],
+        &mut heap, &mut frame, &mut host).unwrap();
+    let final_len = frame.pop_short().unwrap() as usize;
+    assert_eq!(final_len + if padding == 1 { block } else { 0 }, if padding == 1 { encrypted } else { 21 });
+    assert_eq!(heap.byte_slice(data, 48, 21).unwrap(), &(1u8..=21).collect::<alloc::vec::Vec<_>>());
+    if padding == 1 { assert_eq!(heap.byte_slice(data, 69, encrypted - 21).unwrap(), &vec![0; encrypted - 21]); }
+    let state = heap.get_word(cipher, 5).unwrap();
+    let state_len = 17 + if chained { 16 } else { 0 };
+    assert_eq!(heap.byte_slice(state, 0, state_len).unwrap(), &vec![0; state_len]);
+    if padding >= 2 {
+        let exact = heap.new_array(heap::KIND_BYTE, 21, 1).unwrap();
+        heap.byte_slice_mut(data, 0, encrypted).unwrap().copy_from_slice(&ciphertext);
+        invoke_security(ClassId::Cipher, MethodId::init, &decrypt, &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::Cipher, MethodId::doFinal,
+            &[(true,cipher),(true,data),(false,0),(false,encrypted as u16),(true,exact),(false,0)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 21);
+        assert_eq!(heap.byte_slice(exact, 0, 21).unwrap(), &(1u8..=21).collect::<alloc::vec::Vec<_>>());
+        let mut bad = ciphertext;
+        *bad.last_mut().unwrap() ^= 1;
+        heap.byte_slice_mut(data, 0, encrypted).unwrap().copy_from_slice(&bad);
+        heap.byte_slice_mut(data, 48, encrypted).unwrap().fill(0x55);
+        invoke_security(ClassId::Cipher, MethodId::init, &decrypt, &mut heap, &mut frame, &mut host).unwrap();
+        let before = heap.byte_slice(state, 0, state_len).unwrap().to_vec();
+        let result = invoke_security(ClassId::Cipher, MethodId::doFinal,
+            &[(true,cipher),(true,data),(false,0),(false,encrypted as u16),(true,data),(false,48)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        let Native::Threw(exception) = result else { panic!("invalid padding accepted"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 5);
+        assert_eq!(heap.byte_slice(data, 48, encrypted).unwrap(), &vec![0x55; encrypted]);
+        assert_eq!(heap.byte_slice(state, 0, state_len).unwrap(), before);
+    }
+}
+
+#[test]
+fn aes_padding_modes_stream_and_round_trip_with_overlap() {
+    for (algorithm, padding) in [(22,1),(23,2),(24,3),(25,1),(26,2),(27,3)] {
+        padded_cipher_case(algorithm, false, 16, padding);
+    }
+}
+
+#[cfg(feature = "des-legacy")]
+#[test]
+fn des_padding_modes_stream_and_round_trip_with_overlap() {
+    for (algorithm, padding) in [(2,1),(3,2),(4,3),(6,1),(7,2),(8,3)] {
+        padded_cipher_case(algorithm, true, 8, padding);
+    }
+}
+
+#[cfg(not(feature = "des-legacy"))]
+#[test]
+fn compact_build_rejects_all_des_cipher_factories() {
+    struct DesCapableHost;
+    impl crate::host::Host for DesCapableHost {
+        fn supports_cipher(&self, _: u8) -> bool { true }
+    }
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let mut host = DesCapableHost;
+    for algorithm in 1..=8 {
+        let result = invoke_security(ClassId::Cipher, MethodId::getInstance,
+            &[(false,algorithm),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        let Native::Threw(exception) = result else { panic!("DES factory {algorithm} available"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 3);
+    }
+}
+
 #[test]
 fn aes_cipher_streams_overlapping_buffers_and_preserves_output_on_failure() {
     struct CipherHost { calls: usize, fail_at: usize }
@@ -188,6 +316,7 @@ fn ctr_buffers_partial_updates_and_keeps_failed_output_private() {
     assert_eq!(heap.byte_slice(heap.get_word(cipher, 5).unwrap(), 0, 32).unwrap(), pending);
 }
 
+#[cfg(feature = "des-legacy")]
 #[test]
 fn des_cipher_uses_eight_byte_blocks_and_des_key_sizes() {
     struct DesHost { ivs: alloc::vec::Vec<Option<[u8; 8]>> }
