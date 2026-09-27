@@ -15,7 +15,17 @@ SHA-1/224/256 use CC310 when proven. SHA-384/512 use tiny-crypto-c. Digest, init
 
 The scope excludes uncommon RSA sizes, other EC curves, PACE, SEED, ISO9796, and additional random-service aliases. A compact build excludes legacy DES/3DES rows, and its link map must show the implementation absent. The default build includes them. The provider candidate is a design selection, not hardware execution evidence; a CC310 failure must fail the operation without a software retry.
 
-The Java Card factory list is a **profile choice**, not a consequence of which chip runs the VM. The simulator uses the software provider. The DK selects the CC310 or software provider at build time; operations without a CC310 implementation use the same pinned tiny-crypto-c primitive in both builds. `des-legacy` is a separate default-on profile choice, so a compact build can omit DES without changing the hardware/software selection. A provider failure is reported to the applet and never triggers a hidden retry through the other provider. An algorithm enters the declared supported set only after the same operation cases pass against both selected providers, plus a DK reboot check for the hardware build.
+The Java Card factory list is a **profile choice**, not a consequence of which chip runs the VM. The JCVM and Java Card exception mapping call one `CryptoProvider` contract through `Services`. The simulator supplies a software implementation. The DK selects a CC310-backed or software-reference implementation at build time; both execute the same JCVM code and CAP. Operations without a CC310 implementation use the same pinned tiny-crypto-c primitive in both builds. `des-legacy` is a separate default-on profile choice, so a compact build can omit DES without changing the hardware/software selection. A provider failure is reported to the applet and never triggers a hidden retry through the other provider. An algorithm enters the declared supported set only after the same operation cases pass against both selected providers, plus a DK reboot check for the hardware build.
+
+For a matching default-on DES profile, build the simulator normally and select one DK provider:
+
+```sh
+cargo build --locked -p microcard-sim
+cargo build --release --locked --manifest-path board/nrf52840/Cargo.toml --features engine-jcvm,usb-ccid
+cargo build --release --locked --manifest-path board/nrf52840/Cargo.toml --no-default-features --features engine-jcvm,software-crypto,des-legacy,usb-ccid
+```
+
+The second command selects CC310 and the third is a software-reference DK image. The hardware selection must exclude software implementations for primitives it claims to accelerate; hardware failure is terminal for that operation. The simulator's host entropy and the DK's CC310 entropy remain distinct from deterministic test fixtures. Run the same applet operation cases against both providers; compare factory availability, outputs, Java Card errors, and state after reset. A successful cross-link or factory probe alone does not prove provider parity.
 
 Regenerate and verify the committed result with:
 
