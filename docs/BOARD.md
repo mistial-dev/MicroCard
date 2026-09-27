@@ -177,14 +177,14 @@ Test-only measurement counters are absent from normal firmware. Build from the b
 so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
 These ceilings are regression alarms based on measured links. The JCVM standard
-USB image now measures 312,960 text bytes, 148 data bytes, and 204,844 BSS bytes.
+USB image now measures 312,960 text bytes, 148 data bytes, and 204,832 BSS bytes.
 The compact CC310 image measures 303,696 text bytes, saving 9,264 bytes; the link
 map and symbol table contain no tiny-crypto-c DES implementation. The software
-reference with DES measures 277,864 text bytes, 0 data bytes, and 203,788 BSS
+reference with DES measures 277,864 text bytes, 0 data bytes, and 203,772 BSS
 bytes. The new JCVM ceilings leave roughly 1.7–2.1 KiB of text headroom. They
 account for CC310 RSA key generation and signatures, P-384 and SHA-384/512
 backfills, AES-CMAC, and optional DES modes and MACs. Standard USB static RAM
-usage is 204,992 bytes, leaving 57,152 bytes before stacks and other runtime use.
+usage is 204,980 bytes, leaving 57,164 bytes before stacks and other runtime use.
 They are not the physical firmware partition size. The linker scripts set
 the actual DK and dongle code, staging, image, heap, and journal regions. The
 earlier USB ceilings were below their own recorded measurements, so the gate could

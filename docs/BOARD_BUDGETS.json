@@ -33,7 +33,7 @@
       }
     },
     "usb_ccid": {
-      "text_bytes": 234928,
+      "text_bytes": 234840,
       "data_bytes": 148,
       "bss_bytes": 203104,
       "ceilings": {
@@ -43,7 +43,7 @@
       }
     },
     "dongle": {
-      "text_bytes": 236420,
+      "text_bytes": 236324,
       "data_bytes": 148,
       "bss_bytes": 203120,
       "ceilings": {
