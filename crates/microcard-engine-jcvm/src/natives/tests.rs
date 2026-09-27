@@ -780,6 +780,27 @@ fn transient_factories_report_lifetimes_and_recoverable_failures() {
 }
 
 #[test]
+fn unsupported_symmetric_key_sizes_fail_before_allocation() {
+    let signature = framework(ClassId::KeyBuilder, MethodId::buildKey, true).method.signature;
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let exception = new_exception(&mut heap, ClassId::CryptoException, 1).unwrap();
+    let used = heap.used();
+    for (key_type, length) in [(15, 512), (13, 64), (1, 256)] {
+        frame.push_short(key_type).unwrap();
+        frame.push_short(length).unwrap();
+        frame.push_short(0).unwrap();
+        let result = security::call(ClassId::KeyBuilder, MethodId::buildKey, signature,
+            &mut heap, &mut crate::host::NoHost, &mut frame, 1,
+            &mut idle(), &mut { u32::MAX }, &[]).unwrap();
+        assert!(matches!(result, Native::Threw(reference) if reference == exception));
+        assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 3);
+        assert_eq!(heap.used(), used);
+    }
+}
+
+#[test]
 fn symmetric_keys_clear_material_and_initialization_with_their_lifetime() {
     let signature = framework(ClassId::KeyBuilder, MethodId::buildKey, true).method.signature;
     let invoke = |class, method, heap: &mut Heap, frame: &mut Frame| {
