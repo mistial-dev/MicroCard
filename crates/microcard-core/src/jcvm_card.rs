@@ -16,7 +16,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 #[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
-unsafe extern "C" { fn microcard_diagnostic_maintenance_recovered(); }
+unsafe extern "C" { fn microcard_diagnostic_maintenance_recovered(error_code: u32); }
 
 pub struct Storage<F: Flash, I: ImageFlash, H: HeapBanks> {
     pub registry: Store<F>,
@@ -227,7 +227,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             self.reset_requested = true;
             if recovered {
                 #[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
-                unsafe { microcard_diagnostic_maintenance_recovered(); }
+                unsafe { microcard_diagnostic_maintenance_recovered(crate::diagnostic_error_code(&error)); }
                 return Ok(());
             }
             return Err(error);

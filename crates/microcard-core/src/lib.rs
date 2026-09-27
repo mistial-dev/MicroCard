@@ -54,6 +54,14 @@ pub enum Error {
     Authentication,
     Cancelled,
 }
+#[cfg(feature = "diagnostic-apdu")]
+pub fn diagnostic_error_code(error: &Error) -> u32 {
+    match error {
+        Error::Storage => 1, Error::IncompatibleState => 2, Error::Quota => 3,
+        Error::Authentication => 4, Error::Unauthorized => 5, Error::Cancelled => 6,
+        Error::Native => 7, Error::Format => 8, _ => 9,
+    }
+}
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub mod transport;

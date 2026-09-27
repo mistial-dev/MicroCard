@@ -239,7 +239,7 @@ pub(crate) fn finish(error: Option<Error>) {
         record.phase_started_us = at;
         record.elapsed_us = at.wrapping_sub(record.started_us);
         if let Some(error) = error {
-            record.error = error_code(&error);
+            record.error = microcard_core::diagnostic_error_code(&error);
             record.last_failure_attempt = record.attempt;
             record.last_failure_phase = record.phase;
             record.last_failure_error = record.error;
@@ -263,14 +263,6 @@ pub(crate) fn finish(error: Option<Error>) {
             _ => {}
         }
     });
-}
-
-fn error_code(error: &Error) -> u32 {
-    match error {
-        Error::Storage => 1, Error::IncompatibleState => 2, Error::Quota => 3,
-        Error::Authentication => 4, Error::Unauthorized => 5, Error::Cancelled => 6,
-        Error::Native => 7, Error::Format => 8, _ => 9,
-    }
 }
 
 pub(crate) fn response(command: &[u8])
@@ -308,11 +300,11 @@ pub extern "C" fn microcard_diagnostic_phase(kind: u32) {
 }
 
 #[no_mangle]
-pub extern "C" fn microcard_diagnostic_maintenance_recovered() {
+pub extern "C" fn microcard_diagnostic_maintenance_recovered(error_code: u32) {
     update(|record| {
         record.error = 10;
         record.last_failure_attempt = record.attempt;
         record.last_failure_phase = record.phase;
-        record.last_failure_error = 10;
+        record.last_failure_error = error_code;
     });
 }

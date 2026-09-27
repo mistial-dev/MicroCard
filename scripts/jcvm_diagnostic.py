@@ -21,6 +21,11 @@ FIELDS = (
 SUMMARY = ("attempt", "elapsed_us", "erased_pages", "programmed_words",
            "decision", "error", "generation_hi", "generation_lo")
 PHASES = ("prepare", "execute", "publish", "respond", "maintenance", "drained")
+ERROR_NAMES = {
+    0: "none", 1: "storage", 2: "incompatible-state", 3: "quota",
+    4: "authentication", 5: "unauthorized", 6: "cancelled",
+    7: "native", 8: "format", 9: "other",
+}
 
 
 def decode(response: bytes) -> dict:
@@ -32,6 +37,8 @@ def decode(response: bytes) -> dict:
     if words[0] != 1:
         raise ValueError(f"unsupported diagnostic version {words[0]}")
     data = dict(zip(FIELDS, words[:15]))
+    data["maintenance_recovered"] = data["error"] == 10
+    data["last_failure_category"] = ERROR_NAMES.get(data["last_failure_error"], "unknown")
     data["generation"] = (data["generation_hi"] << 32) | data["generation_lo"]
     data["phase_us"] = dict(zip(PHASES, words[15:21]))
     for name, start in (("last_apdu", 21), ("last_maintenance", 29)):

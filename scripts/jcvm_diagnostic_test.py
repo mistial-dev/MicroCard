@@ -13,7 +13,11 @@ class DiagnosticWireTest(unittest.TestCase):
         words[50:56] = [0x303, 1, 17, 2, 100, 400000]
         words[56:62] = [0x80000303, 1, 18, 1, 40, 100000]
         words[74] = 0
+        words[11] = 10
+        words[14] = 3
         data = decode(struct.pack(f">{WORDS}I", *words) + b"\x90\x00")
+        self.assertTrue(data["maintenance_recovered"])
+        self.assertEqual(data["last_failure_category"], "quota")
         self.assertEqual(data["generation"], 0x123456789abcdef0)
         self.assertEqual(data["last_apdu"]["erased_pages"], 23)
         self.assertEqual(data["last_maintenance"]["programmed_words"], 32)
