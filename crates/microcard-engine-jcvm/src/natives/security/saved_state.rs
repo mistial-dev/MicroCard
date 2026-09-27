@@ -3,6 +3,16 @@
 use super::*;
 use crate::natives;
 
+fn saved_bytes(saved_heap: &[u8], start: usize, length: usize) -> Result<&[u8]> {
+    let end = start.checked_add(length).ok_or(Error::Format)?;
+    saved_heap.get(start..end).ok_or(Error::Format)
+}
+
+fn saved_word(saved_heap: &[u8], start: usize) -> Result<u16> {
+    let bytes = saved_bytes(saved_heap, start, 2)?;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+
 pub(crate) fn validate_saved_security(
     class: ClassId,
     payload: &[u8],
@@ -31,13 +41,14 @@ pub(crate) fn validate_saved_security(
             (private, if rsa { ClassId::RSAPrivateCrtKey } else { ClassId::ECPrivateKey }),
         ] {
             let start = reference as usize;
-            let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
+            let object = saved_bytes(saved_heap, start, heap::HEADER + STATE_WORDS as usize * 2)?;
+            let key_class = u16::from_be_bytes([object[0], object[1]]);
             if natives::api_class(key_class).map(|entry| entry.id) != Some(expected)
-                || saved_heap[start + 4] != heap::KIND_OBJECT
-                || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
+                || object[4] != heap::KIND_OBJECT
+                || u16::from_be_bytes([object[2], object[3]]) != 6
                 || u16::from_be_bytes([
-                    saved_heap[start + heap::HEADER + SIZE * 2],
-                    saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+                    object[heap::HEADER + SIZE * 2],
+                    object[heap::HEADER + SIZE * 2 + 1],
                 ]) != word(1)
             {
                 return Err(Error::Type);
@@ -50,13 +61,14 @@ pub(crate) fn validate_saved_security(
         }
         if material != 0 {
             let start = material as usize;
-            let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
+            let object = saved_bytes(saved_heap, start, heap::HEADER + STATE_WORDS as usize * 2)?;
+            let key_class = u16::from_be_bytes([object[0], object[1]]);
             if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::ECPrivateKey)
-                || saved_heap[start + 4] != heap::KIND_OBJECT
-                || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
+                || object[4] != heap::KIND_OBJECT
+                || u16::from_be_bytes([object[2], object[3]]) != 6
                 || !matches!(u16::from_be_bytes([
-                    saved_heap[start + heap::HEADER + SIZE * 2],
-                    saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+                    object[heap::HEADER + SIZE * 2],
+                    object[heap::HEADER + SIZE * 2 + 1],
                 ]), 256 | 384)
             {
                 return Err(Error::Type);
@@ -75,7 +87,7 @@ pub(crate) fn validate_saved_security(
         {
             return Err(Error::Format);
         }
-        let header = &saved_heap[pending as usize..pending as usize + heap::HEADER];
+        let header = saved_bytes(saved_heap, pending as usize, heap::HEADER)?;
         if u16::from_be_bytes([header[2], header[3]]) != cipher::state_bytes(kind) as u16
             || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4)
         {
@@ -83,8 +95,9 @@ pub(crate) fn validate_saved_security(
         }
         if material != 0 {
             let start = material as usize;
-            let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
-            let key_size = saved_heap.get(start + heap::HEADER + 2..start + heap::HEADER + 4);
+            let object = saved_bytes(saved_heap, start, heap::HEADER + STATE_WORDS as usize * 2)?;
+            let key_class = u16::from_be_bytes([object[0], object[1]]);
+            let key_size = object.get(heap::HEADER + 2..heap::HEADER + 4);
             let valid_key_size = if des {
                 matches!(key_size, Some(&[0, 64] | &[0, 128] | &[0, 192]))
             } else {
@@ -92,8 +105,8 @@ pub(crate) fn validate_saved_security(
             };
             if natives::api_class(key_class).map(|entry| entry.id)
                 != Some(if des { ClassId::DESKey } else { ClassId::AESKey })
-                || saved_heap[start + 4] != heap::KIND_OBJECT
-                || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
+                || object[4] != heap::KIND_OBJECT
+                || u16::from_be_bytes([object[2], object[3]]) != 6
                 || !valid_key_size
             {
                 return Err(Error::Type);
@@ -119,7 +132,7 @@ pub(crate) fn validate_saved_security(
         return Err(Error::Format);
     }
     if material != 0 && class.is_key() {
-        let header = &saved_heap[material as usize..material as usize + heap::HEADER];
+        let header = saved_bytes(saved_heap, material as usize, heap::HEADER)?;
         let length = u16::from_be_bytes([header[2], header[3]]);
         if header[4] & 0x0f != heap::KIND_BYTE {
             return Err(Error::Type);
@@ -133,12 +146,12 @@ pub(crate) fn validate_saved_security(
             if length != expected { return Err(Error::Format); }
             if class == ClassId::RSAPrivateCrtKey {
                 let start = material as usize + heap::HEADER;
-                let der_length = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
+                let der_length = saved_word(saved_heap, start)?;
                 if word(3) == 1 && (der_length == 0 || der_length as usize > rsa::PRIVATE_BYTES - 2) {
                     return Err(Error::Format);
                 }
                 if word(3) == 1 {
-                    let der = &saved_heap[start + 2..start + 2 + der_length as usize];
+                    let der = saved_bytes(saved_heap, start + 2, der_length as usize)?;
                     let (n, e) = rsa::private_public_parts(der).ok_or(Error::Format)?;
                     if n.len() != word(1) as usize / 8 || e != [1, 0, 1] {
                         return Err(Error::Format);
@@ -154,7 +167,7 @@ pub(crate) fn validate_saved_security(
             if header[4] >> 4 != event || length != expected {
                 return Err(Error::Format);
             }
-            let flags = saved_heap[material as usize + heap::HEADER];
+            let flags = saved_bytes(saved_heap, material as usize + heap::HEADER, 1)?[0];
             if flags & 0x80 != 0 {
                 return Err(Error::Format);
             }
@@ -183,19 +196,19 @@ pub(crate) fn validate_saved_security(
         if !valid || !matches!(word(1), 1024 | 2048) { return Err(Error::Format); }
         if class == ClassId::RSAPublicKey && word(5) != 0 {
             let start = word(5) as usize;
-            let header = &saved_heap[start..start + heap::HEADER];
+            let header = saved_bytes(saved_heap, start, heap::HEADER)?;
             if header[4] != heap::KIND_BYTE
                 || u16::from_be_bytes([header[2], header[3]]) != 3 {
                 return Err(Error::Format);
             }
             if word(3) & 2 != 0
-                && saved_heap[start + heap::HEADER..start + heap::HEADER + 3] != [1, 0, 1] {
+                && saved_bytes(saved_heap, start + heap::HEADER, 3)? != [1, 0, 1] {
                 return Err(Error::Format);
             }
         }
         if class == ClassId::RSAPublicKey && word(3) & 1 != 0 {
             let start = material as usize + heap::HEADER;
-            let bytes = &saved_heap[start..start + word(1) as usize / 8];
+            let bytes = saved_bytes(saved_heap, start, word(1) as usize / 8)?;
             if bytes[0] & 0x80 == 0 || bytes[bytes.len() - 1] & 1 == 0 {
                 return Err(Error::Format);
             }
@@ -207,6 +220,16 @@ pub(crate) fn validate_saved_security(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn out_of_range_rsa_exponent_reference_is_a_format_error() {
+        let mut payload = [0u8; STATE_WORDS as usize * 2];
+        payload[KIND * 2..KIND * 2 + 2].copy_from_slice(&4u16.to_be_bytes());
+        payload[SIZE * 2..SIZE * 2 + 2].copy_from_slice(&2048u16.to_be_bytes());
+        payload[PENDING * 2..PENDING * 2 + 2].copy_from_slice(&u16::MAX.to_be_bytes());
+        assert_eq!(validate_saved_security(ClassId::RSAPublicKey, &payload, &[0; 32]),
+            Err(Error::Format));
+    }
 
     #[test]
     fn p384_recovery_checks_key_material_length_and_pair_sizes() {
