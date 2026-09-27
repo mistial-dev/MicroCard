@@ -2,7 +2,7 @@
 
 The generated [matrix](JCVM_CRYPTO_PROFILE.json) declares **110 proposed operation and key-size rows**. Its source is the pinned JCAlgTest 1.8.3 P71D321 result in `vendor/jcalgtest/p71d321-reference.csv.gz`, checked against `vendor/jcalgtest/client.lock.json`. P71D321 is a comparison reference. A `yes` in its factory scan does not establish MicroCard support.
 
-Each row records the candidate provider, key size, exact legacy and OneShot factory probes, P71 key-builder and on-card key-pair generation results, and separate MicroCard evidence slots for key import, generation, real operation, invalid input/provider failure, and reboot. **All MicroCard rows start pending and unadvertised.** Update evidence only with a reproducible run, firmware identity, and raw result path. The applicable factory becomes supported only when every relevant slot passes on the selected build and the DK. Unsupported factories must return the Java Card exception specified for that API.
+Each row records candidate providers for the simulator, hardware DK, and software DK; key size; exact legacy and OneShot factory probes; P71 key-builder and on-card key-pair generation results; and separate MicroCard evidence slots for key import, generation, real operation, invalid input/provider failure, and reboot. **All MicroCard rows start pending and unadvertised.** Update evidence only with a reproducible run, firmware identity, and raw result path. The applicable factory becomes supported only when every relevant slot passes on the selected build and the DK. Unsupported factories must return the Java Card exception specified for that API.
 
 | Family | Proposed scope | Provider candidate |
 | --- | --- | --- |

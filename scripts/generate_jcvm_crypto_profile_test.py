@@ -23,7 +23,11 @@ def main():
         assert all(p["p71d321"] in {"yes", "no"} for p in row["p71d321"]["factories"].values())
         if row["compact_build"] == "excluded":
             assert row["algorithm"].startswith("ALG_DES_")
-            assert row["provider_candidate"] == "tiny_crypto_c"
+            assert set(row["provider_candidates"].values()) == {"tiny_crypto_c"}
+        assert row["provider_candidates"]["simulator"] == row["provider_candidates"]["dk_software"]
+        assert row["provider_candidates"]["dk_hardware"] in {
+            "cc310", "tiny_crypto_c", "cc310_if_pinned_driver_supports_it_else_tiny_crypto_c",
+        }
     assert {r["key_bits"] for r in rows if r["kind"] == "cipher" and r["algorithm"].startswith("ALG_RSA_")} == {1024, 2048}
     assert {r["key_bits"] for r in rows if r["kind"] == "agreement"} == {256, 384}
     assert {r["algorithm"] for r in rows if r["kind"] == "digest"} == {

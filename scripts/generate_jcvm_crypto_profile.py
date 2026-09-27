@@ -20,11 +20,17 @@ KEY_BUILDER = "javacard.security.KeyBuilder"
 
 def candidate(kind, name, bits, provider, *, compact=False, factories=None,
               key_types=(), generation=None):
+    software = ("tiny_crypto_c" if provider == "tiny_crypto_c"
+                or "RSA" in name or name == "ALG_AES_CTR" else "rustcrypto")
     return {
         "kind": kind,
         "algorithm": name,
         "key_bits": bits,
-        "provider_candidate": provider,
+        "provider_candidates": {
+            "simulator": software,
+            "dk_hardware": provider,
+            "dk_software": software,
+        },
         "compact_build": "excluded" if compact else "included",
         "factories": factories or {},
         "key_types": list(key_types),
@@ -50,7 +56,7 @@ def selections():
             cipher(f"ALG_AES_{suffix}{mode}_{padding}", 128, "cc310",
                    f"CIPHER_AES_{mode} PAD_{modern_padding}",
                    key_types=("TYPE_AES LENGTH_AES_128",))
-    cipher("ALG_AES_CTR", 128, "cc310_if_pinned_driver_supports_it_else_tiny_crypto_c",
+    cipher("ALG_AES_CTR", 128, "cc310",
            "CIPHER_AES_CTR PAD_NOPAD", key_types=("TYPE_AES LENGTH_AES_128",))
     for mode in ("CBC", "ECB"):
         for padding in ("NOPAD", "ISO9797_M1", "ISO9797_M2", "PKCS5"):
@@ -162,7 +168,7 @@ def build_profile():
         }
         rows.append(selected)
     return {
-        "format": 1,
+        "format": 2,
         "source": "JCAlgTest 1.8.3 P71D321, 2026-06-18",
         "source_sha256": digest,
         "status": "proposed; no operation acceptance inferred from factory scans",
