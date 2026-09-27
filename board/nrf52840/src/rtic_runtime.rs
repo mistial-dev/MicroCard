@@ -244,9 +244,7 @@ mod app {
                 {
                     #[cfg(feature = "latency-trace")]
                     trace::record(trace::event::RESPONSE_QUEUED, 0);
-                    if cx.local.maintenance_at.is_none() {
-                        *cx.local.maintenance_at = Some(now().wrapping_add(2_000_000));
-                    }
+                    *cx.local.maintenance_at = Some(now().wrapping_add(2_000_000));
                 }
                 cortex_m::peripheral::NVIC::pend(pac::Interrupt::USBD);
                 #[cfg(feature = "dongle-layout")]
