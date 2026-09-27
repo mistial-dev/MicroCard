@@ -214,9 +214,12 @@ MICROCARD_USB_VID=0x1234 MICROCARD_USB_PID=0x5678 cargo build --release --locked
 
 Each command produces a separate firmware image. Selecting both engines or neither is
 an error. The identifiers above are compile-only examples; distributing firmware
-requires authorized USB identifiers. Firmware defaults to the hardware-only CC310
-provider; reproducible vendor and compiler setup is documented in
-[crypto providers](docs/CRYPTO_PROVIDERS.md).
+requires authorized USB identifiers. The simulator uses software crypto. JCVM firmware
+defaults to CC310 and can select a software reference provider at build time; DES
+compatibility is a separate default-on option. The Java Card algorithm set is defined
+by the [practical crypto profile](docs/JCVM_CRYPTO_PROFILE.md), with exact build
+selections in [board setup](docs/BOARD.md). Reproducible vendor and compiler setup
+is documented in [crypto providers](docs/CRYPTO_PROVIDERS.md).
 
 ## Repository map
 
