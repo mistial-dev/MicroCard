@@ -496,6 +496,19 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
     }
 
     #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn rsa_pkcs1v15_sha256_sign_with_entropy(
+        &mut self,
+        private_der: &[u8],
+        key_bits: usize,
+        hash: &[u8; 32],
+        signature: &mut [u8],
+    ) -> Result<()> {
+        // The pinned CC310 API has no caller RNG parameter.
+        let mut unused = |_bytes: &mut [u8]| false;
+        self.rsa_pkcs1v15_sha256_sign_der(private_der, key_bits, hash, signature, &mut unused)
+    }
+
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
     fn rsa_pkcs1v15_sha256_verify_der(
         &mut self,
         public_der: &[u8],

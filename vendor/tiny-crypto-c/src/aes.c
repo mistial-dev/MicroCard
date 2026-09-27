@@ -424,7 +424,7 @@ static void tc_aes_mix_columns(state_t* state)
   uint8_t i;
   uint8_t Tmp, Tm, t;
   for (i = 0; i < 4; ++i)
-  {
+  {  
     t   = (*state)[i][0];
     Tmp = (*state)[i][0] ^ (*state)[i][1] ^ (*state)[i][2] ^ (*state)[i][3] ;
     Tm  = (*state)[i][0] ^ (*state)[i][1] ; Tm = tc_aes_xtime(Tm);  (*state)[i][0] ^= Tm ^ Tmp ;
