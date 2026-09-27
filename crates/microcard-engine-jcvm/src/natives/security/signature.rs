@@ -76,17 +76,74 @@ fn aes_mac_advance(
         state[16 + used] = byte;
         state[32] += 1;
         if state[32] == 16 {
-            let mut block = [0u8; 16];
+            let mut block = Zeroizing::new([0u8; 16]);
             for (index, value) in block.iter_mut().enumerate() {
                 *value = state[index] ^ state[16 + index];
             }
             host.aes128_block(key, &mut block, true)?;
-            state[..16].copy_from_slice(&block);
+            state[..16].copy_from_slice(&block[..]);
             state[16..32].fill(0);
             state[32] = 0;
             state[33] = 1;
         }
     }
+    Ok(())
+}
+
+// CMAC keeps the final block unprocessed until sign/verify chooses K1 or K2.
+fn aes_cmac_advance(
+    host: &mut dyn crate::host::Host,
+    key: &[u8; 16],
+    state: &mut [u8; AES_MAC_STATE_BYTES],
+    input: &[u8],
+) -> Result<()> {
+    for &byte in input {
+        let used = state[32] as usize;
+        if used > 16 { return Err(Error::Format); }
+        if used == 16 {
+            let mut block = Zeroizing::new([0u8; 16]);
+            for (index, value) in block.iter_mut().enumerate() {
+                *value = state[index] ^ state[16 + index];
+            }
+            host.aes128_block(key, &mut block, true)?;
+            state[..16].copy_from_slice(&block[..]);
+            state[16..32].fill(0);
+            state[32] = 0;
+        }
+        state[16 + state[32] as usize] = byte;
+        state[32] += 1;
+    }
+    Ok(())
+}
+
+fn cmac_double(block: &mut [u8; 16]) {
+    let carry = block[0] >> 7;
+    for index in 0..15 {
+        block[index] = (block[index] << 1) | (block[index + 1] >> 7);
+    }
+    block[15] = (block[15] << 1) ^ (0x87 & 0u8.wrapping_sub(carry));
+}
+
+fn aes_cmac_finish(
+    host: &mut dyn crate::host::Host,
+    key: &[u8; 16],
+    state: &mut [u8; AES_MAC_STATE_BYTES],
+) -> Result<()> {
+    let used = state[32] as usize;
+    if used > 16 { return Err(Error::Format); }
+    let mut subkey = Zeroizing::new([0u8; 16]);
+    host.aes128_block(key, &mut subkey, true)?;
+    cmac_double(&mut subkey);
+    if used != 16 {
+        cmac_double(&mut subkey);
+        state[16 + used] = 0x80;
+    }
+    let mut block = Zeroizing::new([0u8; 16]);
+    for (index, value) in block.iter_mut().enumerate() {
+        *value = state[index] ^ state[16 + index] ^ subkey[index];
+    }
+    host.aes128_block(key, &mut block, true)?;
+    state[..16].copy_from_slice(&block[..]);
     Ok(())
 }
 
@@ -99,6 +156,7 @@ fn aes_mac_call(
     frame: &mut Frame,
     context: heap::Context,
     budget: &mut u32,
+    kind: u16,
 ) -> Result<Option<Native>> {
     if method == MethodId::setInitialDigest {
         for _ in 0..6 {
@@ -117,10 +175,10 @@ fn aes_mac_call(
         let this = frame.pop_reference()?;
         heap.check_access(this, context)?;
         frame.push_short(match method {
-            MethodId::getAlgorithm => 18,
+            MethodId::getAlgorithm => kind as i16,
             MethodId::getMessageDigestAlgorithm => 0,
-            MethodId::getCipherAlgorithm => 6,
-            MethodId::getPaddingAlgorithm => 1,
+            MethodId::getCipherAlgorithm => if kind == 49 { 10 } else { 6 },
+            MethodId::getPaddingAlgorithm => if kind == 49 { 0 } else { 1 },
             _ => unreachable!(),
         })?;
         return Ok(Some(Native::Returned));
@@ -151,6 +209,7 @@ fn aes_mac_call(
         }
         let mut iv = [0u8; 16];
         if let Some((array, offset, length)) = vector {
+            if kind == 49 { return crypto_exception(heap, context, 1).map(Some); }
             if length != 16 {
                 return crypto_exception(heap, context, 1).map(Some);
             }
@@ -250,13 +309,19 @@ fn aes_mac_call(
     let prefix = usize::from(symmetric_key_clear_event(word_field(heap, key, KIND)?) != 0);
     let mut secret = Zeroizing::new([0u8; 16]);
     secret.copy_from_slice(heap.byte_slice(material, prefix, 16)?);
-    aes_mac_advance(host, &secret, &mut state, input)?;
+    if kind == 49 {
+        aes_cmac_advance(host, &secret, &mut state, input)?;
+    } else {
+        aes_mac_advance(host, &secret, &mut state, input)?;
+    }
     if update {
         heap.byte_slice_mut(pending, 0, AES_MAC_STATE_BYTES)?
             .copy_from_slice(&state[..]);
         return Ok(Some(Native::Returned));
     }
-    if state[32] != 0 || state[33] == 0 {
+    if kind == 49 {
+        aes_cmac_finish(host, &secret, &mut state)?;
+    } else if state[32] != 0 || state[33] == 0 {
         return crypto_exception(heap, context, 5).map(Some);
     }
     if verify {
@@ -549,14 +614,15 @@ pub(super) fn call(
             return des_mac_call(method, signature, heap, frame, context, budget, kind);
         }
     }
-    if word_field(heap, receiver, KIND)? == 18 {
+    let kind = word_field(heap, receiver, KIND)?;
+    if matches!(kind, 18 | 49) {
         if matches!(
             method,
             MethodId::signPreComputedHash | MethodId::verifyPreComputedHash
         ) {
             return crypto_exception(heap, context, 5).map(Some);
         }
-        return aes_mac_call(method, signature, heap, host, frame, context, budget);
+        return aes_mac_call(method, signature, heap, host, frame, context, budget, kind);
     }
     if word_field(heap, receiver, KIND)? == 40 {
         return rsa::signature_call(method, signature, heap, host, frame, context, budget);
@@ -768,7 +834,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
             false
         }
     };
-    if (!matches!(algorithm, 18 | 33 | 34 | 40) && !des_algorithm)
+    if (!matches!(algorithm, 18 | 33 | 34 | 40 | 49) && !des_algorithm)
         || word(3) > 1
         || (word(3) == 1 && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2)))
     {
@@ -780,7 +846,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         let des_state_bytes = ISO9797_CONTEXT_BYTES;
         #[cfg(not(feature = "des-legacy"))]
         let des_state_bytes = 0;
-        let expected_length = if algorithm == 18 {
+        let expected_length = if matches!(algorithm, 18 | 49) {
             34
         } else if matches!(algorithm, 33 | 34 | 40) {
             crate::host::SHA256_STATE_BYTES
@@ -796,7 +862,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
     if material != 0 {
         let start = material as usize;
         let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
-        let expected = if algorithm == 18 {
+        let expected = if matches!(algorithm, 18 | 49) {
             ClassId::AESKey
         } else if algorithm == 40 {
             if word(4) == 1 { ClassId::RSAPrivateCrtKey } else { ClassId::RSAPublicKey }
@@ -829,11 +895,17 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
             if algorithm == 40 { !matches!(bits, 1024 | 2048) }
             else { bits != if algorithm == 34 { 384 } else { 256 } }
         } else { false };
+        let invalid_aes_size = matches!(algorithm, 18 | 49)
+            && u16::from_be_bytes([
+                saved_heap[start + heap::HEADER + SIZE * 2],
+                saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+            ]) != 128;
         if super::super::api_class(key_class).map(|entry| entry.id) != Some(expected)
             || saved_heap[start + 4] != heap::KIND_OBJECT
             || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
             || invalid_des_key
             || invalid_ec_size
+            || invalid_aes_size
         {
             return Err(Error::Type);
         }
@@ -845,6 +917,110 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aes_cmac_streaming_matches_nist_lengths() {
+        use aes::cipher::{BlockEncrypt, KeyInit};
+
+        struct BlockProvider;
+        impl crate::host::Host for BlockProvider {
+            fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
+                if !encrypt { return Err(Error::Unsupported); }
+                aes::Aes128::new(key.into()).encrypt_block(block.into());
+                Ok(())
+            }
+        }
+
+        // NIST SP 800-38B examples, including the empty and partial final blocks.
+        let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+            0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
+        let message = [
+            0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96,
+            0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
+            0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c,
+            0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
+            0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11,
+            0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
+            0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17,
+            0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10,
+        ];
+        let cases = [
+            (0, [0xbb, 0x1d, 0x69, 0x29, 0xe9, 0x59, 0x37, 0x28,
+                 0x7f, 0xa3, 0x7d, 0x12, 0x9b, 0x75, 0x67, 0x46]),
+            (16, [0x07, 0x0a, 0x16, 0xb4, 0x6b, 0x4d, 0x41, 0x44,
+                  0xf7, 0x9b, 0xdd, 0x9d, 0xd0, 0x4a, 0x28, 0x7c]),
+            (40, [0xdf, 0xa6, 0x67, 0x47, 0xde, 0x9a, 0xe6, 0x30,
+                  0x30, 0xca, 0x32, 0x61, 0x14, 0x97, 0xc8, 0x27]),
+            (64, [0x51, 0xf0, 0xbe, 0xbf, 0x7e, 0x3b, 0x9d, 0x92,
+                  0xfc, 0x49, 0x74, 0x17, 0x79, 0x36, 0x3c, 0xfe]),
+        ];
+        let mut host = BlockProvider;
+        for (length, expected) in cases {
+            let mut state = [0u8; AES_MAC_STATE_BYTES];
+            let split = length.min(7);
+            aes_cmac_advance(&mut host, &key, &mut state, &message[..split]).unwrap();
+            aes_cmac_advance(&mut host, &key, &mut state, &message[split..length]).unwrap();
+            aes_cmac_finish(&mut host, &key, &mut state).unwrap();
+            assert_eq!(state[..16], expected, "message length {length}");
+        }
+
+        let methods = crate::jcvm_api::PACKAGES.iter()
+            .flat_map(|package| package.classes)
+            .find(|class| class.id == ClassId::Signature).unwrap().methods;
+        let signature = methods.iter()
+            .find(|entry| entry.id == MethodId::init && !entry.signature.init_vector())
+            .unwrap().signature;
+        let mut slab = [0; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let aes_key = new_native(&mut heap, ClassId::AESKey, STATE_WORDS, 1).unwrap();
+        heap.put_word(aes_key, KIND, 15).unwrap();
+        heap.put_word(aes_key, SIZE, 128).unwrap();
+        let material = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+        heap.byte_slice_mut(material, 0, 16).unwrap().copy_from_slice(&key);
+        heap.put_word(aes_key, MATERIAL, material).unwrap();
+        heap.put_word(aes_key, READY, 1).unwrap();
+        let signer = new_native(&mut heap, ClassId::Signature, STATE_WORDS, 1).unwrap();
+        heap.put_word(signer, KIND, 49).unwrap();
+        let bytes = heap.new_array(heap::KIND_BYTE, 32, 1).unwrap();
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut budget = 128;
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(aes_key).unwrap();
+        frame.push_short(1).unwrap();
+        assert!(matches!(call(MethodId::init, signature, &mut heap, &mut host,
+            &mut frame, 1, &mut budget), Ok(Some(Native::Returned))));
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(16).unwrap();
+        assert!(matches!(call(MethodId::sign, signature, &mut heap, &mut host,
+            &mut frame, 1, &mut budget), Ok(Some(Native::Returned))));
+        assert_eq!(frame.pop_short(), Ok(16));
+        assert_eq!(heap.byte_slice(bytes, 16, 16).unwrap(), &cases[0].1);
+
+        for valid in [true, false] {
+            frame.push_reference(signer).unwrap();
+            frame.push_reference(aes_key).unwrap();
+            frame.push_short(2).unwrap();
+            assert!(matches!(call(MethodId::init, signature, &mut heap, &mut host,
+                &mut frame, 1, &mut budget), Ok(Some(Native::Returned))));
+            if !valid { heap.byte_slice_mut(bytes, 16, 1).unwrap()[0] ^= 1; }
+            frame.push_reference(signer).unwrap();
+            frame.push_reference(bytes).unwrap();
+            frame.push_short(0).unwrap();
+            frame.push_short(0).unwrap();
+            frame.push_reference(bytes).unwrap();
+            frame.push_short(16).unwrap();
+            frame.push_short(16).unwrap();
+            assert!(matches!(call(MethodId::verify, signature, &mut heap, &mut host,
+                &mut frame, 1, &mut budget), Ok(Some(Native::Returned))));
+            assert_eq!(frame.pop_short(), Ok(i16::from(valid)));
+        }
+    }
 
     struct WideProvider { fail_sign: bool }
     impl crate::host::Host for WideProvider {

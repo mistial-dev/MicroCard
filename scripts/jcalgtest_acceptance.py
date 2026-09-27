@@ -26,7 +26,7 @@ GET_VERSION = "b0e100000100"
 # physical scan supplies the separate provider and reboot evidence.
 FACTORIES = {
     "Cipher": (0x11, 29, {*range(1, 9), 13, 14, *range(22, 28)}),
-    "Signature": (0x12, 49, {*range(2, 9), 18, 19, 20, 33, 34, 40, 47, 48}),
+    "Signature": (0x12, 49, {*range(2, 9), 18, 19, 20, 33, 34, 40, 47, 48, 49}),
     "KeyAgreement": (0x13, 9, {3}),
     "MessageDigest": (0x15, 11, {1, 4, 5, 6, 7}),
     "RandomData": (0x16, 6, {1, 2}),

@@ -345,7 +345,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 
     fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
     fn supports_signature(&self, algorithm: u8) -> bool {
-        matches!(algorithm, 18 | 33)
+        matches!(algorithm, 18 | 33 | 49)
             || algorithm == 34 && self.provider.supports_p384() && self.provider.supports_sha384()
             || algorithm == 40 && self.provider.supports_rsa_pkcs1v15_sha256()
                 && self.provider.supports_rsa_keygen() && self.supports_digest(4)

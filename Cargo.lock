@@ -321,6 +321,7 @@ dependencies = [
 name = "microcard-engine-jcvm"
 version = "0.1.0-wip"
 dependencies = [
+ "aes",
  "microcard-memory",
  "microcard-tiny-crypto",
  "sha2",
