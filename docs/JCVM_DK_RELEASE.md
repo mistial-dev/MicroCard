@@ -768,5 +768,10 @@ python3 scripts/jcvm_physical_persistence.py verify \
   --record artifacts/physical/microcard-piv-persistence-dk-20260927/expected.bin
 ```
 
-This value was written after the previous power cycle, so its physical
-power-cycle result is not yet recorded here.
+After a user-operated SW8 power cycle on 2026-09-27, the diagnostic APDU
+reported reset reason `0` and `retained_from_previous_boot=false`. The
+`verify` command returned the same 337 bytes as the saved pre-cycle object.
+The JCAlgTest applet also selected and passed its focused probes afterward.
+This proves recovery of that completed PIV write and coexistence of the two
+installed applets across the cycle. It does not cover a cut while a flash
+publication is in progress.
