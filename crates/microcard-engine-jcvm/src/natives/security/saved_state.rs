@@ -20,7 +20,7 @@ pub(crate) fn validate_saved_security(
     }
     if class == ClassId::KeyPair {
         let private = word(5);
-        if word(0) != 5 || word(1) != 256 || material == 0 || private == 0 {
+        if word(0) != 5 || !matches!(word(1), 256 | 384) || material == 0 || private == 0 {
             return Err(Error::Format);
         }
         for (reference, expected) in [
@@ -32,6 +32,10 @@ pub(crate) fn validate_saved_security(
             if natives::api_class(key_class).map(|entry| entry.id) != Some(expected)
                 || saved_heap[start + 4] != heap::KIND_OBJECT
                 || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
+                || u16::from_be_bytes([
+                    saved_heap[start + heap::HEADER + SIZE * 2],
+                    saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+                ]) != word(1)
             {
                 return Err(Error::Type);
             }
@@ -47,6 +51,10 @@ pub(crate) fn validate_saved_security(
             if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::ECPrivateKey)
                 || saved_heap[start + 4] != heap::KIND_OBJECT
                 || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
+                || !matches!(u16::from_be_bytes([
+                    saved_heap[start + heap::HEADER + SIZE * 2],
+                    saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+                ]), 256 | 384)
             {
                 return Err(Error::Type);
             }
@@ -54,10 +62,10 @@ pub(crate) fn validate_saved_security(
     }
     if class == ClassId::Cipher {
         let kind = word(0);
-        let des = matches!(kind, 1 | 5);
-        let chained = matches!(kind, 1 | 13 | 240);
+        let des = cipher::is_des(kind);
         let pending = word(5);
-        if !matches!(kind, 1 | 5 | 13 | 14 | 240)
+        if !(matches!(kind, 13 | 14 | 22..=27 | 240)
+            || cfg!(feature = "des-legacy") && matches!(kind, 1..=8))
             || pending == 0
             || word(3) > 1
             || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2)))
@@ -65,7 +73,7 @@ pub(crate) fn validate_saved_security(
             return Err(Error::Format);
         }
         let header = &saved_heap[pending as usize..pending as usize + heap::HEADER];
-        if u16::from_be_bytes([header[2], header[3]]) != if chained { 32 } else { 16 }
+        if u16::from_be_bytes([header[2], header[3]]) != cipher::state_bytes(kind) as u16
             || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4)
         {
             return Err(Error::Format);
@@ -99,7 +107,7 @@ pub(crate) fn validate_saved_security(
     let ec = matches!(class, ClassId::ECPublicKey | ClassId::ECPrivateKey);
     if ec
         && (!natives::ec_key_kind(word(0))
-            || word(1) != 256
+            || !matches!(word(1), 256 | 384)
             || word(3) != 0
             || (class == ClassId::ECPublicKey) != (word(0) == 11))
     {
@@ -113,7 +121,11 @@ pub(crate) fn validate_saved_security(
         }
         if ec {
             let event = natives::ec_key_clear_event(word(0));
-            if header[4] >> 4 != event || length != if word(0) == 11 { 66 } else { 33 } {
+            let expected = match (word(0) == 11, word(1) == 384) {
+                (true, false) => 66, (true, true) => 98,
+                (false, false) => 33, (false, true) => 49,
+            };
+            if header[4] >> 4 != event || length != expected {
                 return Err(Error::Format);
             }
             let flags = saved_heap[material as usize + heap::HEADER];

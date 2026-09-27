@@ -1,4 +1,4 @@
-//! P-256 key objects retain checked parameter flags rather than duplicate curve data.
+//! Fixed-curve key objects retain checked parameter flags rather than duplicate curve data.
 use super::*;
 
 pub(crate) fn key_kind(kind: u16) -> bool { matches!(kind, 11 | 12 | 30 | 31) }
@@ -10,7 +10,7 @@ pub(crate) fn clear_event(kind: u16) -> u8 {
 fn check_key(heap: &Heap, key: u16, context: heap::Context) -> Result<u16> {
     heap.check_access(key, context)?;
     let kind = word_field(heap, key, KIND)?;
-    if !key_kind(kind) || word_field(heap, key, SIZE)? != 256 { return Err(Error::Type); }
+    if !key_kind(kind) || !matches!(word_field(heap, key, SIZE)?, 256 | 384) { return Err(Error::Type); }
     Ok(kind)
 }
 
@@ -24,7 +24,11 @@ pub(super) fn material(heap: &mut Heap, key: u16, context: heap::Context) -> Res
     let existing = heap.get_word(key, MATERIAL)?;
     if existing != NULL { return Ok(existing); }
     let kind = check_key(heap, key, context)?;
-    let length = if kind == 11 { 66 } else { 33 };
+    let wide = word_field(heap, key, SIZE)? == 384;
+    let length = match (kind == 11, wide) {
+        (true, false) => 66, (true, true) => 98,
+        (false, false) => 33, (false, true) => 49,
+    };
     let event = clear_event(kind);
     heap.check_allocations(&[(heap::KIND_BYTE, length)])?;
     heap.prepare_payload_writes(&[(key, MATERIAL * 2, 2)])?;
@@ -68,7 +72,11 @@ pub(super) fn call(class: ClassId, method: MethodId, heap: &mut Heap,
         check_key(heap, key, context)?;
         heap.check_access(array, context)?;
         if offset < 0 { return Err(Error::Bounds); }
-        let Some(expected) = host.p256_parameter(id) else { return crypto_exception(heap, context, 3).map(Some); };
+        let Some(expected) = (if word_field(heap, key, SIZE)? == 384 {
+            host.p384_parameter(id)
+        } else {
+            host.p256_parameter(id)
+        }) else { return crypto_exception(heap, context, 3).map(Some); };
         let flags = flags(heap, key)?;
         if let Some(length) = length {
             if length < 0 { return Err(Error::Bounds); }
@@ -102,6 +110,9 @@ pub(super) fn call(class: ClassId, method: MethodId, heap: &mut Heap,
             let key = frame.pop_reference()?;
             check_key(heap, source, context)?;
             check_key(heap, key, context)?;
+            if word_field(heap, source, SIZE)? != word_field(heap, key, SIZE)? {
+                return crypto_exception(heap, context, 1).map(Some);
+            }
             let source_flags = flags(heap, source)?;
             if source_flags & 0x1f != 0x1f { return crypto_exception(heap, context, 2).map(Some); }
             let value = (flags(heap, key)? & 0x40) | (source_flags & 0x3f);
@@ -114,14 +125,22 @@ pub(super) fn call(class: ClassId, method: MethodId, heap: &mut Heap,
             let key = frame.pop_reference()?;
             let kind = check_key(heap, key, context)?;
             let private = kind != 11;
+            let wide = word_field(heap, key, SIZE)? == 384;
             heap.check_access(array, context)?;
             if offset < 0 || length < 0 { return Err(Error::Bounds); }
-            if (method == MethodId::setS) != private || (private && !(1..=32).contains(&length))
-                || (!private && length != 65) { return crypto_exception(heap, context, 1).map(Some); }
-            let bytes = if private { 32 } else { 65 };
-            let mut staged = Zeroizing::new([0u8; 65]);
+            let bytes = match (private, wide) {
+                (true, false) => 32, (true, true) => 48,
+                (false, false) => 65, (false, true) => 97,
+            };
+            if (method == MethodId::setS) != private || (private && !(1..=48).contains(&length))
+                || (!private && length as usize != bytes) || (private && length as usize > bytes) {
+                return crypto_exception(heap, context, 1).map(Some);
+            }
+            let mut staged = Zeroizing::new([0u8; 97]);
             staged[bytes - length as usize..bytes].copy_from_slice(heap.byte_slice(array, offset as usize, length as usize)?);
-            if !host.p256_key_valid(private, &staged[..bytes])? { return crypto_exception(heap, context, 1).map(Some); }
+            let valid = if wide { host.p384_key_valid(private, &staged[..bytes])? }
+                else { host.p256_key_valid(private, &staged[..bytes])? };
+            if !valid { return crypto_exception(heap, context, 1).map(Some); }
             let material = material(heap, key, context)?;
             let destination = heap.byte_slice_mut(material, 0, bytes + 1)?;
             destination[1..].copy_from_slice(&staged[..bytes]);
@@ -132,13 +151,17 @@ pub(super) fn call(class: ClassId, method: MethodId, heap: &mut Heap,
             let array = frame.pop_reference()?;
             let key = frame.pop_reference()?;
             let private = check_key(heap, key, context)? != 11;
+            let wide = word_field(heap, key, SIZE)? == 384;
             heap.check_access(array, context)?;
             if offset < 0 { return Err(Error::Bounds); }
             if (method == MethodId::getS) != private { return crypto_exception(heap, context, 1).map(Some); }
             let material = heap.get_word(key, MATERIAL)?;
             if material == NULL || heap.byte_slice(material, 0, 1)?[0] & 0x40 == 0 { return crypto_exception(heap, context, 2).map(Some); }
-            let bytes = if private { 32 } else { 65 };
-            let mut staged = Zeroizing::new([0u8; 65]);
+            let bytes = match (private, wide) {
+                (true, false) => 32, (true, true) => 48,
+                (false, false) => 65, (false, true) => 97,
+            };
+            let mut staged = Zeroizing::new([0u8; 97]);
             staged[..bytes].copy_from_slice(heap.byte_slice(material, 1, bytes)?);
             heap.byte_slice_mut(array, offset as usize, bytes)?.copy_from_slice(&staged[..bytes]);
             frame.push_short(bytes as i16)?;
@@ -151,6 +174,71 @@ pub(super) fn call(class: ClassId, method: MethodId, heap: &mut Heap,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct WideProvider { fail: bool }
+    impl crate::host::Host for WideProvider {
+        fn p384_parameter(&self, id: u8) -> Option<&'static [u8]> {
+            match id { 0..=2 | 4 => Some(&[0x17; 48]), 3 => Some(&[0x24; 97]), _ => None }
+        }
+        fn p384_key_valid(&mut self, private: bool, bytes: &[u8]) -> Result<bool> {
+            if self.fail { return Err(Error::Unauthorized); }
+            Ok(if private { bytes.len() == 48 && bytes[47] == 1 }
+                else { bytes.len() == 97 && bytes[0] == 4 && bytes[96] == 1 })
+        }
+    }
+
+    #[test]
+    fn p384_import_checks_lengths_provider_failure_and_curve_parameters() {
+        let mut slab = [0; 2048];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let key = crate::natives::new_native(&mut heap, ClassId::ECPrivateKey, STATE_WORDS, 1).unwrap();
+        heap.put_word(key, KIND, 12).unwrap();
+        heap.put_word(key, SIZE, 384).unwrap();
+        let input = heap.new_array(heap::KIND_BYTE, 97, 1).unwrap();
+        heap.array_put(input, 47, 1).unwrap();
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = WideProvider { fail: false };
+        frame.push_reference(key).unwrap();
+        frame.push_reference(input).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(49).unwrap();
+        assert!(matches!(call(ClassId::ECPrivateKey, MethodId::setS,
+            &mut heap, &mut host, &mut frame, 1), Ok(Some(Native::Threw(_)))));
+        assert_eq!(heap.get_word(key, MATERIAL), Ok(NULL));
+        for id in [MethodId::setFieldFP, MethodId::setA, MethodId::setB,
+            MethodId::setG, MethodId::setR] {
+            let parameter = match id { MethodId::setG => &[0x24; 97][..], _ => &[0x17; 48][..] };
+            heap.byte_slice_mut(input, 0, parameter.len()).unwrap().copy_from_slice(parameter);
+            frame.push_reference(key).unwrap();
+            frame.push_reference(input).unwrap();
+            frame.push_short(0).unwrap();
+            frame.push_short(parameter.len() as i16).unwrap();
+            assert!(matches!(call(ClassId::ECPrivateKey, id, &mut heap, &mut host,
+                &mut frame, 1), Ok(Some(Native::Returned))));
+        }
+        heap.byte_slice_mut(input, 0, 97).unwrap().fill(0);
+        heap.array_put(input, 47, 1).unwrap();
+        host.fail = true;
+        frame.push_reference(key).unwrap();
+        frame.push_reference(input).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(48).unwrap();
+        assert!(matches!(call(ClassId::ECPrivateKey, MethodId::setS,
+            &mut heap, &mut host, &mut frame, 1), Err(Error::Unauthorized)));
+        assert!(!initialized(&heap, key).unwrap());
+        host.fail = false;
+        frame.push_reference(key).unwrap();
+        frame.push_reference(input).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(48).unwrap();
+        assert!(matches!(call(ClassId::ECPrivateKey, MethodId::setS,
+            &mut heap, &mut host, &mut frame, 1), Ok(Some(Native::Returned))));
+        assert!(initialized(&heap, key).unwrap());
+        let material = heap.get_word(key, MATERIAL).unwrap();
+        assert_eq!(heap.byte_slice(material, 1, 48).unwrap()[47], 1);
+    }
 
     struct Provider { fail: bool }
     impl crate::host::Host for Provider {

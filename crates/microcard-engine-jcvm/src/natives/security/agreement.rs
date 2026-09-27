@@ -1,4 +1,4 @@
-//! Raw P-256 ECDH, Java Card ALG_EC_SVDP_DH_PLAIN.
+//! Raw fixed-curve ECDH, Java Card ALG_EC_SVDP_DH_PLAIN.
 use super::*;
 
 pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host::Host,
@@ -10,7 +10,7 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
         heap.check_access(key, context)?;
         if word_field(heap, this, KIND)? != 3
             || !matches!(word_field(heap, key, KIND)?, 12 | 30 | 31)
-            || word_field(heap, key, SIZE)? != 256 {
+            || !matches!(word_field(heap, key, SIZE)?, 256 | 384) {
             return crypto_exception(heap, context, 1).map(Some);
         }
         if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2).map(Some); }
@@ -32,26 +32,91 @@ pub(super) fn call(method: MethodId, heap: &mut Heap, host: &mut dyn crate::host
     heap.check_access(key, context)?;
     if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2).map(Some); }
     if offset < 0 || output_offset < 0 { return Err(Error::Bounds); }
-    if length != 65 { return crypto_exception(heap, context, 1).map(Some); }
-    heap.byte_slice(output, output_offset as usize, 32)?;
-    let peer: &[u8; 65] = heap.byte_slice(input, offset as usize, 65)?.try_into().map_err(|_| Error::Bounds)?;
+    let wide = word_field(heap, key, SIZE)? == 384;
+    let peer_len = if wide { 97 } else { 65 };
+    let secret_len = if wide { 48 } else { 32 };
+    if length != peer_len { return crypto_exception(heap, context, 1).map(Some); }
+    heap.byte_slice(output, output_offset as usize, secret_len)?;
+    let peer = heap.byte_slice(input, offset as usize, peer_len as usize)?;
     let material = heap.get_word(key, MATERIAL)?;
-    let scalar: &[u8; 32] = heap.byte_slice(material, 1, 32)?.try_into().map_err(|_| Error::Bounds)?;
-    *budget = budget.checked_sub(65).ok_or(Error::Quota)?;
-    let mut result = Zeroizing::new([0; 32]);
-    match host.p256_agree(scalar, peer, &mut result) {
+    let scalar = heap.byte_slice(material, 1, secret_len)?;
+    *budget = budget.checked_sub(peer_len as u32).ok_or(Error::Quota)?;
+    let mut result = Zeroizing::new([0; 48]);
+    let operation = if wide {
+        host.p384_agree(scalar.try_into().map_err(|_| Error::Bounds)?,
+            peer.try_into().map_err(|_| Error::Bounds)?, &mut result)
+    } else {
+        host.p256_agree(scalar.try_into().map_err(|_| Error::Bounds)?,
+            peer.try_into().map_err(|_| Error::Bounds)?,
+            (&mut result[..32]).try_into().map_err(|_| Error::Bounds)?)
+    };
+    match operation {
         Ok(()) => {}
         Err(Error::Bounds) => return crypto_exception(heap, context, 1).map(Some),
         Err(error) => return Err(error),
     }
-    heap.byte_slice_mut(output, output_offset as usize, 32)?.copy_from_slice(&result[..]);
-    frame.push_short(32)?;
+    heap.byte_slice_mut(output, output_offset as usize, secret_len)?.copy_from_slice(&result[..secret_len]);
+    frame.push_short(secret_len as i16)?;
     Ok(Some(Native::Returned))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct WideProvider { fail: bool }
+    impl crate::host::Host for WideProvider {
+        fn p384_agree(&mut self, key: &[u8; 48], peer: &[u8; 97], output: &mut [u8; 48]) -> Result<()> {
+            assert_eq!(key[47], 1);
+            assert_eq!(peer[0], 4);
+            output.fill(0x5a);
+            if self.fail { Err(Error::Unauthorized) } else { Ok(()) }
+        }
+    }
+
+    #[test]
+    fn p384_agreement_uses_97_byte_point_and_preserves_output_on_failure() {
+        let mut slab = [0; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let key = new_native(&mut heap, ClassId::ECPrivateKey, STATE_WORDS, 1).unwrap();
+        let material = heap.new_array(heap::KIND_BYTE, 49, 1).unwrap();
+        heap.array_put(material, 0, 0x5f).unwrap();
+        heap.array_put(material, 48, 1).unwrap();
+        heap.put_word(key, KIND, 12).unwrap();
+        heap.put_word(key, SIZE, 384).unwrap();
+        heap.put_word(key, MATERIAL, material).unwrap();
+        let agreement = new_native(&mut heap, ClassId::KeyAgreement, STATE_WORDS, 1).unwrap();
+        heap.put_word(agreement, KIND, 3).unwrap();
+        let array = heap.new_array(heap::KIND_BYTE, 97, 1).unwrap();
+        heap.array_put(array, 0, 4).unwrap();
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = WideProvider { fail: false };
+        frame.push_reference(agreement).unwrap();
+        frame.push_reference(key).unwrap();
+        assert!(matches!(call(MethodId::init, &mut heap, &mut host, &mut frame, 1,
+            &mut 100), Ok(Some(Native::Returned))));
+        for fail in [true, false] {
+            host.fail = fail;
+            frame.push_reference(agreement).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(0).unwrap();
+            frame.push_short(97).unwrap();
+            frame.push_reference(array).unwrap();
+            frame.push_short(1).unwrap();
+            let result = call(MethodId::generateSecret, &mut heap, &mut host,
+                &mut frame, 1, &mut 97);
+            if fail {
+                assert!(matches!(result, Err(Error::Unauthorized)));
+                assert_eq!(heap.array_get(array, 1), Ok(0));
+            } else {
+                assert!(matches!(result, Ok(Some(Native::Returned))));
+                assert_eq!(frame.pop_short(), Ok(48));
+                assert_eq!(heap.byte_slice(array, 1, 48).unwrap(), &[0x5a; 48]);
+            }
+        }
+    }
     struct Provider { fail: bool, calls: usize }
     impl crate::host::Host for Provider {
         fn p256_agree(&mut self, key: &[u8; 32], peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
