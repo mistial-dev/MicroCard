@@ -232,14 +232,14 @@ fn renewal_recovery_authenticates_before_reclaim_and_never_reencrypts_the_heap()
     let preparations = heaps.preparations;
     let generation = heaps.banks[first.heap_bank as usize].borrow().monotonic_generation().unwrap();
     let nonce = store.journal.flash_mut().nonce_generation().unwrap();
-    assert_eq!(store.begin_renewal(first.aid, &live, &images, &heaps, &root, &mut staging, &mut scratch, &mut FailedEncryption), Err(Error::Native));
+    assert_eq!(store.begin_renewal(first.aid, &mut live, &images, &heaps, &root, &mut staging, &mut scratch, &mut FailedEncryption), Err(Error::Native));
     let consumed = store.journal.flash_mut().nonce_generation().unwrap();
     assert_eq!(consumed, nonce + 1);
     assert!(staging.is_empty());
     assert!(store.pending_renewal().unwrap().is_none());
     let before_publication = store.journal.flash_mut().clone();
     let initial = *store.state().unwrap();
-    let renewal = store.begin_renewal(first.aid, &live, &images, &heaps, &root, &mut staging, &mut scratch, &mut provider).unwrap();
+    let renewal = store.begin_renewal(first.aid, &mut live, &images, &heaps, &root, &mut staging, &mut scratch, &mut provider).unwrap();
     let identity = renewal.new_identity;
     assert!(u64::from_le_bytes(identity[..8].try_into().unwrap()) > consumed);
     assert!(live.selected().unwrap(), "staging does not deselect the running applet");
@@ -252,7 +252,7 @@ fn renewal_recovery_authenticates_before_reclaim_and_never_reencrypts_the_heap()
     let before_anchor = 4 + 4 + 4096 + record_bytes + 4 + 4;
     interrupted.journal.flash_mut().fail_after = Some(before_anchor);
     let mut protected = BoundedFlashStaging::<_, 65536>::new(Scratch(alloc::vec![0xff; 65536]));
-    assert_eq!(interrupted.begin_renewal(first.aid, &live, &images, &heaps, &root, &mut protected, &mut scratch, &mut provider), Err(Error::Storage));
+    assert_eq!(interrupted.begin_renewal(first.aid, &mut live, &images, &heaps, &root, &mut protected, &mut scratch, &mut provider), Err(Error::Storage));
     assert!(!protected.is_empty(), "uncertain publication must retain staging ownership");
     let mut flash = interrupted.into_flash(); flash.fail_after = None;
     let interrupted = Store::open(flash, [3; 16], initial, &mut provider).unwrap();

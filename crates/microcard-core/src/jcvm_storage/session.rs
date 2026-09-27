@@ -121,7 +121,7 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
     }
 
     pub(crate) fn prepare_epoch_record(
-        &self,
+        &mut self,
         old_identity: [u8; 16],
         image: [u8; 32],
         new_identity: [u8; 16],
@@ -593,8 +593,10 @@ mod tests {
 
         // Handoff changes only persistence ownership, never the live engine object.
         let live_card = session.card.as_ref().unwrap() as *const AppletInstance;
+        let workspace = session.store.snapshot_workspace.as_ptr();
         let record = session.prepare_epoch_record([4; 16], session.store.image, [5; 16],
             JournalKey::from([6; 16]), &mut provider).unwrap();
+        assert_eq!(record.as_ptr(), workspace, "renewal must reuse the selected session's snapshot buffer");
         let seed = crate::journal::SeedRecord::authenticate(&record, &JournalKey::from([6; 16]),
             &mut SoftwareCrypto, |_| Ok(())).unwrap();
         let mut bank = MemoryFlash::new(65536);

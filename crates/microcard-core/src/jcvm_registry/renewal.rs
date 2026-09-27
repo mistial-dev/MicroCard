@@ -50,7 +50,7 @@ impl<F: crate::journal::Flash> Store<F> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin_renewal<I: crate::image_store::ImageFlash, H: crate::jcvm_storage::HeapBanks,
             S: crate::staging::PackageStaging>(
-        &mut self, aid: Aid, session: &crate::jcvm_storage::Session<H::Bank, PinnedImage<I>>,
+        &mut self, aid: Aid, session: &mut crate::jcvm_storage::Session<H::Bank, PinnedImage<I>>,
         images: &crate::image_store::Images<I>, heaps: &H, root: &crate::journal::JournalKey,
         staging: &mut S, scratch: &mut [u8], provider: &mut impl crate::crypto::CryptoProvider,
     ) -> Result<Renewal> {

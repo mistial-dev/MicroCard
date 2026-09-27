@@ -394,7 +394,7 @@ impl<F: Flash> Store<F> {
     }
 
     fn prepare_epoch_record(
-        &self,
+        &mut self,
         view: PersistentView<'_>,
         installation: [u8; 16],
         key: JournalKey,
@@ -402,7 +402,12 @@ impl<F: Flash> Store<F> {
     ) -> Result<Zeroizing<Vec<u8>>> {
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(43);
-        let snapshot = encode_snapshot(view, self.image, installation, self.maximum)?;
+        // Recovery already reserved a full-slot buffer. Move it into the seed
+        // record rather than holding two full-slot plaintext buffers in RAM.
+        let mut snapshot = core::mem::replace(&mut self.snapshot_workspace,
+            Zeroizing::new(Vec::new()));
+        reserve_snapshot_workspace(&mut snapshot, self.maximum)?;
+        encode_snapshot_into(view, self.image, installation, self.maximum, &mut snapshot)?;
         #[cfg(feature = "latency-trace")]
         trace::renewal_phase(44);
         let record = crate::journal::SeedRecord::seal_new_epoch(snapshot, key, provider)?;
@@ -414,14 +419,6 @@ impl<F: Flash> Store<F> {
     pub fn into_flash(self) -> F {
         self.journal.into_flash()
     }
-}
-
-fn encode_snapshot(view: PersistentView<'_>, image: [u8; 32], installation: [u8; 16],
-        maximum: usize) -> Result<Zeroizing<Vec<u8>>> {
-    let mut output = Zeroizing::new(Vec::new());
-    reserve_snapshot_workspace(&mut output, maximum)?;
-    encode_snapshot_into(view, image, installation, maximum, &mut output)?;
-    Ok(output)
 }
 
 fn reserve_snapshot_workspace(output: &mut Zeroizing<Vec<u8>>, maximum: usize) -> Result<()> {
