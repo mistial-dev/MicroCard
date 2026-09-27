@@ -13,6 +13,7 @@ from jcalgtest_gp_acceptance import IMAGE
 STATUSES = {"NO_SUCH_ALGORITHM", "CANT_BE_MEASURED", "ILLEGAL_VALUE"}
 TRANSPORT = ("SCARD_E_", "CARD_HAS_RETURN_VALUE_", "TIMEOUT", "CRASH",
              "EXCEPTION IN THREAD", "UNKONWN_ERROR", "UNKNOWN_ERROR")
+SESSION_FAILURES = {"6982", "6A82"}
 
 
 def inspect_csv(text):
@@ -41,6 +42,13 @@ def inspect_csv(text):
     return entries, counts
 
 
+def inspect_log(text):
+    """Find lost authority or applet selection hidden by an unmeasured CSV row."""
+    return [line.strip() for line in text.splitlines()
+            if (match := re.search(r"\bSW=([0-9A-Fa-f]{4})\b", line))
+            and match.group(1).upper() in SESSION_FAILURES]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result", required=True, type=pathlib.Path)
@@ -62,10 +70,12 @@ def main():
     exit_code = exit_file.read_text().strip() if exit_file.exists() else None
     errors = [line for line in transcript.splitlines()
               if any(word in line.upper() for word in TRANSPORT)]
+    logs = sorted(args.result.glob("ALGTEST_log_*.log"))
+    session_failures = inspect_log(logs[0].read_text(errors="replace")) if len(logs) == 1 else ["missing or ambiguous APDU log"]
     finished = bool(re.search(r"Total test time:;\s*\d+ seconds\.", raw))
     complete = (exit_code == "0" and finished and bool(entries)
                 and counts.get("incomplete", 0) == 0 and not errors)
-    valid = complete and counts.get("invalid_measurement", 0) == 0
+    valid = complete and counts.get("invalid_measurement", 0) == 0 and not session_failures
     report = {
         "completed_run": complete,
         "valid_performance_result": valid,
@@ -80,6 +90,7 @@ def main():
         "unmeasured": [entry["name"] for entry in entries if entry["outcome"] == "CANT_BE_MEASURED"],
         "invalid_measurements": [entry for entry in entries if entry["outcome"] == "invalid_measurement"],
         "transport_error_rows": errors,
+        "session_failure_rows": session_failures,
     }
     destination = args.result / "analysis.json"
     destination.write_text(json.dumps(report, indent=2) + "\n")
@@ -87,7 +98,7 @@ def main():
           f"{counts.get('measured', 0)} measured; "
           f"{counts.get('CANT_BE_MEASURED', 0)} unmeasured; "
           f"{counts.get('invalid_measurement', 0)} invalid measurements; "
-          f"{len(errors)} transport errors")
+          f"{len(errors)} transport errors; {len(session_failures)} session failures")
     if not valid:
         raise SystemExit(1)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Keep incomplete performance rows distinct from unsupported algorithms."""
-from analyze_jcalgtest_performance import inspect_csv
+from analyze_jcalgtest_performance import inspect_csv, inspect_log
 
 sample = """
 method name:; supported operation
@@ -20,5 +20,6 @@ assert counts == {
     "invalid_measurement": 1, "incomplete": 1,
 }
 assert entries[0]["mean_ms_per_op"] == 0.65
+assert inspect_log("ResponseAPDU: SW=9000\nResponseAPDU: SW=6982\nResponseAPDU: SW=6a82") == [
+    "ResponseAPDU: SW=6982", "ResponseAPDU: SW=6a82"]
 print("PASS: JCAlgTest performance outcomes remain distinct")
-
