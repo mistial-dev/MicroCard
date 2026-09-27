@@ -277,6 +277,52 @@ mod tests {
     }
 
     #[test]
+    fn rsa_public_exponent_survives_deletion_and_restore() {
+        use crate::jcvm_api::ClassId;
+
+        let mut package = super::super::tests::applet(vec![super::super::tests::op::RETURN], 1);
+        package.classes[0].declared_size = 1;
+        package.classes[0].reference_count = 1;
+        let package = package.build();
+        let file = LoadFile::parse(&package).unwrap();
+        let mut card = AppletInstance::new(&file, super::super::Sizes::default()).unwrap();
+        let module = file.applets().unwrap().iter().next().unwrap().aid;
+        card.install_module(&file, &mut crate::host::NoHost, module, &[]).unwrap();
+        let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        let root = card.instance.unwrap();
+        let _dead = heap.new_array(heap::KIND_BYTE, 17, 1).unwrap();
+        let public = heap.new_object(super::super::native_class_of(ClassId::RSAPublicKey).unwrap(), 6, 1).unwrap();
+        let modulus = heap.new_array(heap::KIND_BYTE, 256, 1).unwrap();
+        heap.byte_slice_mut(modulus, 0, 256).unwrap().fill(0x80);
+        heap.array_put(modulus, 255, 0x81).unwrap();
+        let _dead = heap.new_array(heap::KIND_BYTE, 11, 1).unwrap();
+        let exponent = heap.new_array(heap::KIND_BYTE, 3, 1).unwrap();
+        heap.byte_slice_mut(exponent, 0, 3).unwrap().copy_from_slice(&[1, 0, 1]);
+        heap.put_word(root, 0, public).unwrap();
+        heap.put_word(public, 0, 4).unwrap();
+        heap.put_word(public, 1, 2048).unwrap();
+        heap.put_word(public, 2, modulus).unwrap();
+        heap.put_word(public, 3, 3).unwrap();
+        heap.put_word(public, 5, exponent).unwrap();
+        heap.request_object_deletion().unwrap();
+        card.heap_used = heap.used();
+        card.service_object_deletion(&file).unwrap();
+        let compacted = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        let public = compacted.get_word(card.instance.unwrap(), 0).unwrap();
+        let exponent = compacted.get_word(public, 5).unwrap();
+        assert_eq!(compacted.byte_slice(exponent, 0, 3).unwrap(), &[1, 0, 1]);
+
+        let mut bytes = vec![0; card.persistent_heap_bytes()];
+        let saved = card.save_into(&mut bytes).unwrap();
+        let mut restored = AppletInstance::restore_without_frames(
+            &file, super::super::Sizes::default(), saved).unwrap();
+        let heap = Heap::resume(&mut restored.heap, restored.heap_used).unwrap();
+        let public = heap.get_word(restored.instance.unwrap(), 0).unwrap();
+        let exponent = heap.get_word(public, 5).unwrap();
+        assert_eq!(heap.byte_slice(exponent, 0, 3).unwrap(), &[1, 0, 1]);
+    }
+
+    #[test]
     fn deletion_recovers_a_full_slab_without_applet_heap_scratch() {
         let package = Package {
             classes: vec![ClassSpec { declared_size: 1, ..ClassSpec::default() }],

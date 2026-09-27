@@ -7,7 +7,7 @@ use crate::test_support::{ClassSpec, Package};
 use alloc::vec;
 
 /// Opcodes this test spells out, so the bytecode reads like the applet it stands for.
-mod op {
+pub(super) mod op {
     #[allow(dead_code)]
     pub const ACONST_NULL: u8 = 1;
     pub const SCONST_0: u8 = 3;
@@ -38,7 +38,7 @@ const JAVA_LANG_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x00, 0x62, 0x00, 0x01];
 /// The shape is the smallest thing that is still an applet: a static install that
 /// constructs the class and registers it, a select that agrees, and a process that
 /// writes into the APDU buffer and sends it.
-fn applet(process: Vec<u8>, process_stack: u8) -> Package {
+pub(super) fn applet(process: Vec<u8>, process_stack: u8) -> Package {
     applet_registration(process, process_stack, false)
 }
 
@@ -499,6 +499,19 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
     heap.put_word(pair, 1, 256).unwrap();
     heap.put_word(pair, 2, ec_public).unwrap();
     heap.put_word(pair, 5, ec_private).unwrap();
+    let rsa_public = heap
+        .new_object(native_class_of(ClassId::RSAPublicKey).unwrap(), 6, 1)
+        .unwrap();
+    let modulus = heap.new_array(heap::KIND_BYTE, 256, 1).unwrap();
+    heap.byte_slice_mut(modulus, 0, 256).unwrap().fill(0x80);
+    heap.array_put(modulus, 255, 0x81).unwrap();
+    let exponent = heap.new_array(heap::KIND_BYTE, 3, 1).unwrap();
+    heap.byte_slice_mut(exponent, 0, 3).unwrap().copy_from_slice(&[1, 0, 1]);
+    heap.put_word(rsa_public, 0, 4).unwrap();
+    heap.put_word(rsa_public, 1, 2048).unwrap();
+    heap.put_word(rsa_public, 2, modulus).unwrap();
+    heap.put_word(rsa_public, 3, 3).unwrap();
+    heap.put_word(rsa_public, 5, exponent).unwrap();
     let signature = heap
         .new_object(native_class_of(ClassId::Signature).unwrap(), 6, 1)
         .unwrap();
@@ -600,6 +613,8 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
     assert_eq!(recovered.get_word(pin_x, 4), Ok(2));
     assert_eq!(recovered.get_word(predecrement, 5), Ok(predecrement_flag));
     assert_eq!(recovered.array_get(predecrement_flag, 0), Ok(0));
+    assert_eq!(recovered.get_word(rsa_public, 5), Ok(exponent));
+    assert_eq!(recovered.byte_slice(exponent, 0, 3).unwrap(), &[1, 0, 1]);
     assert_eq!(
         recovered.get_word(reserved_exception, natives::REASON_FIELD),
         Ok(0)

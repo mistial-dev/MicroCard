@@ -128,6 +128,7 @@ pub(crate) fn visit_native_reference_offsets(
             | ClassId::MessageDigest
             | ClassId::Signature
             | ClassId::KeyPair
+            | ClassId::RSAPublicKey
             | ClassId::OwnerPINxWithPredecrement
     ) {
         visit(PENDING * 2)?;

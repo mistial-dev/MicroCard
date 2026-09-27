@@ -9,6 +9,7 @@ fn native_reference_walk_includes_private_state_handles() {
         (ClassId::AESKey, false),
         (ClassId::MessageDigest, true),
         (ClassId::KeyPair, true),
+        (ClassId::RSAPublicKey, true),
         (ClassId::OwnerPINxWithPredecrement, true),
     ] {
         let class = PACKAGES.iter().enumerate().find_map(|(package, api)| api.classes.iter()
