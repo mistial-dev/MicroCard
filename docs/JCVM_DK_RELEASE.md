@@ -868,3 +868,39 @@ further full power cycle. The reader and JCAlgTest selection remained
 available. Breakpoint and marker details are recorded locally in
 `artifacts/physical/microcard-pin-cut-dk-20260927/README.txt`. Physical
 interruption during anchor advancement and renewal remains open.
+
+The first physical epoch-renewal stress run exposed a RAM peak on the
+exhausted-counter path. **498** successful PIV PIN verifications consumed
+**996** anchor words in **36.2 s** and left two words in the 1,024-word page.
+The final VERIFY returned `9000` and consumed those words, but idle renewal
+failed before staging or heap erasure. Its diagnostic recorded one programmed
+identity-nonce word and no erased pages; the old diagnostic replaced the
+actual error category with a generic recovered-maintenance marker. SWD read
+the active saved payload length as **7,770 bytes**, within staging capacity.
+Renewal was allocating a second roughly **65 KiB** plaintext workspace while
+the selected session already owned one in a **192 KiB** allocator. Reusing
+that workspace removed the avoidable peak, and the diagnostic now retains the
+underlying category if a recovered maintenance failure recurs. The old
+failure's exact category cannot be reconstructed.
+
+The revised diagnostic ELF (`6c4ace7f101dc5035a8f02b2217016c503c1e2a417fbddc5df39a7eb2c77fd69`)
+was downloaded without erasing state. It renewed the exhausted heap to
+generation high word `1`; the six PIN retries, exact public PIV object, saved
+P-256 signing key, and JCAlgTest selection survived. A second run exhausted
+the counter and halted SWD in automatic idle renewal after staging an
+authenticated seed and preparing both heap slots. Cutting both USB power
+paths there forced boot recovery to install the seed. The same applet state
+and second applet survived, with heap generation high word `1`. Exact
+breakpoint, flash-header, and command evidence is retained locally in
+`artifacts/physical/microcard-renewal-dk-20260927/README.txt`. Other physical
+renewal publication boundaries remain open.
+
+The pinned upstream JCAlgTest 1.8.3 extended scan on that revised ELF also
+completed **8,607/8,607 probes with zero error rows and no reader loss**.
+It reported **50 supported** factories, 238 missing P71D321-positive probes,
+and no outside-profile claims. The untouched CSV SHA-256 is
+`ac72e8810f88ab26cd957a2406d3c6fa569ddafe53267d9e152117ce3b1de320`;
+the 17,222 host PC/SC exchanges had 18 ms median, 19 ms p95, and 5,143 ms
+maximum. Raw CSV, log, exact ELF, client exit code, and analyzer result are
+retained locally under `artifacts/physical/microcard-renewal-dk-20260927/`.
+Operation-level crypto tests remain separate from this factory scan.

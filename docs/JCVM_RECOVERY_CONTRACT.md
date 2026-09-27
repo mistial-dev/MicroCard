@@ -27,8 +27,9 @@ commits and PIN retry changes retain their earlier synchronous checkpoints.
 The nRF52840 has no hold-up capacitor, so a cut during a flash publication
 must leave either the previous or the new authenticated record authoritative.
 Recovery accepts a complete authenticated record or returns an error; it does
-not silently reset the applet. Physical interruption during publication remains
-to be validated on the DK.
+not silently reset the applet. DK cuts have exercised snapshot and PIN marker
+boundaries plus staged heap-renewal recovery. Other publication boundaries
+remain host fault-injection evidence until physically exercised.
 
 Keep recovery checks off the APDU hot path. A new native object layout must define
 its reference fields, transient fields, recovery checks, and specified reset behavior
