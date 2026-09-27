@@ -1,5 +1,6 @@
 //! MC04 native service dispatch, authorization and bounded output handling.
 use super::*;
+use crate::native_abi::id::*;
 
 #[derive(Clone, Copy)]
 pub(super) enum NativeArgument<'a> {
@@ -60,9 +61,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     .and_then(|unit| unit.bindings.get(usize::from(*dependency)))
                     .ok_or(Error::Storage)?
                     .digest;
-                let mut matches = units.iter().enumerate().filter(|(_, unit)| {
-                    unit.package.digest == digest
-                });
+                let mut matches = units
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, unit)| unit.package.digest == digest);
                 let (index, _) = matches.next().ok_or(Error::Missing)?;
                 if matches.next().is_some() {
                     return Err(Error::Storage);
@@ -101,8 +103,10 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
         if matches!(
             *self.transaction,
             TransactionDisposition::Commit | TransactionDisposition::Abort
-        ) && !matches!(id, 2 | 13 | 58)
-        {
+        ) && !matches!(
+            id,
+            RESPONSE_SERVICE_SET_STATUS | RESPONSE_SERVICE_WRITE | TRANSACTION_RUNTIME_CURRENT
+        ) {
             return Err(Error::Unauthorized);
         }
         self.capabilities = &self
@@ -113,17 +117,19 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             .manifest
             .capabilities;
         match (id, arguments) {
-            (58, []) => {
-                return Ok(Some(if matches!(
-                    *self.transaction,
-                    TransactionDisposition::Begun | TransactionDisposition::Active
-                ) {
-                    Opaque(4)
-                } else {
-                    crate::mc04_vm::RuntimeValue::Ref(0)
-                }));
+            (TRANSACTION_RUNTIME_CURRENT, []) => {
+                return Ok(Some(
+                    if matches!(
+                        *self.transaction,
+                        TransactionDisposition::Begun | TransactionDisposition::Active
+                    ) {
+                        Opaque(4)
+                    } else {
+                        crate::mc04_vm::RuntimeValue::Ref(0)
+                    },
+                ));
             }
-            (59, [Opaque(4)])
+            (TRANSACTION_RUNTIME_INFORMATION, [Opaque(4)])
                 if matches!(
                     *self.transaction,
                     TransactionDisposition::Begun | TransactionDisposition::Active
@@ -131,7 +137,7 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             {
                 return Ok(Some(Opaque(5)));
             }
-            (60, [Opaque(5)])
+            (TRANSACTION_INFORMATION_RUNTIME_STATUS, [Opaque(5)])
                 if matches!(
                     *self.transaction,
                     TransactionDisposition::Begun | TransactionDisposition::Active
@@ -142,25 +148,40 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
             _ => {}
         }
         match (id, arguments) {
-            (7, [Opaque(3), Int(key)]) => {
+            (STORAGE_SERVICE_GET_INT32, [Opaque(3), Int(key)]) => {
                 self.authorize_storage(unit, *key, 1, None)?;
             }
-            (8, [Opaque(3), Int(key), Int(_)]) => {
+            (STORAGE_SERVICE_SET_INT32, [Opaque(3), Int(key), Int(_)]) => {
                 self.authorize_storage(unit, *key, 1, None)?;
             }
-            (31 | 33 | 34, [Opaque(3), Int(key)]) => {
+            (
+                STORAGE_SERVICE_GET_BYTES
+                | STORAGE_SERVICE_DELETE_BYTES
+                | STORAGE_SERVICE_CONTAINS_BYTES,
+                [Opaque(3), Int(key)],
+            ) => {
                 self.authorize_storage(unit, *key, 2, None)?;
             }
-            (32, [Opaque(3), Int(key), value]) => {
+            (STORAGE_SERVICE_SET_BYTES_2_ARGS, [Opaque(3), Int(key), value]) => {
                 self.authorize_storage(unit, *key, 2, Some(heap.bytes(*value)?.len()))?;
             }
             _ => {}
         }
         let result = match (id, arguments) {
-            (2, [Opaque(2), Int(value)]) => scalar(self.call(id, &[*value])?),
-            (5 | 9 | 10, [Opaque(2)]) => scalar(self.call(id, &[])?),
-            (11, [Opaque(2)]) => scalar(self.call(id, &[])?),
-            (12, [Opaque(2), destination, Int(destination_offset), Int(source_offset), Int(length)]) => {
+            (RESPONSE_SERVICE_SET_STATUS, [Opaque(2), Int(value)]) => {
+                scalar(self.call(id, &[*value])?)
+            }
+            (
+                RANDOM_SERVICE_GET_INT32
+                | SECURE_CHANNEL_SERVICE_SECURITY_LEVEL
+                | SECURE_CHANNEL_SERVICE_IS_AUTHENTICATED,
+                [Opaque(2)],
+            ) => scalar(self.call(id, &[])?),
+            (COMMAND_SERVICE_LENGTH, [Opaque(2)]) => scalar(self.call(id, &[])?),
+            (
+                COMMAND_SERVICE_COPY_TO,
+                [Opaque(2), destination, Int(destination_offset), Int(source_offset), Int(length)],
+            ) => {
                 self.copy_command(
                     heap,
                     *destination,
@@ -170,77 +191,105 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                 )?;
                 BufferResult::Void
             }
-            (54, [input, Int(offset), Int(length), result, Int(result_offset), Int(der)]) => {
-                let read = self.read_tlv(heap, *input, *offset, *length, *result, *result_offset, *der != 0)?;
+            (
+                TLV_TRY_READ,
+                [input, Int(offset), Int(length), result, Int(result_offset), Int(der)],
+            ) => {
+                let read = self.read_tlv(
+                    heap,
+                    *input,
+                    *offset,
+                    *length,
+                    *result,
+                    *result_offset,
+                    *der != 0,
+                )?;
                 BufferResult::Scalar(i32::from(read))
             }
-            (53, [source, Int(source_offset), destination, Int(destination_offset), Int(length)]) => {
-                let copied = self.copy_bytes(heap, *source, *source_offset, *destination, *destination_offset, *length)?;
+            (
+                BUFFERS_COPY,
+                [source, Int(source_offset), destination, Int(destination_offset), Int(length)],
+            ) => {
+                let copied = self.copy_bytes(
+                    heap,
+                    *source,
+                    *source_offset,
+                    *destination,
+                    *destination_offset,
+                    *length,
+                )?;
                 BufferResult::Scalar(i32::from(copied))
             }
-            (13, [Opaque(2), source, Int(source_offset), Int(length)]) => {
+            (RESPONSE_SERVICE_WRITE, [Opaque(2), source, Int(source_offset), Int(length)]) => {
                 self.write_response(heap, *source, *source_offset, *length)?;
                 BufferResult::Void
             }
-            (6, [Opaque(2), Int(resource), Int(value)]) => {
+            (RUNTIME_SERVICE_WRITE_HARDWARE, [Opaque(2), Int(resource), Int(value)]) => {
                 if self.transaction.transaction_involved() {
                     return Err(Error::Unauthorized);
                 }
-                let result = scalar(self.call(6, &[*resource, *value])?);
+                let result =
+                    scalar(self.call(RUNTIME_SERVICE_WRITE_HARDWARE, &[*resource, *value])?);
                 self.irreversible_output = true;
                 result
             }
-            (7, [Opaque(3), Int(key)]) => scalar(self.call(7, &[*key])?),
-            (8, [Opaque(3), Int(key), Int(value)]) => scalar(self.call(8, &[*key, *value])?),
-            (20, [input]) | (20, [Opaque(2), input]) => {
-                self.buffers(20, &[heap.bytes(*input)?])?
+            (STORAGE_SERVICE_GET_INT32, [Opaque(3), Int(key)]) => {
+                scalar(self.call(STORAGE_SERVICE_GET_INT32, &[*key])?)
             }
-            (22, [Opaque(2), Int(slot), Int(algorithm)]) => self.key_call(
-                22,
-                &[
-                    NativeArgument::Int(*slot),
-                    NativeArgument::Int(*algorithm),
-                ],
+            (STORAGE_SERVICE_SET_INT32, [Opaque(3), Int(key), Int(value)]) => {
+                scalar(self.call(STORAGE_SERVICE_SET_INT32, &[*key, *value])?)
+            }
+            (RUNTIME_SERVICE_SHA256, [input]) | (RUNTIME_SERVICE_SHA256, [Opaque(2), input]) => {
+                self.buffers(RUNTIME_SERVICE_SHA256, &[heap.bytes(*input)?])?
+            }
+            (KEY_SERVICE_GENERATE, [Opaque(2), Int(slot), Int(algorithm)]) => self.key_call(
+                KEY_SERVICE_GENERATE,
+                &[NativeArgument::Int(*slot), NativeArgument::Int(*algorithm)],
             )?,
-            (23 | 24, [Opaque(2), Int(slot)]) => {
+            (KEY_SERVICE_OPEN | KEY_SERVICE_DELETE, [Opaque(2), Int(slot)]) => {
                 self.key_call(id, &[NativeArgument::Int(*slot)])?
             }
-            (25 | 26, [handle, input]) => self.key_call(
+            (KEY_HANDLE_HMAC_SHA256 | KEY_HANDLE_AES_CMAC, [handle, input]) => self.key_call(
                 id,
                 &[
                     NativeArgument::Bytes(heap.bytes(*handle)?),
                     NativeArgument::Bytes(heap.bytes(*input)?),
                 ],
             )?,
-            (27 | 28, [handle, iv, input]) => self.key_call(
-                id,
-                &[
-                    NativeArgument::Bytes(heap.bytes(*handle)?),
-                    NativeArgument::Bytes(heap.bytes(*iv)?),
-                    NativeArgument::Bytes(heap.bytes(*input)?),
-                ],
-            )?,
-            (29 | 30, [handle, nonce, aad, input]) => self.key_call(
-                id,
-                &[
-                    NativeArgument::Bytes(heap.bytes(*handle)?),
-                    NativeArgument::Bytes(heap.bytes(*nonce)?),
-                    NativeArgument::Bytes(heap.bytes(*aad)?),
-                    NativeArgument::Bytes(heap.bytes(*input)?),
-                ],
-            )?,
-            (31, [Opaque(3), Int(key)]) => {
-                self.key_call(31, &[NativeArgument::Int(*key)])?
+            (KEY_HANDLE_ENCRYPT_CBC | KEY_HANDLE_DECRYPT_CBC, [handle, iv, input]) => self
+                .key_call(
+                    id,
+                    &[
+                        NativeArgument::Bytes(heap.bytes(*handle)?),
+                        NativeArgument::Bytes(heap.bytes(*iv)?),
+                        NativeArgument::Bytes(heap.bytes(*input)?),
+                    ],
+                )?,
+            (KEY_HANDLE_ENCRYPT_CCM | KEY_HANDLE_DECRYPT_CCM, [handle, nonce, aad, input]) => self
+                .key_call(
+                    id,
+                    &[
+                        NativeArgument::Bytes(heap.bytes(*handle)?),
+                        NativeArgument::Bytes(heap.bytes(*nonce)?),
+                        NativeArgument::Bytes(heap.bytes(*aad)?),
+                        NativeArgument::Bytes(heap.bytes(*input)?),
+                    ],
+                )?,
+            (STORAGE_SERVICE_GET_BYTES, [Opaque(3), Int(key)]) => {
+                self.key_call(STORAGE_SERVICE_GET_BYTES, &[NativeArgument::Int(*key)])?
             }
-            (32, [Opaque(3), Int(key), value]) => self.key_call(
-                32,
+            (STORAGE_SERVICE_SET_BYTES_2_ARGS, [Opaque(3), Int(key), value]) => self.key_call(
+                STORAGE_SERVICE_SET_BYTES_2_ARGS,
                 &[
                     NativeArgument::Int(*key),
                     NativeArgument::Bytes(heap.bytes(*value)?),
                 ],
             )?,
-            (52, [Opaque(3), Int(key), value, Int(offset), Int(length)]) => self.key_call(
-                52,
+            (
+                STORAGE_SERVICE_SET_BYTES_4_ARGS,
+                [Opaque(3), Int(key), value, Int(offset), Int(length)],
+            ) => self.key_call(
+                STORAGE_SERVICE_SET_BYTES_4_ARGS,
                 &[
                     NativeArgument::Int(*key),
                     NativeArgument::Bytes(heap.bytes(*value)?),
@@ -248,15 +297,16 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*length),
                 ],
             )?,
-            (33 | 34, [Opaque(3), Int(key)]) => {
-                self.key_call(id, &[NativeArgument::Int(*key)])?
-            }
-            (35, [handle]) => self.key_call(
-                35,
+            (
+                STORAGE_SERVICE_DELETE_BYTES | STORAGE_SERVICE_CONTAINS_BYTES,
+                [Opaque(3), Int(key)],
+            ) => self.key_call(id, &[NativeArgument::Int(*key)])?,
+            (KEY_HANDLE_EXPORT_P256_PUBLIC_KEY, [handle]) => self.key_call(
+                KEY_HANDLE_EXPORT_P256_PUBLIC_KEY,
                 &[NativeArgument::Bytes(heap.bytes(*handle)?)],
             )?,
-            (36, [handle, input, Int(offset), Int(length)]) => self.key_call(
-                36,
+            (KEY_HANDLE_SIGN_P256, [handle, input, Int(offset), Int(length)]) => self.key_call(
+                KEY_HANDLE_SIGN_P256,
                 &[
                     NativeArgument::Bytes(heap.bytes(*handle)?),
                     NativeArgument::Bytes(heap.bytes(*input)?),
@@ -264,62 +314,71 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*length),
                 ],
             )?,
-            (38, [handle, input]) => self.key_call(
-                38,
+            (KEY_HANDLE_DERIVE_P256, [handle, input]) => self.key_call(
+                KEY_HANDLE_DERIVE_P256,
                 &[
                     NativeArgument::Bytes(heap.bytes(*handle)?),
                     NativeArgument::Bytes(heap.bytes(*input)?),
                 ],
             )?,
-            (37, [Opaque(2), public_key, data, signature]) => self.buffers(
-                37,
-                &[
-                    heap.bytes(*public_key)?,
-                    heap.bytes(*data)?,
-                    heap.bytes(*signature)?,
-                ],
-            )?,
-            (39, [Opaque(2), destination, Int(offset), Int(length)]) => {
+            (RUNTIME_SERVICE_VERIFY_P256, [Opaque(2), public_key, data, signature]) => self
+                .buffers(
+                    RUNTIME_SERVICE_VERIFY_P256,
+                    &[
+                        heap.bytes(*public_key)?,
+                        heap.bytes(*data)?,
+                        heap.bytes(*signature)?,
+                    ],
+                )?,
+            (RANDOM_SERVICE_FILL, [Opaque(2), destination, Int(offset), Int(length)]) => {
                 self.fill_random(heap, *destination, *offset, *length)?;
                 BufferResult::Void
             }
-            (49, [Opaque(2), input, Int(input_offset), Int(input_length), destination, Int(destination_offset)]) => {
-                scalar(Some(self.sha256_into(
-                    heap,
-                    *input,
-                    *input_offset,
-                    *input_length,
-                    *destination,
-                    *destination_offset,
-                )?))
-            }
-            (50, [Int(length)]) | (50, [Opaque(2), Int(length)]) => {
+            (
+                RUNTIME_SERVICE_SHA256_INTO,
+                [Opaque(2), input, Int(input_offset), Int(input_length), destination, Int(destination_offset)],
+            ) => scalar(Some(self.sha256_into(
+                heap,
+                *input,
+                *input_offset,
+                *input_length,
+                *destination,
+                *destination_offset,
+            )?)),
+            (RANDOM_SERVICE_GET_BYTES, [Int(length)])
+            | (RANDOM_SERVICE_GET_BYTES, [Opaque(2), Int(length)]) => {
                 BufferResult::Bytes(self.random_bytes(*length)?)
             }
-            (51, [Opaque(2), left, Int(left_offset), Int(left_length), right, Int(right_offset), Int(right_length)]) => {
-                scalar(Some(self.fixed_time_equals(
-                    heap,
-                    (*left, *left_offset, *left_length),
-                    (*right, *right_offset, *right_length),
-                )?))
-            }
-            (40, [Opaque(2), Int(slot), pin, Int(pin_offset), Int(pin_length), Int(pin_retries), puk, Int(puk_offset), Int(puk_length), Int(puk_retries)]) => self
-                .credential_call(
-                    40,
-                    &[
-                        NativeArgument::Int(*slot),
-                        NativeArgument::Bytes(heap.bytes(*pin)?),
-                        NativeArgument::Int(*pin_offset),
-                        NativeArgument::Int(*pin_length),
-                        NativeArgument::Int(*pin_retries),
-                        NativeArgument::Bytes(heap.bytes(*puk)?),
-                        NativeArgument::Int(*puk_offset),
-                        NativeArgument::Int(*puk_length),
-                        NativeArgument::Int(*puk_retries),
-                    ],
-                )?,
-            (41, [Opaque(2), Int(slot), candidate, Int(offset), Int(length)]) => self.credential_call(
-                41,
+            (
+                RUNTIME_SERVICE_FIXED_TIME_EQUALS,
+                [Opaque(2), left, Int(left_offset), Int(left_length), right, Int(right_offset), Int(right_length)],
+            ) => scalar(Some(self.fixed_time_equals(
+                heap,
+                (*left, *left_offset, *left_length),
+                (*right, *right_offset, *right_length),
+            )?)),
+            (
+                CREDENTIAL_SERVICE_CREATE,
+                [Opaque(2), Int(slot), pin, Int(pin_offset), Int(pin_length), Int(pin_retries), puk, Int(puk_offset), Int(puk_length), Int(puk_retries)],
+            ) => self.credential_call(
+                CREDENTIAL_SERVICE_CREATE,
+                &[
+                    NativeArgument::Int(*slot),
+                    NativeArgument::Bytes(heap.bytes(*pin)?),
+                    NativeArgument::Int(*pin_offset),
+                    NativeArgument::Int(*pin_length),
+                    NativeArgument::Int(*pin_retries),
+                    NativeArgument::Bytes(heap.bytes(*puk)?),
+                    NativeArgument::Int(*puk_offset),
+                    NativeArgument::Int(*puk_length),
+                    NativeArgument::Int(*puk_retries),
+                ],
+            )?,
+            (
+                CREDENTIAL_SERVICE_VERIFY,
+                [Opaque(2), Int(slot), candidate, Int(offset), Int(length)],
+            ) => self.credential_call(
+                CREDENTIAL_SERVICE_VERIFY,
                 &[
                     NativeArgument::Int(*slot),
                     NativeArgument::Bytes(heap.bytes(*candidate)?),
@@ -327,11 +386,15 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*length),
                 ],
             )?,
-            (42, [Opaque(2), Int(slot)]) => {
-                self.credential_call(42, &[NativeArgument::Int(*slot)])?
-            }
-            (43, [Opaque(2), Int(slot), new_pin, Int(offset), Int(length)]) => self.credential_call(
-                43,
+            (CREDENTIAL_SERVICE_IS_VERIFIED, [Opaque(2), Int(slot)]) => self.credential_call(
+                CREDENTIAL_SERVICE_IS_VERIFIED,
+                &[NativeArgument::Int(*slot)],
+            )?,
+            (
+                CREDENTIAL_SERVICE_CHANGE,
+                [Opaque(2), Int(slot), new_pin, Int(offset), Int(length)],
+            ) => self.credential_call(
+                CREDENTIAL_SERVICE_CHANGE,
                 &[
                     NativeArgument::Int(*slot),
                     NativeArgument::Bytes(heap.bytes(*new_pin)?),
@@ -339,8 +402,11 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*length),
                 ],
             )?,
-            (44, [Opaque(2), Int(slot), puk, Int(puk_offset), Int(puk_length), new_pin, Int(new_pin_offset), Int(new_pin_length)]) => self.credential_call(
-                44,
+            (
+                CREDENTIAL_SERVICE_UNBLOCK,
+                [Opaque(2), Int(slot), puk, Int(puk_offset), Int(puk_length), new_pin, Int(new_pin_offset), Int(new_pin_length)],
+            ) => self.credential_call(
+                CREDENTIAL_SERVICE_UNBLOCK,
                 &[
                     NativeArgument::Int(*slot),
                     NativeArgument::Bytes(heap.bytes(*puk)?),
@@ -351,31 +417,20 @@ impl<P: Platform> crate::mc04_vm::External for Host<'_, '_, P> {
                     NativeArgument::Int(*new_pin_length),
                 ],
             )?,
-            (45, [Opaque(2), Int(slot), Int(kind)]) => self.credential_call(
-                45,
-                &[NativeArgument::Int(*slot), NativeArgument::Int(*kind)],
-            )?,
-            (46, [Opaque(3)]) => {
+            (CREDENTIAL_SERVICE_RETRIES_REMAINING, [Opaque(2), Int(slot), Int(kind)]) => self
+                .credential_call(
+                    CREDENTIAL_SERVICE_RETRIES_REMAINING,
+                    &[NativeArgument::Int(*slot), NativeArgument::Int(*kind)],
+                )?,
+            (TRANSACTION_SCOPE_RUNTIME_BEGIN, []) => {
                 self.begin_transaction()?;
                 BufferResult::Void
             }
-            (55, []) => {
-                self.begin_transaction()?;
-                BufferResult::Void
-            }
-            (47, [Opaque(3)]) => {
+            (TRANSACTION_SCOPE_RUNTIME_COMMIT, []) => {
                 self.transaction.commit()?;
                 BufferResult::Void
             }
-            (56, []) => {
-                self.transaction.commit()?;
-                BufferResult::Void
-            }
-            (48, [Opaque(3)]) => {
-                self.transaction.abort()?;
-                BufferResult::Void
-            }
-            (57, []) => {
+            (TRANSACTION_SCOPE_RUNTIME_ABORT, []) => {
                 self.transaction.abort()?;
                 BufferResult::Void
             }
@@ -442,7 +497,11 @@ impl<P: Platform> Host<'_, '_, P> {
         Ok(())
     }
 
-    pub(super) fn credential_call(&mut self, id: u8, args: &[NativeArgument<'_>]) -> Result<BufferResult> {
+    pub(super) fn credential_call(
+        &mut self,
+        id: u8,
+        args: &[NativeArgument<'_>],
+    ) -> Result<BufferResult> {
         if !self.capabilities.contains(&id) {
             return Err(Error::Unauthorized);
         }
@@ -451,21 +510,25 @@ impl<P: Platform> Host<'_, '_, P> {
             return Err(Error::Bounds);
         }
         let byte_total = match id {
-            40 => native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?
-                .len()
-                .checked_add(
-                    native_range(args[5].bytes()?, args[6].int()?, args[7].int()?)?.len(),
-                )
-                .ok_or(Error::Quota)?,
-            41 | 43 => {
+            CREDENTIAL_SERVICE_CREATE => {
+                native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?
+                    .len()
+                    .checked_add(
+                        native_range(args[5].bytes()?, args[6].int()?, args[7].int()?)?.len(),
+                    )
+                    .ok_or(Error::Quota)?
+            }
+            CREDENTIAL_SERVICE_VERIFY | CREDENTIAL_SERVICE_CHANGE => {
                 native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len()
             }
-            44 => native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?
-                .len()
-                .checked_add(
-                    native_range(args[4].bytes()?, args[5].int()?, args[6].int()?)?.len(),
-                )
-                .ok_or(Error::Quota)?,
+            CREDENTIAL_SERVICE_UNBLOCK => {
+                native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?
+                    .len()
+                    .checked_add(
+                        native_range(args[4].bytes()?, args[5].int()?, args[6].int()?)?.len(),
+                    )
+                    .ok_or(Error::Quota)?
+            }
             _ => 0,
         };
         if byte_total > 96 {
@@ -477,7 +540,7 @@ impl<P: Platform> Host<'_, '_, P> {
         }
         self.budget -= cost;
         let result = match id {
-            40 => {
+            CREDENTIAL_SERVICE_CREATE => {
                 self.credentials.create(
                     self.owner,
                     args[0].int()?,
@@ -489,16 +552,14 @@ impl<P: Platform> Host<'_, '_, P> {
                 *self.persistent_dirty = true;
                 BufferResult::Void
             }
-            41 => {
+            CREDENTIAL_SERVICE_VERIFY => {
                 let slot = args[0].int()?;
-                let (verified, changed) =
-                    self.credentials
-                        .verify_pin(
-                            self.owner,
-                            slot,
-                            native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
-                            self.platform,
-                        )?;
+                let (verified, changed) = self.credentials.verify_pin(
+                    self.owner,
+                    slot,
+                    native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
+                    self.platform,
+                )?;
                 if verified {
                     self.authorized_credentials.insert(slot)?;
                     *self.persistent_dirty |= changed;
@@ -510,10 +571,10 @@ impl<P: Platform> Host<'_, '_, P> {
                 }
                 BufferResult::Scalar(i32::from(verified))
             }
-            42 => BufferResult::Scalar(i32::from(
+            CREDENTIAL_SERVICE_IS_VERIFIED => BufferResult::Scalar(i32::from(
                 self.authorized_credentials.contains(args[0].int()?),
             )),
-            43 => {
+            CREDENTIAL_SERVICE_CHANGE => {
                 let slot = args[0].int()?;
                 if !self.authorized_credentials.contains(slot) {
                     return Err(Error::Unauthorized);
@@ -527,7 +588,7 @@ impl<P: Platform> Host<'_, '_, P> {
                 *self.persistent_dirty |= changed;
                 BufferResult::Void
             }
-            44 => {
+            CREDENTIAL_SERVICE_UNBLOCK => {
                 let slot = args[0].int()?;
                 let (unblocked, changed) = self.credentials.unblock(
                     self.owner,
@@ -546,7 +607,7 @@ impl<P: Platform> Host<'_, '_, P> {
                 }
                 BufferResult::Scalar(i32::from(unblocked))
             }
-            45 => {
+            CREDENTIAL_SERVICE_RETRIES_REMAINING => {
                 let (pin, puk) = self.credentials.retries(self.owner, args[0].int()?)?;
                 BufferResult::Scalar(i32::from(match args[1].int()? {
                     0 => pin,
@@ -589,7 +650,7 @@ impl<P: Platform> Host<'_, '_, P> {
         let mut complete_byte_total = 0usize;
         for argument in args {
             if let NativeArgument::Bytes(bytes) = argument {
-                let argument_limit = if id == 32 {
+                let argument_limit = if id == STORAGE_SERVICE_SET_BYTES_2_ARGS {
                     usize::from(MAX_DECLARED_BLOB_BYTES)
                 } else {
                     MAX_KEY_SERVICE_ARGUMENT_BYTES
@@ -603,99 +664,102 @@ impl<P: Platform> Host<'_, '_, P> {
             }
         }
         let byte_total = match id {
-            36 => args[0]
+            KEY_HANDLE_SIGN_P256 => args[0]
                 .bytes()?
                 .len()
-                .checked_add(
-                    native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len(),
-                )
+                .checked_add(native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len())
                 .ok_or(Error::Quota)?,
-            52 => native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len(),
+            STORAGE_SERVICE_SET_BYTES_4_ARGS => {
+                native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?.len()
+            }
             _ => complete_byte_total,
         };
         if byte_total > MAX_KEY_SERVICE_TOTAL_BYTES {
             return Err(Error::Quota);
         }
-        let cost = if matches!(id, 35 | 36 | 38) { 512 } else { 32 } + byte_total / 16;
+        let cost = if matches!(
+            id,
+            KEY_HANDLE_EXPORT_P256_PUBLIC_KEY | KEY_HANDLE_SIGN_P256 | KEY_HANDLE_DERIVE_P256
+        ) {
+            512
+        } else {
+            32
+        } + byte_total / 16;
         if self.budget < cost {
             return Err(Error::Budget);
         }
         self.budget -= cost;
         // Management credentials never enter this store. A caller can access only its current SSD.
         let bytes = match id {
-            22 => {
+            KEY_SERVICE_GENERATE => {
                 if self.keys.len() >= self.max_key_slots {
                     return Err(Error::Quota);
                 }
-                let generated = self.keys
-                    .generate(self.owner, args[0].int()?, args[1].int()?, |b| {
-                        self.platform.random(b)
-                    })?;
+                let generated =
+                    self.keys
+                        .generate(self.owner, args[0].int()?, args[1].int()?, |b| {
+                            self.platform.random(b)
+                        })?;
                 *self.persistent_dirty = true;
                 generated
             }
-            23 => {
-                self.keys.open(self.owner, args[0].int()?)?
-            }
-            24 => {
+            KEY_SERVICE_OPEN => self.keys.open(self.owner, args[0].int()?)?,
+            KEY_SERVICE_DELETE => {
                 self.keys.delete(args[0].int()?)?;
                 *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
-            25 => self.keys.hmac(
+            KEY_HANDLE_HMAC_SHA256 => self.keys.hmac(
                 self.owner,
                 args[0].bytes()?,
                 args[1].bytes()?,
                 self.platform,
             )?,
-            26 => self.keys.cmac(
+            KEY_HANDLE_AES_CMAC => self.keys.cmac(
                 self.owner,
                 args[0].bytes()?,
                 args[1].bytes()?,
                 self.platform,
             )?,
-            27 | 28 => self.keys.cbc(
+            KEY_HANDLE_ENCRYPT_CBC | KEY_HANDLE_DECRYPT_CBC => self.keys.cbc(
                 self.owner,
                 args[0].bytes()?,
                 args[1].bytes()?,
                 args[2].bytes()?,
-                id == 27,
+                id == KEY_HANDLE_ENCRYPT_CBC,
                 self.platform,
             )?,
-            29 | 30 => {
+            KEY_HANDLE_ENCRYPT_CCM | KEY_HANDLE_DECRYPT_CCM => {
                 let buffers = [args[1].bytes()?, args[2].bytes()?, args[3].bytes()?];
                 self.keys.ccm(
                     self.owner,
                     args[0].bytes()?,
                     &buffers,
-                    id == 29,
+                    id == KEY_HANDLE_ENCRYPT_CCM,
                     self.platform,
                 )?
             }
-            35 => self.keys.p256_public_key(
-                self.owner,
-                args[0].bytes()?,
-                self.platform,
-            )?,
-            36 => self.keys.p256_sign(
+            KEY_HANDLE_EXPORT_P256_PUBLIC_KEY => {
+                self.keys
+                    .p256_public_key(self.owner, args[0].bytes()?, self.platform)?
+            }
+            KEY_HANDLE_SIGN_P256 => self.keys.p256_sign(
                 self.owner,
                 args[0].bytes()?,
                 native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?,
                 self.platform,
             )?,
-            38 => self.keys.p256_ecdh(
+            KEY_HANDLE_DERIVE_P256 => self.keys.p256_ecdh(
                 self.owner,
                 args[0].bytes()?,
                 args[1].bytes()?,
                 self.platform,
             )?,
-            31 => {
-                match self.blobs.get(&args[0].int()?) {
-                    Some(value) => Self::copy_buffer(value)?,
-                    None => Vec::new(),
-                }
-            }
-            32 => {
+            STORAGE_SERVICE_GET_BYTES => match self.blobs.get(&args[0].int()?) {
+                Some(value) => Self::copy_buffer(value)?,
+                None => Vec::new(),
+            },
+            STORAGE_SERVICE_SET_BYTES_2_ARGS => {
                 let key = args[0].int()?;
                 let value = args[1].bytes()?;
                 if value.len() > usize::from(MAX_DECLARED_BLOB_BYTES) {
@@ -708,7 +772,11 @@ impl<P: Platform> Host<'_, '_, P> {
                 {
                     return Err(Error::Quota);
                 }
-                if self.blobs.get(&key).is_some_and(|old| old.as_slice() == value) {
+                if self
+                    .blobs
+                    .get(&key)
+                    .is_some_and(|old| old.as_slice() == value)
+                {
                     return Ok(BufferResult::Void);
                 }
                 let replacement = Self::copy_buffer(value)?;
@@ -716,7 +784,7 @@ impl<P: Platform> Host<'_, '_, P> {
                 *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
-            52 => {
+            STORAGE_SERVICE_SET_BYTES_4_ARGS => {
                 let key = args[0].int()?;
                 let value = native_range(args[1].bytes()?, args[2].int()?, args[3].int()?)?;
                 if value.len() > usize::from(MAX_DECLARED_BLOB_BYTES) {
@@ -729,7 +797,11 @@ impl<P: Platform> Host<'_, '_, P> {
                 {
                     return Err(Error::Quota);
                 }
-                if self.blobs.get(&key).is_some_and(|old| old.as_slice() == value) {
+                if self
+                    .blobs
+                    .get(&key)
+                    .is_some_and(|old| old.as_slice() == value)
+                {
                     return Ok(BufferResult::Void);
                 }
                 let replacement = Self::copy_buffer(value)?;
@@ -737,13 +809,13 @@ impl<P: Platform> Host<'_, '_, P> {
                 *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
-            33 => {
+            STORAGE_SERVICE_DELETE_BYTES => {
                 let mut removed = self.blobs.remove(&args[0].int()?).ok_or(Error::Missing)?;
                 removed.zeroize();
                 *self.persistent_dirty = true;
                 return Ok(BufferResult::Void);
             }
-            34 => {
+            STORAGE_SERVICE_CONTAINS_BYTES => {
                 return Ok(BufferResult::Scalar(
                     self.blobs.contains_key(&args[0].int()?) as i32,
                 ));
@@ -754,8 +826,11 @@ impl<P: Platform> Host<'_, '_, P> {
     }
 
     pub(super) fn buffers(&mut self, id: u8, args: &[&[u8]]) -> Result<BufferResult> {
-        let cost = if matches!(id, 21 | 37) { 512 } else { 1 }
-            + args.iter().map(|value| value.len()).sum::<usize>() / 32;
+        let cost = if id == RUNTIME_SERVICE_VERIFY_P256 {
+            512
+        } else {
+            1
+        } + args.iter().map(|value| value.len()).sum::<usize>() / 32;
         if self.budget < cost {
             return Err(Error::Budget);
         }
@@ -764,15 +839,13 @@ impl<P: Platform> Host<'_, '_, P> {
             return Err(Error::Unauthorized);
         }
         match id {
-            20 if args.len() == 1 => {
+            RUNTIME_SERVICE_SHA256 if args.len() == 1 => {
                 let mut output = crate::crypto::zeroizing_buffer(32)?;
-                self.platform.sha256_into(
-                    args[0],
-                    output.as_mut_slice().try_into().unwrap(),
-                )?;
+                self.platform
+                    .sha256_into(args[0], output.as_mut_slice().try_into().unwrap())?;
                 Ok(BufferResult::Bytes(core::mem::take(&mut *output)))
             }
-            37 if args.len() == 3 => {
+            RUNTIME_SERVICE_VERIFY_P256 if args.len() == 3 => {
                 let valid = self.platform.p256_ecdsa_verify(args[0], args[1], args[2])?;
                 Ok(BufferResult::Scalar(valid as i32))
             }
@@ -788,21 +861,18 @@ impl<P: Platform> Host<'_, '_, P> {
     }
     pub(super) fn call(&mut self, id: u8, a: &[i32]) -> Result<Option<i32>> {
         self.charge(id, 0)?;
-        let (id, a) = match id {
-            7 => (3, a),
-            8 => (4, a),
-            _ => (id, a),
-        };
         match id {
-            9 => Ok(Some(self.level as i32)),
-            10 => Ok(Some((self.level != 0) as i32)),
-            11 => Ok(Some(i32::try_from(self.data.len()).map_err(|_| Error::Bounds)?)),
-            2 => {
+            SECURE_CHANNEL_SERVICE_SECURITY_LEVEL => Ok(Some(self.level as i32)),
+            SECURE_CHANNEL_SERVICE_IS_AUTHENTICATED => Ok(Some((self.level != 0) as i32)),
+            COMMAND_SERVICE_LENGTH => Ok(Some(
+                i32::try_from(self.data.len()).map_err(|_| Error::Bounds)?,
+            )),
+            RESPONSE_SERVICE_SET_STATUS => {
                 self.sw = u16::try_from(a[0]).map_err(|_| Error::Bounds)?;
                 Ok(None)
             }
-            3 => Ok(Some(*self.store.get(&a[0]).unwrap_or(&0))),
-            4 => {
+            STORAGE_SERVICE_GET_INT32 => Ok(Some(*self.store.get(&a[0]).unwrap_or(&0))),
+            STORAGE_SERVICE_SET_INT32 => {
                 if !self.store.contains_key(&a[0]) && self.store.len() >= self.max_int_records {
                     return Err(Error::Quota);
                 }
@@ -812,12 +882,12 @@ impl<P: Platform> Host<'_, '_, P> {
                 }
                 Ok(None)
             }
-            5 => {
+            RANDOM_SERVICE_GET_INT32 => {
                 let mut b = [0; 4];
                 self.platform.random(&mut b)?;
                 Ok(Some(i32::from_le_bytes(b)))
             }
-            6 => {
+            RUNTIME_SERVICE_WRITE_HARDWARE => {
                 self.platform.gpio(a[0], a[1])?;
                 Ok(None)
             }
@@ -832,7 +902,7 @@ impl<P: Platform> Host<'_, '_, P> {
         offset: i32,
         length: i32,
     ) -> Result<()> {
-        if !self.capabilities.contains(&39) {
+        if !self.capabilities.contains(&RANDOM_SERVICE_FILL) {
             return Err(Error::Unauthorized);
         }
         let offset = usize::try_from(offset).map_err(|_| Error::Bounds)?;
@@ -863,14 +933,15 @@ impl<P: Platform> Host<'_, '_, P> {
         destination: crate::mc04_vm::RuntimeValue,
         destination_offset: i32,
     ) -> Result<i32> {
-        if !self.capabilities.contains(&49) {
+        if !self.capabilities.contains(&RUNTIME_SERVICE_SHA256_INTO) {
             return Err(Error::Unauthorized);
         }
         let input_offset = usize::try_from(input_offset).map_err(|_| Error::Bounds)?;
         let input_length = usize::try_from(input_length).map_err(|_| Error::Bounds)?;
-        let input_end = input_offset.checked_add(input_length).ok_or(Error::Bounds)?;
-        let destination_offset =
-            usize::try_from(destination_offset).map_err(|_| Error::Bounds)?;
+        let input_end = input_offset
+            .checked_add(input_length)
+            .ok_or(Error::Bounds)?;
+        let destination_offset = usize::try_from(destination_offset).map_err(|_| Error::Bounds)?;
         let destination_end = destination_offset.checked_add(32).ok_or(Error::Bounds)?;
         heap.bytes(destination)?
             .get(destination_offset..destination_end)
@@ -892,7 +963,7 @@ impl<P: Platform> Host<'_, '_, P> {
     }
 
     pub(super) fn random_bytes(&mut self, length: i32) -> Result<Vec<u8>> {
-        if !self.capabilities.contains(&50) {
+        if !self.capabilities.contains(&RANDOM_SERVICE_GET_BYTES) {
             return Err(Error::Unauthorized);
         }
         let length = usize::try_from(length).map_err(|_| Error::Bounds)?;
@@ -924,7 +995,10 @@ impl<P: Platform> Host<'_, '_, P> {
         left: (crate::mc04_vm::RuntimeValue, i32, i32),
         right: (crate::mc04_vm::RuntimeValue, i32, i32),
     ) -> Result<i32> {
-        if !self.capabilities.contains(&51) {
+        if !self
+            .capabilities
+            .contains(&RUNTIME_SERVICE_FIXED_TIME_EQUALS)
+        {
             return Err(Error::Unauthorized);
         }
         let left_offset = usize::try_from(left.1).map_err(|_| Error::Bounds)?;
@@ -935,7 +1009,9 @@ impl<P: Platform> Host<'_, '_, P> {
             return Err(Error::Bounds);
         }
         let left_end = left_offset.checked_add(left_length).ok_or(Error::Bounds)?;
-        let right_end = right_offset.checked_add(right_length).ok_or(Error::Bounds)?;
+        let right_end = right_offset
+            .checked_add(right_length)
+            .ok_or(Error::Bounds)?;
         let left = heap
             .bytes(left.0)?
             .get(left_offset..left_end)
@@ -944,7 +1020,10 @@ impl<P: Platform> Host<'_, '_, P> {
             .bytes(right.0)?
             .get(right_offset..right_end)
             .ok_or(Error::Bounds)?;
-        let cost = left_length.max(right_length).checked_add(1).ok_or(Error::Budget)?;
+        let cost = left_length
+            .max(right_length)
+            .checked_add(1)
+            .ok_or(Error::Budget)?;
         if self.budget < cost {
             return Err(Error::Budget);
         }
@@ -954,18 +1033,34 @@ impl<P: Platform> Host<'_, '_, P> {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn read_tlv(
-        &mut self, heap: &mut crate::mc04_vm::Heap,
-        input: crate::mc04_vm::RuntimeValue, offset: i32, length: i32,
-        result: crate::mc04_vm::RuntimeValue, result_offset: i32, der: bool,
+        &mut self,
+        heap: &mut crate::mc04_vm::Heap,
+        input: crate::mc04_vm::RuntimeValue,
+        offset: i32,
+        length: i32,
+        result: crate::mc04_vm::RuntimeValue,
+        result_offset: i32,
+        der: bool,
     ) -> Result<bool> {
-        self.charge(54, 0)?;
+        self.charge(TLV_TRY_READ, 0)?;
         let (Ok(offset), Ok(length), Ok(result_offset)) = (
-            usize::try_from(offset), usize::try_from(length), usize::try_from(result_offset),
-        ) else { return Ok(false); };
-        let Some(range) = microcard_memory::byte_range(heap.bytes(input)?.len(), offset, length) else { return Ok(false); };
-        if microcard_memory::byte_range(heap.int_length(result)?, result_offset, 5).is_none() { return Ok(false); }
+            usize::try_from(offset),
+            usize::try_from(length),
+            usize::try_from(result_offset),
+        ) else {
+            return Ok(false);
+        };
+        let Some(range) = microcard_memory::byte_range(heap.bytes(input)?.len(), offset, length)
+        else {
+            return Ok(false);
+        };
+        if microcard_memory::byte_range(heap.int_length(result)?, result_offset, 5).is_none() {
+            return Ok(false);
+        }
         self.budget = self.budget.checked_sub(length).ok_or(Error::Budget)?;
-        let Some(mut parsed) = crate::tlv::read(&heap.bytes(input)?[range], der) else { return Ok(false); };
+        let Some(mut parsed) = crate::tlv::read(&heap.bytes(input)?[range], der) else {
+            return Ok(false);
+        };
         parsed[2] += offset as i32;
         parsed[4] += offset as i32;
         heap.write_ints(result, result_offset, &parsed)?;
@@ -973,19 +1068,40 @@ impl<P: Platform> Host<'_, '_, P> {
     }
 
     pub(super) fn copy_bytes(
-        &mut self, heap: &mut crate::mc04_vm::Heap,
-        source: crate::mc04_vm::RuntimeValue, source_offset: i32,
-        destination: crate::mc04_vm::RuntimeValue, destination_offset: i32, length: i32,
+        &mut self,
+        heap: &mut crate::mc04_vm::Heap,
+        source: crate::mc04_vm::RuntimeValue,
+        source_offset: i32,
+        destination: crate::mc04_vm::RuntimeValue,
+        destination_offset: i32,
+        length: i32,
     ) -> Result<bool> {
-        self.charge(53, 0)?;
+        self.charge(BUFFERS_COPY, 0)?;
         let (Ok(source_offset), Ok(destination_offset), Ok(length)) = (
-            usize::try_from(source_offset), usize::try_from(destination_offset), usize::try_from(length),
-        ) else { return Ok(false); };
+            usize::try_from(source_offset),
+            usize::try_from(destination_offset),
+            usize::try_from(length),
+        ) else {
+            return Ok(false);
+        };
         if microcard_memory::byte_range(heap.bytes(source)?.len(), source_offset, length).is_none()
-            || microcard_memory::byte_range(heap.bytes(destination)?.len(), destination_offset, length).is_none()
-        { return Ok(false); }
+            || microcard_memory::byte_range(
+                heap.bytes(destination)?.len(),
+                destination_offset,
+                length,
+            )
+            .is_none()
+        {
+            return Ok(false);
+        }
         self.budget = self.budget.checked_sub(length).ok_or(Error::Budget)?;
-        heap.copy_bytes(source, source_offset, destination, destination_offset, length)?;
+        heap.copy_bytes(
+            source,
+            source_offset,
+            destination,
+            destination_offset,
+            length,
+        )?;
         Ok(true)
     }
 
@@ -1001,12 +1117,17 @@ impl<P: Platform> Host<'_, '_, P> {
         let source_offset = usize::try_from(source_offset).map_err(|_| Error::Bounds)?;
         let length = usize::try_from(length).map_err(|_| Error::Bounds)?;
         let source_end = source_offset.checked_add(length).ok_or(Error::Bounds)?;
-        let destination_end = destination_offset.checked_add(length).ok_or(Error::Bounds)?;
-        let source = self.data.get(source_offset..source_end).ok_or(Error::Bounds)?;
+        let destination_end = destination_offset
+            .checked_add(length)
+            .ok_or(Error::Bounds)?;
+        let source = self
+            .data
+            .get(source_offset..source_end)
+            .ok_or(Error::Bounds)?;
         heap.bytes(destination)?
             .get(destination_offset..destination_end)
             .ok_or(Error::Bounds)?;
-        self.charge(12, length)?;
+        self.charge(COMMAND_SERVICE_COPY_TO, length)?;
         heap.bytes_mut(destination)?[destination_offset..destination_end].copy_from_slice(source);
         Ok(())
     }
@@ -1030,7 +1151,7 @@ impl<P: Platform> Host<'_, '_, P> {
             return Err(Error::Quota);
         }
         self.out.try_reserve(length).map_err(|_| Error::Quota)?;
-        self.charge(13, length)?;
+        self.charge(RESPONSE_SERVICE_WRITE, length)?;
         self.out.extend_from_slice(source);
         Ok(())
     }

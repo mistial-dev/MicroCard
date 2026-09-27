@@ -4,6 +4,57 @@ use crate::{Error, Result};
 
 pub const CATALOG_SHA256: &str = "fbf27e9a7355a1d62755412dfad24122b24708b1c0c76dbbef17936d8ed0cad0";
 
+/// Native operation IDs from the MC04 ABI catalog.
+pub mod id {
+    pub const RESPONSE_SERVICE_SET_STATUS: u8 = 2;
+    pub const RANDOM_SERVICE_GET_INT32: u8 = 5;
+    pub const RUNTIME_SERVICE_WRITE_HARDWARE: u8 = 6;
+    pub const STORAGE_SERVICE_GET_INT32: u8 = 7;
+    pub const STORAGE_SERVICE_SET_INT32: u8 = 8;
+    pub const SECURE_CHANNEL_SERVICE_SECURITY_LEVEL: u8 = 9;
+    pub const SECURE_CHANNEL_SERVICE_IS_AUTHENTICATED: u8 = 10;
+    pub const COMMAND_SERVICE_LENGTH: u8 = 11;
+    pub const COMMAND_SERVICE_COPY_TO: u8 = 12;
+    pub const RESPONSE_SERVICE_WRITE: u8 = 13;
+    pub const RUNTIME_SERVICE_SHA256: u8 = 20;
+    pub const KEY_SERVICE_GENERATE: u8 = 22;
+    pub const KEY_SERVICE_OPEN: u8 = 23;
+    pub const KEY_SERVICE_DELETE: u8 = 24;
+    pub const KEY_HANDLE_HMAC_SHA256: u8 = 25;
+    pub const KEY_HANDLE_AES_CMAC: u8 = 26;
+    pub const KEY_HANDLE_ENCRYPT_CBC: u8 = 27;
+    pub const KEY_HANDLE_DECRYPT_CBC: u8 = 28;
+    pub const KEY_HANDLE_ENCRYPT_CCM: u8 = 29;
+    pub const KEY_HANDLE_DECRYPT_CCM: u8 = 30;
+    pub const STORAGE_SERVICE_GET_BYTES: u8 = 31;
+    pub const STORAGE_SERVICE_SET_BYTES_2_ARGS: u8 = 32;
+    pub const STORAGE_SERVICE_DELETE_BYTES: u8 = 33;
+    pub const STORAGE_SERVICE_CONTAINS_BYTES: u8 = 34;
+    pub const KEY_HANDLE_EXPORT_P256_PUBLIC_KEY: u8 = 35;
+    pub const KEY_HANDLE_SIGN_P256: u8 = 36;
+    pub const RUNTIME_SERVICE_VERIFY_P256: u8 = 37;
+    pub const KEY_HANDLE_DERIVE_P256: u8 = 38;
+    pub const RANDOM_SERVICE_FILL: u8 = 39;
+    pub const CREDENTIAL_SERVICE_CREATE: u8 = 40;
+    pub const CREDENTIAL_SERVICE_VERIFY: u8 = 41;
+    pub const CREDENTIAL_SERVICE_IS_VERIFIED: u8 = 42;
+    pub const CREDENTIAL_SERVICE_CHANGE: u8 = 43;
+    pub const CREDENTIAL_SERVICE_UNBLOCK: u8 = 44;
+    pub const CREDENTIAL_SERVICE_RETRIES_REMAINING: u8 = 45;
+    pub const RUNTIME_SERVICE_SHA256_INTO: u8 = 49;
+    pub const RANDOM_SERVICE_GET_BYTES: u8 = 50;
+    pub const RUNTIME_SERVICE_FIXED_TIME_EQUALS: u8 = 51;
+    pub const STORAGE_SERVICE_SET_BYTES_4_ARGS: u8 = 52;
+    pub const BUFFERS_COPY: u8 = 53;
+    pub const TLV_TRY_READ: u8 = 54;
+    pub const TRANSACTION_SCOPE_RUNTIME_BEGIN: u8 = 55;
+    pub const TRANSACTION_SCOPE_RUNTIME_COMMIT: u8 = 56;
+    pub const TRANSACTION_SCOPE_RUNTIME_ABORT: u8 = 57;
+    pub const TRANSACTION_RUNTIME_CURRENT: u8 = 58;
+    pub const TRANSACTION_RUNTIME_INFORMATION: u8 = 59;
+    pub const TRANSACTION_INFORMATION_RUNTIME_STATUS: u8 = 60;
+}
+
 pub const CAPABILITIES: &[u8] = &[
     2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
     36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,

@@ -265,7 +265,7 @@ def rust(abi, members, digest):
     return "\n".join(lines)
 
 
-def native_rust(abi, natives, digest):
+def native_rust(abi, members, natives, digest):
     valid = sorted(natives)
     capabilities = sorted({shape[2] for shape in natives.values()})
     lines = [
@@ -274,6 +274,32 @@ def native_rust(abi, natives, digest):
         "use crate::{Error, Result};",
         "",
         f'pub const CATALOG_SHA256: &str = "{digest}";',
+        "",
+        "/// Native operation IDs from the MC04 ABI catalog.",
+        "pub mod id {",
+    ]
+    names = {}
+    for member in members:
+        if member["lowering"] != "native":
+            continue
+        native = member["native"]
+        if native in names or member.get("projection"):
+            continue
+        stem = re.sub(r"(?<!^)(?=[A-Z])", "_", member["owner"]).upper()
+        method = member["name"].removeprefix("get_")
+        method = re.sub(r"(?<!^)(?=[A-Z])", "_", method).upper()
+        names[native] = f"{stem}_{method}"
+    emitted_names = set()
+    for native, name in sorted(names.items()):
+        if list(names.values()).count(name) > 1:
+            member = next(m for m in members if m.get("native") == native)
+            name += f"_{len(member['parameters'])}_ARGS"
+        if name in emitted_names:
+            raise ValueError(f"ambiguous native constant {name}")
+        emitted_names.add(name)
+        lines.append(f"    pub const {name}: u8 = {native};")
+    lines += [
+        "}",
         "",
         f"pub const CAPABILITIES: &[u8] = &[{', '.join(str(value) for value in capabilities)}];",
         "",
@@ -342,7 +368,7 @@ def generated_outputs():
     return {
         CSHARP: csharp(abi, members, digest),
         RUST: format_rust(rust(abi, members, digest)),
-        NATIVE: format_rust(native_rust(abi, natives, digest)),
+        NATIVE: format_rust(native_rust(abi, members, natives, digest)),
     }
 
 
