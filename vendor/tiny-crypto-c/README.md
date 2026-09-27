@@ -9,9 +9,12 @@ This directory contains selected EC source from
 [`003caed622580829c7e36b583bbe4084663b2ed5`](https://github.com/mistial-dev/tiny-crypto-c/commit/003caed622580829c7e36b583bbe4084663b2ed5).
 The ISO 9797 addition is proposed upstream in
 [`tiny-crypto-c` PR 2](https://github.com/mistial-dev/tiny-crypto-c/pull/2).
-The AES-CTR and RSA sources and headers are also copied from commit
-`003caed622580829c7e36b583bbe4084663b2ed5`; only the files required by
-the selected build features are vendored. The sources are copied without local
+The AES-CTR sources and headers are copied from commit
+`003caed622580829c7e36b583bbe4084663b2ed5`. The RSA source and header
+include the bounded raw-operation API from local tiny-crypto-c commit
+`9e5b337` on the existing `crypto-audit-fixes` branch. That commit has not
+been pushed. Only the files required by the selected build features are
+vendored. The sources are copied without local
 modifications. Their SPDX notices identify
 GPL-2.0-or-later; the upstream license text is retained in `LICENSE`.
 The Rust bridge uses AGPL-3.0-or-later. The GPLv3 option permitted by the C

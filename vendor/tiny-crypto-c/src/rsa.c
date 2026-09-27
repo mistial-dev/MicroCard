@@ -48,6 +48,18 @@ size_t TC_RSA_encrypt_workspace_words(size_t bits)
   return TC_RSA_verify_workspace_words(bits);
 }
 
+size_t TC_RSA_raw_public_workspace_words(size_t bits)
+{
+  if (bits != 1024 && bits != 2048 && bits != 3072) return 0;
+  return TC_RSA_RAW_PUBLIC_WORKSPACE_WORDS(bits);
+}
+
+size_t TC_RSA_raw_private_workspace_words(size_t bits)
+{
+  if (bits != 1024 && bits != 2048 && bits != 3072) return 0;
+  return TC_RSA_RAW_PRIVATE_WORKSPACE_WORDS(bits);
+}
+
 size_t TC_RSA_keygen_workspace_words(size_t bits)
 {
   if (bits != 1024 && bits != 2048 && bits != 3072) return 0;
@@ -372,6 +384,59 @@ static TC_RSA_result tc_rsa_public_inputs(const TC_RSA_public_key* key,
   inputs[4] = (TC_bytes){first.data,first.length};
   inputs[5] = (TC_bytes){second.data,second.length};
   return tc_rsa_output_inputs(workspace,inputs,sizeof inputs / sizeof *inputs,output);
+}
+
+TC_RSA_result TC_RSA_raw_public(const TC_RSA_public_key* key, TC_bytes input,
+    const TC_RSA_workspace* workspace, TC_buffer output, TC_work_budget* work)
+{
+  if (!key || !workspace || !work) return TC_RSA_ARGUMENT;
+  TC_RSA_result result = tc_rsa_workspace_inputs(workspace,
+      &(TC_bytes){(const uint8_t*)work,sizeof *work},1);
+  if (result != TC_RSA_OK) return result;
+  result = tc_rsa_public_inputs(key,input,(TC_bytes){(const uint8_t*)work,sizeof *work},
+      (TC_bytes){output.data,output.capacity},workspace);
+  if (result != TC_RSA_OK) return result;
+  const size_t length = key->modulus.length;
+  if (input.length != length) return TC_RSA_INVALID;
+  if (output.capacity < length ||
+      workspace->capacity < TC_RSA_raw_public_workspace_words(length * 8))
+    return TC_RSA_LIMIT;
+  size_t available = work->remaining;
+  result = tc_rsa_public_operation(key->modulus.data,length,key->exponent.data,
+      key->exponent.length,input.data,output.data,workspace->words,
+      workspace->capacity,&available);
+  work->remaining = (uint32_t)available;
+  return result;
+}
+
+TC_RSA_result TC_RSA_raw_private(const TC_RSA_public_key* key,
+    TC_bytes private_exponent, TC_bytes input, const TC_RSA_workspace* workspace,
+    TC_buffer output, TC_RSA_execution* execution)
+{
+  if (!key || !workspace || !execution || !execution->random.fill)
+    return TC_RSA_ARGUMENT;
+  const TC_bytes controls[] = {
+    {(const uint8_t*)key,sizeof *key},
+    {(const uint8_t*)workspace,sizeof *workspace},
+    key->modulus,key->exponent,private_exponent,input,
+    {(const uint8_t*)execution,sizeof *execution}
+  };
+  TC_RSA_result result = tc_rsa_output_inputs(workspace,controls,
+      sizeof controls / sizeof *controls,(TC_bytes){output.data,output.capacity});
+  if (result != TC_RSA_OK) return result;
+  const size_t length = key->modulus.length;
+  if (input.length != length || !private_exponent.length ||
+      private_exponent.length > length) return TC_RSA_INVALID;
+  if (output.capacity < length ||
+      workspace->capacity < TC_RSA_raw_private_workspace_words(length * 8))
+    return TC_RSA_LIMIT;
+  size_t available = execution->work.remaining;
+  result = tc_rsa_private_operation_magnitude(key->modulus.data,length,
+      key->exponent.data,key->exponent.length,private_exponent,input.data,
+      output.data,execution->random.fill,execution->random.context,
+      execution->random_attempts,workspace->words,workspace->capacity,&available);
+  execution->work.remaining = (uint32_t)available;
+  return result;
 }
 
 static TC_RSA_result tc_rsa_private_inputs(const TC_RSA_private_key* key,

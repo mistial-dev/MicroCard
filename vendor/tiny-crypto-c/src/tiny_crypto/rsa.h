@@ -68,6 +68,10 @@ typedef struct {
 #define TC_RSA_SIGN_WORKSPACE_WORDS(bits) (14u * ((bits) / TC_RSA_WORD_BITS))
 #define TC_RSA_DECRYPT_WORKSPACE_WORDS(bits) (14u * ((bits) / TC_RSA_WORD_BITS))
 #define TC_RSA_ENCRYPT_WORKSPACE_WORDS(bits) TC_RSA_VERIFY_WORKSPACE_WORDS(bits)
+#define TC_RSA_RAW_PUBLIC_WORKSPACE_WORDS(bits) \
+  (8u * ((bits) / TC_RSA_WORD_BITS) + 2u)
+#define TC_RSA_RAW_PRIVATE_WORKSPACE_WORDS(bits) \
+  (13u * ((bits) / TC_RSA_WORD_BITS))
 #define TC_RSA_VALIDATION_ROUNDS 65u
 #define TC_RSA_KEYGEN_PUBLIC_EXPONENT 65537u
 #define TC_RSA_KEYGEN_WORKSPACE_WORDS(bits) \
@@ -84,6 +88,8 @@ size_t TC_RSA_crt_workspace_words(size_t bits);
 size_t TC_RSA_sign_workspace_words(size_t bits);
 size_t TC_RSA_decrypt_workspace_words(size_t bits);
 size_t TC_RSA_encrypt_workspace_words(size_t bits);
+size_t TC_RSA_raw_public_workspace_words(size_t bits);
+size_t TC_RSA_raw_private_workspace_words(size_t bits);
 size_t TC_RSA_keygen_workspace_words(size_t bits);
 
 /* Generate a two-prime RSA key with e=65537. Output capacities must be at
@@ -105,6 +111,20 @@ TC_RSA_result TC_RSA_keygen_step(TC_RSA_keygen_state* state,
     TC_random_source random, TC_RSA_cancel_fn cancel, void* cancel_context,
     TC_work_budget* work);
 void TC_RSA_keygen_clear(TC_RSA_keygen_state* state);
+
+/* Apply RSA to one already formatted, fixed-width representative. No padding,
+ * hashing or encoding is provided; callers must select and validate their
+ * protocol's encoding. Input must be less than the modulus. Output is exactly
+ * modulus.length bytes and changes only on TC_RSA_OK. Scratch is wiped after
+ * use. All borrowed inputs, output, metadata, work and scratch are disjoint.
+ * The private operation blinds and verifies the result using the public
+ * exponent. Its RNG must provide full-width unpredictable bytes and its
+ * context must not overlap the other arguments. */
+TC_RSA_result TC_RSA_raw_public(const TC_RSA_public_key* key, TC_bytes input,
+    const TC_RSA_workspace* workspace, TC_buffer output, TC_work_budget* work);
+TC_RSA_result TC_RSA_raw_private(const TC_RSA_public_key* key,
+    TC_bytes private_exponent, TC_bytes input, const TC_RSA_workspace* workspace,
+    TC_buffer output, TC_RSA_execution* execution);
 
 /* Encode a precomputed SHA digest using EMSA-PKCS1-v1_5 (RFC 8017 section 9.2).
  * Used when a card or hardware provider performs the RSA private operation.
