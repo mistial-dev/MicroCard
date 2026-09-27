@@ -1,8 +1,66 @@
 //! Signature operations retain only reset-scoped streaming state between updates.
 use super::*;
 use crate::host::SHA256_STATE_BYTES;
+#[cfg(feature = "des-legacy")]
+use microcard_tiny_crypto::des::{Iso9797Mac, MacAlgorithm, MacPadding, ISO9797_CONTEXT_BYTES};
 
 const AES_MAC_STATE_BYTES: usize = 34;
+
+#[cfg(feature = "des-legacy")]
+fn des_mac_params(kind: u16) -> Option<(MacAlgorithm, MacPadding, usize, bool)> {
+    let (algorithm, padding, length, pkcs5) = match kind {
+        2 => (MacAlgorithm::Cbc, MacPadding::None, 8, false),
+        3 => (MacAlgorithm::Cbc, MacPadding::Iso9797M1, 4, false),
+        4 => (MacAlgorithm::Cbc, MacPadding::Iso9797M1, 8, false),
+        5 => (MacAlgorithm::Cbc, MacPadding::Iso9797M2, 4, false),
+        6 => (MacAlgorithm::Cbc, MacPadding::Iso9797M2, 8, false),
+        7 => (MacAlgorithm::Cbc, MacPadding::None, 4, true),
+        8 => (MacAlgorithm::Cbc, MacPadding::None, 8, true),
+        19 => (MacAlgorithm::Retail, MacPadding::Iso9797M2, 4, false),
+        20 => (MacAlgorithm::Retail, MacPadding::Iso9797M2, 8, false),
+        47 => (MacAlgorithm::Retail, MacPadding::Iso9797M1, 4, false),
+        48 => (MacAlgorithm::Retail, MacPadding::Iso9797M1, 8, false),
+        _ => return None,
+    };
+    Some((algorithm, padding, length, pkcs5))
+}
+
+#[cfg(feature = "des-legacy")]
+fn des_mac_metadata(kind: u16) -> (i16, i16) {
+    let cipher = if matches!(kind, 3 | 5 | 7 | 19 | 47) {
+        1
+    } else {
+        2
+    };
+    let padding = match kind {
+        2 => 1,
+        3 | 4 => 2,
+        5 | 6 => 3,
+        19 | 20 => 5,
+        47 | 48 => 4,
+        7 | 8 => 6,
+        _ => unreachable!(),
+    };
+    (cipher, padding)
+}
+
+#[cfg(feature = "des-legacy")]
+pub(super) fn combined_des_mac(cipher: i16, padding: i16) -> Option<u16> {
+    Some(match (cipher, padding) {
+        (1, 2) => 3,
+        (2, 1) => 2,
+        (2, 2) => 4,
+        (1, 3) => 5,
+        (2, 3) => 6,
+        (1, 6) => 7,
+        (2, 6) => 8,
+        (1, 5) => 19,
+        (2, 5) => 20,
+        (1, 4) => 47,
+        (2, 4) => 48,
+        _ => return None,
+    })
+}
 
 fn aes_mac_advance(
     host: &mut dyn crate::host::Host,
@@ -226,6 +284,234 @@ fn aes_mac_call(
     Ok(Some(Native::Returned))
 }
 
+#[cfg(feature = "des-legacy")]
+#[allow(clippy::too_many_arguments)]
+fn des_mac_call(
+    method: MethodId,
+    signature: Signature,
+    heap: &mut Heap,
+    frame: &mut Frame,
+    context: heap::Context,
+    budget: &mut u32,
+    kind: u16,
+) -> Result<Option<Native>> {
+    let (algorithm, padding, tag_len, pkcs5) = des_mac_params(kind).ok_or(Error::Format)?;
+    if method == MethodId::setInitialDigest {
+        for _ in 0..6 {
+            frame.pop_raw()?;
+        }
+        frame.pop_reference()?;
+        return crypto_exception(heap, context, 5).map(Some);
+    }
+    if matches!(
+        method,
+        MethodId::getAlgorithm
+            | MethodId::getMessageDigestAlgorithm
+            | MethodId::getCipherAlgorithm
+            | MethodId::getPaddingAlgorithm
+    ) {
+        let this = frame.pop_reference()?;
+        heap.check_access(this, context)?;
+        let (cipher, pad) = des_mac_metadata(kind);
+        frame.push_short(match method {
+            MethodId::getAlgorithm => kind as i16,
+            MethodId::getMessageDigestAlgorithm => 0,
+            MethodId::getCipherAlgorithm => cipher,
+            MethodId::getPaddingAlgorithm => pad,
+            _ => unreachable!(),
+        })?;
+        return Ok(Some(Native::Returned));
+    }
+    if method == MethodId::init {
+        let vector = if signature.init_vector() {
+            let length = frame.pop_short()?;
+            let offset = frame.pop_short()?;
+            let array = frame.pop_reference()?;
+            Some((array, offset, length))
+        } else {
+            None
+        };
+        let mode = frame.pop_short()?;
+        let key = frame.pop_reference()?;
+        let this = frame.pop_reference()?;
+        heap.check_access(this, context)?;
+        heap.check_access(key, context)?;
+        let bits = word_field(heap, key, SIZE)?;
+        if !matches!(mode, 1 | 2)
+            || !matches!(bits, 64 | 128 | 192)
+            || (algorithm == MacAlgorithm::Retail && bits == 64)
+            || super::super::api_class(heap.info(key)?.class).map(|entry| entry.id)
+                != Some(ClassId::DESKey)
+        {
+            return crypto_exception(heap, context, 1).map(Some);
+        }
+        if !key_initialized(heap, key)? {
+            return crypto_exception(heap, context, 2).map(Some);
+        }
+        let mut iv = [0u8; 8];
+        if let Some((array, offset, length)) = vector {
+            if length != 8 {
+                return crypto_exception(heap, context, 1).map(Some);
+            }
+            if offset < 0 {
+                return Err(Error::Bounds);
+            }
+            heap.check_access(array, context)?;
+            iv.copy_from_slice(heap.byte_slice(array, offset as usize, 8)?);
+        }
+        let material = heap.get_word(key, MATERIAL)?;
+        let prefix = usize::from(symmetric_key_clear_event(word_field(heap, key, KIND)?) != 0);
+        let key_len = bits as usize / 8;
+        let mut secret = Zeroizing::new([0u8; 24]);
+        secret[..key_len].copy_from_slice(heap.byte_slice(material, prefix, key_len)?);
+        let mac =
+            Iso9797Mac::new_with_iv(algorithm, padding, &secret[..key_len], vector.map(|_| &iv))
+                .map_err(|_| Error::Format)?;
+        let mut snapshot = Zeroizing::new([0u8; ISO9797_CONTEXT_BYTES]);
+        mac.write_snapshot(&mut snapshot)
+            .map_err(|_| Error::Format)?;
+        let state = heap.get_word(this, PENDING)?;
+        if state == NULL {
+            heap.check_allocations(&[(heap::KIND_BYTE, ISO9797_CONTEXT_BYTES as u16)])?;
+        } else {
+            heap.byte_slice(state, 0, ISO9797_CONTEXT_BYTES)?;
+        }
+        heap.prepare_payload_writes(&[(this, MATERIAL * 2, (PENDING + 1 - MATERIAL) * 2)])?;
+        let state = if state == NULL {
+            heap.new_transient_array(
+                heap::KIND_BYTE,
+                ISO9797_CONTEXT_BYTES as u16,
+                context,
+                heap::CLEAR_ON_RESET,
+            )?
+        } else {
+            state
+        };
+        heap.byte_slice_mut(state, 0, ISO9797_CONTEXT_BYTES)?
+            .copy_from_slice(&snapshot[..]);
+        heap.put_word(this, PENDING, state)?;
+        heap.put_word(this, MATERIAL, key)?;
+        heap.put_word(this, COUNTER, mode as u16)?;
+        heap.put_word(this, READY, 1)?;
+        return Ok(Some(Native::Returned));
+    }
+    if method == MethodId::getLength {
+        let this = frame.pop_reference()?;
+        heap.check_access(this, context)?;
+        if word_field(heap, this, READY)? != 1 {
+            return crypto_exception(heap, context, 4).map(Some);
+        }
+        let key = heap.get_word(this, MATERIAL)?;
+        if !key_initialized(heap, key)? {
+            return crypto_exception(heap, context, 2).map(Some);
+        }
+        frame.push_short(tag_len as i16)?;
+        return Ok(Some(Native::Returned));
+    }
+    if matches!(
+        method,
+        MethodId::signPreComputedHash | MethodId::verifyPreComputedHash
+    ) {
+        return crypto_exception(heap, context, 5).map(Some);
+    }
+    let update = method == MethodId::update;
+    let verify = method == MethodId::verify;
+    if !update && !verify && method != MethodId::sign {
+        return Ok(None);
+    }
+    let signature_length = if verify { frame.pop_short()? } else { 0 };
+    let (signature_array, signature_offset) = if update {
+        (NULL, 0)
+    } else {
+        let offset = frame.pop_short()?;
+        (frame.pop_reference()?, offset)
+    };
+    let length = frame.pop_short()?;
+    let offset = frame.pop_short()?;
+    let input = frame.pop_reference()?;
+    let this = frame.pop_reference()?;
+    heap.check_access(this, context)?;
+    heap.check_access(input, context)?;
+    if word_field(heap, this, READY)? != 1
+        || (!update && word_field(heap, this, COUNTER)? != if verify { 2 } else { 1 })
+    {
+        return crypto_exception(heap, context, 4).map(Some);
+    }
+    let key = heap.get_word(this, MATERIAL)?;
+    heap.check_access(key, context)?;
+    if !key_initialized(heap, key)? {
+        return crypto_exception(heap, context, 2).map(Some);
+    }
+    if length < 0 || offset < 0 || signature_offset < 0 || signature_length < 0 {
+        return Err(Error::Bounds);
+    }
+    if !update {
+        heap.check_access(signature_array, context)?;
+        heap.byte_slice(
+            signature_array,
+            signature_offset as usize,
+            if verify {
+                signature_length as usize
+            } else {
+                tag_len
+            },
+        )?;
+    }
+    let input = heap.byte_slice(input, offset as usize, length as usize)?;
+    *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
+    let pending = heap.get_word(this, PENDING)?;
+    let mut snapshot = Zeroizing::new([0u8; ISO9797_CONTEXT_BYTES]);
+    snapshot.copy_from_slice(heap.byte_slice(pending, 0, ISO9797_CONTEXT_BYTES)?);
+    let material = heap.get_word(key, MATERIAL)?;
+    let prefix = usize::from(symmetric_key_clear_event(word_field(heap, key, KIND)?) != 0);
+    let key_len = word_field(heap, key, SIZE)? as usize / 8;
+    let mut secret = Zeroizing::new([0u8; 24]);
+    secret[..key_len].copy_from_slice(heap.byte_slice(material, prefix, key_len)?);
+    let Ok(mut mac) = Iso9797Mac::resume(algorithm, padding, &secret[..key_len], &snapshot) else {
+        return crypto_exception(heap, context, 4).map(Some);
+    };
+    mac.update(input).map_err(|_| Error::Format)?;
+    if update {
+        mac.write_snapshot(&mut snapshot)
+            .map_err(|_| Error::Format)?;
+        heap.byte_slice_mut(pending, 0, ISO9797_CONTEXT_BYTES)?
+            .copy_from_slice(&snapshot[..]);
+        return Ok(Some(Native::Returned));
+    }
+    if pkcs5 {
+        let pad_len = 8 - (mac.total_len() % 8);
+        let pad = [pad_len as u8; 8];
+        mac.update(&pad[..pad_len]).map_err(|_| Error::Format)?;
+    }
+    let mut tag = Zeroizing::new([0u8; 8]);
+    if mac.finalize(&mut tag).is_err() {
+        return crypto_exception(heap, context, 5).map(Some);
+    }
+    if verify {
+        let expected = heap.byte_slice(
+            signature_array,
+            signature_offset as usize,
+            signature_length as usize,
+        )?;
+        let valid = signature_length as usize == tag_len
+            && tag[..tag_len]
+                .iter()
+                .zip(expected)
+                .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+                == 0;
+        heap.byte_slice_mut(pending, 0, ISO9797_CONTEXT_BYTES)?
+            .fill(0);
+        frame.push_short(i16::from(valid))?;
+    } else {
+        heap.byte_slice_mut(signature_array, signature_offset as usize, tag_len)?
+            .copy_from_slice(&tag[..tag_len]);
+        heap.byte_slice_mut(pending, 0, ISO9797_CONTEXT_BYTES)?
+            .fill(0);
+        frame.push_short(tag_len as i16)?;
+    }
+    Ok(Some(Native::Returned))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn call(
     method: MethodId,
@@ -256,6 +542,13 @@ pub(super) fn call(
     };
     let receiver = frame.peek_reference(receiver_depth)?;
     heap.check_access(receiver, context)?;
+    #[cfg(feature = "des-legacy")]
+    {
+        let kind = word_field(heap, receiver, KIND)?;
+        if des_mac_params(kind).is_some() {
+            return des_mac_call(method, signature, heap, frame, context, budget, kind);
+        }
+    }
     if word_field(heap, receiver, KIND)? == 18 {
         if matches!(
             method,
@@ -435,7 +728,17 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
 
     let algorithm = word(0);
     let pending = word(5);
-    if !matches!(algorithm, 18 | 33)
+    let des_algorithm = {
+        #[cfg(feature = "des-legacy")]
+        {
+            des_mac_params(algorithm).is_some()
+        }
+        #[cfg(not(feature = "des-legacy"))]
+        {
+            false
+        }
+    };
+    if (!matches!(algorithm, 18 | 33) && !des_algorithm)
         || word(3) > 1
         || (word(3) == 1 && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2)))
     {
@@ -443,10 +746,16 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
     }
     if pending != 0 {
         let header = &saved_heap[pending as usize..pending as usize + heap::HEADER];
+        #[cfg(feature = "des-legacy")]
+        let des_state_bytes = ISO9797_CONTEXT_BYTES;
+        #[cfg(not(feature = "des-legacy"))]
+        let des_state_bytes = 0;
         let expected_length = if algorithm == 18 {
             34
-        } else {
+        } else if algorithm == 33 {
             crate::host::SHA256_STATE_BYTES
+        } else {
+            des_state_bytes
         };
         if header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4)
             || u16::from_be_bytes([header[2], header[3]]) as usize != expected_length
@@ -459,14 +768,31 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
         let expected = if algorithm == 18 {
             ClassId::AESKey
+        } else if algorithm != 33 {
+            ClassId::DESKey
         } else if word(4) == 1 {
             ClassId::ECPrivateKey
         } else {
             ClassId::ECPublicKey
         };
+        let invalid_des_key = if des_algorithm {
+            let bits = u16::from_be_bytes([
+                saved_heap[start + heap::HEADER + SIZE * 2],
+                saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+            ]);
+            #[cfg(feature = "des-legacy")]
+            let retail_with_des = des_mac_params(algorithm)
+                .is_some_and(|(mode, _, _, _)| mode == MacAlgorithm::Retail && bits == 64);
+            #[cfg(not(feature = "des-legacy"))]
+            let retail_with_des = false;
+            !matches!(bits, 64 | 128 | 192) || retail_with_des
+        } else {
+            false
+        };
         if super::super::api_class(key_class).map(|entry| entry.id) != Some(expected)
             || saved_heap[start + 4] != heap::KIND_OBJECT
             || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
+            || invalid_des_key
         {
             return Err(Error::Type);
         }
@@ -478,6 +804,346 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "des-legacy"))]
+    #[test]
+    fn compact_build_rejects_des_key_and_signature_factories() {
+        struct NoHost;
+        impl crate::host::Host for NoHost {}
+        let mut slab = [0u8; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut words = [0; 8];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = NoHost;
+        frame.push_short(3).unwrap();
+        frame.push_short(128).unwrap();
+        frame.push_short(0).unwrap();
+        let Ok(Native::Threw(exception)) = key::call(ClassId::KeyBuilder,
+            MethodId::buildKey, &mut heap, &mut host, &mut frame, 1)
+        else { panic!("compact build accepted DESKey"); };
+        assert_eq!(heap.get_word(exception, crate::natives::REASON_FIELD), Ok(3));
+        frame.push_short(20).unwrap();
+        frame.push_short(0).unwrap();
+        let Ok(Native::Threw(exception)) = factory::get_instance(ClassId::Signature,
+            &mut heap, &mut host, &mut frame, 1)
+        else { panic!("compact build accepted DES MAC"); };
+        assert_eq!(heap.get_word(exception, crate::natives::REASON_FIELD), Ok(3));
+    }
+
+    #[cfg(feature = "des-legacy")]
+    #[test]
+    fn des_mac_factory_admits_only_implemented_legacy_ids() {
+        struct NoHost;
+        impl crate::host::Host for NoHost {}
+        let mut slab = [0u8; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut words = [0; 8];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = NoHost;
+        for algorithm in [2, 3, 4, 5, 6, 7, 8, 19, 20, 47, 48] {
+            frame.push_short(algorithm).unwrap();
+            frame.push_short(0).unwrap();
+            assert!(matches!(
+                factory::get_instance(ClassId::Signature, &mut heap, &mut host, &mut frame, 1),
+                Ok(Native::Returned)
+            ));
+            let signer = frame.pop_reference().unwrap();
+            assert_eq!(word_field(&heap, signer, KIND), Ok(algorithm as u16));
+        }
+        frame.push_short(1).unwrap();
+        frame.push_short(0).unwrap();
+        let Ok(Native::Threw(exception)) =
+            factory::get_instance(ClassId::Signature, &mut heap, &mut host, &mut frame, 1)
+        else {
+            panic!("unsupported MAC4 NOPAD accepted");
+        };
+        assert_eq!(
+            heap.get_word(exception, crate::natives::REASON_FIELD),
+            Ok(3)
+        );
+    }
+
+    #[cfg(feature = "des-legacy")]
+    #[test]
+    fn des_mac_variants_match_independent_des_cbc_vectors() {
+        struct NoHost;
+        impl crate::host::Host for NoHost {}
+        // OpenSSL DES-EDE CBC and DES-EDE ECB results for ANSI X9.19's message.
+        let cases: &[(u16, usize, [u8; 8])] = &[
+            (2, 24, [0x93, 0x46, 0x2a, 0x6d, 0xb9, 0xb4, 0xa4, 0xd1]),
+            (3, 23, [0x15, 0x2f, 0x89, 0xe6, 0x81, 0x35, 0x08, 0x77]),
+            (4, 23, [0x15, 0x2f, 0x89, 0xe6, 0x81, 0x35, 0x08, 0x77]),
+            (5, 24, [0x80, 0x50, 0x36, 0xd5, 0x0b, 0xb7, 0x61, 0x07]),
+            (6, 24, [0x80, 0x50, 0x36, 0xd5, 0x0b, 0xb7, 0x61, 0x07]),
+            (7, 24, [0x7c, 0x3f, 0xfc, 0x6c, 0xd3, 0x5a, 0x76, 0xee]),
+            (8, 24, [0x7c, 0x3f, 0xfc, 0x6c, 0xd3, 0x5a, 0x76, 0xee]),
+            (19, 24, [0xe9, 0x08, 0x62, 0x30, 0xca, 0x3b, 0xe7, 0x96]),
+            (20, 24, [0xe9, 0x08, 0x62, 0x30, 0xca, 0x3b, 0xe7, 0x96]),
+            (47, 23, [0x4b, 0xad, 0x7f, 0xbb, 0x7c, 0xa1, 0xb8, 0x03]),
+            (48, 23, [0x4b, 0xad, 0x7f, 0xbb, 0x7c, 0xa1, 0xb8, 0x03]),
+        ];
+        let methods = crate::jcvm_api::PACKAGES
+            .iter()
+            .flat_map(|package| package.classes)
+            .find(|class| class.id == ClassId::Signature)
+            .unwrap()
+            .methods;
+        let init_plain = methods
+            .iter()
+            .find(|entry| entry.id == MethodId::init && !entry.signature.init_vector())
+            .unwrap()
+            .signature;
+        for &(algorithm, message_len, expected) in cases {
+            let mut slab = [0u8; 2048];
+            let mut heap = Heap::new(&mut slab).unwrap();
+            let key = new_native(&mut heap, ClassId::DESKey, STATE_WORDS, 1).unwrap();
+            heap.put_word(key, KIND, 3).unwrap();
+            heap.put_word(key, SIZE, 128).unwrap();
+            let material = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+            heap.byte_slice_mut(material, 0, 16)
+                .unwrap()
+                .copy_from_slice(&[
+                    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76,
+                    0x54, 0x32, 0x10,
+                ]);
+            heap.put_word(key, MATERIAL, material).unwrap();
+            heap.put_word(key, READY, 1).unwrap();
+            let signer = new_native(&mut heap, ClassId::Signature, STATE_WORDS, 1).unwrap();
+            heap.put_word(signer, KIND, algorithm).unwrap();
+            let bytes = heap.new_array(heap::KIND_BYTE, 48, 1).unwrap();
+            heap.byte_slice_mut(bytes, 0, 24)
+                .unwrap()
+                .copy_from_slice(b"Now is the time for all ");
+            let mut words = [0; 16];
+            let mut tags = [0; 8];
+            let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+            let mut host = NoHost;
+            frame.push_reference(signer).unwrap();
+            frame.push_reference(key).unwrap();
+            frame.push_short(1).unwrap();
+            assert!(matches!(
+                call(
+                    MethodId::init,
+                    init_plain,
+                    &mut heap,
+                    &mut host,
+                    &mut frame,
+                    1,
+                    &mut 100
+                ),
+                Ok(Some(Native::Returned))
+            ));
+            frame.push_reference(signer).unwrap();
+            frame.push_reference(bytes).unwrap();
+            frame.push_short(0).unwrap();
+            frame.push_short(message_len as i16).unwrap();
+            frame.push_reference(bytes).unwrap();
+            frame.push_short(32).unwrap();
+            assert!(matches!(
+                call(
+                    MethodId::sign,
+                    init_plain,
+                    &mut heap,
+                    &mut host,
+                    &mut frame,
+                    1,
+                    &mut 100
+                ),
+                Ok(Some(Native::Returned))
+            ));
+            let tag_len = des_mac_params(algorithm).unwrap().2;
+            assert_eq!(frame.pop_short(), Ok(tag_len as i16));
+            assert_eq!(
+                heap.byte_slice(bytes, 32, tag_len).unwrap(),
+                &expected[..tag_len]
+            );
+        }
+    }
+
+    #[cfg(feature = "des-legacy")]
+    #[test]
+    fn retail_mac_streams_real_vector_and_rejects_bad_state() {
+        struct NoHost;
+        impl crate::host::Host for NoHost {}
+        let methods = crate::jcvm_api::PACKAGES
+            .iter()
+            .flat_map(|package| package.classes)
+            .find(|class| class.id == ClassId::Signature)
+            .unwrap()
+            .methods;
+        let init_plain = methods
+            .iter()
+            .find(|entry| entry.id == MethodId::init && !entry.signature.init_vector())
+            .unwrap()
+            .signature;
+        let mut slab = [0u8; 4096];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let key = new_native(&mut heap, ClassId::DESKey, STATE_WORDS, 1).unwrap();
+        heap.put_word(key, KIND, 3).unwrap();
+        heap.put_word(key, SIZE, 128).unwrap();
+        let material = heap.new_array(heap::KIND_BYTE, 16, 1).unwrap();
+        heap.byte_slice_mut(material, 0, 16)
+            .unwrap()
+            .copy_from_slice(&[
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+                0x32, 0x10,
+            ]);
+        heap.put_word(key, MATERIAL, material).unwrap();
+        heap.put_word(key, READY, 1).unwrap();
+        let signer = new_native(&mut heap, ClassId::Signature, STATE_WORDS, 1).unwrap();
+        heap.put_word(signer, KIND, 20).unwrap();
+        let bytes = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
+        heap.byte_slice_mut(bytes, 0, 24)
+            .unwrap()
+            .copy_from_slice(b"Now is the time for all ");
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = NoHost;
+        let mut budget = 100;
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(key).unwrap();
+        frame.push_short(1).unwrap();
+        assert!(matches!(
+            call(
+                MethodId::init,
+                init_plain,
+                &mut heap,
+                &mut host,
+                &mut frame,
+                1,
+                &mut budget
+            ),
+            Ok(Some(Native::Returned))
+        ));
+        let pending = heap.get_word(signer, PENDING).unwrap();
+        for (offset, length) in [(0, 9), (9, 7)] {
+            frame.push_reference(signer).unwrap();
+            frame.push_reference(bytes).unwrap();
+            frame.push_short(offset).unwrap();
+            frame.push_short(length).unwrap();
+            assert!(matches!(
+                call(
+                    MethodId::update,
+                    init_plain,
+                    &mut heap,
+                    &mut host,
+                    &mut frame,
+                    1,
+                    &mut budget
+                ),
+                Ok(Some(Native::Returned))
+            ));
+        }
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(16).unwrap();
+        frame.push_short(8).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(32).unwrap();
+        assert!(matches!(
+            call(
+                MethodId::sign,
+                init_plain,
+                &mut heap,
+                &mut host,
+                &mut frame,
+                1,
+                &mut budget
+            ),
+            Ok(Some(Native::Returned))
+        ));
+        assert_eq!(frame.pop_short(), Ok(8));
+        assert_eq!(
+            heap.byte_slice(bytes, 32, 8).unwrap(),
+            &[0xe9, 0x08, 0x62, 0x30, 0xca, 0x3b, 0xe7, 0x96]
+        );
+        assert!(heap
+            .byte_slice(pending, 0, ISO9797_CONTEXT_BYTES)
+            .unwrap()
+            .iter()
+            .all(|byte| *byte == 0));
+
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(key).unwrap();
+        frame.push_short(2).unwrap();
+        assert!(matches!(
+            call(
+                MethodId::init,
+                init_plain,
+                &mut heap,
+                &mut host,
+                &mut frame,
+                1,
+                &mut budget
+            ),
+            Ok(Some(Native::Returned))
+        ));
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(24).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(32).unwrap();
+        frame.push_short(8).unwrap();
+        assert!(matches!(
+            call(
+                MethodId::verify,
+                init_plain,
+                &mut heap,
+                &mut host,
+                &mut frame,
+                1,
+                &mut budget
+            ),
+            Ok(Some(Native::Returned))
+        ));
+        assert_eq!(frame.pop_short(), Ok(1));
+
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(key).unwrap();
+        frame.push_short(1).unwrap();
+        assert!(matches!(
+            call(
+                MethodId::init,
+                init_plain,
+                &mut heap,
+                &mut host,
+                &mut frame,
+                1,
+                &mut budget
+            ),
+            Ok(Some(Native::Returned))
+        ));
+        heap.clear_transient(heap::CLEAR_ON_RESET, 1).unwrap();
+        frame.push_reference(signer).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(24).unwrap();
+        frame.push_reference(bytes).unwrap();
+        frame.push_short(32).unwrap();
+        let Ok(Some(Native::Threw(exception))) = call(
+            MethodId::sign,
+            init_plain,
+            &mut heap,
+            &mut host,
+            &mut frame,
+            1,
+            &mut budget,
+        ) else {
+            panic!("reset state accepted");
+        };
+        assert_eq!(
+            heap.get_word(exception, crate::natives::REASON_FIELD),
+            Ok(4)
+        );
+        assert_eq!(
+            heap.byte_slice(bytes, 32, 8).unwrap(),
+            &[0xe9, 0x08, 0x62, 0x30, 0xca, 0x3b, 0xe7, 0x96]
+        );
+    }
 
     #[test]
     fn aes_mac_nopad_uses_cbc_vectors_and_preserves_state_on_failure() {

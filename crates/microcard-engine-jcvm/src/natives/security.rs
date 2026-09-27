@@ -255,7 +255,18 @@ pub fn call(
         let padding = frame.pop_short()?;
         let cipher = frame.pop_short()?;
         let digest = frame.pop_short()?;
-        if external || (digest, cipher, padding) != (0, 6, 1) || !host.supports_signature(18) {
+        #[cfg(feature = "des-legacy")]
+        let des = (digest == 0)
+            .then(|| signature::combined_des_mac(cipher, padding))
+            .flatten();
+        #[cfg(not(feature = "des-legacy"))]
+        let des: Option<u16> = None;
+        let algorithm = if (digest, cipher, padding) == (0, 6, 1) && host.supports_signature(18) {
+            Some(18)
+        } else {
+            des
+        };
+        if external || algorithm.is_none() {
             return crypto_exception(heap, context, 3);
         }
         if let Err(error) = heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS)]) {
@@ -265,7 +276,7 @@ pub fn call(
             return system_no_resource(heap, context);
         }
         let instance = new_native(heap, class, STATE_WORDS, context)?;
-        heap.put_word(instance, KIND, 18)?;
+        heap.put_word(instance, KIND, algorithm.ok_or(Error::Format)?)?;
         frame.push_reference(instance)?;
         return Ok(Native::Returned);
     }

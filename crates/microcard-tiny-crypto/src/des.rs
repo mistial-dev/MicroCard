@@ -2,7 +2,7 @@
 
 use crate::Error;
 
-const ISO9797_CONTEXT_BYTES: usize = 384;
+pub const ISO9797_CONTEXT_BYTES: usize = 384;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -58,6 +58,15 @@ extern "C" {
     fn mc_tc_des_iso9797_update(context: *mut u8, message: *const u8, len: usize) -> i32;
     fn mc_tc_des_iso9797_final(context: *mut u8, tag: *mut u8) -> i32;
     fn mc_tc_des_iso9797_clear(context: *mut u8);
+    fn mc_tc_des_iso9797_resume(
+        context: *const u8,
+        algorithm: u32,
+        padding: u32,
+        key: *const u8,
+        key_len: usize,
+    ) -> i32;
+    fn mc_tc_des_iso9797_initial_chain(context: *mut u8, iv: *const u8) -> i32;
+    fn mc_tc_des_iso9797_total(context: *const u8) -> usize;
 }
 
 fn valid_key(key: &[u8]) -> bool {
@@ -171,6 +180,16 @@ pub struct Iso9797Mac {
 
 impl Iso9797Mac {
     pub fn new(algorithm: MacAlgorithm, padding: MacPadding, key: &[u8]) -> Result<Self, Error> {
+        Self::new_with_iv(algorithm, padding, key, None)
+    }
+
+    /// Start with an explicit chaining value when a protocol supplies one.
+    pub fn new_with_iv(
+        algorithm: MacAlgorithm,
+        padding: MacPadding,
+        key: &[u8],
+        iv: Option<&[u8; 8]>,
+    ) -> Result<Self, Error> {
         if !valid_key(key) || (algorithm == MacAlgorithm::Retail && key.len() == 8) {
             return Err(Error::InvalidLength);
         }
@@ -191,7 +210,60 @@ impl Iso9797Mac {
             return Err(Error::OperationFailed);
         }
         mac.active = true;
+        if let Some(iv) = iv {
+            let status =
+                unsafe { mc_tc_des_iso9797_initial_chain(mac.context.as_mut_ptr(), iv.as_ptr()) };
+            if status != 0 {
+                return Err(Error::OperationFailed);
+            }
+        }
         Ok(mac)
+    }
+
+    pub fn total_len(&self) -> usize {
+        if self.active {
+            unsafe { mc_tc_des_iso9797_total(self.context.as_ptr()) }
+        } else {
+            0
+        }
+    }
+
+    /// Restore a context kept in reset-scoped memory. The key schedule and
+    /// state invariants are checked before any message bytes are accepted.
+    pub fn resume(
+        algorithm: MacAlgorithm,
+        padding: MacPadding,
+        key: &[u8],
+        snapshot: &[u8; ISO9797_CONTEXT_BYTES],
+    ) -> Result<Self, Error> {
+        if !valid_key(key) || (algorithm == MacAlgorithm::Retail && key.len() == 8) {
+            return Err(Error::InvalidLength);
+        }
+        let status = unsafe {
+            mc_tc_des_iso9797_resume(
+                snapshot.as_ptr(),
+                algorithm as u32,
+                padding as u32,
+                key.as_ptr(),
+                key.len(),
+            )
+        };
+        if status != 0 {
+            return Err(Error::OperationFailed);
+        }
+        Ok(Self {
+            context: *snapshot,
+            active: true,
+        })
+    }
+
+    pub fn write_snapshot(&self, output: &mut [u8; ISO9797_CONTEXT_BYTES]) -> Result<(), Error> {
+        output.fill(0);
+        if !self.active {
+            return Err(Error::OperationFailed);
+        }
+        output.copy_from_slice(&self.context);
+        Ok(())
     }
 
     pub fn update(&mut self, message: &[u8]) -> Result<(), Error> {
@@ -345,7 +417,13 @@ mod tests {
         assert_eq!(tag, [0; 8]);
 
         let mut streaming = Iso9797Mac::new(MacAlgorithm::Retail, MacPadding::None, &key).unwrap();
-        for chunk in message.chunks(3) {
+        streaming.update(&message[..9]).unwrap();
+        let mut snapshot = [0u8; ISO9797_CONTEXT_BYTES];
+        streaming.write_snapshot(&mut snapshot).unwrap();
+        drop(streaming);
+        let mut streaming =
+            Iso9797Mac::resume(MacAlgorithm::Retail, MacPadding::None, &key, &snapshot).unwrap();
+        for chunk in message[9..].chunks(3) {
             streaming.update(chunk).unwrap();
         }
         streaming.finalize(&mut tag).unwrap();
@@ -353,6 +431,10 @@ mod tests {
         tag.fill(0xa5);
         assert_eq!(streaming.finalize(&mut tag), Err(Error::OperationFailed));
         assert_eq!(tag, [0; 8]);
+        snapshot[0] ^= 1;
+        assert!(
+            Iso9797Mac::resume(MacAlgorithm::Retail, MacPadding::None, &key, &snapshot).is_err()
+        );
         assert_eq!(
             iso9797_mac(
                 MacAlgorithm::Retail,

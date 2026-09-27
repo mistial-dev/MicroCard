@@ -23,7 +23,10 @@ pub(super) fn get_instance(
             ClassId::RandomData => host.supports_random(id) && host.supports_digest(4),
             ClassId::Cipher => matches!(id, 1 | 5 | 13 | 14 | 240) && host.supports_cipher(id),
             ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
-            ClassId::Signature => matches!(id, 18 | 33) && host.supports_signature(id),
+            ClassId::Signature => {
+                (matches!(id, 18 | 33) && host.supports_signature(id))
+                    || (cfg!(feature = "des-legacy") && matches!(id, 2..=8 | 19 | 20 | 47 | 48))
+            }
             _ => false,
         },
         _ => false,

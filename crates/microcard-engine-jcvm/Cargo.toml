@@ -7,8 +7,10 @@ license.workspace = true
 # Mnemonics for error messages and tooling. A card build leaves this off, because the names
 # cost flash and nothing on the card prints them.
 diagnostics = []
+des-legacy = ["dep:microcard-tiny-crypto", "microcard-tiny-crypto/des-legacy"]
 [dependencies]
 microcard-memory = { path = "../microcard-memory" }
+microcard-tiny-crypto = { path = "../microcard-tiny-crypto", optional = true }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 # The test host answers digests with a real implementation, so the engine is exercised

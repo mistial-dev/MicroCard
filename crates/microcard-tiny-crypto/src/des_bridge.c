@@ -1,6 +1,7 @@
 /* Own the C context here, so Rust never depends on its compile-time layout. */
 #include <tiny_crypto/des.h>
 #include <stddef.h>
+#include <string.h>
 
 #define MC_ISO9797_CONTEXT_BYTES 384
 typedef char mc_iso9797_context_size[
@@ -87,4 +88,45 @@ int mc_tc_des_iso9797_final(void* context, uint8_t tag[8])
 void mc_tc_des_iso9797_clear(void* context)
 {
   TC_DES_ISO9797_clear((struct TC_DES_ISO9797_ctx*)context);
+}
+
+int mc_tc_des_iso9797_resume(const void* context, unsigned algorithm,
+                              unsigned padding, const uint8_t* key,
+                              size_t key_len)
+{
+  struct TC_DES_ISO9797_ctx saved = {0};
+  struct TC_DES_ISO9797_ctx fresh = {0};
+  unsigned diff = 0;
+  if (!context || !key) return TC_ERROR;
+  memcpy(&saved, context, sizeof saved);
+  if (saved.active != 1 || saved.used >= 8 ||
+      saved.total % 8 != saved.used || saved.keylen != key_len ||
+      saved.algorithm != algorithm || saved.padding != padding ||
+      TC_DES_ISO9797_init(&fresh, (TC_DES_ISO9797_algorithm)algorithm,
+                          (TC_DES_ISO9797_padding)padding, key, key_len) != TC_OK)
+  {
+    TC_DES_ISO9797_clear(&saved);
+    return TC_ERROR;
+  }
+  for (size_t i = 0; i < sizeof saved.sk; ++i)
+    diff |= ((const uint8_t*)saved.sk)[i] ^ ((const uint8_t*)fresh.sk)[i];
+  TC_DES_ISO9797_clear(&saved);
+  TC_DES_ISO9797_clear(&fresh);
+  return diff == 0 ? TC_OK : TC_ERROR;
+}
+
+int mc_tc_des_iso9797_initial_chain(void* context, const uint8_t iv[8])
+{
+  struct TC_DES_ISO9797_ctx* ctx = (struct TC_DES_ISO9797_ctx*)context;
+  if (!ctx || !iv || !ctx->active || ctx->total != 0 || ctx->used != 0)
+    return TC_ERROR;
+  for (size_t i = 0; i < 8; ++i) ctx->mac[i] = iv[i];
+  return TC_OK;
+}
+
+size_t mc_tc_des_iso9797_total(const void* context)
+{
+  const struct TC_DES_ISO9797_ctx* ctx =
+      (const struct TC_DES_ISO9797_ctx*)context;
+  return ctx && ctx->active ? ctx->total : 0;
 }
