@@ -1,5 +1,7 @@
 //! A torn append closes this epoch; the next snapshot starts in the other slot.
 use super::*;
+#[cfg(test)]
+use alloc::vec;
 pub(super) const MAX_FRAME_BYTES: usize = 1024;
 const MARKER_BYTES: usize = 4;
 pub(super) const MIN_FRAME_BYTES: usize = HEADER_BYTES + 16 + MARKER_BYTES;
