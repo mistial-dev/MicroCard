@@ -681,8 +681,15 @@ captured by this normal image; earlier diagnostic counts belong to different
 ELFs and must not be attributed to this scan.
 
 The final local checkpoint, host PIV vectors, and NIST transport check passed.
-The full NIST contact suite was not rerun at this revision because the
-separately installed Test Runner 5.0.1 JAR is absent from the configured
-upstream checkout. A simulator-only timing sample measured 12.56 ms for
+The separately installed Test Runner 5.0.1 JAR was located in the pinned
+OpenFIPS201 checkout. A fresh P-256 identity and the full host `card-contact`
+suite produced **61 passed, zero failed, two skipped** across 63 vectors.
+`SecureMessagingErrorHandling:1` was skipped because the SELECT APT does not
+advertise secure messaging; `CHECK_certificate_profile:6` was superseded by
+the complete certificate profile and certificate-bound ECDH operation because
+the runner uses a signing template for agreement-only slot 9D. The runner JAR
+SHA-256 is `7a52daff6caecd473d89f15a4e7bc108b93d3bf3bf689e84fd3a05365d194363`.
+The report and logs are in `work/p256-identity-contact-20260926/`.
+A simulator-only timing sample measured 12.56 ms for
 cold startup plus SELECT and 2.73 ms median, 2.91 ms p95 for 100 warm
 GET DATA commands. Those host numbers are separate from PC/SC device latency.
