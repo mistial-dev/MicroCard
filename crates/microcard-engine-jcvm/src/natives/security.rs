@@ -4,22 +4,22 @@
 //! object, so the firewall covers it. What they are not is algorithms: an operation that
 //! needs one asks the host. Key and PIN fields currently occupy native heap objects;
 //! protected-key service integration remains separate work.
+use super::{new_native, word_field, Jcre, Native};
+use crate::host::SHA256_STATE_BYTES;
 use crate::jcvm_api::{ClassId, MethodId, Signature};
-use super::{Jcre, Native, new_native, word_field};
 use crate::vm::frame::{Frame, NULL};
 use crate::vm::heap::{self, Heap};
-use crate::host::SHA256_STATE_BYTES;
 use crate::{Error, Result};
 extern crate alloc;
 use alloc::vec::Vec;
 use zeroize::Zeroizing;
-mod ec;
-mod pin;
 mod agreement;
-mod key_pair;
-mod signature;
-mod secure_channel;
 mod checksum;
+mod ec;
+mod key_pair;
+mod pin;
+mod secure_channel;
+mod signature;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
 
 /// Words every object here carries. The meaning of each is per class and documented where
@@ -60,8 +60,14 @@ impl StagedBytes {
             bytes.try_reserve_exact(length).map_err(|_| Error::Quota)?;
             bytes.resize(length, 0);
             Some(bytes)
-        } else { None };
-        Ok(Self { inline: Zeroizing::new([0; 256]), overflow, length })
+        } else {
+            None
+        };
+        Ok(Self {
+            inline: Zeroizing::new([0; 256]),
+            overflow,
+            length,
+        })
     }
 
     fn as_mut(&mut self) -> &mut [u8] {
@@ -93,13 +99,21 @@ impl RandomService {
     }
 }
 
-fn random_domain_hash(host: &mut dyn crate::host::Host, domain: &[u8], material: &[u8; 32],
-        output: &mut [u8; 32]) -> Result<()> {
-    if domain.len() > 32 { return Err(Error::Format); }
+fn random_domain_hash(
+    host: &mut dyn crate::host::Host,
+    domain: &[u8],
+    material: &[u8; 32],
+    output: &mut [u8; 32],
+) -> Result<()> {
+    if domain.len() > 32 {
+        return Err(Error::Format);
+    }
     let mut input = Zeroizing::new([0u8; 64]);
     input[..domain.len()].copy_from_slice(domain);
     input[32..].copy_from_slice(material);
-    if host.digest(4, &input[..], &mut output[..])? != output.len() { return Err(Error::Format); }
+    if host.digest(4, &input[..], &mut output[..])? != output.len() {
+        return Err(Error::Format);
+    }
     Ok(())
 }
 
@@ -118,10 +132,19 @@ fn store_secure_chain(heap: &mut Heap, state: u16, chain: &[u8; 32]) -> Result<(
 }
 
 pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops::Range<usize>>> {
-    if info.kind != heap::KIND_OBJECT { return Ok(None); }
-    let Some(class) = super::api_class(info.class) else { return Ok(None); };
-    if matches!(class.id, ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement) {
-        if info.length as usize <= READY { return Err(Error::Bounds); }
+    if info.kind != heap::KIND_OBJECT {
+        return Ok(None);
+    }
+    let Some(class) = super::api_class(info.class) else {
+        return Ok(None);
+    };
+    if matches!(
+        class.id,
+        ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement
+    ) {
+        if info.length as usize <= READY {
+            return Err(Error::Bounds);
+        }
         return Ok(Some(READY * 2..READY * 2 + 2));
     }
     if info.length == 1 && super::is_exception_class(class) {
@@ -133,23 +156,40 @@ pub(crate) fn native_volatile_range(info: heap::Info) -> Result<Option<core::ops
 
 /// Native state uses heap handles too. Recovery and object deletion must trace
 /// these words with the same rules as Java reference fields.
-pub(crate) fn visit_native_reference_offsets(info: heap::Info, payload_len: usize,
-        mut visit: impl FnMut(usize) -> Result<()>) -> Result<()> {
-    if info.kind != heap::KIND_OBJECT || info.length != STATE_WORDS { return Ok(()); }
-    let Some(class) = super::api_class(info.class) else { return Ok(()); };
-    if payload_len != STATE_WORDS as usize * 2 { return Err(Error::Format); }
+pub(crate) fn visit_native_reference_offsets(
+    info: heap::Info,
+    payload_len: usize,
+    mut visit: impl FnMut(usize) -> Result<()>,
+) -> Result<()> {
+    if info.kind != heap::KIND_OBJECT || info.length != STATE_WORDS {
+        return Ok(());
+    }
+    let Some(class) = super::api_class(info.class) else {
+        return Ok(());
+    };
+    if payload_len != STATE_WORDS as usize * 2 {
+        return Err(Error::Format);
+    }
     visit(MATERIAL * 2)?;
-    if matches!(class.id,
-        ClassId::Cipher | ClassId::MessageDigest | ClassId::Signature | ClassId::KeyPair
-        | ClassId::OwnerPINxWithPredecrement)
-    { visit(PENDING * 2)?; }
+    if matches!(
+        class.id,
+        ClassId::Cipher
+            | ClassId::MessageDigest
+            | ClassId::Signature
+            | ClassId::KeyPair
+            | ClassId::OwnerPINxWithPredecrement
+    ) {
+        visit(PENDING * 2)?;
+    }
     Ok(())
 }
 
 pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
     release_one_shot_digests(heap)?;
     heap.visit_objects(|_, info, payload| {
-        if let Some(range) = native_volatile_range(info)? { payload[range].fill(0); }
+        if let Some(range) = native_volatile_range(info)? {
+            payload[range].fill(0);
+        }
         Ok(())
     })
 }
@@ -157,8 +197,10 @@ pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
 /// A temporary digest cannot outlive the applet entry point which opened it.
 pub(crate) fn release_one_shot_digests(heap: &mut Heap) -> Result<()> {
     heap.visit_objects(|_, info, payload| {
-        if info.kind == heap::KIND_OBJECT && info.length == STATE_WORDS
-            && super::api_class(info.class).is_some_and(|class| class.id == ClassId::MessageDigest_OneShot)
+        if info.kind == heap::KIND_OBJECT
+            && info.length == STATE_WORDS
+            && super::api_class(info.class)
+                .is_some_and(|class| class.id == ClassId::MessageDigest_OneShot)
         {
             payload[READY * 2..READY * 2 + 2].fill(0);
             // No applet local can retain a reference across this boundary.
@@ -170,7 +212,8 @@ pub(crate) fn release_one_shot_digests(heap: &mut Heap) -> Result<()> {
 
 fn one_shot_digest(heap: &Heap, this: u16, context: heap::Context) -> Result<bool> {
     let info = heap.info(this)?;
-    let one_shot = super::api_class(info.class).is_some_and(|class| class.id == ClassId::MessageDigest_OneShot);
+    let one_shot = super::api_class(info.class)
+        .is_some_and(|class| class.id == ClassId::MessageDigest_OneShot);
     if one_shot {
         if info.owner != 0 || word_field(heap, this, COUNTER)? != context as u16 {
             return Err(Error::Firewall);
@@ -187,10 +230,17 @@ fn one_shot_slot(heap: &Heap) -> Result<(bool, Option<u16>)> {
     let mut reusable = None;
     while at < heap.used() {
         let info = heap::Info::read(image, heap.used(), at as u16)?;
-        if info.kind == heap::KIND_OBJECT && info.length == STATE_WORDS
-            && super::api_class(info.class).is_some_and(|class| class.id == ClassId::MessageDigest_OneShot) {
-            if image[at + heap::HEADER + READY * 2 + 1] != 0 { return Ok((true, None)); }
-            if image[at + heap::HEADER + SIZE * 2 + 1] != 0 { reusable = Some(at as u16); }
+        if info.kind == heap::KIND_OBJECT
+            && info.length == STATE_WORDS
+            && super::api_class(info.class)
+                .is_some_and(|class| class.id == ClassId::MessageDigest_OneShot)
+        {
+            if image[at + heap::HEADER + READY * 2 + 1] != 0 {
+                return Ok((true, None));
+            }
+            if image[at + heap::HEADER + SIZE * 2 + 1] != 0 {
+                reusable = Some(at as u16);
+            }
         }
         at = (at + heap::HEADER + info.length as usize * info.element_size()).next_multiple_of(2);
     }
@@ -198,26 +248,50 @@ fn one_shot_slot(heap: &Heap) -> Result<(bool, Option<u16>)> {
 }
 
 // Persist unconditional PIN changes without publishing conditional heap/static writes.
-pub(crate) fn ensure_checkpoint_capacity(count: u32, host: &mut dyn crate::host::Host, jcre: &Jcre) -> Result<()> {
-    if !jcre.installing && count != 0 { host.ensure_checkpoint_capacity(count)?; }
+pub(crate) fn ensure_checkpoint_capacity(
+    count: u32,
+    host: &mut dyn crate::host::Host,
+    jcre: &Jcre,
+) -> Result<()> {
+    if !jcre.installing && count != 0 {
+        host.ensure_checkpoint_capacity(count)?;
+    }
     Ok(())
 }
 
-pub(crate) fn checkpoint_committed(changed: bool, heap: &mut Heap, host: &mut dyn crate::host::Host, jcre: &Jcre,
-        _context: heap::Context, statics: &[u8]) -> Result<()> {
-    if jcre.installing || !changed || !heap.has_uncheckpointed_writes() { return Ok(()); }
+pub(crate) fn checkpoint_committed(
+    changed: bool,
+    heap: &mut Heap,
+    host: &mut dyn crate::host::Host,
+    jcre: &Jcre,
+    _context: heap::Context,
+    statics: &[u8],
+) -> Result<()> {
+    if jcre.installing || !changed || !heap.has_uncheckpointed_writes() {
+        return Ok(());
+    }
     let instance = jcre.instance.ok_or(Error::Missing)?;
     let mut projected = Zeroizing::new(alloc::vec::Vec::new());
     let statics = if heap.transaction_remaining().is_some() {
-        projected.try_reserve_exact(statics.len()).map_err(|_| Error::Quota)?;
+        projected
+            .try_reserve_exact(statics.len())
+            .map_err(|_| Error::Quota)?;
         projected.extend_from_slice(statics);
         heap.project_statics(&mut projected)?;
         &projected[..]
-    } else { statics };
-    host.checkpoint(crate::applet::PersistentView {
-        heap: heap.image(), statics, instance, buffer: jcre.buffer,
-        projection: Some(heap),
-    }, crate::host::CheckpointReason::OwnerPin)?;
+    } else {
+        statics
+    };
+    host.checkpoint(
+        crate::applet::PersistentView {
+            heap: heap.image(),
+            statics,
+            instance,
+            buffer: jcre.buffer,
+            projection: Some(heap),
+        },
+        crate::host::CheckpointReason::OwnerPin,
+    )?;
     heap.mark_checkpointed();
     Ok(())
 }
@@ -299,7 +373,10 @@ pub fn call(
     budget: &mut u32,
     statics: &[u8],
 ) -> Result<Native> {
-    if matches!(class, ClassId::PIN | ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement) {
+    if matches!(
+        class,
+        ClassId::PIN | ClassId::OwnerPIN | ClassId::OwnerPINx | ClassId::OwnerPINxWithPredecrement
+    ) {
         return pin::call(class, method, heap, host, frame, context, jcre, statics);
     }
     if class == ClassId::OwnerPINBuilder && method == MethodId::buildOwnerPIN {
@@ -319,7 +396,9 @@ pub fn call(
         _ => None,
     };
     if let Some(arguments) = unavailable_factory_arguments {
-        for _ in 0..arguments { frame.pop_short()?; }
+        for _ in 0..arguments {
+            frame.pop_short()?;
+        }
         return crypto_exception(heap, context, 3);
     }
     if class == ClassId::MessageDigest_OneShot && method == MethodId::open {
@@ -329,12 +408,18 @@ pub fn call(
         }
         // This platform offers one live temporary digest at a time.
         let (occupied, reusable) = one_shot_slot(heap)?;
-        if occupied { return system_no_resource(heap, context); }
+        if occupied {
+            return system_no_resource(heap, context);
+        }
         // Reuse only after the prior applet entry point returned. A local
         // reference held after close must remain invalid for that call.
-        let instance = if let Some(reusable) = reusable { reusable } else {
+        let instance = if let Some(reusable) = reusable {
+            reusable
+        } else {
             if let Err(error) = heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS)]) {
-                if error != Error::Quota { return Err(error); }
+                if error != Error::Quota {
+                    return Err(error);
+                }
                 return system_no_resource(heap, context);
             }
             new_native(heap, class, STATE_WORDS, 0)?
@@ -347,19 +432,31 @@ pub fn call(
         return Ok(Native::Returned);
     }
     if class == ClassId::Checksum {
-        if let Some(result) = checksum::call(method, heap, frame, context, budget)? { return Ok(result); }
+        if let Some(result) = checksum::call(method, heap, frame, context, budget)? {
+            return Ok(result);
+        }
     }
-    if let Some(result) = ec::call(class, method, heap, host, frame, context)? { return Ok(result); }
+    if let Some(result) = ec::call(class, method, heap, host, frame, context)? {
+        return Ok(result);
+    }
     if class == ClassId::KeyAgreement {
-        if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? { return Ok(result); }
+        if let Some(result) = agreement::call(method, heap, host, frame, context, budget)? {
+            return Ok(result);
+        }
     }
     if class == ClassId::Signature {
-        if let Some(result) = signature::call(method, signature, heap, host, frame, context, budget)? { return Ok(result); }
+        if let Some(result) =
+            signature::call(method, signature, heap, host, frame, context, budget)?
+        {
+            return Ok(result);
+        }
     }
     if class == ClassId::KeyPair {
         return key_pair::call(method, signature, heap, host, frame, context, budget);
     }
-    if class == ClassId::SecureChannel || class == ClassId::GPSystem && method == MethodId::getSecureChannel {
+    if class == ClassId::SecureChannel
+        || class == ClassId::GPSystem && method == MethodId::getSecureChannel
+    {
         return secure_channel::call(class, method, heap, host, frame, context, jcre);
     }
     match (class, method) {
@@ -371,16 +468,24 @@ pub fn call(
                 return crypto_exception(heap, context, 3);
             };
             if (matches!(key_type, 1..=3) && !matches!(length, 64 | 128 | 192))
-                || (matches!(key_type, 13..=15) && !matches!(length, 128 | 192 | 256)) {
+                || (matches!(key_type, 13..=15) && !matches!(length, 128 | 192 | 256))
+            {
                 return crypto_exception(heap, context, 3);
             }
             if matches!(key_type, 4..=6 | 22..=25)
-                && !matches!(length, 512 | 736 | 768 | 896 | 1024 | 1280 | 1536 | 1984 | 2048) {
+                && !matches!(
+                    length,
+                    512 | 736 | 768 | 896 | 1024 | 1280 | 1536 | 1984 | 2048
+                )
+            {
                 return crypto_exception(heap, context, 3);
             }
             if matches!(key_type, 9..=12 | 28..=31)
-                && (!ec::key_kind(key_type as u16) || length != 256 || _encryption != 0
-                    || host.p256_parameter(0).is_none()) {
+                && (!ec::key_kind(key_type as u16)
+                    || length != 256
+                    || _encryption != 0
+                    || host.p256_parameter(0).is_none())
+            {
                 return crypto_exception(heap, context, 3);
             }
             let key = new_native(heap, name, STATE_WORDS, context)?;
@@ -415,7 +520,9 @@ pub fn call(
                 }
                 heap.byte_slice_mut(material, 0, length)?.fill(0);
             }
-            if separate_flag { heap.put_word(key, READY, 0)?; }
+            if separate_flag {
+                heap.put_word(key, READY, 0)?;
+            }
         }
 
         // Symmetric key material, JCRE §5.3. The bytes are copied into the key's own
@@ -445,11 +552,20 @@ pub fn call(
             let material = match heap.get_word(this, MATERIAL)? {
                 NULL => {
                     heap.check_allocations(&[(heap::KIND_BYTE, (bytes + prefix) as u16)])?;
-                    heap.prepare_payload_writes(&[(this, MATERIAL * 2, if event == 0 { 4 } else { 2 })])?;
+                    heap.prepare_payload_writes(&[(
+                        this,
+                        MATERIAL * 2,
+                        if event == 0 { 4 } else { 2 },
+                    )])?;
                     let array = if event == 0 {
                         heap.new_array(heap::KIND_BYTE, bytes as u16, context)?
                     } else {
-                        heap.new_transient_array(heap::KIND_BYTE, (bytes + prefix) as u16, context, event)?
+                        heap.new_transient_array(
+                            heap::KIND_BYTE,
+                            (bytes + prefix) as u16,
+                            context,
+                            event,
+                        )?
                     };
                     heap.put_word(this, MATERIAL, array)?;
                     array
@@ -463,8 +579,11 @@ pub fn call(
             }
             let destination = heap.byte_slice_mut(material, 0, bytes + prefix)?;
             destination[prefix..].copy_from_slice(&staging[..bytes]);
-            if event == 0 { heap.put_word(this, READY, 1)?; }
-            else { destination[0] = 1; }
+            if event == 0 {
+                heap.put_word(this, READY, 1)?;
+            } else {
+                destination[0] = 1;
+            }
         }
         (ClassId::AESKey, MethodId::getKey)
         | (ClassId::DESKey, MethodId::getKey)
@@ -480,8 +599,12 @@ pub fn call(
             }
             let material = heap.get_word(this, MATERIAL)?;
             let prefix = usize::from(symmetric_key_clear_event(word_field(heap, this, KIND)?) != 0);
-            let bytes = (heap.info(material)?.length as usize).checked_sub(prefix).ok_or(Error::Format)?;
-            if bytes > 64 || offset < 0 { return Err(Error::Bounds); }
+            let bytes = (heap.info(material)?.length as usize)
+                .checked_sub(prefix)
+                .ok_or(Error::Format)?;
+            if bytes > 64 || offset < 0 {
+                return Err(Error::Bounds);
+            }
             let mut staging = Zeroizing::new([0u8; 64]);
             staging[..bytes].copy_from_slice(heap.byte_slice(material, prefix, bytes)?);
             heap.byte_slice_mut(destination, offset as usize, bytes)?
@@ -520,14 +643,20 @@ pub fn call(
                 heap.put_word_unconditional(exception, super::REASON_FIELD, 3)?; // NO_SUCH_ALGORITHM
                 return Ok(Native::Threw(exception));
             }
-            let pending_bytes = (class == ClassId::Cipher).then_some(if algorithm == 13 { 32 } else { 16 });
+            let pending_bytes =
+                (class == ClassId::Cipher).then_some(if algorithm == 13 { 32 } else { 16 });
             let random_state = (class == ClassId::RandomData).then_some(RANDOM_STATE_BYTES);
             let checksum_state = (class == ClassId::Checksum).then_some(4);
             let extra = pending_bytes.or(random_state).or(checksum_state);
-            let allocations = [(heap::KIND_OBJECT, STATE_WORDS), (heap::KIND_BYTE, extra.unwrap_or(0))];
+            let allocations = [
+                (heap::KIND_OBJECT, STATE_WORDS),
+                (heap::KIND_BYTE, extra.unwrap_or(0)),
+            ];
             let count = if extra.is_some() { 2 } else { 1 };
             if let Err(error) = heap.check_allocations(&allocations[..count]) {
-                if error != Error::Quota { return Err(error); }
+                if error != Error::Quota {
+                    return Err(error);
+                }
                 let exception = super::new_exception(heap, ClassId::SystemException, context)?;
                 heap.put_word_unconditional(exception, super::REASON_FIELD, 5)?; // NO_RESOURCE
                 return Ok(Native::Threw(exception));
@@ -535,11 +664,21 @@ pub fn call(
             let instance = new_native(heap, class, STATE_WORDS, context)?;
             heap.put_word(instance, KIND, algorithm as u16)?;
             if let Some(bytes) = pending_bytes {
-                let pending = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
+                let pending = heap.new_transient_array(
+                    heap::KIND_BYTE,
+                    bytes,
+                    context,
+                    heap::CLEAR_ON_RESET,
+                )?;
                 heap.put_word(instance, PENDING, pending)?;
             }
             if let Some(bytes) = checksum_state {
-                let state = heap.new_transient_array(heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?;
+                let state = heap.new_transient_array(
+                    heap::KIND_BYTE,
+                    bytes,
+                    context,
+                    heap::CLEAR_ON_RESET,
+                )?;
                 heap.put_word(instance, MATERIAL, state)?;
             }
             if let Some(bytes) = random_state {
@@ -547,7 +686,11 @@ pub fn call(
                 let state = match service {
                     RandomService::Pseudo(_) => heap.new_array(heap::KIND_BYTE, bytes, context)?,
                     RandomService::Secure(_) => heap.new_transient_array(
-                        heap::KIND_BYTE, bytes, context, heap::CLEAR_ON_RESET)?,
+                        heap::KIND_BYTE,
+                        bytes,
+                        context,
+                        heap::CLEAR_ON_RESET,
+                    )?,
                 };
                 heap.put_word(instance, MATERIAL, state)?;
                 if matches!(service, RandomService::Pseudo(_)) {
@@ -585,12 +728,28 @@ pub fn call(
         }
         (ClassId::GPSystem, MethodId::setCardContentState) => {
             let state = frame.pop_short()?;
-            let previous = if jcre.installing { None } else { Some(heap.lifecycle()?) };
-            if !jcre.installing && Heap::valid_lifecycle(state as u8) && previous != Some(state as u8) {
+            let previous = if jcre.installing {
+                None
+            } else {
+                Some(heap.lifecycle()?)
+            };
+            if !jcre.installing
+                && Heap::valid_lifecycle(state as u8)
+                && previous != Some(state as u8)
+            {
                 ensure_checkpoint_capacity(1, host, jcre)?;
             }
             let accepted = !jcre.installing && heap.set_lifecycle(state as u8)?;
-            if accepted { checkpoint_committed(previous != Some(state as u8), heap, host, jcre, context, statics)?; }
+            if accepted {
+                checkpoint_committed(
+                    previous != Some(state as u8),
+                    heap,
+                    host,
+                    jcre,
+                    context,
+                    statics,
+                )?;
+            }
             frame.push_short(i16::from(accepted))?;
         }
         (ClassId::MessageDigest | ClassId::MessageDigest_OneShot, MethodId::reset) => {
@@ -598,7 +757,9 @@ pub fn call(
             if one_shot_digest(heap, this, context)? && word_field(heap, this, READY)? == 0 {
                 return crypto_exception(heap, context, 5); // ILLEGAL_USE
             }
-            if !matches!(word_field(heap, this, KIND)?, 1 | 4 | 5 | 6 | 7) { return Err(Error::Unsupported); }
+            if !matches!(word_field(heap, this, KIND)?, 1 | 4 | 5 | 6 | 7) {
+                return Err(Error::Unsupported);
+            }
             let pending = heap.get_word(this, PENDING)?;
             if pending != NULL {
                 heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.fill(0);
@@ -614,11 +775,17 @@ pub fn call(
             }
             heap.check_access(input, context)?;
             let algorithm = word_field(heap, this, KIND)?;
-            if !matches!(algorithm, 1 | 4 | 5 | 6 | 7) { return Err(Error::Unsupported); }
-            if length < 0 || offset < 0 { return Err(Error::Bounds); }
+            if !matches!(algorithm, 1 | 4 | 5 | 6 | 7) {
+                return Err(Error::Unsupported);
+            }
+            if length < 0 || offset < 0 {
+                return Err(Error::Bounds);
+            }
             heap.byte_slice(input, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
-            if length == 0 { return Ok(Native::Returned); }
+            if length == 0 {
+                return Ok(Native::Returned);
+            }
             let pending = heap.get_word(this, PENDING)?;
             let mut state = Zeroizing::new([0u8; SHA256_STATE_BYTES]);
             if pending == NULL {
@@ -637,12 +804,19 @@ pub fn call(
                 _ => unreachable!(),
             }
             let pending = if pending == NULL {
-                let array = heap.new_transient_array(heap::KIND_BYTE, SHA256_STATE_BYTES as u16,
-                    context, heap::CLEAR_ON_RESET)?;
+                let array = heap.new_transient_array(
+                    heap::KIND_BYTE,
+                    SHA256_STATE_BYTES as u16,
+                    context,
+                    heap::CLEAR_ON_RESET,
+                )?;
                 heap.put_word(this, PENDING, array)?;
                 array
-            } else { pending };
-            heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.copy_from_slice(&state[..]);
+            } else {
+                pending
+            };
+            heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?
+                .copy_from_slice(&state[..]);
         }
         (ClassId::MessageDigest | ClassId::MessageDigest_OneShot, MethodId::doFinal) => {
             let out_offset = frame.pop_short()?;
@@ -726,30 +900,43 @@ pub fn call(
                 let offset = frame.pop_short()?;
                 let array = frame.pop_reference()?;
                 Some((array, offset, length))
-            } else { None };
+            } else {
+                None
+            };
             let mode = frame.pop_short()?;
             let key = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             let cbc = word_field(heap, this, KIND)? == 13;
             let mut iv = Zeroizing::new([0u8; 16]);
             if let Some((array, offset, length)) = vector {
-                if !cbc || length != 16 { return crypto_exception(heap, context, 1); }
-                if offset < 0 { return Err(Error::Bounds); }
+                if !cbc || length != 16 {
+                    return crypto_exception(heap, context, 1);
+                }
+                if offset < 0 {
+                    return Err(Error::Bounds);
+                }
                 heap.check_access(array, context)?;
                 iv.copy_from_slice(heap.byte_slice(array, offset as usize, 16)?);
             }
             heap.check_access(key, context)?;
             if !matches!(mode, 1 | 2)
-                || super::api_class(heap.info(key)?.class).map(|entry| entry.id) != Some(ClassId::AESKey)
-                || word_field(heap, key, SIZE)? != 128 {
+                || super::api_class(heap.info(key)?.class).map(|entry| entry.id)
+                    != Some(ClassId::AESKey)
+                || word_field(heap, key, SIZE)? != 128
+            {
                 return crypto_exception(heap, context, 1);
             }
-            if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2); }
+            if !key_initialized(heap, key)? {
+                return crypto_exception(heap, context, 2);
+            }
             let pending = heap.get_word(this, PENDING)?;
             heap.byte_slice(pending, 0, if cbc { 32 } else { 16 })?;
             heap.prepare_payload_writes(&[(this, MATERIAL * 2, (COUNTER + 1 - MATERIAL) * 2)])?;
             heap.byte_slice_mut(pending, 0, 16)?.fill(0);
-            if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&iv[..]); }
+            if cbc {
+                heap.byte_slice_mut(pending, 16, 16)?
+                    .copy_from_slice(&iv[..]);
+            }
             heap.put_word(this, MATERIAL, key)?;
             heap.put_word(this, COUNTER, mode as u16)?;
             heap.put_word(this, READY, 1)?;
@@ -761,24 +948,36 @@ pub fn call(
             let offset = frame.pop_short()?;
             let input = frame.pop_reference()?;
             let this = frame.pop_reference()?;
-            if word_field(heap, this, READY)? == 0 { return crypto_exception(heap, context, 4); }
+            if word_field(heap, this, READY)? == 0 {
+                return crypto_exception(heap, context, 4);
+            }
             let key = heap.get_word(this, MATERIAL)?;
             heap.check_access(key, context)?;
-            if !key_initialized(heap, key)? { return crypto_exception(heap, context, 2); }
+            if !key_initialized(heap, key)? {
+                return crypto_exception(heap, context, 2);
+            }
             heap.check_access(input, context)?;
             heap.check_access(output, context)?;
-            if length < 0 || offset < 0 || out_offset < 0 { return Err(Error::Bounds); }
+            if length < 0 || offset < 0 || out_offset < 0 {
+                return Err(Error::Bounds);
+            }
             let pending = heap.get_word(this, PENDING)?;
             let mut prior = Zeroizing::new([0u8; 16]);
             prior.copy_from_slice(heap.byte_slice(pending, 0, 16)?);
             let count = (prior[0] & 0x0f) as usize;
-            if prior[0] & 0x70 != 0 { return Err(Error::Format); }
+            if prior[0] & 0x70 != 0 {
+                return Err(Error::Format);
+            }
             let total = count + length as usize;
-            if method == MethodId::doFinal && (!total.is_multiple_of(16) || (total == 0 && prior[0] & 0x80 == 0)) {
+            if method == MethodId::doFinal
+                && (!total.is_multiple_of(16) || (total == 0 && prior[0] & 0x80 == 0))
+            {
                 return crypto_exception(heap, context, 5);
             }
             let written = total / 16 * 16;
-            if written > i16::MAX as usize { return Err(Error::Bounds); }
+            if written > i16::MAX as usize {
+                return Err(Error::Bounds);
+            }
             heap.byte_slice(output, out_offset as usize, written)?;
             let message = heap.byte_slice(input, offset as usize, length as usize)?;
             let material = heap.get_word(key, MATERIAL)?;
@@ -790,8 +989,16 @@ pub fn call(
             *budget = budget.checked_sub(total as u32).ok_or(Error::Quota)?;
             let mut staged = StagedBytes::new(written)?;
             let result = staged.as_mut();
-            let byte = |at: usize| if at < count { prior[1 + at] } else { message[at - count] };
-            for (at, output) in result.iter_mut().enumerate() { *output = byte(at); }
+            let byte = |at: usize| {
+                if at < count {
+                    prior[1 + at]
+                } else {
+                    message[at - count]
+                }
+            };
+            for (at, output) in result.iter_mut().enumerate() {
+                *output = byte(at);
+            }
             let cbc = word_field(heap, this, KIND)? == 13;
             let encrypt = word_field(heap, this, COUNTER)? == 2;
             let mut next_iv = Zeroizing::new([0u8; 16]);
@@ -800,23 +1007,42 @@ pub fn call(
                 iv.copy_from_slice(heap.byte_slice(pending, 16, 16)?);
                 *next_iv = *iv;
                 if written != 0 {
-                    if !encrypt { next_iv.copy_from_slice(&result[written - 16..]); }
+                    if !encrypt {
+                        next_iv.copy_from_slice(&result[written - 16..]);
+                    }
                     host.aes128_cbc(&key_bytes, &iv, result, encrypt)?;
-                    if encrypt { next_iv.copy_from_slice(&result[written - 16..]); }
+                    if encrypt {
+                        next_iv.copy_from_slice(&result[written - 16..]);
+                    }
                 }
-                if method == MethodId::doFinal { next_iv.fill(0); }
+                if method == MethodId::doFinal {
+                    next_iv.fill(0);
+                }
             } else {
                 for block in result.chunks_exact_mut(16) {
-                    host.aes128_block(&key_bytes, block.try_into().map_err(|_| Error::Bounds)?, encrypt)?;
+                    host.aes128_block(
+                        &key_bytes,
+                        block.try_into().map_err(|_| Error::Bounds)?,
+                        encrypt,
+                    )?;
                 }
             }
             let mut tail = Zeroizing::new([0u8; 16]);
             tail[0] = (total - written) as u8;
-            if method == MethodId::update && (total != 0 || prior[0] & 0x80 != 0) { tail[0] |= 0x80; }
-            for at in written..total { tail[1 + at - written] = byte(at); }
-            heap.byte_slice_mut(output, out_offset as usize, written)?.copy_from_slice(result);
-            heap.byte_slice_mut(pending, 0, 16)?.copy_from_slice(&tail[..]);
-            if cbc { heap.byte_slice_mut(pending, 16, 16)?.copy_from_slice(&next_iv[..]); }
+            if method == MethodId::update && (total != 0 || prior[0] & 0x80 != 0) {
+                tail[0] |= 0x80;
+            }
+            for at in written..total {
+                tail[1 + at - written] = byte(at);
+            }
+            heap.byte_slice_mut(output, out_offset as usize, written)?
+                .copy_from_slice(result);
+            heap.byte_slice_mut(pending, 0, 16)?
+                .copy_from_slice(&tail[..]);
+            if cbc {
+                heap.byte_slice_mut(pending, 16, 16)?
+                    .copy_from_slice(&next_iv[..]);
+            }
             frame.push_short(written as i16)?;
         }
         (ClassId::RandomData, MethodId::generateData)
@@ -829,7 +1055,9 @@ pub fn call(
             if length < 0 || offset < 0 {
                 return Err(Error::Bounds);
             }
-            if length == 0 { return crypto_exception(heap, context, 1); }
+            if length == 0 {
+                return crypto_exception(heap, context, 1);
+            }
             heap.byte_slice(array, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             let mut staged = StagedBytes::new(length as usize)?;
@@ -837,10 +1065,13 @@ pub fn call(
             let algorithm = word_field(heap, this, KIND)? as u8;
             let service = RandomService::from_algorithm(algorithm)?;
             let state = heap.get_word(this, MATERIAL)?;
-            let seeded = state != NULL && heap.byte_slice(state, 0, RANDOM_STATE_BYTES as usize)?[0] != 0;
+            let seeded =
+                state != NULL && heap.byte_slice(state, 0, RANDOM_STATE_BYTES as usize)?[0] != 0;
             match service {
                 RandomService::Pseudo(_) => {
-                    if !seeded { return Err(Error::Format); }
+                    if !seeded {
+                        return Err(Error::Format);
+                    }
                     let mut chain = Zeroizing::new([0u8; 32]);
                     chain.copy_from_slice(heap.byte_slice(state, 1, 32)?);
                     for output in result.chunks_mut(32) {
@@ -861,14 +1092,17 @@ pub fn call(
                         for output in result.chunks_mut(32) {
                             let mut next = Zeroizing::new([0u8; 32]);
                             random_domain_hash(host, SECURE_MASK_DOMAIN, &chain, &mut next)?;
-                            for (byte, mask) in output.iter_mut().zip(next.iter()) { *byte ^= mask; }
+                            for (byte, mask) in output.iter_mut().zip(next.iter()) {
+                                *byte ^= mask;
+                            }
                             *chain = *next;
                         }
                         store_secure_chain(heap, state, &chain)?;
                     }
                 }
             }
-            heap.byte_slice_mut(array, offset as usize, length as usize)?.copy_from_slice(result);
+            heap.byte_slice_mut(array, offset as usize, length as usize)?
+                .copy_from_slice(result);
             if method == MethodId::nextBytes {
                 frame.push_short(offset.wrapping_add(length))?;
             }
@@ -879,13 +1113,17 @@ pub fn call(
             let source = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             heap.check_access(source, context)?;
-            if length < 0 || offset < 0 { return Err(Error::Bounds); }
+            if length < 0 || offset < 0 {
+                return Err(Error::Bounds);
+            }
             let seed = heap.byte_slice(source, offset as usize, length as usize)?;
             *budget = budget.checked_sub(length as u32).ok_or(Error::Quota)?;
             let algorithm = word_field(heap, this, KIND)? as u8;
             let service = RandomService::from_algorithm(algorithm)?;
             let mut seed_digest = Zeroizing::new([0u8; 32]);
-            if host.digest(4, seed, &mut seed_digest[..])? != 32 { return Err(Error::Format); }
+            if host.digest(4, seed, &mut seed_digest[..])? != 32 {
+                return Err(Error::Format);
+            }
             let mut chain = Zeroizing::new([0u8; 32]);
             match service {
                 RandomService::Pseudo(_) => {

@@ -31,10 +31,18 @@ impl PersistentCursor<'_> {
     pub fn save_range(&mut self, at: usize, output: &mut [u8]) -> Result<()> {
         let result = (|| {
             let total = self.view.heap_bytes();
-            let end = at.checked_add(output.len()).filter(|end| *end <= total).ok_or(Error::Bounds)?;
-            if at < self.last_end { return Err(Error::Bounds); }
-            if let Some(heap) = self.view.projection { heap.project_heap_range(at, output)?; }
-            else { output.copy_from_slice(self.view.heap.get(at..end).ok_or(Error::Bounds)?); }
+            let end = at
+                .checked_add(output.len())
+                .filter(|end| *end <= total)
+                .ok_or(Error::Bounds)?;
+            if at < self.last_end {
+                return Err(Error::Bounds);
+            }
+            if let Some(heap) = self.view.projection {
+                heap.project_heap_range(at, output)?;
+            } else {
+                output.copy_from_slice(self.view.heap.get(at..end).ok_or(Error::Bounds)?);
+            }
             while self.cursor < total {
                 let reference = u16::try_from(self.cursor).map_err(|_| Error::Bounds)?;
                 let info = heap::Info::read(self.view.heap, total, reference)?;
@@ -42,25 +50,41 @@ impl PersistentCursor<'_> {
                 let length = info.length as usize * info.element_size();
                 let next = (payload + length).next_multiple_of(2);
                 if reference == self.view.buffer {
-                    if info.kind != heap::KIND_BYTE { return Err(Error::Type); }
+                    if info.kind != heap::KIND_BYTE {
+                        return Err(Error::Type);
+                    }
                     self.found_buffer = true;
                 }
-                if next <= at { self.cursor = next; continue; }
-                if self.cursor >= end { break; }
-                let clear = if reference == self.view.buffer || info.clear_event != 0 { Some(0..length) }
-                else { natives::native_volatile_range(info)? };
+                if next <= at {
+                    self.cursor = next;
+                    continue;
+                }
+                if self.cursor >= end {
+                    break;
+                }
+                let clear = if reference == self.view.buffer || info.clear_event != 0 {
+                    Some(0..length)
+                } else {
+                    natives::native_volatile_range(info)?
+                };
                 if let Some(range) = clear {
                     let lo = at.max(payload + range.start);
                     let hi = end.min(payload + range.end);
-                    if lo < hi { output[lo - at..hi - at].fill(0); }
+                    if lo < hi {
+                        output[lo - at..hi - at].fill(0);
+                    }
                 }
-                if next > end { break; }
+                if next > end {
+                    break;
+                }
                 self.cursor = next;
             }
             self.last_end = end;
             Ok(())
         })();
-        if result.is_err() { output.zeroize(); }
+        if result.is_err() {
+            output.zeroize();
+        }
         result
     }
 
@@ -70,19 +94,26 @@ impl PersistentCursor<'_> {
             let reference = u16::try_from(self.cursor).map_err(|_| Error::Bounds)?;
             let info = heap::Info::read(self.view.heap, total, reference)?;
             if reference == self.view.buffer {
-                if info.kind != heap::KIND_BYTE { return Err(Error::Type); }
+                if info.kind != heap::KIND_BYTE {
+                    return Err(Error::Type);
+                }
                 self.found_buffer = true;
             }
             self.cursor = (self.cursor + heap::HEADER + info.length as usize * info.element_size())
                 .next_multiple_of(2);
         }
-        if self.cursor != total || !self.found_buffer { return Err(Error::Format); }
+        if self.cursor != total || !self.found_buffer {
+            return Err(Error::Format);
+        }
         Ok(())
     }
 }
 
 impl<'a> PersistentView<'a> {
-    pub fn heap_bytes(self) -> usize { self.projection.map_or(self.heap.len(), Heap::committed_bytes) }
+    pub fn heap_bytes(self) -> usize {
+        self.projection
+            .map_or(self.heap.len(), Heap::committed_bytes)
+    }
 
     /// The runtime's version and pending-deletion marker live outside objects
     /// and are never part of a Java transaction.
@@ -92,8 +123,14 @@ impl<'a> PersistentView<'a> {
 
     /// A deletion request serviced in this APDU may set and clear only the
     /// runtime marker. If its final value matches flash, nothing changed.
-    pub fn same_state_after_deletion_request(self, before_length: usize, before_header: u8) -> Result<bool> {
-        let Some(writes) = self.pending_writes() else { return Ok(false); };
+    pub fn same_state_after_deletion_request(
+        self,
+        before_length: usize,
+        before_header: u8,
+    ) -> Result<bool> {
+        let Some(writes) = self.pending_writes() else {
+            return Ok(false);
+        };
         Ok(self.heap_bytes() == before_length
             && self.heap_header()? == before_header
             && !writes.snapshot_required()
@@ -103,15 +140,25 @@ impl<'a> PersistentView<'a> {
 
     pub fn cursor(self) -> Result<PersistentCursor<'a>> {
         let total = self.heap_bytes();
-        if total < 2 || !total.is_multiple_of(2) { return Err(Error::Bounds); }
-        Ok(PersistentCursor { view: self, cursor: 2, last_end: 0, found_buffer: false })
+        if total < 2 || !total.is_multiple_of(2) {
+            return Err(Error::Bounds);
+        }
+        Ok(PersistentCursor {
+            view: self,
+            cursor: 2,
+            last_end: 0,
+            found_buffer: false,
+        })
     }
 
-    pub fn metadata(self) -> (Reference, &'a [u8]) { (self.instance, self.statics) }
+    pub fn metadata(self) -> (Reference, &'a [u8]) {
+        (self.instance, self.statics)
+    }
 
     /// None means this view has no live write tracker and requires a full snapshot.
     pub fn pending_writes(self) -> Option<heap::PendingWrites> {
-        self.projection.map(|heap| heap.pending_writes().for_committed_heap(self.heap_bytes()))
+        self.projection
+            .map(|heap| heap.pending_writes().for_committed_heap(self.heap_bytes()))
     }
 
     /// Copy a sanitized window without allocating a complete heap projection.
@@ -121,16 +168,27 @@ impl<'a> PersistentView<'a> {
             cursor.save_range(at, output)?;
             cursor.finish()
         })();
-        if result.is_err() { output.zeroize(); }
+        if result.is_err() {
+            output.zeroize();
+        }
         result
     }
 
-    pub fn save_into<'b>(self, output: &'b mut [u8]) -> Result<PersistentState<'b>> where 'a: 'b {
-        if output.len() != self.heap_bytes() { output.zeroize(); return Err(Error::Bounds); }
+    pub fn save_into<'b>(self, output: &'b mut [u8]) -> Result<PersistentState<'b>>
+    where
+        'a: 'b,
+    {
+        if output.len() != self.heap_bytes() {
+            output.zeroize();
+            return Err(Error::Bounds);
+        }
         self.save_range(0, output)?;
-        Ok(PersistentState { heap: output, statics: self.statics, instance: self.instance })
+        Ok(PersistentState {
+            heap: output,
+            statics: self.statics,
+            instance: self.instance,
+        })
     }
-
 }
 
 /// RAM-only reset-scoped array contents. Bind this to the installation that produced it.
@@ -142,7 +200,9 @@ pub struct VolatileState {
 }
 
 impl VolatileState {
-    pub fn bytes(&self) -> usize { self.bytes.len() }
+    pub fn bytes(&self) -> usize {
+        self.bytes.len()
+    }
 }
 
 impl AppletInstance {
@@ -157,7 +217,9 @@ impl AppletInstance {
             }
             Ok(())
         })?;
-        if size > maximum { return Err(Error::Quota); }
+        if size > maximum {
+            return Err(Error::Quota);
+        }
         let mut bytes = zeroize::Zeroizing::new(Vec::new());
         bytes.try_reserve_exact(size).map_err(|_| Error::Quota)?;
         heap.visit_objects(|reference, info, payload| {
@@ -169,7 +231,11 @@ impl AppletInstance {
             }
             Ok(())
         })?;
-        Ok(VolatileState { bytes, heap_used: self.heap_used, instance })
+        Ok(VolatileState {
+            bytes,
+            heap_used: self.heap_used,
+            instance,
+        })
     }
 
     /// Apply a RAM snapshot only to the identical recovered heap layout. Validate the
@@ -186,15 +252,25 @@ impl AppletInstance {
                     let header = saved.bytes.get(at..at + 5).ok_or(Error::Format)?;
                     if header[..2] != reference.to_be_bytes()
                         || header[2..4] != (payload.len() as u16).to_be_bytes()
-                        || header[4] != info.kind { return Err(Error::Format); }
+                        || header[4] != info.kind
+                    {
+                        return Err(Error::Format);
+                    }
                     at += 5;
-                    let value = saved.bytes.get(at..at + payload.len()).ok_or(Error::Format)?;
-                    if apply { payload.copy_from_slice(value); }
+                    let value = saved
+                        .bytes
+                        .get(at..at + payload.len())
+                        .ok_or(Error::Format)?;
+                    if apply {
+                        payload.copy_from_slice(value);
+                    }
                     at += payload.len();
                 }
                 Ok(())
             })?;
-            if at != saved.bytes.len() { return Err(Error::Format); }
+            if at != saved.bytes.len() {
+                return Err(Error::Format);
+            }
         }
         Ok(())
     }
@@ -210,8 +286,11 @@ impl AppletInstance {
 
     pub fn persistent_view(&self) -> Result<PersistentView<'_>> {
         Ok(PersistentView {
-            heap: &self.heap[..self.heap_used], statics: &self.statics,
-            instance: self.instance.ok_or(Error::Missing)?, buffer: self.buffer, projection: None,
+            heap: &self.heap[..self.heap_used],
+            statics: &self.statics,
+            instance: self.instance.ok_or(Error::Missing)?,
+            buffer: self.buffer,
+            projection: None,
         })
     }
 
@@ -220,20 +299,33 @@ impl AppletInstance {
     pub fn save_into<'a>(&'a self, output: &'a mut [u8]) -> Result<PersistentState<'a>> {
         match self.persistent_view() {
             Ok(view) => view.save_into(output),
-            Err(error) => { output.zeroize(); Err(error) }
+            Err(error) => {
+                output.zeroize();
+                Err(error)
+            }
         }
     }
 
     /// Validate borrowed state with only the load file's initial runtime layout.
-    pub fn validate_persistent(file: &LoadFile, mut sizes: Sizes, saved: PersistentState<'_>) -> Result<()> {
-        if saved.heap.len() > sizes.heap_bytes { return Err(Error::Bounds); }
+    pub fn validate_persistent(
+        file: &LoadFile,
+        mut sizes: Sizes,
+        saved: PersistentState<'_>,
+    ) -> Result<()> {
+        if saved.heap.len() > sizes.heap_bytes {
+            return Err(Error::Bounds);
+        }
         // Bound initial objects from the same exception inventory and static arrays
         // used by new(). No spare heap, execution frames, or saved-heap copy is needed.
-        let mut initial = 2usize + (heap::HEADER + usize::from(sizes.buffer_bytes)).next_multiple_of(2);
-        initial = initial.checked_add((1 + natives::runtime_exception_classes().count()) * (heap::HEADER + 2))
+        let mut initial =
+            2usize + (heap::HEADER + usize::from(sizes.buffer_bytes)).next_multiple_of(2);
+        initial = initial
+            .checked_add((1 + natives::runtime_exception_classes().count()) * (heap::HEADER + 2))
             .ok_or(Error::Quota)?;
         for array in file.static_fields()?.array_inits() {
-            initial = initial.checked_add((heap::HEADER + array.values.len()).next_multiple_of(2)).ok_or(Error::Quota)?;
+            initial = initial
+                .checked_add((heap::HEADER + array.values.len()).next_multiple_of(2))
+                .ok_or(Error::Quota)?;
         }
         sizes.heap_bytes = initial.min(saved.heap.len());
         sizes.frame_words = 0;
@@ -250,9 +342,21 @@ impl AppletInstance {
 
     /// Restore state while leaving execution suspended. The caller must restore
     /// frames before invoking the applet, after releasing its snapshot buffer.
-    pub fn restore_without_frames(file: &LoadFile, sizes: Sizes, saved: PersistentState<'_>) -> Result<Self> {
-        if saved.heap.len() > sizes.heap_bytes { return Err(Error::Bounds); }
-        let mut card = Self::new(file, Sizes { frame_words: 0, ..sizes })?;
+    pub fn restore_without_frames(
+        file: &LoadFile,
+        sizes: Sizes,
+        saved: PersistentState<'_>,
+    ) -> Result<Self> {
+        if saved.heap.len() > sizes.heap_bytes {
+            return Err(Error::Bounds);
+        }
+        let mut card = Self::new(
+            file,
+            Sizes {
+                frame_words: 0,
+                ..sizes
+            },
+        )?;
         card.sizes = sizes;
         card.validate_saved(file, &saved)?;
         card.heap[..saved.heap.len()].copy_from_slice(saved.heap);
@@ -263,14 +367,20 @@ impl AppletInstance {
     }
 
     fn validate_saved(&self, file: &LoadFile, saved: &PersistentState<'_>) -> Result<()> {
-        if saved.statics.len() != self.statics.len() || saved.heap.len() < 2
-            || saved.heap.len() > u16::MAX as usize || !saved.heap.len().is_multiple_of(2) {
+        if saved.statics.len() != self.statics.len()
+            || saved.heap.len() < 2
+            || saved.heap.len() > u16::MAX as usize
+            || !saved.heap.len().is_multiple_of(2)
+        {
             return Err(Error::Bounds);
         }
         // Runtime objects have deterministic handles and a zeroed APDU buffer.
-        if !Heap::valid_version(saved.heap[0]) { return Err(Error::IncompatibleState); }
+        if !Heap::valid_version(saved.heap[0]) {
+            return Err(Error::IncompatibleState);
+        }
         if !Heap::valid_lifecycle(saved.heap[1])
-            || saved.heap.get(2..self.runtime_bytes) != Some(&self.heap[2..self.runtime_bytes]) {
+            || saved.heap.get(2..self.runtime_bytes) != Some(&self.heap[2..self.runtime_bytes])
+        {
             return Err(Error::Format);
         }
         let mut starts = Vec::new();
@@ -318,11 +428,17 @@ impl AppletInstance {
         linked.imports_resolve()?;
         visit_saved_objects(saved.heap, |_, info, payload| {
             if info.kind == heap::KIND_REFERENCE {
-                let component = if info.class == heap::ANY_REFERENCE_CLASS { None } else {
+                let component = if info.class == heap::ANY_REFERENCE_CLASS {
+                    None
+                } else {
                     let target = ClassRef::decode(info.class);
                     match target {
-                        ClassRef::Internal(offset) => { linked.classes().at(offset)?; }
-                        ClassRef::External { package, class } => { linked.api_class(package, class)?; }
+                        ClassRef::Internal(offset) => {
+                            linked.classes().at(offset)?;
+                        }
+                        ClassRef::External { package, class } => {
+                            linked.api_class(package, class)?;
+                        }
                         ClassRef::None => return Err(Error::Format),
                     }
                     Some(target)
@@ -337,7 +453,9 @@ impl AppletInstance {
                         } else {
                             linked.class_matches_target(value.class, component)?
                         };
-                        if !compatible { return Err(Error::Type); }
+                        if !compatible {
+                            return Err(Error::Type);
+                        }
                     }
                 }
             } else if info.kind == heap::KIND_BOOLEAN {
@@ -352,12 +470,13 @@ impl AppletInstance {
                         return Err(Error::Format);
                     }
                     if info.length != 6
-                        && !(info.length == 1
-                            && (exception || class.id == ClassId::APDU))
+                        && !(info.length == 1 && (exception || class.id == ClassId::APDU))
                     {
                         return Err(Error::Format);
                     }
-                    if class.id == ClassId::SecureChannel && (info.length != 6 || payload.iter().any(|byte| *byte != 0)) {
+                    if class.id == ClassId::SecureChannel
+                        && (info.length != 6 || payload.iter().any(|byte| *byte != 0))
+                    {
                         return Err(Error::Format);
                     }
                     if info.length == 6 {
@@ -374,24 +493,40 @@ impl AppletInstance {
                         let material = word(2);
                         if class.id == ClassId::Signature {
                             let pending = word(5);
-                            if word(0) != 33 || word(3) > 1
-                                || (word(3) == 1 && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2))) {
+                            if word(0) != 33
+                                || word(3) > 1
+                                || (word(3) == 1
+                                    && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2)))
+                            {
                                 return Err(Error::Format);
                             }
                             if pending != 0 {
-                                let header = &saved.heap[pending as usize..pending as usize + heap::HEADER];
+                                let header =
+                                    &saved.heap[pending as usize..pending as usize + heap::HEADER];
                                 if header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4)
-                                    || u16::from_be_bytes([header[2], header[3]]) as usize != crate::host::SHA256_STATE_BYTES {
+                                    || u16::from_be_bytes([header[2], header[3]]) as usize
+                                        != crate::host::SHA256_STATE_BYTES
+                                {
                                     return Err(Error::Format);
                                 }
                             }
                             if material != 0 {
                                 let start = material as usize;
-                                let key_class = u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
-                                let expected = if word(4) == 1 { ClassId::ECPrivateKey } else { ClassId::ECPublicKey };
-                                if natives::api_class(key_class).map(|entry| entry.id) != Some(expected)
+                                let key_class =
+                                    u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
+                                let expected = if word(4) == 1 {
+                                    ClassId::ECPrivateKey
+                                } else {
+                                    ClassId::ECPublicKey
+                                };
+                                if natives::api_class(key_class).map(|entry| entry.id)
+                                    != Some(expected)
                                     || saved.heap[start + 4] != heap::KIND_OBJECT
-                                    || u16::from_be_bytes([saved.heap[start + 2], saved.heap[start + 3]]) != 6 {
+                                    || u16::from_be_bytes([
+                                        saved.heap[start + 2],
+                                        saved.heap[start + 3],
+                                    ]) != 6
+                                {
                                     return Err(Error::Type);
                                 }
                             }
@@ -401,12 +536,21 @@ impl AppletInstance {
                             if word(0) != 5 || word(1) != 256 || material == 0 || private == 0 {
                                 return Err(Error::Format);
                             }
-                            for (reference, expected) in [(material, ClassId::ECPublicKey), (private, ClassId::ECPrivateKey)] {
+                            for (reference, expected) in [
+                                (material, ClassId::ECPublicKey),
+                                (private, ClassId::ECPrivateKey),
+                            ] {
                                 let start = reference as usize;
-                                let key_class = u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
-                                if natives::api_class(key_class).map(|entry| entry.id) != Some(expected)
+                                let key_class =
+                                    u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
+                                if natives::api_class(key_class).map(|entry| entry.id)
+                                    != Some(expected)
                                     || saved.heap[start + 4] != heap::KIND_OBJECT
-                                    || u16::from_be_bytes([saved.heap[start + 2], saved.heap[start + 3]]) != 6 {
+                                    || u16::from_be_bytes([
+                                        saved.heap[start + 2],
+                                        saved.heap[start + 3],
+                                    ]) != 6
+                                {
                                     return Err(Error::Type);
                                 }
                             }
@@ -417,41 +561,65 @@ impl AppletInstance {
                             }
                             if material != 0 {
                                 let start = material as usize;
-                                let key_class = u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
-                                if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::ECPrivateKey)
+                                let key_class =
+                                    u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
+                                if natives::api_class(key_class).map(|entry| entry.id)
+                                    != Some(ClassId::ECPrivateKey)
                                     || saved.heap[start + 4] != heap::KIND_OBJECT
-                                    || u16::from_be_bytes([saved.heap[start + 2], saved.heap[start + 3]]) != 6 {
+                                    || u16::from_be_bytes([
+                                        saved.heap[start + 2],
+                                        saved.heap[start + 3],
+                                    ]) != 6
+                                {
                                     return Err(Error::Type);
                                 }
                             }
                         }
                         if class.id == ClassId::Cipher {
                             let pending = word(5);
-                            if !matches!(word(0), 13 | 14) || pending == 0 || word(3) > 1
-                                || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2))) {
+                            if !matches!(word(0), 13 | 14)
+                                || pending == 0
+                                || word(3) > 1
+                                || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2)))
+                            {
                                 return Err(Error::Format);
                             }
-                            let header = &saved.heap[pending as usize..pending as usize + heap::HEADER];
-                            if u16::from_be_bytes([header[2], header[3]]) != if word(0) == 13 { 32 } else { 16 }
-                                || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4) {
+                            let header =
+                                &saved.heap[pending as usize..pending as usize + heap::HEADER];
+                            if u16::from_be_bytes([header[2], header[3]])
+                                != if word(0) == 13 { 32 } else { 16 }
+                                || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4)
+                            {
                                 return Err(Error::Format);
                             }
                             if material != 0 {
                                 let start = material as usize;
-                                let key_class = u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
-                                if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::AESKey)
+                                let key_class =
+                                    u16::from_be_bytes([saved.heap[start], saved.heap[start + 1]]);
+                                if natives::api_class(key_class).map(|entry| entry.id)
+                                    != Some(ClassId::AESKey)
                                     || saved.heap[start + 4] != heap::KIND_OBJECT
-                                    || u16::from_be_bytes([saved.heap[start + 2], saved.heap[start + 3]]) != 6
-                                    || saved.heap.get(start + heap::HEADER + 2..start + heap::HEADER + 4) != Some(&[0, 128]) {
+                                    || u16::from_be_bytes([
+                                        saved.heap[start + 2],
+                                        saved.heap[start + 3],
+                                    ]) != 6
+                                    || saved
+                                        .heap
+                                        .get(start + heap::HEADER + 2..start + heap::HEADER + 4)
+                                        != Some(&[0, 128])
+                                {
                                     return Err(Error::Type);
                                 }
                             }
                         }
                         let pin = class.id == ClassId::OwnerPIN;
                         let ec = matches!(class.id, ClassId::ECPublicKey | ClassId::ECPrivateKey);
-                        if ec && (!natives::ec_key_kind(word(0)) || word(1) != 256
-                            || word(3) != 0
-                            || (class.id == ClassId::ECPublicKey) != (word(0) == 11)) {
+                        if ec
+                            && (!natives::ec_key_kind(word(0))
+                                || word(1) != 256
+                                || word(3) != 0
+                                || (class.id == ClassId::ECPublicKey) != (word(0) == 11))
+                        {
                             return Err(Error::Format);
                         }
                         if material != 0 && (pin || class.id.is_key()) {
@@ -462,16 +630,14 @@ impl AppletInstance {
                                 return Err(Error::Type);
                             }
                             if pin {
-                                if word(0) == 0
-                                    || word(4) > word(0)
-                                    || word(1) > length
-                                {
+                                if word(0) == 0 || word(4) > word(0) || word(1) > length {
                                     return Err(Error::Format);
                                 }
                             } else if ec {
                                 let event = natives::ec_key_clear_event(word(0));
                                 if header[4] >> 4 != event
-                                    || length != if word(0) == 11 { 66 } else { 33 } {
+                                    || length != if word(0) == 11 { 66 } else { 33 }
+                                {
                                     return Err(Error::Format);
                                 }
                                 let flags = saved.heap[material as usize + heap::HEADER];
@@ -497,7 +663,9 @@ impl AppletInstance {
                         }
                     }
                 } else {
-                    if linked.instance_words(info.class)? != info.length { return Err(Error::Format); }
+                    if linked.instance_words(info.class)? != info.length {
+                        return Err(Error::Format);
+                    }
                     linked.visit_instance_reference_offsets(info.class, payload.len(), |at| {
                         storable_reference(u16::from_be_bytes([payload[at], payload[at + 1]]))
                     })?;
@@ -505,7 +673,10 @@ impl AppletInstance {
             }
             Ok(())
         })?;
-        check_applet(&linked, heap::Info::read(saved.heap, saved.heap.len(), saved.instance)?)?;
+        check_applet(
+            &linked,
+            heap::Info::read(saved.heap, saved.heap.len(), saved.instance)?,
+        )?;
         let references = file.static_fields()?.reference_count as usize * 2;
         for word in saved
             .statics
@@ -519,7 +690,10 @@ impl AppletInstance {
     }
 }
 
-fn visit_saved_objects(bytes: &[u8], mut visit: impl FnMut(Reference, heap::Info, &[u8]) -> Result<()>) -> Result<()> {
+fn visit_saved_objects(
+    bytes: &[u8],
+    mut visit: impl FnMut(Reference, heap::Info, &[u8]) -> Result<()>,
+) -> Result<()> {
     if bytes.len() < 2 || bytes.len() > u16::MAX as usize || !bytes.len().is_multiple_of(2) {
         return Err(Error::Bounds);
     }
@@ -530,6 +704,8 @@ fn visit_saved_objects(bytes: &[u8], mut visit: impl FnMut(Reference, heap::Info
         visit(at as Reference, info, &bytes[at + heap::HEADER..end])?;
         at = end.next_multiple_of(2);
     }
-    if at != bytes.len() { return Err(Error::Format); }
+    if at != bytes.len() {
+        return Err(Error::Format);
+    }
     Ok(())
 }
