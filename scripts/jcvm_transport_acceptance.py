@@ -84,10 +84,12 @@ def read_certificate(client, expected):
     raise AssertionError("certificate response did not finish")
 
 
-def write_certificate(client, certificate_object):
+def write_certificate(client, certificate_object, before_final=None):
     payload = bytes.fromhex("5C035FC10A") + certificate_object
     for offset in range(0, len(payload), 180):
         more = offset + 180 < len(payload)
+        if not more and before_final is not None:
+            before_final()
         client.command(0xdb, payload[offset:offset + 180], p1=0x3f, p2=0xff,
                        cla=0x14 if more else 0x04)
 

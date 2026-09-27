@@ -837,3 +837,22 @@ locally in `artifacts/physical/microcard-jcalgtest-rtic-retry-dk-20260927/`.
 JCAlgTest selected afterward and the diagnostic reported no latched failure.
 The diagnostic journal generation's low word is a 32-bit append sequence, not
 the count of available words in a 1,024-word counter page.
+
+Two physical cuts were then performed on that exact image during the **final
+APDU** of a chained PIV certificate replacement. The
+`scripts/jcvm_physical_publication.py` probe prepared distinct old and new
+public values and paused just before that final APDU. The first cut stopped
+after the replacement snapshot was programmed into the idle slot but before
+its commit marker at `0xF1FFC`; the marker was still `0xFFFFFFFF`. After both
+controlled USB power paths were switched off and back on, recovery returned
+the **exact old 337-byte value**. The second cut stopped immediately after
+that marker was programmed and verified as zero, before reclaim completion or
+response delivery. Recovery returned the **exact new 337-byte value**. Both
+pending APDUs ended with `SCARD_E_NOT_TRANSACTED`, never `9000`; JCAlgTest
+still selected and the saved P-256 key still signed and verified. Each boot
+reported reset reason `0`, rejected retained RAM diagnostics, and reported no
+recovery error. The raw public values and breakpoint details are retained in
+`artifacts/physical/microcard-publication-cut-dk-20260927/README.txt`.
+Earlier cuts during intermediate chained chunks were useful to locate the
+write path but did not test publication of the replacement object. Other
+physical cut points and renewal remain to be exercised.
