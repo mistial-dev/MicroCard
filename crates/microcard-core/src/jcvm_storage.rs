@@ -478,7 +478,13 @@ fn decode_card(snapshot: Option<&[u8]>, file: &LoadFile, sizes: Sizes,
         image: [u8; 32], installation: [u8; 16]) -> Result<Option<AppletInstance>> {
     snapshot.map(|bytes| {
         let saved = decode_snapshot(bytes, file, sizes, image, installation)?;
-        let mut card = AppletInstance::restore_without_frames(file, sizes, saved).map_err(|_| Error::Format)?;
+        let mut card = AppletInstance::restore_without_frames(file, sizes, saved).map_err(|error| {
+            #[cfg(feature = "latency-trace")]
+            trace::record_session_error(1, error as u32);
+            #[cfg(not(feature = "latency-trace"))]
+            let _ = error;
+            Error::Format
+        })?;
         card.restore_execution_frames().map_err(|_| Error::Quota)?;
         Ok(card)
     }).transpose()
