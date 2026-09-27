@@ -69,9 +69,10 @@ pub(super) fn call(
             }
             if matches!(key_type, 9..=12 | 28..=31)
                 && (!ec::key_kind(key_type as u16)
-                    || length != 256
+                    || !matches!(length, 256 | 384)
                     || _encryption != 0
-                    || host.p256_parameter(0).is_none())
+                    || if length == 384 { host.p384_parameter(0).is_none() }
+                        else { host.p256_parameter(0).is_none() })
             {
                 return crypto_exception(heap, context, 3);
             }

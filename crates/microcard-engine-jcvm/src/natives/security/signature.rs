@@ -558,6 +558,9 @@ pub(super) fn call(
         }
         return aes_mac_call(method, signature, heap, host, frame, context, budget);
     }
+    let algorithm = word_field(heap, receiver, KIND)?;
+    if !matches!(algorithm, 33 | 34) { return Ok(None); }
+    let wide = algorithm == 34;
     if method == MethodId::init {
         if signature.init_vector() {
             frame.pop_short()?;
@@ -571,8 +574,8 @@ pub(super) fn call(
         heap.check_access(key, context)?;
         let kind = word_field(heap, key, KIND)?;
         if signature.init_vector()
-            || word_field(heap, this, KIND)? != 33
-            || word_field(heap, key, SIZE)? != 256
+            || word_field(heap, this, KIND)? != algorithm
+            || word_field(heap, key, SIZE)? != if wide { 384 } else { 256 }
             || !((mode == 1 && matches!(kind, 12 | 30 | 31)) || (mode == 2 && kind == 11))
         {
             return crypto_exception(heap, context, 1).map(Some);
@@ -605,6 +608,18 @@ pub(super) fn call(
         heap.put_word(this, READY, 1)?;
         return Ok(Some(Native::Returned));
     }
+    if matches!(method, MethodId::getMessageDigestAlgorithm
+        | MethodId::getCipherAlgorithm | MethodId::getPaddingAlgorithm) {
+        let this = frame.pop_reference()?;
+        heap.check_access(this, context)?;
+        frame.push_short(match method {
+            MethodId::getMessageDigestAlgorithm => if wide { 5 } else { 4 },
+            MethodId::getCipherAlgorithm => 5,
+            MethodId::getPaddingAlgorithm => 1,
+            _ => unreachable!(),
+        })?;
+        return Ok(Some(Native::Returned));
+    }
     if method == MethodId::getLength {
         let this = frame.pop_reference()?;
         heap.check_access(this, context)?;
@@ -614,7 +629,7 @@ pub(super) fn call(
         if !key_initialized(heap, heap.get_word(this, MATERIAL)?)? {
             return crypto_exception(heap, context, 2).map(Some);
         }
-        frame.push_short(72)?;
+        frame.push_short(if wide { 104 } else { 72 })?;
         return Ok(Some(Native::Returned));
     }
     let update = method == MethodId::update;
@@ -652,7 +667,7 @@ pub(super) fn call(
     if length < 0 || offset < 0 || signature_offset < 0 || signature_length < 0 {
         return Err(Error::Bounds);
     }
-    if prehashed && length != 32 {
+    if prehashed && length != if wide { 48 } else { 32 } {
         return crypto_exception(heap, context, 5).map(Some);
     }
     if !update {
@@ -663,7 +678,7 @@ pub(super) fn call(
             if verify {
                 signature_length as usize
             } else {
-                72
+                if wide { 104 } else { 72 }
             },
         )?;
     }
@@ -672,15 +687,21 @@ pub(super) fn call(
     let pending = heap.get_word(this, PENDING)?;
     let mut state = Zeroizing::new([0; SHA256_STATE_BYTES]);
     state.copy_from_slice(heap.byte_slice(pending, 0, SHA256_STATE_BYTES)?);
-    let mut digest = Zeroizing::new([0; 32]);
+    let mut digest = Zeroizing::new([0; 48]);
     if prehashed {
-        digest.copy_from_slice(input);
+        digest[..input.len()].copy_from_slice(input);
         state.fill(0);
+    } else if wide {
+        host.sha384_stream(
+            &mut state,
+            input,
+            if update { None } else { Some(&mut digest) },
+        )?;
     } else {
         host.sha256_stream(
             &mut state,
             input,
-            if update { None } else { Some(&mut digest) },
+            if update { None } else { Some((&mut digest[..32]).try_into().map_err(|_| Error::Bounds)?) },
         )?;
     }
     if update {
@@ -690,26 +711,32 @@ pub(super) fn call(
     }
     let material = heap.get_word(key, MATERIAL)?;
     if verify {
-        let public = heap
-            .byte_slice(material, 1, 65)?
-            .try_into()
-            .map_err(|_| Error::Bounds)?;
+        let public = heap.byte_slice(material, 1, if wide { 97 } else { 65 })?;
         let encoded = heap.byte_slice(
             signature_array,
             signature_offset as usize,
             signature_length as usize,
         )?;
-        let valid = host.p256_verify_hash(public, &digest, encoded)?;
+        let valid = if wide {
+            host.p384_verify_hash(public.try_into().map_err(|_| Error::Bounds)?, &digest, encoded)?
+        } else {
+            host.p256_verify_hash(public.try_into().map_err(|_| Error::Bounds)?,
+                (&digest[..32]).try_into().map_err(|_| Error::Bounds)?, encoded)?
+        };
         heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.fill(0);
         frame.push_short(i16::from(valid))?;
     } else {
-        let private = heap
-            .byte_slice(material, 1, 32)?
-            .try_into()
-            .map_err(|_| Error::Bounds)?;
-        let mut encoded = Zeroizing::new([0; 72]);
-        let written = host.p256_sign_hash(private, &digest, &mut encoded)?;
-        if !(8..=72).contains(&written) {
+        let private = heap.byte_slice(material, 1, if wide { 48 } else { 32 })?;
+        let mut encoded = Zeroizing::new([0; 104]);
+        let written = if wide {
+            host.p384_sign_hash(private.try_into().map_err(|_| Error::Bounds)?,
+                &digest, &mut encoded)?
+        } else {
+            host.p256_sign_hash(private.try_into().map_err(|_| Error::Bounds)?,
+                (&digest[..32]).try_into().map_err(|_| Error::Bounds)?,
+                (&mut encoded[..72]).try_into().map_err(|_| Error::Bounds)?)?
+        };
+        if !(8..=if wide { 104 } else { 72 }).contains(&written) {
             return Err(Error::Format);
         }
         heap.byte_slice_mut(signature_array, signature_offset as usize, written)?
@@ -738,7 +765,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
             false
         }
     };
-    if (!matches!(algorithm, 18 | 33) && !des_algorithm)
+    if (!matches!(algorithm, 18 | 33 | 34) && !des_algorithm)
         || word(3) > 1
         || (word(3) == 1 && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2)))
     {
@@ -752,7 +779,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         let des_state_bytes = 0;
         let expected_length = if algorithm == 18 {
             34
-        } else if algorithm == 33 {
+        } else if matches!(algorithm, 33 | 34) {
             crate::host::SHA256_STATE_BYTES
         } else {
             des_state_bytes
@@ -768,7 +795,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
         let expected = if algorithm == 18 {
             ClassId::AESKey
-        } else if algorithm != 33 {
+        } else if !matches!(algorithm, 33 | 34) {
             ClassId::DESKey
         } else if word(4) == 1 {
             ClassId::ECPrivateKey
@@ -789,10 +816,18 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         } else {
             false
         };
+        let invalid_ec_size = if matches!(algorithm, 33 | 34) {
+            let bits = u16::from_be_bytes([
+                saved_heap[start + heap::HEADER + SIZE * 2],
+                saved_heap[start + heap::HEADER + SIZE * 2 + 1],
+            ]);
+            bits != if algorithm == 34 { 384 } else { 256 }
+        } else { false };
         if super::super::api_class(key_class).map(|entry| entry.id) != Some(expected)
             || saved_heap[start + 4] != heap::KIND_OBJECT
             || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
             || invalid_des_key
+            || invalid_ec_size
         {
             return Err(Error::Type);
         }
@@ -804,6 +839,116 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct WideProvider { fail_sign: bool }
+    impl crate::host::Host for WideProvider {
+        fn supports_signature(&self, algorithm: u8) -> bool { algorithm == 34 }
+        fn sha384_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
+            output: Option<&mut [u8; 48]>) -> Result<()> {
+            for byte in input { state[0] = state[0].wrapping_add(*byte); }
+            if let Some(output) = output { output.fill(state[0]); state.fill(0); }
+            Ok(())
+        }
+        fn p384_sign_hash(&mut self, _: &[u8; 48], hash: &[u8; 48],
+            output: &mut [u8; 104]) -> Result<usize> {
+            if self.fail_sign { output.fill(0x42); return Err(Error::Unauthorized); }
+            output[..8].copy_from_slice(&[0x30, 6, 2, 1, hash[0], 2, 1, 1]);
+            Ok(8)
+        }
+        fn p384_verify_hash(&mut self, _: &[u8; 97], hash: &[u8; 48],
+            signature: &[u8]) -> Result<bool> {
+            Ok(signature == [0x30, 6, 2, 1, hash[0], 2, 1, 1])
+        }
+    }
+
+    #[test]
+    fn p384_signature_factory_streaming_verify_and_provider_failure() {
+        let init_signature = crate::jcvm_api::PACKAGES.iter().flat_map(|package| package.classes)
+            .find(|class| class.id == ClassId::Signature).unwrap().methods.iter()
+            .find(|method| method.id == MethodId::init && !method.signature.init_vector())
+            .unwrap().signature;
+        let mut slab = [0; 2048];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = WideProvider { fail_sign: false };
+        let mut instances = [0; 2];
+        for instance in &mut instances {
+            frame.push_short(34).unwrap();
+            frame.push_short(0).unwrap();
+            assert!(matches!(factory::get_instance(ClassId::Signature, &mut heap,
+                &mut host, &mut frame, 1), Ok(Native::Returned)));
+            *instance = frame.pop_reference().unwrap();
+        }
+        let mut keys = [0; 2];
+        for (index, key) in keys.iter_mut().enumerate() {
+            let class = if index == 0 { ClassId::ECPrivateKey } else { ClassId::ECPublicKey };
+            let kind = if index == 0 { 12 } else { 11 };
+            let length = if index == 0 { 49 } else { 98 };
+            *key = new_native(&mut heap, class, STATE_WORDS, 1).unwrap();
+            heap.put_word(*key, KIND, kind).unwrap();
+            heap.put_word(*key, SIZE, 384).unwrap();
+            let material = heap.new_array(heap::KIND_BYTE, length, 1).unwrap();
+            heap.array_put(material, 0, 0x5f).unwrap();
+            if index == 0 { heap.array_put(material, 48, 1).unwrap(); }
+            else { heap.array_put(material, 1, 4).unwrap(); }
+            heap.put_word(*key, MATERIAL, material).unwrap();
+        }
+        let array = heap.new_array(heap::KIND_BYTE, 120, 1).unwrap();
+        heap.byte_slice_mut(array, 0, 3).unwrap().copy_from_slice(&[1, 2, 3]);
+        for (instance, key, mode) in [(instances[0], keys[0], 1), (instances[1], keys[1], 2)] {
+            frame.push_reference(instance).unwrap();
+            frame.push_reference(key).unwrap();
+            frame.push_short(mode).unwrap();
+            assert!(matches!(call(MethodId::init, init_signature, &mut heap, &mut host,
+                &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
+            frame.push_reference(instance).unwrap();
+            assert!(matches!(call(MethodId::getLength, init_signature, &mut heap, &mut host,
+                &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
+            assert_eq!(frame.pop_short(), Ok(104));
+        }
+        frame.push_reference(instances[0]).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(2).unwrap();
+        assert!(matches!(call(MethodId::update, init_signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
+        let pending = heap.get_word(instances[0], PENDING).unwrap();
+        let before = heap.byte_slice(array, 10, 8).unwrap().to_vec();
+        host.fail_sign = true;
+        frame.push_reference(instances[0]).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(2).unwrap();
+        frame.push_short(1).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(10).unwrap();
+        assert!(matches!(call(MethodId::sign, init_signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 100), Err(Error::Unauthorized)));
+        assert_eq!(heap.byte_slice(array, 10, 8).unwrap(), before);
+        assert_eq!(heap.array_get(pending, 0), Ok(3));
+        host.fail_sign = false;
+        frame.push_reference(instances[0]).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(2).unwrap();
+        frame.push_short(1).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(10).unwrap();
+        assert!(matches!(call(MethodId::sign, init_signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
+        assert_eq!(frame.pop_short(), Ok(8));
+        assert_eq!(heap.byte_slice(array, 10, 8).unwrap(), &[0x30, 6, 2, 1, 6, 2, 1, 1]);
+        frame.push_reference(instances[1]).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(0).unwrap();
+        frame.push_short(3).unwrap();
+        frame.push_reference(array).unwrap();
+        frame.push_short(10).unwrap();
+        frame.push_short(8).unwrap();
+        assert!(matches!(call(MethodId::verify, init_signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
+        assert_eq!(frame.pop_short(), Ok(1));
+    }
 
     #[cfg(not(feature = "des-legacy"))]
     #[test]

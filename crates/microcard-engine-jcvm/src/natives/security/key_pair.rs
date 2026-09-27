@@ -1,4 +1,4 @@
-//! P-256 containers hold key references; generation publishes both values together.
+//! Fixed-curve containers hold key references; generation publishes both values together.
 use super::*;
 
 // MATERIAL holds the public key; PENDING holds the private key.
@@ -17,7 +17,9 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
                 || word_field(heap, public, SIZE)? != word_field(heap, private, SIZE)? {
                 return crypto_exception(heap, context, 1);
             }
-            if word_field(heap, public, SIZE)? != 256 || host.p256_parameter(0).is_none() {
+            let bits = word_field(heap, public, SIZE)?;
+            if !matches!(bits, 256 | 384)
+                || (if bits == 384 { host.p384_parameter(0) } else { host.p256_parameter(0) }).is_none() {
                 return crypto_exception(heap, context, 3);
             }
             prepare_constructor(heap, this, context)?;
@@ -27,7 +29,8 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
             let algorithm = frame.pop_short()?;
             let this = frame.pop_reference()?;
             heap.check_access(this, context)?;
-            if algorithm != 5 || size != 256 || host.p256_parameter(0).is_none() {
+            if algorithm != 5 || !matches!(size, 256 | 384)
+                || (if size == 384 { host.p384_parameter(0) } else { host.p256_parameter(0) }).is_none() {
                 return crypto_exception(heap, context, 3);
             }
             heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS); 2])?;
@@ -36,12 +39,13 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
             let private = new_native(heap, ClassId::ECPrivateKey, STATE_WORDS, context)?;
             for (key, kind) in [(public, 11), (private, 12)] {
                 heap.put_word(key, KIND, kind)?;
-                heap.put_word(key, SIZE, 256)?;
+                heap.put_word(key, SIZE, size as u16)?;
             }
             (this, public, private)
         };
+        let bits = word_field(heap, public, SIZE)?;
         heap.put_word(this, KIND, 5)?;
-        heap.put_word(this, SIZE, 256)?;
+        heap.put_word(this, SIZE, bits)?;
         heap.put_word(this, MATERIAL, public)?;
         heap.put_word(this, PENDING, private)?;
         return Ok(Native::Returned);
@@ -58,11 +62,14 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
         return Ok(Native::Returned);
     }
     for key in [public, private] { heap.check_access(key, context)?; }
-    *budget = budget.checked_sub(97).ok_or(Error::Quota)?;
+    let wide = word_field(heap, this, SIZE)? == 384;
+    *budget = budget.checked_sub(if wide { 145 } else { 97 }).ok_or(Error::Quota)?;
     let mut allocations = [(heap::KIND_BYTE, 0); 2];
     let mut count = 0;
     let mut writes = [(0, 0, 0); 2];
-    for (index, (key, bytes)) in [(public, 66), (private, 33)].into_iter().enumerate() {
+    let lengths = if wide { [(public, 98), (private, 49)] }
+        else { [(public, 66), (private, 33)] };
+    for (index, (key, bytes)) in lengths.into_iter().enumerate() {
         let material = heap.get_word(key, MATERIAL)?;
         if material == NULL {
             allocations[count] = (heap::KIND_BYTE, bytes);
@@ -78,13 +85,21 @@ pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     let public_material = ec::material(heap, public, context)?;
     let private_material = ec::material(heap, private, context)?;
     // Validate both destinations before the provider runs or any key value changes.
-    heap.byte_slice(public_material, 0, 66)?;
-    heap.byte_slice(private_material, 0, 33)?;
-    let mut scalar = Zeroizing::new([0; 32]);
-    let mut point = Zeroizing::new([0; 65]);
-    host.p256_generate(&mut scalar, &mut point)?;
-    heap.byte_slice_mut(public_material, 1, 65)?.copy_from_slice(&point[..]);
-    heap.byte_slice_mut(private_material, 1, 32)?.copy_from_slice(&scalar[..]);
+    heap.byte_slice(public_material, 0, if wide { 98 } else { 66 })?;
+    heap.byte_slice(private_material, 0, if wide { 49 } else { 33 })?;
+    if wide {
+        let mut scalar = Zeroizing::new([0; 48]);
+        let mut point = Zeroizing::new([0; 97]);
+        host.p384_generate(&mut scalar, &mut point)?;
+        heap.byte_slice_mut(public_material, 1, 97)?.copy_from_slice(&point[..]);
+        heap.byte_slice_mut(private_material, 1, 48)?.copy_from_slice(&scalar[..]);
+    } else {
+        let mut scalar = Zeroizing::new([0; 32]);
+        let mut point = Zeroizing::new([0; 65]);
+        host.p256_generate(&mut scalar, &mut point)?;
+        heap.byte_slice_mut(public_material, 1, 65)?.copy_from_slice(&point[..]);
+        heap.byte_slice_mut(private_material, 1, 32)?.copy_from_slice(&scalar[..]);
+    }
     // Every accepted parameter set is the same fixed curve, including default K=1.
     heap.byte_slice_mut(public_material, 0, 1)?[0] = 0x7f;
     heap.byte_slice_mut(private_material, 0, 1)?[0] = 0x7f;
@@ -100,6 +115,58 @@ fn prepare_constructor(heap: &mut Heap, this: u16, context: heap::Context) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct WideProvider { fail: bool }
+    impl crate::host::Host for WideProvider {
+        fn p384_parameter(&self, _: u8) -> Option<&'static [u8]> { Some(&[1]) }
+        fn p384_generate(&mut self, private: &mut [u8; 48], public: &mut [u8; 97]) -> Result<()> {
+            private.fill(0);
+            private[47] = 1;
+            public.fill(0x42);
+            public[0] = 4;
+            if self.fail { Err(Error::Unauthorized) } else { Ok(()) }
+        }
+    }
+
+    #[test]
+    fn p384_generation_publishes_complete_pair_only_after_provider_success() {
+        let class = crate::jcvm_api::PACKAGES.iter().flat_map(|package| package.classes)
+            .find(|class| class.id == ClassId::KeyPair).unwrap();
+        let signature = class.methods.iter().find(|method| method.id == MethodId::Constructor
+            && !method.signature.key_pair_references()).unwrap().signature;
+        let mut slab = [0; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let pair = new_native(&mut heap, ClassId::KeyPair, STATE_WORDS, 1).unwrap();
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = WideProvider { fail: false };
+        frame.push_reference(pair).unwrap();
+        frame.push_short(5).unwrap();
+        frame.push_short(384).unwrap();
+        assert!(matches!(call(MethodId::Constructor, signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 200), Ok(Native::Returned)));
+        let public = heap.get_word(pair, MATERIAL).unwrap();
+        let private = heap.get_word(pair, PENDING).unwrap();
+        assert_eq!(heap.get_word(public, SIZE), Ok(384));
+        assert_eq!(heap.get_word(private, SIZE), Ok(384));
+        assert!(!key_initialized(&heap, public).unwrap());
+        host.fail = true;
+        frame.push_reference(pair).unwrap();
+        assert!(matches!(call(MethodId::genKeyPair, signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 145), Err(Error::Unauthorized)));
+        assert!(!key_initialized(&heap, public).unwrap());
+        assert!(!key_initialized(&heap, private).unwrap());
+        host.fail = false;
+        frame.push_reference(pair).unwrap();
+        assert!(matches!(call(MethodId::genKeyPair, signature, &mut heap, &mut host,
+            &mut frame, 1, &mut 145), Ok(Native::Returned)));
+        assert!(key_initialized(&heap, public).unwrap());
+        assert!(key_initialized(&heap, private).unwrap());
+        let public_material = heap.get_word(public, MATERIAL).unwrap();
+        let private_material = heap.get_word(private, MATERIAL).unwrap();
+        assert_eq!(heap.byte_slice(public_material, 1, 97).unwrap()[0], 4);
+        assert_eq!(heap.byte_slice(private_material, 1, 48).unwrap()[47], 1);
+    }
     struct Provider { fail: bool }
     impl crate::host::Host for Provider {
         fn p256_parameter(&self, _: u8) -> Option<&'static [u8]> { Some(&[1]) }

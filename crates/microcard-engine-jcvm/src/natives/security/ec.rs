@@ -240,6 +240,31 @@ mod tests {
         assert_eq!(heap.byte_slice(material, 1, 48).unwrap()[47], 1);
     }
 
+    #[test]
+    fn p384_key_builder_accepts_only_declared_size_with_provider() {
+        let mut slab = [0; 1024];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut words = [0; 16];
+        let mut tags = [0; 8];
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = WideProvider { fail: false };
+        for (size, expected) in [(384, true), (521, false)] {
+            frame.push_short(12).unwrap();
+            frame.push_short(size).unwrap();
+            frame.push_short(0).unwrap();
+            let result = key::call(ClassId::KeyBuilder, MethodId::buildKey,
+                &mut heap, &mut host, &mut frame, 1).unwrap();
+            if expected {
+                assert!(matches!(result, Native::Returned));
+                let key = frame.pop_reference().unwrap();
+                assert_eq!(heap.get_word(key, SIZE), Ok(384));
+            } else {
+                let Native::Threw(exception) = result else { panic!("unexpected key"); };
+                assert_eq!(heap.get_word(exception, crate::natives::REASON_FIELD), Ok(3));
+            }
+        }
+    }
+
     struct Provider { fail: bool }
     impl crate::host::Host for Provider {
         fn p256_parameter(&self, id: u8) -> Option<&'static [u8]> {

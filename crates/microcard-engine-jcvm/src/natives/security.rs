@@ -263,6 +263,8 @@ pub fn call(
         let des: Option<u16> = None;
         let algorithm = if (digest, cipher, padding) == (0, 6, 1) && host.supports_signature(18) {
             Some(18)
+        } else if (digest, cipher, padding) == (5, 5, 1) && host.supports_signature(34) {
+            Some(34)
         } else {
             des
         };
