@@ -684,7 +684,7 @@ pub(super) fn call(
         frame.push_short(match method {
             MethodId::getMessageDigestAlgorithm => if wide { 5 } else { 4 },
             MethodId::getCipherAlgorithm => 5,
-            MethodId::getPaddingAlgorithm => 1,
+            MethodId::getPaddingAlgorithm => 0,
             _ => unreachable!(),
         })?;
         return Ok(Some(Native::Returned));
@@ -1089,6 +1089,10 @@ mod tests {
             assert!(matches!(call(MethodId::getLength, init_signature, &mut heap, &mut host,
                 &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
             assert_eq!(frame.pop_short(), Ok(104));
+            frame.push_reference(instance).unwrap();
+            assert!(matches!(call(MethodId::getPaddingAlgorithm, init_signature, &mut heap,
+                &mut host, &mut frame, 1, &mut 100), Ok(Some(Native::Returned))));
+            assert_eq!(frame.pop_short(), Ok(0));
         }
         frame.push_reference(instances[0]).unwrap();
         frame.push_reference(array).unwrap();

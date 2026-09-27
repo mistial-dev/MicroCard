@@ -32,6 +32,15 @@ FACTORIES = {
     "RandomData": (0x16, 6, {1, 2}),
 }
 
+# Java Card 3.0.5 combined Signature factory uses Cipher.PAD_NULL for ECDSA
+# and AES-CMAC. The legacy byte-algorithm factory above cannot catch this.
+COMBINED_SIGNATURE = (
+    ("ECDSA P-256", (4, 5, 0), True),
+    ("ECDSA P-384", (5, 5, 0), True),
+    ("AES-CMAC", (0, 10, 0), True),
+    ("ECDSA wrong padding", (5, 5, 1), False),
+)
+
 
 def performance_command(ins: int, profile: tuple[int, ...], method: int) -> str:
     class_id, algorithm, key_class, key_type, key_bits, length, mode = profile
@@ -89,6 +98,8 @@ def main() -> None:
         f"b075{class_id:02x}0003{algorithm:02x}0000"
         for _, algorithm, class_id, _ in probes
     )]
+    commands.extend(f"b075260003{digest:02x}{cipher:02x}{padding:02x}00"
+                    for _, (digest, cipher, padding), _ in COMBINED_SIGNATURE)
     performance = []
     for name, prepare_ins, run_ins, profile, methods in PERFORMANCE:
         performance.append((f"{name} prepare",
@@ -119,7 +130,13 @@ def main() -> None:
         expected = 0 if supported else 3
         assert response[1] == expected, f"{label} result was {response[1]}"
 
-    for (operation, _), answer in zip(performance, answers[2 + len(probes):]):
+    for (name, _, supported), answer in zip(COMBINED_SIGNATURE,
+                                             answers[2 + len(probes):2 + len(probes) + len(COMBINED_SIGNATURE)]):
+        response = bytes.fromhex(answer)
+        assert response[:1] == b"\x26" and response[-2:] == b"\x90\x00", f"{name}: {answer}"
+        assert response[1] == (0 if supported else 3), f"{name}: {answer}"
+
+    for (operation, _), answer in zip(performance, answers[2 + len(probes) + len(COMBINED_SIGNATURE):]):
         assert answer == "AA9000", f"JCAlgTest {operation} answered {answer}"
 
     print(f"PASS: JCAlgTest reports {len(probes)} factories and runs {len(performance)} provider commands")
