@@ -42,6 +42,48 @@ pub(super) fn decode(input: &[u8]) -> Option<[u8; 64]> {
     (cursor == input.len()).then_some(output)
 }
 
+pub(super) fn encode_p384(raw: &[u8; 96], output: &mut [u8; 104]) -> usize {
+    output.fill(0);
+    output[0] = 0x30;
+    let mut cursor = 2;
+    for scalar in raw.chunks_exact(48) {
+        let first = scalar.iter().position(|byte| *byte != 0).unwrap_or(47);
+        let scalar = &scalar[first..];
+        let padding = usize::from(scalar[0] & 0x80 != 0);
+        output[cursor] = 2;
+        output[cursor + 1] = (scalar.len() + padding) as u8;
+        cursor += 2 + padding;
+        output[cursor..cursor + scalar.len()].copy_from_slice(scalar);
+        cursor += scalar.len();
+    }
+    output[1] = (cursor - 2) as u8;
+    cursor
+}
+
+pub(super) fn decode_p384(input: &[u8]) -> Option<[u8; 96]> {
+    if !(8..=104).contains(&input.len()) || input[0] != 0x30 || input[1] as usize != input.len() - 2 {
+        return None;
+    }
+    let mut output = [0; 96];
+    let mut cursor = 2;
+    for scalar in output.chunks_exact_mut(48) {
+        if input.get(cursor) != Some(&2) { return None; }
+        let length = *input.get(cursor + 1)? as usize;
+        cursor += 2;
+        if !(1..=49).contains(&length) { return None; }
+        let encoded = input.get(cursor..cursor + length)?;
+        cursor += length;
+        if encoded[0] & 0x80 != 0 { return None; }
+        let value = if encoded.len() > 1 && encoded[0] == 0 {
+            if encoded[1] & 0x80 == 0 { return None; }
+            &encoded[1..]
+        } else { encoded };
+        if value.len() > 48 { return None; }
+        scalar[48 - value.len()..].copy_from_slice(value);
+    }
+    (cursor == input.len()).then_some(output)
+}
+
 #[cfg(all(test, feature = "software-p256"))]
 mod tests {
     use super::*;

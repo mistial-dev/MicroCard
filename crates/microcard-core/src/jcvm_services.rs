@@ -136,6 +136,61 @@ impl<P: CryptoProvider> Services<'_, P> {
         self.provider.p256_verify_hash(key, message, &raw).map_err(|_| Error::Unauthorized)
     }
 
+    pub fn p384_public_valid(&mut self, key: &[u8; 97]) -> Result<bool> {
+        if key[0] != 4 { return Ok(false); }
+        self.provider.p384_public_key_valid(key).map_err(|_| Error::Unauthorized)
+    }
+
+    pub fn p384_agree(&mut self, key: &[u8; 48], peer: &[u8; 97], output: &mut [u8; 48]) -> Result<()> {
+        output.fill(0);
+        if !ec_parameters::p384_scalar_valid(key) || !self.p384_public_valid(peer)? {
+            return Err(Error::Bounds);
+        }
+        self.provider.p384_ecdh_into(key, peer, output).map_err(|_| {
+            output.fill(0);
+            Error::Unauthorized
+        })
+    }
+
+    pub fn p384_generate(&mut self, private: &mut [u8; 48], public: &mut [u8; 97]) -> Result<()>
+    where P: Entropy {
+        private.fill(0);
+        public.fill(0);
+        if self.provider.p384_generate_key_pair_with_entropy(private, public).is_err() {
+            private.fill(0);
+            public.fill(0);
+            return Err(Error::Unauthorized);
+        }
+        if !ec_parameters::p384_scalar_valid(private) || public[0] != 4 {
+            private.fill(0);
+            public.fill(0);
+            return Err(Error::Format);
+        }
+        Ok(())
+    }
+
+    pub fn p384_sign_hash(&mut self, key: &[u8; 48], hash: &[u8; 48], output: &mut [u8; 104]) -> Result<usize>
+    where P: Entropy {
+        output.fill(0);
+        if !ec_parameters::p384_scalar_valid(key) { return Err(Error::Bounds); }
+        let mut raw = zeroize::Zeroizing::new([0u8; 96]);
+        self.provider.p384_sign_hash_with_entropy(key, hash, &mut raw)
+            .map_err(|_| Error::Unauthorized)?;
+        if !raw.chunks_exact(48).all(|scalar| {
+            scalar.try_into().is_ok_and(ec_parameters::p384_scalar_valid)
+        }) { return Err(Error::Format); }
+        Ok(ecdsa::encode_p384(&raw, output))
+    }
+
+    pub fn p384_verify_hash(&mut self, key: &[u8; 97], hash: &[u8; 48], signature: &[u8]) -> Result<bool> {
+        if !self.p384_public_valid(key)? { return Ok(false); }
+        let Some(raw) = ecdsa::decode_p384(signature) else { return Ok(false); };
+        if !raw.chunks_exact(48).all(|scalar| {
+            scalar.try_into().is_ok_and(ec_parameters::p384_scalar_valid)
+        }) { return Ok(false); }
+        self.provider.p384_verify_hash(key, hash, &raw).map_err(|_| Error::Unauthorized)
+    }
+
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
@@ -252,12 +307,42 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
-    fn supports_signature(&self, algorithm: u8) -> bool { matches!(algorithm, 18 | 33) }
+    fn supports_signature(&self, algorithm: u8) -> bool {
+        matches!(algorithm, 18 | 33) || algorithm == 34 && self.provider.supports_p384() && self.provider.supports_sha384()
+    }
     fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()> {
         Services::p256_generate(self, private, public)
     }
     fn p256_agree(&mut self, key: &[u8; 32], peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
         Services::p256_agree(self, key, peer, output)
+    }
+
+    fn p384_generate(&mut self, private: &mut [u8; 48], public: &mut [u8; 97]) -> Result<()> {
+        Services::p384_generate(self, private, public)
+    }
+    fn p384_agree(&mut self, key: &[u8; 48], peer: &[u8; 97], output: &mut [u8; 48]) -> Result<()> {
+        Services::p384_agree(self, key, peer, output)
+    }
+    fn p384_sign_hash(&mut self, key: &[u8; 48], hash: &[u8; 48], output: &mut [u8; 104]) -> Result<usize> {
+        Services::p384_sign_hash(self, key, hash, output)
+    }
+    fn p384_verify_hash(&mut self, key: &[u8; 97], hash: &[u8; 48], signature: &[u8]) -> Result<bool> {
+        Services::p384_verify_hash(self, key, hash, signature)
+    }
+
+    fn p384_parameter(&self, id: u8) -> Option<&'static [u8]> {
+        self.provider.supports_p384().then(|| ec_parameters::p384_parameter(id)).flatten()
+    }
+
+    fn p384_key_valid(&mut self, private: bool, key: &[u8]) -> Result<bool> {
+        if private {
+            Ok(key.try_into().is_ok_and(ec_parameters::p384_scalar_valid))
+        } else {
+            match key.try_into() {
+                Ok(key) => self.p384_public_valid(key),
+                Err(_) => Ok(false),
+            }
+        }
     }
 
     fn p256_parameter(&self, id: u8) -> Option<&'static [u8]> { ec_parameters::parameter(id) }

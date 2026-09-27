@@ -1,4 +1,4 @@
-//! SEC 2 v2, section 2.4.2: the sole supported Java Card prime-field curve.
+//! SEC 2 v2, sections 2.4.2 and 2.5.1: fixed Java Card prime-field curves.
 const FIELD: [u8; 32] = [0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 const A: [u8; 32] = [0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfc];
 const B: [u8; 32] = [0x5a, 0xc6, 0x35, 0xd8, 0xaa, 0x3a, 0x93, 0xe7, 0xb3, 0xeb, 0xbd, 0x55, 0x76, 0x98, 0x86, 0xbc, 0x65, 0x1d, 0x06, 0xb0, 0xcc, 0x53, 0xb0, 0xf6, 0x3b, 0xce, 0x3c, 0x3e, 0x27, 0xd2, 0x60, 0x4b];
@@ -11,6 +11,42 @@ pub(super) fn parameter(id: u8) -> Option<&'static [u8]> {
         2 => &B,
         3 => &G,
         4 => &crate::crypto::P256_ORDER,
+        _ => return None,
+    })
+}
+
+const fn decode_hex<const N: usize>(hex: &[u8]) -> [u8; N] {
+    const fn nibble(byte: u8) -> u8 {
+        if byte >= b'0' && byte <= b'9' { byte - b'0' }
+        else if byte >= b'a' && byte <= b'f' { byte - b'a' + 10 }
+        else { panic!("invalid curve parameter") }
+    }
+    let mut output = [0; N];
+    let mut index = 0;
+    while index < N {
+        output[index] = (nibble(hex[index * 2]) << 4) | nibble(hex[index * 2 + 1]);
+        index += 1;
+    }
+    output
+}
+
+const P384_FIELD: [u8; 48] = decode_hex(b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff");
+const P384_A: [u8; 48] = decode_hex(b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc");
+const P384_B: [u8; 48] = decode_hex(b"b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef");
+const P384_G: [u8; 97] = decode_hex(b"04aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab73617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f");
+pub(super) const P384_ORDER: [u8; 48] = decode_hex(b"ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973");
+
+pub(super) fn p384_scalar_valid(scalar: &[u8; 48]) -> bool {
+    scalar.iter().any(|byte| *byte != 0) && scalar < &P384_ORDER
+}
+
+pub(super) fn p384_parameter(id: u8) -> Option<&'static [u8]> {
+    Some(match id {
+        0 => &P384_FIELD,
+        1 => &P384_A,
+        2 => &P384_B,
+        3 => &P384_G,
+        4 => &P384_ORDER,
         _ => return None,
     })
 }

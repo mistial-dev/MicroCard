@@ -78,6 +78,12 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    fn p384_parameter(&self, _id: u8) -> Option<&'static [u8]> { None }
+
+    fn p384_key_valid(&mut self, _private: bool, _key: &[u8]) -> Result<bool> {
+        Err(Error::Unsupported)
+    }
+
     /// Opaque transient state; zero begins a message, finalization clears state.
     fn sha256_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], _input: &[u8],
         output: Option<&mut [u8; 32]>) -> Result<()> {
@@ -136,6 +142,26 @@ pub trait Host {
     /// Raw P-256 ECDH x-coordinate; failure clears all output.
     fn p256_agree(&mut self, _key: &[u8; 32], _peer: &[u8; 65], output: &mut [u8; 32]) -> Result<()> {
         output.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn p384_generate(&mut self, private: &mut [u8; 48], public: &mut [u8; 97]) -> Result<()> {
+        private.fill(0);
+        public.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn p384_agree(&mut self, _key: &[u8; 48], _peer: &[u8; 97], output: &mut [u8; 48]) -> Result<()> {
+        output.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn p384_sign_hash(&mut self, _key: &[u8; 48], _hash: &[u8; 48], output: &mut [u8; 104]) -> Result<usize> {
+        output.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn p384_verify_hash(&mut self, _key: &[u8; 97], _hash: &[u8; 48], _signature: &[u8]) -> Result<bool> {
         Err(Error::Unsupported)
     }
 
