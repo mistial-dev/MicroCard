@@ -817,3 +817,23 @@ probes absent. Across 17,222 host PC/SC exchanges, latency was 18 ms median,
 `38aa52ec42e94b2d0383c94b8a8a859d0d837ab8def838b8a6b91b4f570a6aff`.
 The installed JCAlgTest applet selected afterward. This is a factory-support
 and transport result; operation-level qualification remains separate.
+
+The later RTIC retry change was then built as the compact diagnostic DK
+profile with `--no-default-features --features
+jcvm-hardware,usb-ccid,diagnostic-apdu`. SWD programming used `probe-rs
+download --preverify --verify`, without a chip erase. The resulting ELF SHA-256
+is `b2e7ace32d71d4ac0e8da11a6e9b392482aa53ea90af5868be9ede5c5d3f8e6b`;
+its text section is 32 bytes larger than the prior image, with the same data
+and BSS sizes. After reset, the saved P-256 key signed and verified, the saved
+PIV object matched exactly, and JCAlgTest selected. The same pinned upstream
+extended scan on this exact ELF then completed **8,607/8,607 probes with zero
+error rows**, **50 supported**, no outside-profile claims, and 238 missing
+P71D321-positive probes. The 17,222 host exchanges measured 18 ms median,
+19 ms p95, and 11,309 ms maximum; the maximum is one run's tail, not a device
+latency regression attribution. The untouched CSV SHA-256 is
+`d1337b60f1c209a739602b36f4ed865d3abb8d688f16b2786a74f912c04d6bda`.
+The raw CSV, log, client output, analyzer result, and exact ELF are retained
+locally in `artifacts/physical/microcard-jcalgtest-rtic-retry-dk-20260927/`.
+JCAlgTest selected afterward and the diagnostic reported no latched failure.
+The diagnostic journal generation's low word is a 32-bit append sequence, not
+the count of available words in a 1,024-word counter page.
