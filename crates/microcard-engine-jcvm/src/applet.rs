@@ -66,6 +66,7 @@ pub struct AppletInstance {
     reselecting: bool,
     transaction_aborted: bool,
     pending_writes: heap::PendingWrites,
+    last_auto_collection_used: usize,
     context: heap::Context,
     sizes: Sizes,
 }
@@ -146,6 +147,7 @@ impl AppletInstance {
             reselecting: false,
             transaction_aborted: false,
             pending_writes: heap::PendingWrites::default(),
+            last_auto_collection_used: 0,
             context: 1,
             sizes,
         };
@@ -361,6 +363,7 @@ impl AppletInstance {
         }
         let incoming = incoming_length(command)?;
         let expected = expected_length(command)?;
+        self.collect_when_low(file)?;
         {
             let mut heap = Heap::resume(&mut self.heap, self.heap_used)?;
             let buffer = heap.byte_slice_mut(self.buffer, 0, self.sizes.buffer_bytes as usize)?;

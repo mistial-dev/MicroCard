@@ -75,6 +75,21 @@ fn rewrite_slot(bytes: &mut [u8], at: usize, index: &[u32]) -> Result<bool> {
 }
 
 impl AppletInstance {
+    pub(super) fn collect_when_low(&mut self, file: &LoadFile) -> Result<()> {
+        // No Java frames are live here. Retry only after enough new allocation
+        // to avoid rescanning an applet whose reachable heap is nearly full.
+        let reserve = (self.heap.len() / 8).min(8 * 1024);
+        let heap = heap::Heap::resume(&mut self.heap, self.heap_used)?;
+        let low = heap.available() < reserve;
+        let transaction = heap.transaction_remaining().is_some();
+        if !low || transaction || self.heap_used.saturating_sub(self.last_auto_collection_used) < reserve / 8 {
+            return Ok(());
+        }
+        self.collect_unreachable(file)?;
+        self.last_auto_collection_used = self.heap_used;
+        Ok(())
+    }
+
     pub(super) fn collect_unreachable(&mut self, file: &LoadFile) -> Result<bool> {
         let linked = Linked::new(file)?;
         let used = self.heap_used;
@@ -290,6 +305,29 @@ mod tests {
         assert_eq!(card.heap_used, card.runtime_bytes + heap::HEADER + 2);
         let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
         assert!(heap.new_object(0, 1, 1).is_ok());
+    }
+
+    #[test]
+    fn low_headroom_collects_dead_objects_without_an_applet_request() {
+        let package = Package {
+            classes: vec![ClassSpec { declared_size: 1, ..ClassSpec::default() }],
+            ..Package::default()
+        }.build();
+        let file = LoadFile::parse(&package).unwrap();
+        let mut card = AppletInstance::new(&file, super::super::Sizes::default()).unwrap();
+        let mut heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
+        let root = heap.new_object(0, 1, 1).unwrap();
+        while heap.available() >= 1024 { heap.new_object(0, 1, 1).unwrap(); }
+        card.pending_writes.merge(heap.pending_writes());
+        card.heap_used = heap.used();
+        card.instance = Some(root);
+        let before = card.heap_used;
+        card.collect_when_low(&file).unwrap();
+        assert!(card.heap_used < before / 2);
+        assert_eq!(card.last_auto_collection_used, card.heap_used);
+        let after = card.heap_used;
+        card.collect_when_low(&file).unwrap();
+        assert_eq!(card.heap_used, after);
     }
 
     #[test]
