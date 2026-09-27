@@ -81,6 +81,8 @@ pub(crate) fn report_usb_failure(code: u8) -> ! {
 /// proprietary `6Fxx` status lets unattended hardware tests distinguish the failure
 /// boundary after the ordinary CCID power-on and ATR exchange succeeds.
 pub(crate) fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> ! {
+    #[cfg(feature = "diagnostic-apdu")]
+    crate::diagnostic_apdu::startup_failure(_code);
     #[cfg(feature = "usb-ccid")]
     let mut usb_stack = None;
     #[cfg(feature = "usb-ccid")]
@@ -148,6 +150,12 @@ pub(crate) fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> !
                     if let Some(request) = responder.take_request() {
                         let mut response = heapless::Vec::new();
                         let uf2_requested = crate::recovery::is_enter_uf2_command(&request);
+                        #[cfg(feature = "diagnostic-apdu")]
+                        if let Some(diagnostic) = crate::diagnostic_apdu::response(&request) {
+                            let _ = responder.respond(diagnostic);
+                            class.check_for_app_response();
+                            continue;
+                        }
                         let status = if uf2_requested {
                             [0x90, 0x00]
                         } else {

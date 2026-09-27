@@ -79,6 +79,11 @@ where
             Status::Idle
         }
     }
+
+    /// True once the final bulk IN packet of an application response completed.
+    pub fn take_response_drained(&mut self) -> bool {
+        self.pipe.take_response_drained()
+    }
 }
 
 impl<'bus, 'pipe, Bus, const N: usize> UsbClass<Bus> for Ccid<'bus, 'pipe, Bus, N>
@@ -117,7 +122,7 @@ where
             return;
         }
 
-        self.pipe.maybe_send_packet();
+        self.pipe.endpoint_in_complete();
     }
 
     fn endpoint_out(&mut self, addr: EndpointAddress) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Load the independent JCAlgTest CAP through SCP03 on host or a PC/SC board."""
 import argparse
+import json
 import pathlib
 import subprocess
 import tempfile
@@ -9,12 +10,18 @@ import time
 from device_cbor import decode
 from jcalgtest_acceptance import performance_command
 from jcvm_transport_acceptance import load_cap, lv
+from jcvm_diagnostic import query as query_diagnostic
 from scp03_acceptance import Client, ROOT
 
 
 IMAGE = ROOT / "crates/microcard-engine-jcvm/tests/vectors/jcalgtest-v1.8.2-jc305.lfdb"
 PACKAGE = bytes.fromhex("4A43416C6754657374")
 APPLET = bytes.fromhex("4A43416C675465737431")
+KEYPAIR_PROFILES = {
+    "rsa1024": (2, 1024),
+    "rsa2048": (2, 2048),
+    "p384": (5, 384),
+}
 
 
 def probe(client, timings=False):
@@ -48,6 +55,27 @@ def probe(client, timings=False):
     software_aes = raw("software AES prepare", bytes.fromhex(
         "B0C00000160016FFFFFFFFFFFFFFFF00020010FFFFFFFF0032000100"))
     assert software_aes == b"\xaa\x90\x00", software_aes.hex()
+
+
+def probe_keypair_generation(client, name):
+    key_class, key_bits = KEYPAIR_PROFILES[name]
+    # AlgPerformanceTest reads keyClass and keyLength, then invokes genKeyPair.
+    profile = (0x19, 0, key_class, 0, key_bits, 0, 0)
+    for label, ins in (("prepare", 0x36), ("generate", 0x45)):
+        command = bytes.fromhex(performance_command(ins, profile, 1))
+        start = time.perf_counter_ns()
+        result = client.raw(command)
+        elapsed = (time.perf_counter_ns() - start) / 1_000_000
+        print(f"{name} {label}: {elapsed:.2f} ms, response {result.hex()}", flush=True)
+        assert result == b"\xaa\x90\x00", f"{name} {label}: {result.hex()}"
+
+
+def probe_cmac_factory(client):
+    start = time.perf_counter_ns()
+    result = client.raw(bytes.fromhex("B075120003310000"))
+    elapsed = (time.perf_counter_ns() - start) / 1_000_000
+    print(f"AES-CMAC factory: {elapsed:.2f} ms, response {result.hex()}", flush=True)
+    assert result[:2] == b"\x12\x00" and result[-2:] == b"\x90\x00", result.hex()
 
 
 def deletion_timings(client, repeats):
@@ -84,9 +112,17 @@ def main():
                         help="Time factory calls after the applet requests object deletion")
     parser.add_argument("--deletion-noop-probes", type=int, default=0,
                         help="Repeat deletion requests followed by unsupported factories")
+    parser.add_argument("--keypair-generation", action="append", choices=KEYPAIR_PROFILES,
+                        default=[], help="Opt-in JCAlgTest key-pair generation APDU; repeat per size")
+    parser.add_argument("--keypair-repeat", type=int, default=1,
+                        help="Repeat each opt-in key-pair generation; stop on first failure")
+    parser.add_argument("--cmac-factory", action="store_true",
+                        help="Probe the selected AES-CMAC Signature factory")
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
+    if args.keypair_repeat < 1:
+        parser.error("--keypair-repeat must be positive")
     if args.deletion_probes < 0:
         parser.error("--deletion-probes must be nonnegative")
     if args.deletion_noop_probes < 0:
@@ -120,10 +156,26 @@ def main():
                 client.command(0xE6, lv(PACKAGE, APPLET, APPLET, b"\0", b"\xc9\0", b""), p1=0x0C)
             for _ in range(args.repeat):
                 probe(client, args.timings)
+            for name in args.keypair_generation:
+                for _ in range(args.keypair_repeat):
+                    probe_keypair_generation(client, name)
+            if args.cmac_factory:
+                probe_cmac_factory(client)
             deletion_timings(client, args.deletion_probes)
             deletion_noop_probes(client, args.deletion_noop_probes)
-        finally:
+        except Exception:
             client.close()
+            if args.reader:
+                try:
+                    print("JCVM diagnostic after failure:",
+                          json.dumps(query_diagnostic(args.reader, classes), sort_keys=True),
+                          flush=True)
+                except Exception as diagnostic_error:
+                    print(f"JCVM diagnostic unavailable: {diagnostic_error}", flush=True)
+            raise
+        finally:
+            if client.p.poll() is None:
+                client.close()
         if args.reader:
             print("PASS: physical unsigned JCAlgTest load, install and probe" if not args.select_only
                   else "PASS: physical JCAlgTest selection after reset")
@@ -133,6 +185,11 @@ def main():
             client.connect()
             for _ in range(args.repeat):
                 probe(client, args.timings)
+            for name in args.keypair_generation:
+                for _ in range(args.keypair_repeat):
+                    probe_keypair_generation(client, name)
+            if args.cmac_factory:
+                probe_cmac_factory(client)
         finally:
             client.close()
     print("PASS: unsigned JCAlgTest CAP loads through SCP03 and survives reboot")

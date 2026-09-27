@@ -194,6 +194,8 @@ impl Nvm {
                 nvmc.erasepage()
                     .write(|w| unsafe { w.erasepage().bits(page as u32) });
                 Self::ready()?;
+                #[cfg(feature = "diagnostic-apdu")]
+                crate::diagnostic_apdu::erased_page();
                 nvmc.config.write(|w| w.wen().ren());
                 #[cfg(feature = "latency-trace")]
                 crate::trace::record(crate::trace::event::ERASE_PAGE_DONE, page as u32);
@@ -254,6 +256,8 @@ impl Nvm {
                 if unsafe { read(base + pos) } != word {
                     return Err(Error::Storage);
                 }
+                #[cfg(feature = "diagnostic-apdu")]
+                crate::diagnostic_apdu::programmed_word();
                 feed();
                 #[cfg(feature = "usb-ccid")]
                 {
@@ -307,6 +311,8 @@ impl Nvm {
         let nvmc = unsafe { &*pac::NVMC::ptr() };
         nvmc.config.write(|w| w.wen().wen());
         unsafe { write(address, 0) };
+        #[cfg(feature = "diagnostic-apdu")]
+        crate::diagnostic_apdu::programmed_word();
         let result = Self::ready();
         nvmc.config.write(|w| w.wen().ren());
         result?;

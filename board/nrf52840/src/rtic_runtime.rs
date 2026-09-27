@@ -8,6 +8,11 @@ use super::*;
 
 static RESET_PENDING: AtomicBool = AtomicBool::new(false);
 static WORK_PENDING: AtomicBool = AtomicBool::new(false);
+static IDLE_MAINTENANCE: AtomicBool = AtomicBool::new(false);
+static FAULTED: AtomicBool = AtomicBool::new(false);
+static FAULT_RESET_PENDING: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "diagnostic-apdu")]
+static APDU_COMPLETION_PENDING: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "dongle-layout")]
 static UF2_AT: AtomicU32 = AtomicU32::new(0);
 
@@ -28,14 +33,11 @@ mod app {
     struct Local {
         endpoint: WorkerEndpoint,
         responder: usb_ccid::ApduResponder<'static>,
-        maintenance_at: Option<u32>,
-        maintenance_by: Option<u32>,
         usb_parts: Option<(pac::CLOCK, pac::USBD, usb_ccid::ApduRequester<'static>)>,
         usb_stack: Option<(BoardUsbDevice, BoardCcidClass)>,
         usb_started: bool,
         extension_at: Option<u32>,
         configuration_at: Option<u32>,
-        ticks: u32,
     }
 
     #[init]
@@ -59,26 +61,22 @@ mod app {
             Local {
                 endpoint: WorkerEndpoint(Endpoint::new(card, keys)),
                 responder,
-                maintenance_at: None,
-                maintenance_by: None,
                 usb_parts: Some((cx.device.CLOCK, cx.device.USBD, requester)),
                 usb_stack: None,
                 usb_started: false,
                 extension_at: None,
                 configuration_at: None,
-                ticks: 0,
             },
         )
     }
 
-    #[task(binds = TIMER1, priority = 2, local = [ticks])]
-    fn tick(cx: tick::Context) {
+    #[task(binds = TIMER1, priority = 2)]
+    fn tick(_: tick::Context) {
         let timer = unsafe { &*pac::TIMER1::ptr() };
         timer.events_compare[0].write(|w| w);
         feed();
-        *cx.local.ticks = cx.local.ticks.wrapping_add(1);
         cortex_m::peripheral::NVIC::pend(pac::Interrupt::USBD);
-        if WORK_PENDING.load(Ordering::Acquire) || (*cx.local.ticks).is_multiple_of(250) {
+        if WORK_PENDING.load(Ordering::Acquire) {
             let _ = worker::spawn();
         }
         #[cfg(feature = "dongle-layout")]
@@ -193,24 +191,47 @@ mod app {
             };
         }
         class.check_for_app_response();
+        if class.take_response_drained() {
+            if FAULT_RESET_PENDING.swap(false, Ordering::AcqRel) {
+                cortex_m::peripheral::SCB::sys_reset();
+            }
+            #[cfg(feature = "diagnostic-apdu")]
+            if APDU_COMPLETION_PENDING.swap(false, Ordering::AcqRel) {
+                crate::diagnostic_apdu::phase(crate::diagnostic_apdu::DRAINED);
+                crate::diagnostic_apdu::finish(None);
+            }
+            IDLE_MAINTENANCE.store(true, Ordering::Release);
+            let _ = worker::spawn();
+        }
     }
 
-    #[task(priority = 1, local = [endpoint, responder, maintenance_at, maintenance_by])]
+    #[task(priority = 1, local = [endpoint, responder])]
     async fn worker(cx: worker::Context) {
         let endpoint = &mut cx.local.endpoint.0;
         let responder = cx.local.responder;
         loop {
             if RESET_PENDING.swap(false, Ordering::AcqRel) {
                 endpoint.reset();
-                *cx.local.maintenance_at = None;
-                *cx.local.maintenance_by = None;
+                IDLE_MAINTENANCE.store(false, Ordering::Release);
             }
-            // A continuous APDU stream must not keep ordinary writes in RAM forever.
-            let forced_maintenance = cx.local.maintenance_by
-                .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000);
-            let request = if forced_maintenance { None } else { responder.take_request() };
+            let request = responder.take_request();
             if let Some(request) = request {
                 WORK_PENDING.store(false, Ordering::Release);
+                let faulted = FAULTED.load(Ordering::Acquire);
+                let fault_reset = faulted && request.as_slice() == [0x80, 0xf4, 0, 0, 0];
+                #[cfg(feature = "dongle-layout")]
+                let fault_uf2 = faulted && crate::recovery::is_enter_uf2_command(&request);
+                let fault_control = fault_reset;
+                #[cfg(feature = "dongle-layout")]
+                let fault_control = fault_control || fault_uf2;
+                #[cfg(feature = "diagnostic-apdu")]
+                let diagnostic = crate::diagnostic_apdu::response(&request);
+                #[cfg(feature = "diagnostic-apdu")]
+                if diagnostic.is_none() && !faulted {
+                    crate::diagnostic_apdu::begin(crate::diagnostic_apdu::APDU,
+                        crate::diagnostic_apdu::PREPARE);
+                    APDU_COMPLETION_PENDING.store(true, Ordering::Release);
+                }
                 #[cfg(feature = "latency-trace")]
                 {
                     trace::apdu_start();
@@ -220,7 +241,7 @@ mod app {
                         .unwrap_or(0);
                     trace::record(trace::event::REQUEST, header);
                 }
-                let reply = Nvm::with_flash_yield(
+                let mut exchange = || Nvm::with_flash_yield(
                     &mut || cortex_m::peripheral::NVIC::pend(pac::Interrupt::USBD),
                     || {
                         Ok(endpoint.exchange_with_cancel(&request, &mut || {
@@ -233,6 +254,23 @@ mod app {
                     },
                 )
                 .unwrap_or_else(|_| alloc::vec![0x69, 0x85]);
+                #[cfg(feature = "diagnostic-apdu")]
+                let reply = if let Some(response) = diagnostic {
+                    response.to_vec()
+                } else if faulted {
+                    if fault_control { alloc::vec![0x90, 0x00] }
+                    else { alloc::vec![0x65, 0x81] }
+                } else {
+                    let reply = exchange();
+                    crate::diagnostic_apdu::phase(crate::diagnostic_apdu::RESPOND);
+                    crate::diagnostic_apdu::finish(endpoint.take_last_error());
+                    reply
+                };
+                #[cfg(not(feature = "diagnostic-apdu"))]
+                let reply = if faulted {
+                    if fault_control { alloc::vec![0x90, 0x00] }
+                    else { alloc::vec![0x65, 0x81] }
+                } else { exchange() };
                 #[cfg(feature = "latency-trace")]
                 {
                     trace::apdu_end();
@@ -251,10 +289,10 @@ mod app {
                 {
                     #[cfg(feature = "latency-trace")]
                     trace::record(trace::event::RESPONSE_QUEUED, 0);
-                    let completed = now();
-                    *cx.local.maintenance_at = Some(completed.wrapping_add(2_000_000));
-                    if cx.local.maintenance_by.is_none() {
-                        *cx.local.maintenance_by = Some(completed.wrapping_add(60_000_000));
+                    if fault_reset { FAULT_RESET_PENDING.store(true, Ordering::Release); }
+                    #[cfg(feature = "dongle-layout")]
+                    if fault_uf2 {
+                        UF2_AT.store(now().wrapping_add(250_000), Ordering::Release);
                     }
                 }
                 cortex_m::peripheral::NVIC::pend(pac::Interrupt::USBD);
@@ -264,12 +302,11 @@ mod app {
                 }
                 continue;
             }
-            if cx
-                .local
-                .maintenance_at
-                .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
-                || forced_maintenance
-            {
+            if IDLE_MAINTENANCE.swap(false, Ordering::AcqRel) {
+                if FAULTED.load(Ordering::Acquire) { continue; }
+                #[cfg(feature = "diagnostic-apdu")]
+                crate::diagnostic_apdu::begin(crate::diagnostic_apdu::MAINTENANCE,
+                    crate::diagnostic_apdu::MAINTAIN);
                 #[cfg(feature = "latency-trace")]
                 let started = now();
                 #[cfg(feature = "latency-trace")]
@@ -290,10 +327,13 @@ mod app {
                     trace::record(trace::event::MAINTENANCE_DONE, result.is_err() as u32);
                 }
                 if result.is_err() {
-                    cortex_m::peripheral::SCB::sys_reset();
+                    #[cfg(feature = "diagnostic-apdu")]
+                    crate::diagnostic_apdu::finish(endpoint.take_last_error());
+                    FAULTED.store(true, Ordering::Release);
+                } else {
+                    #[cfg(feature = "diagnostic-apdu")]
+                    crate::diagnostic_apdu::finish(None);
                 }
-                *cx.local.maintenance_at = None;
-                *cx.local.maintenance_by = None;
                 continue;
             }
             break;

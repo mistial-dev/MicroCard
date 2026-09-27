@@ -68,17 +68,20 @@ impl JcvmBackend for BoardBackend {
 pub(super) type BoardCard = JcvmEngine<BoardBackend>;
 
 pub(super) fn open(mut hardware: Hardware, key: JournalKey) -> Result<BoardCard> {
+    #[cfg(feature = "diagnostic-apdu")]
+    crate::diagnostic_apdu::begin(crate::diagnostic_apdu::STARTUP, 1);
     let heap_key = heap_root(&mut hardware, &key)?;
     let mut incarnation = [0; 16];
     hardware.fill_entropy(&mut incarnation)?;
+    let registry = Store::open(Nvm::new(), key, Registry::new(incarnation), &mut hardware)?;
+    #[cfg(feature = "diagnostic-apdu")]
+    crate::diagnostic_apdu::phase(2);
+    let images = Images::new(Nvm::new())?;
+    #[cfg(feature = "diagnostic-apdu")]
+    crate::diagnostic_apdu::phase(3);
     let storage = Storage {
-        registry: Store::open(
-            Nvm::new(),
-            key,
-            Registry::new(incarnation),
-            &mut hardware,
-        )?,
-        images: Images::new(Nvm::new())?,
+        registry,
+        images,
         heaps: Heaps,
         heap_key,
     };

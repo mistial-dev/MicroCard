@@ -14,14 +14,14 @@ use microcard_engine_jcvm::{
 };
 use zeroize::Zeroizing;
 #[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
-unsafe extern "C" { fn microcard_diagnostic_journal(kind: u32, generation: u64); }
+unsafe extern "C" { fn microcard_diagnostic_journal(kind: u32, generation: u64, completed: u32); }
 
 #[inline]
-fn journal_decision(kind: u32, generation: u64) {
+fn journal_decision(kind: u32, generation: u64, completed: bool) {
     #[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
-    unsafe { microcard_diagnostic_journal(kind, generation); }
+    unsafe { microcard_diagnostic_journal(kind, generation, u32::from(completed)); }
     #[cfg(not(all(feature = "diagnostic-apdu", target_arch = "arm")))]
-    let _ = (kind, generation);
+    let _ = (kind, generation, completed);
 }
 mod patch;
 #[cfg(feature = "latency-trace")]
@@ -304,7 +304,7 @@ impl<F: Flash> Store<F> {
         if reason == CheckpointReason::ApduEnd {
             if let Some((length, header)) = self.heap_length.zip(self.heap_header) {
                 if view.same_state_after_deletion_request(length, header).map_err(|_| Error::Format)? {
-                    journal_decision(1, self.journal.generation());
+                    journal_decision(1, self.journal.generation(), true);
                     return Ok(());
                 }
             }
@@ -327,13 +327,13 @@ impl<F: Flash> Store<F> {
                 let generation = self.journal.generation();
                 match patch::view_size(view, before_length, generation, capacity) {
                     Ok(length) => {
-                        journal_decision(2, generation);
+                        journal_decision(2, generation, false);
                         #[cfg(feature = "latency-trace")]
                         trace::patch(length);
                         self.journal.append_encoded_with(length, reason.into(), provider, |output| {
                             patch::encode_view_into(view, before_length, generation, output)
                         })?;
-                        journal_decision(2, self.journal.generation());
+                        journal_decision(2, self.journal.generation(), true);
                         #[cfg(feature = "latency-trace")]
                         trace::committed_patch();
                         self.heap_length = Some(view.heap_bytes());
@@ -356,9 +356,9 @@ impl<F: Flash> Store<F> {
         #[cfg(feature = "latency-trace")]
         if self.heap_length.is_none() { trace::fallback(1); }
         let snapshot_decision = 3 | (snapshot_reason << 8);
-        journal_decision(snapshot_decision, self.journal.generation());
+        journal_decision(snapshot_decision, self.journal.generation(), false);
         self.commit_snapshot(view, reason, provider)?;
-        journal_decision(snapshot_decision, self.journal.generation());
+        journal_decision(snapshot_decision, self.journal.generation(), true);
         #[cfg(feature = "latency-trace")]
         trace::committed_snapshot();
         self.heap_length = Some(view.heap_bytes());
@@ -370,9 +370,9 @@ impl<F: Flash> Store<F> {
     /// security anchor. A new snapshot attempt still reserves a fresh nonce.
     pub(crate) fn compact_view(&mut self, view: PersistentView<'_>,
         provider: &mut impl CryptoProvider) -> Result<()> {
-        journal_decision(4, self.journal.generation());
+        journal_decision(4, self.journal.generation(), false);
         self.commit_snapshot(view, CheckpointReason::ApduEnd, provider)?;
-        journal_decision(4, self.journal.generation());
+        journal_decision(4, self.journal.generation(), true);
         #[cfg(feature = "latency-trace")]
         trace::committed_snapshot();
         self.heap_length = Some(view.heap_bytes());

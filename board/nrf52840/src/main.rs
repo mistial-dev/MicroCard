@@ -4,6 +4,8 @@ extern crate alloc;
 #[cfg(feature = "cc310-sha256")]
 mod cc310;
 mod diagnostics;
+#[cfg(feature = "diagnostic-apdu")]
+mod diagnostic_apdu;
 mod hardware;
 #[cfg(feature = "engine-jcvm")]
 mod jcvm;
@@ -27,7 +29,7 @@ use microcard_core::{
     provisioning::{ownership_marker_action, OwnershipMarkerAction},
     scp03::Keys,
 };
-#[cfg(not(feature = "latency-trace"))]
+#[cfg(not(any(feature = "latency-trace", feature = "diagnostic-apdu")))]
 use microcard_core::Error;
 #[cfg(feature = "usb-ccid")]
 use nrf52840_hal::{
@@ -217,10 +219,13 @@ fn initialize_card() -> (BoardCard, Keys) {
         halt_with_diagnostic(&mut watchdog, 0x09);
     }
     let _reset_reason = BoardResetReport::capture().reset_reason();
-    #[cfg(feature = "latency-trace")]
+    #[cfg(any(feature = "latency-trace", feature = "diagnostic-apdu"))]
     {
         let power = unsafe { &*pac::POWER::ptr() };
         let reset_reason = power.resetreas.read().bits();
+        #[cfg(feature = "diagnostic-apdu")]
+        diagnostic_apdu::boot(reset_reason);
+        #[cfg(feature = "latency-trace")]
         trace::boot(reset_reason);
         power.resetreas.write(|w| unsafe { w.bits(reset_reason) });
     }
@@ -289,9 +294,9 @@ fn initialize_card() -> (BoardCard, Keys) {
     let card = match opened {
         Ok(c) => c,
         Err(error) => {
-            #[cfg(feature = "latency-trace")]
+            #[cfg(any(feature = "latency-trace", feature = "diagnostic-apdu"))]
             let code = 0x20 + error as u8;
-            #[cfg(not(feature = "latency-trace"))]
+            #[cfg(not(any(feature = "latency-trace", feature = "diagnostic-apdu")))]
             let code = if error == Error::IncompatibleState { 0x07 } else { 0x08 };
             halt_with_diagnostic(&mut watchdog, code);
         }
@@ -344,6 +349,8 @@ fn main() -> ! {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    #[cfg(feature = "diagnostic-apdu")]
+    diagnostic_apdu::startup_failure(0xff);
     #[cfg(feature = "latency-trace")]
     if let Some(location) = info.location() {
         let hash = location.file().as_bytes().iter().fold(0x811c9dc5u32, |hash, byte| {
@@ -361,7 +368,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     #[cfg(not(feature = "development-recovery"))]
     cortex_m::peripheral::SCB::sys_reset();
 }
-
 
 #[cfg(feature = "development-recovery")]
 #[exception]

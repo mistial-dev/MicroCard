@@ -10,6 +10,7 @@ engine-jcvm = ["microcard-core/jcvm", "microcard-core/software-p384", "dep:micro
 jcvm-hardware = ["engine-jcvm", "cc310"]
 jcvm-software = ["engine-jcvm", "software-crypto"]
 crypto-profile-self-test = ["jcvm-hardware"]
+diagnostic-apdu = ["usb-ccid", "development-debug", "microcard-core/diagnostic-apdu"]
 des-legacy = ["microcard-core/des-legacy"]
 development-debug = []
 latency-trace = ["development-debug", "microcard-core/latency-trace"]

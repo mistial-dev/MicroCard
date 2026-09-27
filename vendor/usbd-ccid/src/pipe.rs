@@ -49,6 +49,28 @@ enum Error {
     CommandNotSupported = 0x00,
 }
 
+#[derive(Default)]
+struct ResponseDrain {
+    final_queued: bool,
+    final_in_flight: bool,
+    drained: bool,
+}
+
+impl ResponseDrain {
+    fn sent(&mut self, packet_length: usize, idle: bool) {
+        if self.final_queued && idle && packet_length < PACKET_SIZE {
+            self.final_in_flight = true;
+        }
+    }
+
+    fn completed(&mut self) {
+        if core::mem::take(&mut self.final_in_flight) {
+            self.final_queued = false;
+            self.drained = true;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,6 +83,22 @@ mod tests {
         assert_eq!(packet[6], 0xff);
         assert_eq!(&packet[10..14], &CLOCK_FREQUENCY_KHZ);
         assert_eq!(&packet[14..18], &DATA_RATE_BPS);
+    }
+
+    #[test]
+    fn response_drain_waits_for_the_final_packet_or_its_zero_length_packet() {
+        let mut drain = ResponseDrain { final_queued: true, ..Default::default() };
+        drain.sent(PACKET_SIZE - 1, true);
+        drain.completed();
+        assert!(core::mem::take(&mut drain.drained));
+
+        drain.final_queued = true;
+        drain.sent(PACKET_SIZE, true);
+        drain.completed();
+        assert!(!drain.drained);
+        drain.sent(0, true);
+        drain.completed();
+        assert!(drain.drained);
     }
 }
 
@@ -78,6 +116,7 @@ where
     interchange: Requester<'pipe, N>,
     sent: usize,
     outbox: Option<RawPacket>,
+    drain: ResponseDrain,
 
     ext_packet: ExtPacket,
     #[allow(dead_code)]
@@ -108,6 +147,7 @@ where
             state: State::Idle,
             sent: 0,
             outbox: None,
+            drain: ResponseDrain::default(),
             interchange: request_pipe,
 
             ext_packet: Default::default(),
@@ -133,6 +173,7 @@ where
         self.state = State::Idle;
         self.sent = 0;
         self.outbox = None;
+        self.drain = ResponseDrain::default();
         self.packet_len = 0;
         self.receiving_long = false;
         self.long_packet_missing = 0;
@@ -455,6 +496,15 @@ where
         }
     }
 
+    pub fn take_response_drained(&mut self) -> bool {
+        core::mem::take(&mut self.drain.drained)
+    }
+
+    pub fn endpoint_in_complete(&mut self) {
+        self.drain.completed();
+        self.maybe_send_packet();
+    }
+
     #[inline(never)]
     fn call_app(&mut self) {
         self.interchange
@@ -520,6 +570,10 @@ where
                 return;
             }
         };
+
+        if !more {
+            self.drain.final_queued = true;
+        }
 
         let primed_packet = DataBlock::new(self.seq, chain, chunk);
         // info!("priming {:?}", &primed_packet).ok();
@@ -613,6 +667,7 @@ where
             let needs_zlp = packet.len() == PACKET_SIZE;
             match self.write.write(packet) {
                 Ok(n) if n == packet.len() => {
+                    self.drain.sent(packet.len(), self.state == State::Idle);
                     // if packet.len() > 8 {
                     //     info!("--> sent {:?}... successfully", &packet[..8]).ok();
                     // } else {
@@ -676,6 +731,7 @@ where
         self.state = State::Idle;
         self.outbox = None;
         self.started_processing = false;
+        self.drain = ResponseDrain::default();
         self.receiving_long = false;
         self.long_packet_missing = 0;
 
