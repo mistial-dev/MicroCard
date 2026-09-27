@@ -595,6 +595,23 @@ mod tests {
     }
 
     #[test]
+    fn rsa_factory_requires_the_selected_provider_sha256_stream() {
+        struct NoHash;
+        impl CryptoProvider for NoHash {
+            fn supports_sha256(&self) -> bool { false }
+            fn supports_rsa_pkcs1v15_sha256(&self) -> bool { true }
+            fn supports_rsa_keygen(&self) -> bool { true }
+        }
+        impl Entropy for NoHash {
+            fn fill_entropy(&mut self, _: &mut [u8]) -> crate::Result<()> { Ok(()) }
+        }
+        let mut provider = NoHash;
+        let host = Services::new(&mut provider);
+        assert!(!Host::supports_digest(&host, 4));
+        assert!(!Host::supports_signature(&host, 40));
+    }
+
+    #[test]
     fn digest_services_support_one_shot_streaming_and_clear_failures() {
         let mut provider = Provider::default();
         let mut host = Services::new(&mut provider);
