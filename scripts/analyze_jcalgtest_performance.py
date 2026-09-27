@@ -55,7 +55,9 @@ def main():
     parser.add_argument("--elf", required=True, type=pathlib.Path)
     parser.add_argument("--source", required=True, type=pathlib.Path)
     args = parser.parse_args()
-    csvs = sorted(args.result.glob("*PERFORMANCE*.csv"))
+    csvs = sorted([*args.result.glob("*PERFORMANCE*.csv"),
+                   *args.result.glob("*ECCPERF*.csv"),
+                   *args.result.glob("*FINGERPRINT*.csv")])
     if len(csvs) != 1:
         parser.error(f"expected one performance CSV, found {len(csvs)}")
     revision = subprocess.check_output(
