@@ -749,3 +749,24 @@ selection, with no recovery error. This confirms that the installed applet
 remained usable, but it does not compare a known persistent field before and
 after the power cycle. A persistent-value round trip and a deliberate cut
 during journal publication remain required to qualify physical recovery.
+
+The next physical check uses `scripts/jcvm_physical_persistence.py`. It loaded
+OpenFIPS201 into the second image slot without removing JCAlgTest, wrote a
+337-byte public certificate object, and read back the exact bytes over PIV.
+The same read passed after a debugger reset, and JCAlgTest still selected.
+The expected object is kept in the ignored local
+`artifacts/physical/microcard-piv-persistence-dk-20260927/expected.bin`
+(SHA-256 `ea01da9b3f070a4ddbb5974fbe5ba5fcf52cc5ab0e646a277d3d33e9a73bb459`).
+For a fresh DK, run `write` with `--install` and a new record path. Omit
+`--install` when the PIV applet and certificate object already exist. After a
+target power cycle, rerun:
+
+```sh
+python3 scripts/jcvm_physical_persistence.py verify \
+  --reader 'MicroCard MicroCard virtual smart card' \
+  --management-key .keys/first-test-management.key \
+  --record artifacts/physical/microcard-piv-persistence-dk-20260927/expected.bin
+```
+
+This value was written after the previous power cycle, so its physical
+power-cycle result is not yet recorded here.
