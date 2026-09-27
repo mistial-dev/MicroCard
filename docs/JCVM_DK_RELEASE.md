@@ -64,8 +64,8 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
-The latest extended host and DK scans report **57 supported** probes against the
-P71D321 reference's **288**. There are **231 missing supported** probes and
+The latest extended DK scan reports **58 supported** probes against the
+P71D321 reference's **288**. There are **230 missing supported** probes and
 **zero support claims outside the profile**. Both ISO 3309 checksum factories
 now work, and their operations pass focused host vectors and a DK smoke test.
 Both `OwnerPINBuilder` extended variants now
@@ -83,7 +83,7 @@ instead of passing as a partial result.
 | CAP loading | Host accepts unsigned LFDB under SCP03; CAP 2.1 structural checks | Complete supported CAP 2.2 type/dataflow verification |
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
-| API | 57 supported JCAlgTest probes; CRC16/CRC32 operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
+| API | 58 supported JCAlgTest probes; CRC16/CRC32 operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
 | GlobalPlatform | Host SCP03 unsigned OpenFIPS201 and JCAlgTest load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
@@ -555,7 +555,7 @@ these runs differ in successful work, so they are not a controlled wear ratio.
 Continuous command traffic can keep ordinary writes in RAM until traffic
 pauses. The power-cut exposure remains intentional and unbounded in that case;
 PIN, explicit transaction, and administrator boundaries still publish before
-returning. ECC and fingerprint performance modes remain unverified.
+returning.
 
 The upstream variable performance scan also completes on fresh DK media with
 firmware ELF SHA-256
@@ -578,3 +578,35 @@ collects unreachable objects at an APDU boundary, outside explicit
 transactions. It avoids rescanning until more objects are allocated. This is
 RAM work; its changed heap remains queued for idle flash publication. The
 host client now rejects a completed CSV if the APDU log shows lost selection.
+
+The same ELF also completed the upstream ECC performance and fingerprint modes
+on fresh DK media. Their untouched results are in `ecc/` and `fingerprint/`
+under the ignored local
+`artifacts/physical/microcard-jcalgtest-auto-gc-dk-20260926/` directory.
+The performance analyzer found 17 completed ECC method rows (10 measured,
+7 `NO_SUCH_ALGORITHM`) and 67 fingerprint rows (8 measured,
+57 `NO_SUCH_ALGORITHM`, 2 `ILLEGAL_VALUE`). Neither run had an invalid or
+unmeasured result, transport error, or lost session. These modes measure only
+the operations that this firmware currently exposes.
+
+The complete upstream extended support mode then ran three times on that ELF:
+after fresh installation, after debugger reset, and after factory reset and
+reinstallation. Each run completed **8,607 probes with zero error rows** and
+the same support map: **58 supported**, **230 missing P71D321-positive**, and
+**zero claims outside P71D321**. The untouched files are in `support/`,
+`support-after-reset/`, and `support-after-reinstall/` beside the performance
+results. Their CSV SHA-256 values are respectively
+`2e4740c7fdd9779114299b2b975493cd87307097f8e398d544b5b3f36c83b40e`,
+`e07ea604fd5b347549a2396b18bd83572884b6f5eff45e5512b505f669c77d69`,
+and `5f2d1b0bf5136319a40e5008edd85c34e1dd45fcd53f9a0effbe4e7b489cd56f`.
+Each used 17,222 PC/SC APDUs; median latency was 15–16 ms and p95 was
+17–23 ms. The initial run's SWD trace counted 8 erases and 16,037 programmed
+words, with no JCVM session error. Full-scan repeatability is now demonstrated,
+but the 230 positive gaps still prevent a P71D321-compatible claim.
+
+Of those gaps, 105 are signature factories or operations, 60 are cipher
+factories or operations, 18 are RSA key-pair generation, and 47 cover keys,
+EC generation, random data, digests, and agreement. The analyzer writes the
+individual section and probe names to `analysis.json`; implementations need
+generation, import, operation, failure, and reboot tests before reporting
+support.
