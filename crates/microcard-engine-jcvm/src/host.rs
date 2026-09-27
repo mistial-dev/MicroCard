@@ -178,6 +178,19 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// RSA without padding on one exact modulus-sized representative.
+    fn rsa_raw_private(&mut self, _private_der: &[u8], _key_bits: usize,
+        _input: &[u8], output: &mut [u8]) -> Result<()> {
+        output.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn rsa_raw_public(&mut self, _public_der: &[u8], _key_bits: usize,
+        _input: &[u8], output: &mut [u8]) -> Result<()> {
+        output.fill(0);
+        Err(Error::Unsupported)
+    }
+
     /// Generate complete PKCS#1 DER keys and publish lengths only on success.
     fn rsa_generate(&mut self, _key_bits: usize, private_der: &mut [u8],
         public_der: &mut [u8]) -> Result<(usize, usize)> {

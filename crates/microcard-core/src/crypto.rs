@@ -556,6 +556,30 @@ pub trait CryptoProvider {
 
     fn supports_rsa_pkcs1v15_sha256(&self) -> bool { cfg!(feature = "software-rsa") }
     fn supports_rsa_keygen(&self) -> bool { cfg!(feature = "rsa-keygen") }
+    fn supports_rsa_raw(&self) -> bool { cfg!(feature = "rsa-raw") }
+
+    fn rsa_raw_public_der(&mut self, public_der: &[u8], key_bits: usize,
+        input: &[u8], output: &mut [u8]) -> Result<()> {
+        output.fill(0);
+        #[cfg(feature = "rsa-raw")]
+        { microcard_tiny_crypto::rsa::raw_public_der(public_der, key_bits, input, output)
+            .map_err(|_| Error::Native) }
+        #[cfg(not(feature = "rsa-raw"))]
+        { let _ = (public_der, key_bits, input); Err(Error::Unsupported) }
+    }
+
+    fn rsa_raw_private_with_entropy(&mut self, private_der: &[u8], key_bits: usize,
+        input: &[u8], output: &mut [u8]) -> Result<()> where Self: crate::hal::Entropy {
+        output.fill(0);
+        #[cfg(feature = "rsa-raw")]
+        {
+            let mut draw = |bytes: &mut [u8]| self.fill_entropy(bytes).is_ok();
+            microcard_tiny_crypto::rsa::raw_private_der(
+                private_der, key_bits, input, output, &mut draw).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "rsa-raw"))]
+        { let _ = (private_der, key_bits, input); Err(Error::Unsupported) }
+    }
 
     /// Generate a complete PKCS#1 DER key pair using injected entropy.
     /// Both outputs and lengths remain zero on failure.

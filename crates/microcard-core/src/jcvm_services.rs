@@ -214,6 +214,31 @@ impl<P: CryptoProvider> Services<'_, P> {
             .map_err(|_| Error::Unauthorized)
     }
 
+    pub fn rsa_raw_private(&mut self, private_der: &[u8], key_bits: usize,
+        input: &[u8], output: &mut [u8]) -> Result<()>
+    where P: Entropy {
+        output.fill(0);
+        if !matches!(key_bits, 1024 | 2048) || input.len() != key_bits / 8
+            || output.len() != key_bits / 8 { return Err(Error::Bounds); }
+        self.provider.rsa_raw_private_with_entropy(private_der, key_bits, input, output)
+            .map_err(|_| {
+                output.fill(0);
+                Error::Unauthorized
+            })
+    }
+
+    pub fn rsa_raw_public(&mut self, public_der: &[u8], key_bits: usize,
+        input: &[u8], output: &mut [u8]) -> Result<()> {
+        output.fill(0);
+        if !matches!(key_bits, 1024 | 2048) || input.len() != key_bits / 8
+            || output.len() != key_bits / 8 { return Err(Error::Bounds); }
+        self.provider.rsa_raw_public_der(public_der, key_bits, input, output)
+            .map_err(|_| {
+                output.fill(0);
+                Error::Unauthorized
+            })
+    }
+
     pub fn rsa_generate(&mut self, key_bits: usize, private_der: &mut [u8],
         public_der: &mut [u8]) -> Result<(usize, usize)>
     where P: Entropy {
@@ -379,6 +404,14 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
         Services::rsa_pkcs1v15_sha256_verify(self, public_der, key_bits, hash, signature)
     }
+    fn rsa_raw_private(&mut self, private_der: &[u8], key_bits: usize,
+        input: &[u8], output: &mut [u8]) -> Result<()> {
+        Services::rsa_raw_private(self, private_der, key_bits, input, output)
+    }
+    fn rsa_raw_public(&mut self, public_der: &[u8], key_bits: usize,
+        input: &[u8], output: &mut [u8]) -> Result<()> {
+        Services::rsa_raw_public(self, public_der, key_bits, input, output)
+    }
     fn rsa_generate(&mut self, key_bits: usize, private_der: &mut [u8],
         public_der: &mut [u8]) -> Result<(usize, usize)> {
         Services::rsa_generate(self, key_bits, private_der, public_der)
@@ -424,7 +457,8 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_cipher(&self, algorithm: u8) -> bool {
-        matches!(algorithm, 13 | 14 | 22..=27 | 240)
+        algorithm == 12 && self.provider.supports_rsa_raw()
+            || matches!(algorithm, 13 | 14 | 22..=27 | 240)
             || cfg!(feature = "des-legacy") && matches!(algorithm, 1..=8)
     }
 
