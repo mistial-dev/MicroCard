@@ -714,3 +714,14 @@ are preserved locally under
 `artifacts/physical/microcard-jcalgtest-rtic-durability-dk-20260927/`.
 This scan establishes transport continuity and factory classifications. It
 does not establish operation-level support for each reported algorithm.
+
+A later diagnostic image (ELF SHA-256
+`e6e88a9ed78a57613dd5ca39f86e08937ca9e6b9c47eed524914002a6adc889b`)
+generated one RSA-2048 key pair through the installed JCAlgTest applet and
+returned `aa9000`. The host measured 6,778 ms. The device record measured
+6,775 ms for the APDU, including 6,273 ms of execution and one 499 ms heap
+snapshot with four page erases and 3,157 programmed words. Idle maintenance
+then programmed zero words and erased zero pages. The applet selected after
+debugger reset. This is one timing sample, not an RSA operation or endurance
+qualification; no improvement claim follows from comparing it with another
+random key-generation run.
