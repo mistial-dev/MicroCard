@@ -775,3 +775,20 @@ The JCAlgTest applet also selected and passed its focused probes afterward.
 This proves recovery of that completed PIV write and coexistence of the two
 installed applets across the cycle. It does not cover a cut while a flash
 publication is in progress.
+
+The same diagnostic firmware also generated a P-256 signing key in
+OpenFIPS201 slot 9C. `scripts/jcvm_physical_p256.py` confirmed that signing
+without PIN verification returns `6982`, verified an on-card signature with
+the independent host `cryptography` library, and repeated both checks after
+a debugger reset using the saved public key. The 65-byte SEC1 point is in the
+ignored local `artifacts/physical/microcard-piv-p256-dk-20260927/public-sec1.bin`
+(SHA-256 `fb8ffe57ce52c1ff43675e87646d32caac9a2c7c0f995a3a43759c400f76064d`).
+The `setup` phase takes the reader, SCP03 management-key path, and a fresh
+`--record` path; add `--define-management` when slot 9B is not yet defined.
+The `verify` phase takes the same arguments after a restart and checks a new
+signature against the saved SEC1 point.
+The same saved public key verified another on-card signature after the user
+cycled SW8. The diagnostic then reported `reset_reason=4` (`SREQ`), so that
+run proves key recovery after a restart but does not establish that target
+power was removed. This qualifies one CC310-backed P-256 signing path, not
+every P-256 factory or the pending cold-power and provider-failure cases.
