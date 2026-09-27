@@ -1243,6 +1243,84 @@ fn sha224_digest_factory_streams_and_preserves_output_on_failure() {
 }
 
 #[test]
+fn one_shot_digest_open_use_close_and_release_follow_temporary_contract() {
+    use sha2::{Digest, Sha224, Sha256};
+    struct DigestHost;
+    impl crate::host::Host for DigestHost {
+        fn supports_digest(&self, algorithm: u8) -> bool { matches!(algorithm, 1 | 4 | 7) }
+        fn digest(&mut self, algorithm: u8, input: &[u8], output: &mut [u8]) -> Result<usize> {
+            assert_eq!(input, b"abc");
+            let bytes: alloc::vec::Vec<u8> = match algorithm {
+                1 => vec![0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
+                    0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d],
+                4 => Sha256::digest(input).to_vec(),
+                7 => Sha224::digest(input).to_vec(),
+                _ => unreachable!(),
+            };
+            output.copy_from_slice(&bytes);
+            Ok(bytes.len())
+        }
+    }
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let buffer = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
+    let mut host = DigestHost;
+    let mut call = |method, args: &[(bool, u16)], heap: &mut Heap, frame: &mut Frame| {
+        for &(reference, value) in args {
+            if reference { frame.push_reference(value).unwrap(); }
+            else { frame.push_short(value as i16).unwrap(); }
+        }
+        security::call(ClassId::MessageDigest_OneShot, method,
+            framework(ClassId::MessageDigest_OneShot, method, method == MethodId::open).method.signature,
+            heap, &mut host, frame, 1, &mut idle(), &mut u32::MAX, &[]).unwrap()
+    };
+    for (algorithm, expected) in [(1, 20), (7, 28), (4, 32)] {
+        assert!(matches!(call(MethodId::open, &[(false, algorithm)], &mut heap, &mut frame), Native::Returned));
+        let digest = frame.pop_reference().unwrap();
+        assert_eq!(heap.info(digest).unwrap().owner, 0);
+        assert!(is_temporary_native(heap.info(digest).unwrap().class, security::STATE_WORDS));
+        let Native::Threw(exception) = call(MethodId::open, &[(false, 4)], &mut heap, &mut frame) else { panic!("second open must exhaust the single slot"); };
+        assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
+        heap.byte_slice_mut(buffer, 0, 3).unwrap().copy_from_slice(b"abc");
+        assert!(matches!(call(MethodId::update, &[(true, digest), (true, buffer), (false, 0), (false, 0)], &mut heap, &mut frame), Native::Threw(_)));
+        assert!(matches!(call(MethodId::doFinal, &[(true, digest), (true, buffer), (false, 0), (false, 3), (true, buffer), (false, 0)], &mut heap, &mut frame), Native::Returned));
+        assert_eq!(frame.pop_short().unwrap(), expected);
+        let answer = match algorithm {
+            1 => vec![0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
+                0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d],
+            4 => Sha256::digest(b"abc").to_vec(),
+            7 => Sha224::digest(b"abc").to_vec(),
+            _ => unreachable!(),
+        };
+        assert_eq!(heap.byte_slice(buffer, 0, expected as usize).unwrap(), &answer);
+        assert!(matches!(call(MethodId::close, &[(true, digest)], &mut heap, &mut frame), Native::Returned));
+        assert!(matches!(call(MethodId::close, &[(true, digest)], &mut heap, &mut frame), Native::Returned));
+        for method in [MethodId::getAlgorithm, MethodId::getLength, MethodId::reset] {
+            let Native::Threw(exception) = call(method, &[(true, digest)], &mut heap, &mut frame) else { panic!("closed digest method {method:?} succeeded"); };
+            assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
+        }
+    }
+    let Native::Threw(exception) = call(MethodId::open, &[(false, 99)], &mut heap, &mut frame) else { panic!("unsupported algorithm succeeded"); };
+    assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(3));
+    assert!(matches!(call(MethodId::open, &[(false, 4)], &mut heap, &mut frame), Native::Returned));
+    let abandoned = frame.pop_reference().unwrap();
+    security::release_one_shot_digests(&mut heap).unwrap();
+    let Native::Threw(exception) = call(MethodId::doFinal, &[(true, abandoned), (true, buffer), (false, 0), (false, 3), (true, buffer), (false, 0)], &mut heap, &mut frame) else { panic!("released digest remained usable"); };
+    assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
+    let used = heap.used();
+    assert!(matches!(call(MethodId::open, &[(false, 1)], &mut heap, &mut frame), Native::Returned));
+    let reopened = frame.pop_reference().unwrap();
+    assert_eq!(reopened, abandoned);
+    assert_eq!(heap.used(), used, "a released slot should be reused across callbacks");
+    drop(call);
+    frame.push_reference(reopened).unwrap();
+    assert!(matches!(security::call(ClassId::MessageDigest_OneShot, MethodId::getLength,
+        framework(ClassId::MessageDigest_OneShot, MethodId::getLength, false).method.signature,
+        &mut heap, &mut host, &mut frame, 2, &mut idle(), &mut u32::MAX, &[]), Err(Error::Firewall)));
+}
+
+#[test]
 fn exhausted_crypto_factory_throws_without_consuming_heap() {
     struct DigestHost;
     impl crate::host::Host for DigestHost {
@@ -1335,7 +1413,6 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
     for (class, method, token, arguments) in [
         (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance, None, 2),
         (ClassId::InitializedMessageDigest_OneShot, MethodId::open, None, 1),
-        (ClassId::MessageDigest_OneShot, MethodId::open, None, 1),
         (ClassId::RandomData_OneShot, MethodId::open, None, 1),
         (ClassId::Signature_OneShot, MethodId::open, None, 3),
         (ClassId::Cipher_OneShot, MethodId::open, None, 2),

@@ -147,10 +147,54 @@ pub(crate) fn visit_native_reference_offsets(info: heap::Info, payload_len: usiz
 }
 
 pub(super) fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
+    release_one_shot_digests(heap)?;
     heap.visit_objects(|_, info, payload| {
         if let Some(range) = native_volatile_range(info)? { payload[range].fill(0); }
         Ok(())
     })
+}
+
+/// A temporary digest cannot outlive the applet entry point which opened it.
+pub(crate) fn release_one_shot_digests(heap: &mut Heap) -> Result<()> {
+    heap.visit_objects(|_, info, payload| {
+        if info.kind == heap::KIND_OBJECT && info.length == STATE_WORDS
+            && super::api_class(info.class).is_some_and(|class| class.id == ClassId::MessageDigest_OneShot)
+        {
+            payload[READY * 2..READY * 2 + 2].fill(0);
+            // No applet local can retain a reference across this boundary.
+            payload[SIZE * 2 + 1] = 1;
+        }
+        Ok(())
+    })
+}
+
+fn one_shot_digest(heap: &Heap, this: u16, context: heap::Context) -> Result<bool> {
+    let info = heap.info(this)?;
+    let one_shot = super::api_class(info.class).is_some_and(|class| class.id == ClassId::MessageDigest_OneShot);
+    if one_shot {
+        if info.owner != 0 || word_field(heap, this, COUNTER)? != context as u16 {
+            return Err(Error::Firewall);
+        }
+    } else {
+        heap.check_access(this, context)?;
+    }
+    Ok(one_shot)
+}
+
+fn one_shot_slot(heap: &Heap) -> Result<(bool, Option<u16>)> {
+    let image = heap.image();
+    let mut at = 2usize;
+    let mut reusable = None;
+    while at < heap.used() {
+        let info = heap::Info::read(image, heap.used(), at as u16)?;
+        if info.kind == heap::KIND_OBJECT && info.length == STATE_WORDS
+            && super::api_class(info.class).is_some_and(|class| class.id == ClassId::MessageDigest_OneShot) {
+            if image[at + heap::HEADER + READY * 2 + 1] != 0 { return Ok((true, None)); }
+            if image[at + heap::HEADER + SIZE * 2 + 1] != 0 { reusable = Some(at as u16); }
+        }
+        at = (at + heap::HEADER + info.length as usize * info.element_size()).next_multiple_of(2);
+    }
+    Ok((false, reusable))
 }
 
 // Persist unconditional PIN changes without publishing conditional heap/static writes.
@@ -234,6 +278,12 @@ fn crypto_exception(heap: &mut Heap, context: heap::Context, reason: u16) -> Res
     Ok(Native::Threw(exception))
 }
 
+fn system_no_resource(heap: &mut Heap, context: heap::Context) -> Result<Native> {
+    let exception = super::new_exception(heap, ClassId::SystemException, context)?;
+    heap.put_word_unconditional(exception, super::REASON_FIELD, 5)?;
+    Ok(Native::Threw(exception))
+}
+
 /// The pieces are unrelated to each other, which is why they arrive separately rather
 /// than as a struct that would exist only to be passed here.
 #[allow(clippy::too_many_arguments)]
@@ -261,7 +311,6 @@ pub fn call(
     let unavailable_factory_arguments = match (class, method) {
         (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance) => Some(2),
         (ClassId::InitializedMessageDigest_OneShot, MethodId::open)
-        | (ClassId::MessageDigest_OneShot, MethodId::open)
         | (ClassId::RandomData_OneShot, MethodId::open) => Some(1),
         (ClassId::Signature_OneShot, MethodId::open) => Some(3),
         (ClassId::Cipher_OneShot, MethodId::open) => Some(2),
@@ -272,6 +321,30 @@ pub fn call(
     if let Some(arguments) = unavailable_factory_arguments {
         for _ in 0..arguments { frame.pop_short()?; }
         return crypto_exception(heap, context, 3);
+    }
+    if class == ClassId::MessageDigest_OneShot && method == MethodId::open {
+        let algorithm = frame.pop_short()?;
+        if !matches!(algorithm, 1 | 4 | 7) || !host.supports_digest(algorithm as u8) {
+            return crypto_exception(heap, context, 3); // NO_SUCH_ALGORITHM
+        }
+        // This platform offers one live temporary digest at a time.
+        let (occupied, reusable) = one_shot_slot(heap)?;
+        if occupied { return system_no_resource(heap, context); }
+        // Reuse only after the prior applet entry point returned. A local
+        // reference held after close must remain invalid for that call.
+        let instance = if let Some(reusable) = reusable { reusable } else {
+            if let Err(error) = heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS)]) {
+                if error != Error::Quota { return Err(error); }
+                return system_no_resource(heap, context);
+            }
+            new_native(heap, class, STATE_WORDS, 0)?
+        };
+        heap.put_word(instance, KIND, algorithm as u16)?;
+        heap.put_word(instance, SIZE, 0)?;
+        heap.put_word(instance, COUNTER, context as u16)?;
+        heap.put_word(instance, READY, 1)?;
+        frame.push_reference(instance)?;
+        return Ok(Native::Returned);
     }
     if class == ClassId::Checksum {
         if let Some(result) = checksum::call(method, heap, frame, context, budget)? { return Ok(result); }
@@ -489,7 +562,15 @@ pub fn call(
         }
         (_, MethodId::getAlgorithm) => {
             let this = frame.pop_reference()?;
+            if one_shot_digest(heap, this, context)? && word_field(heap, this, READY)? == 0 {
+                return crypto_exception(heap, context, 5);
+            }
             frame.push_short(word_field(heap, this, KIND)? as i16)?;
+        }
+        (ClassId::MessageDigest_OneShot, MethodId::close) => {
+            let this = frame.pop_reference()?;
+            one_shot_digest(heap, this, context)?;
+            heap.put_word_unconditional(this, READY, 0)?;
         }
 
         // GlobalPlatform, JCRE and GP 2.3 §6. The card content state is the applet's
@@ -512,21 +593,25 @@ pub fn call(
             if accepted { checkpoint_committed(previous != Some(state as u8), heap, host, jcre, context, statics)?; }
             frame.push_short(i16::from(accepted))?;
         }
-        (ClassId::MessageDigest, MethodId::reset) => {
+        (ClassId::MessageDigest | ClassId::MessageDigest_OneShot, MethodId::reset) => {
             let this = frame.pop_reference()?;
-            heap.check_access(this, context)?;
+            if one_shot_digest(heap, this, context)? && word_field(heap, this, READY)? == 0 {
+                return crypto_exception(heap, context, 5); // ILLEGAL_USE
+            }
             if !matches!(word_field(heap, this, KIND)?, 1 | 4 | 7) { return Err(Error::Unsupported); }
             let pending = heap.get_word(this, PENDING)?;
             if pending != NULL {
                 heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.fill(0);
             }
         }
-        (ClassId::MessageDigest, MethodId::update) => {
+        (ClassId::MessageDigest | ClassId::MessageDigest_OneShot, MethodId::update) => {
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
             let input = frame.pop_reference()?;
             let this = frame.pop_reference()?;
-            heap.check_access(this, context)?;
+            if one_shot_digest(heap, this, context)? {
+                return crypto_exception(heap, context, 5); // ILLEGAL_USE, even for zero bytes
+            }
             heap.check_access(input, context)?;
             let algorithm = word_field(heap, this, KIND)?;
             if !matches!(algorithm, 1 | 4 | 7) { return Err(Error::Unsupported); }
@@ -557,15 +642,17 @@ pub fn call(
             } else { pending };
             heap.byte_slice_mut(pending, 0, SHA256_STATE_BYTES)?.copy_from_slice(&state[..]);
         }
-        (ClassId::MessageDigest, MethodId::doFinal) => {
+        (ClassId::MessageDigest | ClassId::MessageDigest_OneShot, MethodId::doFinal) => {
             let out_offset = frame.pop_short()?;
             let output = frame.pop_reference()?;
             let length = frame.pop_short()?;
             let offset = frame.pop_short()?;
             let input = frame.pop_reference()?;
             let this = frame.pop_reference()?;
+            if one_shot_digest(heap, this, context)? && word_field(heap, this, READY)? == 0 {
+                return crypto_exception(heap, context, 5);
+            }
             let algorithm = word_field(heap, this, KIND)? as u8;
-            heap.check_access(this, context)?;
             heap.check_access(input, context)?;
             heap.check_access(output, context)?;
             if length < 0 || offset < 0 || out_offset < 0 {
@@ -613,8 +700,11 @@ pub fn call(
             }
             frame.push_short(written as i16)?;
         }
-        (ClassId::MessageDigest, MethodId::getLength) => {
+        (ClassId::MessageDigest | ClassId::MessageDigest_OneShot, MethodId::getLength) => {
             let this = frame.pop_reference()?;
+            if one_shot_digest(heap, this, context)? && word_field(heap, this, READY)? == 0 {
+                return crypto_exception(heap, context, 5);
+            }
             let algorithm = word_field(heap, this, KIND)? as u8;
             frame.push_short(digest_length(algorithm)? as i16)?;
         }

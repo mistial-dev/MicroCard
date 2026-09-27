@@ -310,6 +310,9 @@ pub fn invoke(
     // body sits before it can find its own handlers.
     let outcome = run_body(machine, code, body, &mut callee, &mut inner, budget);
     machine.depth -= 1;
+    if machine.depth == 0 && machine.heap.transaction_remaining().is_none() {
+        natives::release_temporary_natives(machine.heap)?;
+    }
     match outcome? {
         Outcome::Void => Ok(None),
         Outcome::Short(value) => caller.push_short(value).map(|()| None),
@@ -438,7 +441,11 @@ pub fn run_with(
     arena: &mut Arena,
     budget: &mut u32,
 ) -> Result<Outcome> {
-    run_body(machine, code, 0, frame, arena, budget)
+    let outcome = run_body(machine, code, 0, frame, arena, budget);
+    if machine.depth == 0 && machine.heap.transaction_remaining().is_none() {
+        natives::release_temporary_natives(machine.heap)?;
+    }
+    outcome
 }
 
 fn call_native(

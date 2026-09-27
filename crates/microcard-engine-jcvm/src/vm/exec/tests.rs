@@ -579,6 +579,7 @@ fn reference_stores_reject_temporary_runtime_objects_before_mutation() {
         let apdu = heap.new_object(native(ClassId::APDU), 1, 1).unwrap();
         let runtime = natives::new_exception(&mut heap, ClassId::CryptoException, 1).unwrap();
         let explicit = heap.new_object(native(ClassId::CryptoException), 6, 1).unwrap();
+        let digest = heap.new_object(native(ClassId::MessageDigest_OneShot), 6, 1).unwrap();
         let security = natives::new_exception(&mut heap, ClassId::SecurityException, 1).unwrap();
         let object = heap.new_object(0, 1, 1).unwrap();
         let foreign = heap.new_object(0, 1, 2).unwrap();
@@ -590,7 +591,7 @@ fn reference_stores_reject_temporary_runtime_objects_before_mutation() {
         let mut machine = Machine::new(&mut heap, &mut host, &linked, methods,
             &mut statics, 1, Limits::IMPLEMENTED, Jcre::new(apdu, buffer));
         for (value, allowed) in [(NULL, true), (object, true), (explicit, true),
-            (foreign, false), (buffer, false), (apdu, false), (runtime, false)] {
+            (foreign, false), (buffer, false), (apdu, false), (runtime, false), (digest, false)] {
             machine.heap.put_word(object, 0, 0).unwrap();
             machine.heap.array_put_reference(array, 0, NULL).unwrap();
             machine.statics.fill(0);

@@ -69,14 +69,19 @@ pub(crate) fn is_exception_class(class: &ApiClass) -> bool {
 
 /// Runtime APDU and exception objects may be used locally but never retained by applets.
 pub(crate) fn is_temporary_native(class: u16, words: u16) -> bool {
-    words == 1
-        && api_class(class)
-            .is_some_and(|class| class.id == ClassId::APDU || is_exception_class(class))
+    api_class(class).is_some_and(|class| {
+        (words == 1 && (class.id == ClassId::APDU || is_exception_class(class)))
+            || (words == security::STATE_WORDS && class.id == ClassId::MessageDigest_OneShot)
+    })
 }
 
 /// Clear reset-scoped native fields in live state or a persistence staging buffer.
 pub fn reset_native_volatile(heap: &mut Heap) -> Result<()> {
     security::reset_native_volatile(heap)
+}
+
+pub(crate) fn release_temporary_natives(heap: &mut Heap) -> Result<()> {
+    security::release_one_shot_digests(heap)
 }
 
 /// What the runtime environment knows while a command is being processed, JCRE §4.

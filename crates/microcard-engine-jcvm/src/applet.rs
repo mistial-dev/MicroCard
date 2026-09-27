@@ -295,7 +295,9 @@ impl AppletInstance {
             outer.push_short(0)?;
             outer.push_short(i16::from(parameters.len() as u8 as i8))?;
             let result = invoke(&mut machine, install, &mut outer, &mut arena, &mut budget);
-            if machine.abort_unfinished_transaction()? { return Err(Error::Unauthorized); }
+            let unfinished = machine.abort_unfinished_transaction()?;
+            natives::release_temporary_natives(machine.heap)?;
+            if unfinished { return Err(Error::Unauthorized); }
             let thrown = result?;
             (thrown, machine.jcre.instance, machine.jcre.aid, machine.jcre.aid_length)
         };
@@ -494,6 +496,7 @@ impl AppletInstance {
             if matches!(callback, Callback::Process { .. }) { outer.push_reference(self.apdu)?; }
             let result = invoke(&mut machine, method, &mut outer, &mut arena, budget);
             let unfinished = machine.abort_unfinished_transaction()?;
+            natives::release_temporary_natives(machine.heap)?;
             self.transaction_aborted |= machine.heap.allocations_aborted();
             let (exception, aborted) = match result {
                 Ok(exception) => (exception, unfinished),
