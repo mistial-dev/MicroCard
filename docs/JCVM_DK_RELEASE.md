@@ -555,4 +555,26 @@ these runs differ in successful work, so they are not a controlled wear ratio.
 Continuous command traffic can keep ordinary writes in RAM until traffic
 pauses. The power-cut exposure remains intentional and unbounded in that case;
 PIN, explicit transaction, and administrator boundaries still publish before
-returning. Variable, ECC, and fingerprint performance modes remain unverified.
+returning. ECC and fingerprint performance modes remain unverified.
+
+The upstream variable performance scan also completes on fresh DK media with
+firmware ELF SHA-256
+`e163b7fbeadd6f6ac1e3df7d26bd0594da9186323922ef33835b26bd08fd81ba`.
+The untouched CSV and log are in the ignored local
+`artifacts/physical/microcard-jcalgtest-auto-gc-dk-20260926/variable/`
+directory. The analyzer reports **4,534 completed method rows**, 141 measured,
+4,345 `NO_SUCH_ALGORITHM`, 48 `ILLEGAL_VALUE`, and zero unmeasured rows,
+invalid timings, transport errors, or session failures. Its 5,957 PC/SC APDUs
+have a 19 ms median, 23 ms p95, and 1.710 s maximum. SWD reported 9 erases,
+19,664 programmed words, two CCID time extensions, and no JCVM session error.
+Selection and the focused probe passed again after a debugger reset. Current
+JCVM USB and dongle links are 242,736 and 244,228 text bytes, respectively;
+the existing ceilings remain unchanged.
+
+The first variable attempt exhausted the object slab after repeated factory
+probes. Unsupported AES key sizes now raise `CryptoException.NO_SUCH_ALGORITHM`
+before allocation. When less than one eighth of the heap remains free, the VM
+collects unreachable objects at an APDU boundary, outside explicit
+transactions. It avoids rescanning until more objects are allocated. This is
+RAM work; its changed heap remains queued for idle flash publication. The
+host client now rejects a completed CSV if the APDU log shows lost selection.
