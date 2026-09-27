@@ -499,6 +499,9 @@ mod tests {
         fn supports_rsa_keygen(&self) -> bool { true }
         fn rsa_generate(&mut self, bits: usize, private: &mut [u8],
             public: &mut [u8]) -> Result<(usize, usize)> {
+            // The board provider requires these caller-owned capacities before
+            // key generation; a smaller host fixture hid a real DK failure.
+            assert!(private.len() >= 1250 && public.len() >= 300);
             let (private_key, public_key) = match bits {
                 1024 => (PRIVATE, PUBLIC),
                 2048 => (PRIVATE_2048, PUBLIC_2048),
