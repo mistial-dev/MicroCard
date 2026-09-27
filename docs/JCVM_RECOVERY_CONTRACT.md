@@ -22,11 +22,13 @@ leaves it uninitialized. These rules follow the Java Card 3.0.5 Classic JCRE,
 JCVM, and `javacard.security.Signature` API specifications in the Reference Library.
 
 Ordinary applet working data remains in RAM and reaches authenticated flash at the
-configured command boundary. Explicit `JCSystem` transaction commits and PIN retry
-changes retain their synchronous checkpoints. The nRF52840 has no hold-up capacitor:
-a power cut may discard queued ordinary changes. It must never make a partially
-published record authoritative. Recovery accepts the last complete authenticated
-record or returns an error; it does not silently reset the applet.
+APDU boundary before the response is released. Explicit `JCSystem` transaction
+commits and PIN retry changes retain their earlier synchronous checkpoints.
+The nRF52840 has no hold-up capacitor, so a cut during a flash publication
+must leave either the previous or the new authenticated record authoritative.
+Recovery accepts a complete authenticated record or returns an error; it does
+not silently reset the applet. Physical interruption during publication remains
+to be validated on the DK.
 
 Keep recovery checks off the APDU hot path. A new native object layout must define
 its reference fields, transient fields, recovery checks, and specified reset behavior

@@ -13,18 +13,18 @@ A factory may report support only when key import or generation, a real operatio
 failure behavior, and reboot behavior pass on the selected provider. Algorithms
 outside the practical profile are not implementation targets.
 
-Ordinary applet writes now remain in RAM until the idle maintenance task
-authenticates and publishes them, normally two seconds after the last response
-in a burst and no later than 60 seconds into continuous traffic. Several commands
-can share one flash record. A later command can
-read those writes before publication, but an unexpected power cut or VM failure
-can lose them. Selecting a different applet flushes the old applet first. `OwnerPIN`
-checkpoints, explicit `JCSystem.commitTransaction()`, and administrator security
-state still publish synchronously before their operations return. An applet that
-needs a durable atomic update must use an explicit transaction. This deliberate
-power-cut relaxation means the ordinary-write path does **not** meet Java Card's
-usual persistent-memory durability guarantee; it must be disclosed with test
-results rather than claimed as full Java Card conformance.
+Ordinary persistent writes are published to the authenticated heap journal
+before the APDU response is released, including writes made before an
+applet-generated Java exception. No-op and transient-only commands skip the
+flash commit. `OwnerPIN` checkpoints and explicit `JCSystem.commitTransaction()`
+remain synchronous at their Java Card method boundaries. An explicit
+transaction adds rollback across its conditional updates; it is not required
+to make an ordinary completed write durable. Cancellation, interpreter failure,
+or publication failure cannot return `9000` for an uncommitted update. After
+the final CCID response packet is sent, RTIC may perform idle capacity
+maintenance; that task does not carry the preceding APDU's uncommitted writes.
+Host fault injection covers journal publication boundaries. A physical cut
+during publication remains a release validation item.
 
 The source result is pinned in `vendor/jcalgtest/p71d321-reference.csv.gz` and
 identified by `vendor/jcalgtest/client.lock.json`. Run
@@ -550,14 +550,13 @@ accesses one at the last byte of its static image, so the VM raised a bounds
 error and discarded selection. Byte statics now use one image byte, with
 sign extension on read, as Java Card specifies. The performance analyzer also
 checks the raw APDU log so a lost session cannot appear as merely unmeasured.
-Moving idle maintenance to two seconds after the **last** response in a burst
-reduced the previous incomplete run's flash totals from 31 erases and 267,867
-programmed words to 8 and 16,006. The later complete run used 9 and 32,282;
-these runs differ in successful work, so they are not a controlled wear ratio.
-Continuous command traffic now forces maintenance after 60 seconds rather than
-keeping ordinary writes in RAM indefinitely. The power-cut exposure remains
-intentional during that window; PIN, explicit transaction, and administrator
-boundaries still publish before returning.
+At that earlier revision, moving idle maintenance to two seconds after the
+last response reduced one incomplete run's flash totals from 31 erases and
+267,867 programmed words to 8 and 16,006. The later complete run used 9 and
+32,282; these runs differ in successful work, so they are not a controlled
+wear ratio. That deferred-publication policy was replaced by the
+commit-before-response contract above. These counts do not measure the
+current firmware's wear.
 
 The upstream variable performance scan also completes on fresh DK media with
 firmware ELF SHA-256
@@ -646,8 +645,9 @@ text bytes, respectively, with unchanged static RAM. The new support claims
 still require broader negative and interrupted-operation qualification before
 release certification.
 
-The current DK image also bounds deferred ordinary-write maintenance to 60
-seconds of continuous APDUs. Its ELF SHA-256 is
+A subsequent historical DK image bounded deferred ordinary-write maintenance
+to 60 seconds of continuous APDUs. That policy has since been removed. The
+historical image's ELF SHA-256 is
 `3c98e833418e2d158d0084466cc2a0bc253e3ee2edd91609fb1d8186b43164cd`.
 The untouched upstream CSV and log are in ignored local
 `work/jcalgtest-flush-bound-dk/support/`; CSV SHA-256 is
