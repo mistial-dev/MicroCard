@@ -422,6 +422,28 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
     heap.put_word(pin, 2, persistent).unwrap();
     heap.put_word(pin, 3, 1).unwrap(); // Validated flag.
     heap.put_word(pin, 4, 2).unwrap(); // Remaining attempts are persistent.
+    let pin_x = heap
+        .new_object(native_class_of(ClassId::OwnerPINx).unwrap(), 6, 1)
+        .unwrap();
+    heap.put_word(pin_x, 0, 3).unwrap();
+    heap.put_word(pin_x, 1, 4).unwrap();
+    heap.put_word(pin_x, 2, persistent).unwrap();
+    heap.put_word(pin_x, 4, 2).unwrap();
+    let predecrement = heap
+        .new_object(
+            native_class_of(ClassId::OwnerPINxWithPredecrement).unwrap(),
+            6,
+            1,
+        )
+        .unwrap();
+    let predecrement_flag = heap
+        .new_transient_array(heap::KIND_BYTE, 1, 1, heap::CLEAR_ON_RESET)
+        .unwrap();
+    heap.put_word(predecrement, 0, 3).unwrap();
+    heap.put_word(predecrement, 1, 4).unwrap();
+    heap.put_word(predecrement, 2, persistent).unwrap();
+    heap.put_word(predecrement, 4, 2).unwrap();
+    heap.put_word(predecrement, 5, predecrement_flag).unwrap();
     let key = heap
         .new_object(native_class_of(ClassId::AESKey).unwrap(), 6, 1)
         .unwrap();
@@ -494,6 +516,18 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
     heap.put_word(signature, 3, 1).unwrap();
     heap.put_word(signature, 4, 1).unwrap();
     heap.put_word(signature, 5, hash_state).unwrap();
+    let mac = heap
+        .new_object(native_class_of(ClassId::Signature).unwrap(), 6, 1)
+        .unwrap();
+    let mac_state = heap
+        .new_transient_array(heap::KIND_BYTE, 34, 1, heap::CLEAR_ON_RESET)
+        .unwrap();
+    heap.array_put(mac_state, 0, 1).unwrap();
+    heap.put_word(mac, 0, 18).unwrap();
+    heap.put_word(mac, 2, key).unwrap();
+    heap.put_word(mac, 3, 1).unwrap();
+    heap.put_word(mac, 4, 1).unwrap();
+    heap.put_word(mac, 5, mac_state).unwrap();
     let reserved_exception =
         natives::new_exception(&mut heap, ClassId::SystemException, 1).unwrap();
     heap.put_word_unconditional(reserved_exception, natives::REASON_FIELD, 2)
@@ -563,6 +597,9 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
     assert_eq!(recovered.byte_slice(persistent, 0, 64).unwrap(), &[9; 64]);
     assert_eq!(recovered.get_word(pin, 3), Ok(0));
     assert_eq!(recovered.get_word(pin, 4), Ok(2));
+    assert_eq!(recovered.get_word(pin_x, 4), Ok(2));
+    assert_eq!(recovered.get_word(predecrement, 5), Ok(predecrement_flag));
+    assert_eq!(recovered.array_get(predecrement_flag, 0), Ok(0));
     assert_eq!(
         recovered.get_word(reserved_exception, natives::REASON_FIELD),
         Ok(0)
@@ -635,7 +672,7 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
         ),
         Err(Error::IncompatibleState)
     ));
-    for case in 0..31 {
+    for case in 0..32 {
         let mut invalid = saved_heap.clone();
         let root = match case {
             0 => instance + 2, // A field is not an object handle.
@@ -760,6 +797,10 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
                 invalid[0] = 4;
                 instance
             } // Unknown header version.
+            31 => {
+                invalid[predecrement_flag as usize + 4] &= 0x0f;
+                instance
+            }
             _ => {
                 let at = typed_references as usize + heap::HEADER;
                 invalid[at..at + 2].copy_from_slice(&explicit_exception.to_be_bytes());
@@ -784,9 +825,9 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
     let heap = Heap::resume(&mut card.heap, card.heap_used).unwrap();
     assert_eq!(heap.array_get(on_deselect, 0), Ok(0));
     assert_eq!(heap.array_get(transient, 0), Ok(7));
-    assert!(matches!(card.retain_volatile(363), Err(Error::Quota)));
-    let retained = card.retain_volatile(364).unwrap();
-    assert_eq!(retained.bytes(), 364);
+    assert!(matches!(card.retain_volatile(408), Err(Error::Quota)));
+    let retained = card.retain_volatile(409).unwrap();
+    assert_eq!(retained.bytes(), 409);
     // Runtime exceptions are reserved, so deselection preserves the heap layout.
     restored.restore_volatile(&retained).unwrap();
     let mut suspended_heap = vec![0; card.persistent_heap_bytes()];

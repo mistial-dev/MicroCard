@@ -18,9 +18,11 @@ mod checksum;
 mod ec;
 mod key_pair;
 mod pin;
+mod saved_state;
 mod secure_channel;
 mod signature;
 pub(crate) use ec::{clear_event as ec_key_clear_event, key_kind as ec_key_kind};
+pub(super) use saved_state::validate_saved_security;
 
 /// Words every object here carries. The meaning of each is per class and documented where
 /// it is read, because these are not fields an applet can see.
@@ -391,7 +393,6 @@ pub fn call(
         | (ClassId::RandomData_OneShot, MethodId::open) => Some(1),
         (ClassId::Signature_OneShot, MethodId::open) => Some(3),
         (ClassId::Cipher_OneShot, MethodId::open) => Some(2),
-        (ClassId::Signature, MethodId::getInstance) if signature.combined_factory() => Some(4),
         (ClassId::Cipher, MethodId::getInstance) if signature.combined_factory() => Some(3),
         _ => None,
     };
@@ -400,6 +401,28 @@ pub fn call(
             frame.pop_short()?;
         }
         return crypto_exception(heap, context, 3);
+    }
+    if class == ClassId::Signature
+        && method == MethodId::getInstance
+        && signature.combined_factory()
+    {
+        let external = frame.pop_short()? != 0;
+        let padding = frame.pop_short()?;
+        let cipher = frame.pop_short()?;
+        let digest = frame.pop_short()?;
+        if external || (digest, cipher, padding) != (0, 6, 1) || !host.supports_signature(18) {
+            return crypto_exception(heap, context, 3);
+        }
+        if let Err(error) = heap.check_allocations(&[(heap::KIND_OBJECT, STATE_WORDS)]) {
+            if error != Error::Quota {
+                return Err(error);
+            }
+            return system_no_resource(heap, context);
+        }
+        let instance = new_native(heap, class, STATE_WORDS, context)?;
+        heap.put_word(instance, KIND, 18)?;
+        frame.push_reference(instance)?;
+        return Ok(Native::Returned);
     }
     if class == ClassId::MessageDigest_OneShot && method == MethodId::open {
         let algorithm = frame.pop_short()?;
@@ -633,7 +656,7 @@ pub fn call(
                     ClassId::RandomData => host.supports_random(id) && host.supports_digest(4),
                     ClassId::Cipher => matches!(id, 13 | 14) && host.supports_cipher(id),
                     ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
-                    ClassId::Signature => id == 33 && host.supports_signature(id),
+                    ClassId::Signature => matches!(id, 18 | 33) && host.supports_signature(id),
                     _ => false,
                 },
                 _ => false,

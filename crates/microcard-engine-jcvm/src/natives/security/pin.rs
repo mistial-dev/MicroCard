@@ -10,6 +10,43 @@ use crate::vm::{
 };
 use crate::{Error, Result};
 
+pub(super) fn validate_saved(class: ClassId, payload: &[u8], saved_heap: &[u8]) -> Result<()> {
+    if payload.iter().all(|byte| *byte == 0) {
+        // A direct NEW may become durable before its constructor runs.
+        return Ok(());
+    }
+    let word = |at: usize| u16::from_be_bytes([payload[at * 2], payload[at * 2 + 1]]);
+    let tries = word(KIND);
+    let material = word(MATERIAL);
+    if !(1..=127).contains(&tries) || material == 0 || word(READY) != 0 || word(COUNTER) > tries {
+        return Err(Error::Format);
+    }
+    let info = heap::Info::read(saved_heap, saved_heap.len(), material)?;
+    if info.kind != heap::KIND_BYTE
+        || info.clear_event != 0
+        || info.length > 127
+        || word(SIZE) > info.length
+    {
+        return Err(Error::Type);
+    }
+    let pending = word(super::PENDING);
+    if class == ClassId::OwnerPINxWithPredecrement {
+        if pending == 0 {
+            return Err(Error::Format);
+        }
+        let flag = heap::Info::read(saved_heap, saved_heap.len(), pending)?;
+        if flag.kind != heap::KIND_BYTE
+            || flag.clear_event != heap::CLEAR_ON_RESET
+            || flag.length != 1
+        {
+            return Err(Error::Type);
+        }
+    } else if pending != 0 {
+        return Err(Error::Format);
+    }
+    Ok(())
+}
+
 fn pin_matches(material: &[u8], stored_length: usize, candidate: &[u8], blocked: bool) -> bool {
     let mut different = stored_length ^ candidate.len();
     different |= usize::from(blocked);

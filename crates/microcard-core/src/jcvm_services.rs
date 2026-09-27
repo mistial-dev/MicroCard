@@ -252,7 +252,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
-    fn supports_signature(&self, algorithm: u8) -> bool { algorithm == 33 }
+    fn supports_signature(&self, algorithm: u8) -> bool { matches!(algorithm, 18 | 33) }
     fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()> {
         Services::p256_generate(self, private, public)
     }

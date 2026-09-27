@@ -1354,7 +1354,7 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         fn supports_digest(&self, algorithm: u8) -> bool { algorithm == 4 }
         fn supports_random(&self, algorithm: u8) -> bool { algorithm == 2 }
         fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
-        fn supports_signature(&self, algorithm: u8) -> bool { algorithm == 33 }
+        fn supports_signature(&self, algorithm: u8) -> bool { matches!(algorithm, 18 | 33) }
     }
     for (class, algorithm, external, supported) in [
         (ClassId::Checksum, 1, false, true),
@@ -1367,6 +1367,7 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         (ClassId::RandomData, 2, false, true),
         (ClassId::RandomData, 99, false, false),
         (ClassId::Signature, 1, false, false),
+        (ClassId::Signature, 18, false, true),
         (ClassId::Signature, 33, false, true),
         (ClassId::Signature, 33, true, false),
         (ClassId::Signature, 34, false, false),
@@ -1410,6 +1411,17 @@ fn crypto_factories_follow_host_capabilities_and_reject_unsupported_requests() {
         assert_eq!(heap.get_word(exception, REASON_FIELD), Ok(5));
         assert_eq!(heap.used(), before, "failed cipher creation must not leave an incomplete holder");
     }
+
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    for argument in [0, 6, 1, 0] { frame.push_short(argument).unwrap(); }
+    let combined = framework_token(ClassId::Signature, MethodId::getInstance, true, Some(2));
+    assert!(matches!(security::call(ClassId::Signature, MethodId::getInstance,
+        combined.method.signature, &mut heap, &mut Capabilities, &mut frame, 1,
+        &mut idle(), &mut 100, &[]), Ok(Native::Returned)));
+    let mac = frame.pop_reference().unwrap();
+    assert_eq!(heap.get_word(mac, security::KIND), Ok(18));
 
     for (class, method, token, arguments) in [
         (ClassId::MessageDigest, MethodId::getInitializedMessageDigestInstance, None, 2),

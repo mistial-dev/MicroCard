@@ -61,6 +61,26 @@ public class JCAlgTestCryptoProbe {
                     System.out.printf("SHA-%s method %d: success%n", algorithm == 1 ? "1" : "224", method);
                 }
             }
+            // Exercise the newly advertised AES CBC-MAC through the installed applet.
+            byte[] macSettings = new byte[22];
+            macSettings[3] = 18; // Signature.ALG_AES_MAC_128_NOPAD
+            macSettings[7] = 15; // KeyBuilder.TYPE_AES
+            macSettings[9] = (byte) 128;
+            macSettings[13] = 16;
+            macSettings[19] = 1;
+            macSettings[21] = 1;
+            byte[] prepared = command(channel, 0xb0, 0x32, macSettings);
+            if (!Arrays.equals(prepared, new byte[] {(byte) 0xaa})) {
+                throw new IllegalStateException("AES MAC prepare failed: " + Arrays.toString(prepared));
+            }
+            for (int method : new int[] {2, 10, 7}) { // update, sign, verify
+                macSettings[11] = (byte) method;
+                byte[] result = command(channel, 0xb0, 0x49, macSettings);
+                if (!Arrays.equals(result, new byte[] {(byte) 0xaa})) {
+                    throw new IllegalStateException("AES MAC operation failed: " + Arrays.toString(result));
+                }
+                System.out.printf("AES-128 MAC method %d: success%n", method);
+            }
         } finally {
             card.disconnect(false);
         }

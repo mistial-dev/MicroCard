@@ -14,9 +14,11 @@ use crate::vm::heap::{self, Heap};
 use crate::{Error, Result};
 
 mod framework;
+mod saved_state;
 mod security;
 #[cfg(test)]
 use framework::{apdu_call as apdu, jcsystem_call as jcsystem, util_call as util};
+pub(crate) use saved_state::validate_saved_native;
 pub(crate) use security::native_volatile_range;
 pub(crate) use security::visit_native_reference_offsets;
 pub(crate) use security::{ec_key_clear_event, ec_key_kind, symmetric_key_clear_event};

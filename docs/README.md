@@ -44,6 +44,7 @@ is the authoritative list of supported behavior, unfinished implementation, and 
 - [Board](BOARD.md) — the nRF52840 backend guide.
 - [First flash](FIRST_FLASH.md) — preparing artifacts and provisioning a device.
 - [Hardware smoke](HARDWARE_SMOKE.md) — what has actually run on a board, bound to a revision.
+- [JCVM recovery contract](JCVM_RECOVERY_CONTRACT.md) — authenticated state, VM checks, native reset behavior, and power-loss limits.
 - [CCID profile](CCID_PROFILE.md) — the USB CCID descriptor and feature profile.
 - [nRF52840 HAL](NRF52840_HAL.md) — peripheral mapping.
 - [nRF52840 crypto inventory](NRF52840_CRYPTO_INVENTORY.md) — the hardware crypto survey and size budgets.

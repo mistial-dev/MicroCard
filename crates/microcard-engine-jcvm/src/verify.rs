@@ -136,8 +136,7 @@ pub fn verify(file: &LoadFile, scratch: &mut [u8]) -> Result<Report> {
         verify_method(
             &methods,
             code,
-            body,
-            end,
+            body..end,
             method.frame_words(),
             scratch,
             limits,
@@ -156,8 +155,7 @@ pub fn verify(file: &LoadFile, scratch: &mut [u8]) -> Result<Report> {
 fn verify_method(
     methods: &crate::cap::Method,
     code: &[u8],
-    body: usize,
-    end: usize,
+    region: core::ops::Range<usize>,
     frame_words: u16,
     scratch: &mut [u8],
     limits: Limits,
@@ -169,9 +167,9 @@ fn verify_method(
     entries.push(0usize);
     for handler in methods.handlers() {
         let target = handler.handler_offset as usize;
-        if target >= body && target < end {
+        if region.contains(&target) {
             entries.try_reserve(1).map_err(|_| Error::Quota)?;
-            entries.push(target - body);
+            entries.push(target - region.start);
         }
     }
     let boundaries = Boundaries::reachable(code, scratch, limits, &entries)?;
