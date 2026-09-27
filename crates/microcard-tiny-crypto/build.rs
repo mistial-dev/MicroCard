@@ -18,6 +18,28 @@ fn main() {
         .define("TC_ENABLE_HMAC", "0")
         .define("TC_ZEROIZE", "1")
         .define("TC_STRICT", "1");
+    if std::env::var_os("CARGO_FEATURE_RSA").is_some() {
+        build
+            .file(source.join("rsa.c"))
+            .file("src/rsa_bridge.c")
+            .define("TC_ENABLE_RSA", "1")
+            .define("TC_RSA_SMALL", "0");
+    }
+    if std::env::var_os("CARGO_FEATURE_AES_CTR").is_some() {
+        build
+            .file(source.join("aes.c"))
+            .file("src/aes_ctr_bridge.c")
+            .define("TC_ENABLE_AES", "1")
+            .define("TC_AES_KEY_BITS", "128")
+            .define("TC_AES_ENABLE_CTR", "1")
+            .define("TC_AES_ENABLE_ECB", "0")
+            .define("TC_AES_ENABLE_CBC", "0")
+            .define("TC_AES_ENABLE_CMAC", "0")
+            .define("TC_AES_ENABLE_GCM", "0")
+            .define("TC_AES_ENABLE_CCM", "0")
+            .define("TC_AES_ENABLE_EAX", "0")
+            .define("TC_AES_ENABLE_SIV", "0");
+    }
     if std::env::var_os("CARGO_FEATURE_DES_LEGACY").is_some() {
         build
             .file(source.join("des.c"))
@@ -39,6 +61,8 @@ fn main() {
     for path in [
         "src/bridge.c",
         "src/hash_bridge.c",
+        "src/rsa_bridge.c",
+        "src/aes_ctr_bridge.c",
         "src/des_bridge.c",
         "../../vendor/tiny-crypto-c/src",
     ] {

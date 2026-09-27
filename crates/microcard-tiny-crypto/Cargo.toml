@@ -7,7 +7,9 @@ build = "build.rs"
 
 [features]
 default = []
+aes-ctr = []
 des-legacy = []
+rsa = []
 
 [build-dependencies]
 cc = "1"

@@ -2,7 +2,11 @@
 
 #[cfg(feature = "des-legacy")]
 pub mod des;
+#[cfg(feature = "aes-ctr")]
+pub mod aes_ctr;
 pub mod hash;
+#[cfg(feature = "rsa")]
+pub mod rsa;
 
 use core::ffi::c_void;
 
@@ -314,6 +318,27 @@ pub fn verify_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p384_public_key_matches_sec2_generator() {
+        const COORDINATES: &str = concat!(
+            "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a38",
+            "5502f25dbf55296c3a545e3872760ab7",
+            "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0",
+            "b8c00a60b1ce1d7e819d7a431d7c90ea0e5f",
+        );
+        let mut private = [0u8; 48];
+        private[47] = 1;
+        let mut public = [0u8; 97];
+        public_key(Curve::P384, &private, &mut public).unwrap();
+        assert_eq!(public[0], 4);
+        for (index, pair) in COORDINATES.as_bytes().chunks_exact(2).enumerate() {
+            let hex = |byte: u8| -> u8 {
+                match byte { b'0'..=b'9' => byte - b'0', b'a'..=b'f' => byte - b'a' + 10, _ => panic!() }
+            };
+            assert_eq!(public[index + 1], (hex(pair[0]) << 4) | hex(pair[1]));
+        }
+    }
 
     #[test]
     fn rust_boundary_preserves_results_and_clears_failed_outputs() {

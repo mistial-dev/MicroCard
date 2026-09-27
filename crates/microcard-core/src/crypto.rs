@@ -273,26 +273,12 @@ pub trait CryptoProvider {
         }
     );
 
-    /// AES-128 CTR with a big-endian counter. The board overrides this with CC310.
+    /// AES-128 CTR with a big-endian counter. The selected provider owns the mode.
     fn aes_ctr_in_place(&mut self, key: &[u8; 16], counter: &[u8; 16], buffer: &mut [u8]) -> Result<()> {
-        let mut value = u128::from_be_bytes(*counter);
-        let blocks = buffer.len().div_ceil(16);
-        if blocks > 0 && value.checked_add((blocks - 1) as u128).is_none() {
-            buffer.zeroize();
-            return Err(Error::Bounds);
-        }
-        let result = (|| {
-            for chunk in buffer.chunks_mut(16) {
-                let mut mask = Zeroizing::new(value.to_be_bytes());
-                self.aes128_encrypt_block_in_place(key, &mut mask)?;
-                for (byte, pad) in chunk.iter_mut().zip(mask.iter()) {
-                    *byte ^= *pad;
-                }
-                value = value.wrapping_add(1);
-            }
-            Ok(())
-        })();
-        clear_output_on_error(buffer, result)
+        #[cfg(feature = "software-aes-ctr")]
+        { microcard_tiny_crypto::aes_ctr::crypt(key, counter, buffer).map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-aes-ctr"))]
+        { let _ = (key, counter); buffer.zeroize(); Err(Error::Native) }
     }
 
     software_method!(
@@ -476,9 +462,93 @@ pub trait CryptoProvider {
         self.p256_ecdh_into(private_key, peer_public_key, &mut output)?;
         Ok(*output)
     }
+
+    fn supports_p384(&self) -> bool { cfg!(feature = "software-p384") }
+
+    fn p384_generate_key_pair_into(&mut self, private_key: &mut [u8; 48],
+        public_key: &mut [u8; 97], random: &mut dyn FnMut(&mut [u8]) -> bool) -> Result<()> {
+        private_key.fill(0);
+        public_key.fill(0);
+        #[cfg(feature = "software-p384")]
+        {
+            let mut draw = |bytes: &mut [u8]| random(bytes);
+            microcard_tiny_crypto::generate_key_pair(microcard_tiny_crypto::Curve::P384,
+                private_key, public_key, &mut draw).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = random; Err(Error::Native) }
+    }
+
+    fn p384_public_key_valid(&mut self, public_key: &[u8]) -> Result<bool> {
+        #[cfg(feature = "software-p384")]
+        { microcard_tiny_crypto::public_key_valid(microcard_tiny_crypto::Curve::P384,
+            public_key).map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = public_key; Err(Error::Native) }
+    }
+
+    fn p384_public_key_into(&mut self, private_key: &[u8; 48], output: &mut [u8; 97]) -> Result<()> {
+        output.fill(0);
+        #[cfg(feature = "software-p384")]
+        { microcard_tiny_crypto::public_key(microcard_tiny_crypto::Curve::P384, private_key, output)
+            .map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = private_key; Err(Error::Native) }
+    }
+
+    fn p384_ecdh_into(&mut self, private_key: &[u8; 48], peer: &[u8], output: &mut [u8; 48]) -> Result<()> {
+        output.fill(0);
+        #[cfg(feature = "software-p384")]
+        { microcard_tiny_crypto::agree(microcard_tiny_crypto::Curve::P384, private_key, peer, output)
+            .map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = (private_key, peer); Err(Error::Native) }
+    }
+
+    fn p384_sign_hash_into(&mut self, private_key: &[u8; 48], hash: &[u8; 48],
+        signature: &mut [u8; 96], random: &mut dyn FnMut(&mut [u8]) -> bool) -> Result<()> {
+        signature.fill(0);
+        #[cfg(feature = "software-p384")]
+        {
+            let mut draw = |bytes: &mut [u8]| random(bytes);
+            microcard_tiny_crypto::sign_digest(microcard_tiny_crypto::Curve::P384,
+                private_key, hash, signature, &mut draw).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = (private_key, hash, random); Err(Error::Native) }
+    }
+
+    fn p384_verify_hash(&mut self, public_key: &[u8], hash: &[u8; 48], signature: &[u8]) -> Result<bool> {
+        #[cfg(feature = "software-p384")]
+        { microcard_tiny_crypto::verify_digest(microcard_tiny_crypto::Curve::P384,
+            public_key, hash, signature).map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = (public_key, hash, signature); Err(Error::Native) }
+    }
+
+    fn supports_rsa_pkcs1v15_sha256(&self) -> bool { cfg!(feature = "software-rsa") }
+
+    fn rsa_pkcs1v15_sha256_sign_der(&mut self, private_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &mut [u8], random: &mut dyn FnMut(&mut [u8]) -> bool) -> Result<()> {
+        signature.fill(0);
+        #[cfg(feature = "software-rsa")]
+        { microcard_tiny_crypto::rsa::sign_pkcs1v15_sha256_der(
+            private_der, key_bits, hash, signature, random).map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-rsa"))]
+        { let _ = (private_der, key_bits, hash, random); Err(Error::Native) }
+    }
+
+    fn rsa_pkcs1v15_sha256_verify_der(&mut self, public_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
+        #[cfg(feature = "software-rsa")]
+        { microcard_tiny_crypto::rsa::verify_pkcs1v15_sha256_der(
+            public_der, key_bits, hash, signature).map_err(|_| Error::Native) }
+        #[cfg(not(feature = "software-rsa"))]
+        { let _ = (public_der, key_bits, hash, signature); Err(Error::Native) }
+    }
 }
 
-/// Portable native provider used by the simulator and as the board fallback.
+/// Explicit software provider used by the simulator and software-only builds.
 #[cfg(feature = "software-crypto")]
 #[derive(Default)]
 pub struct SoftwareCrypto;
@@ -995,14 +1065,7 @@ mod p256_tests {
             5ae4df3edbd5d35e5b4f09020db03eab\
             1e031dda2fbe03d1792170a0f3009cee"));
 
-        struct Failed;
-        impl CryptoProvider for Failed {
-            fn aes128_encrypt_block_in_place(&mut self, _key: &[u8; 16], block: &mut [u8; 16]) -> Result<()> {
-                block.fill(0xa5);
-                Err(Error::Native)
-            }
-        }
-        assert_eq!(Failed.aes_ctr_in_place(&key, &counter, &mut message), Err(Error::Native));
+        assert_eq!(SoftwareCrypto.aes_ctr_in_place(&key, &[0xff; 16], &mut message), Err(Error::Native));
         assert!(message.iter().all(|byte| *byte == 0));
     }
 
