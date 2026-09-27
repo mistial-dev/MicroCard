@@ -64,6 +64,7 @@ macro_rules! software_method {
 /// errors must not expose a partial result and must leave it all-zero.
 /// The same rule applies to every variable-size output buffer below.
 pub trait CryptoProvider {
+    fn supports_sha256(&self) -> bool { cfg!(feature = "software-sha256") }
     fn supports_sha1(&self) -> bool { cfg!(feature = "software-sha1") }
 
     fn sha1_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],

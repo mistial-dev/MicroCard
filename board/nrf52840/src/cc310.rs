@@ -240,6 +240,16 @@ unsafe extern "C" {
         secret_size: usize,
     ) -> i32;
     #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn microcard_cc310_rsa_generate_key_pair(
+        key_bits: usize,
+        private_der: *mut u8,
+        private_capacity: usize,
+        private_length: *mut usize,
+        public_der: *mut u8,
+        public_capacity: usize,
+        public_length: *mut usize,
+    ) -> i32;
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
     fn microcard_cc310_rsa_pkcs1v15_sha256_sign(
         private_der: *const u8,
         private_der_size: usize,
@@ -628,6 +638,30 @@ pub(super) fn p256_ecdh(
             output.len(),
         )
     }
+}
+
+#[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+pub(super) fn rsa_generate_key_pair(
+    key_bits: usize,
+    private_der: &mut [u8],
+    public_der: &mut [u8],
+) -> Option<(usize, usize)> {
+    private_der.fill(0);
+    public_der.fill(0);
+    let mut private_len = 0;
+    let mut public_len = 0;
+    let status = unsafe {
+        microcard_cc310_rsa_generate_key_pair(
+            key_bits, private_der.as_mut_ptr(), private_der.len(), &mut private_len,
+            public_der.as_mut_ptr(), public_der.len(), &mut public_len,
+        )
+    };
+    if status != 0 || private_len > private_der.len() || public_len > public_der.len() {
+        private_der.fill(0);
+        public_der.fill(0);
+        return None;
+    }
+    Some((private_len, public_len))
 }
 
 #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]

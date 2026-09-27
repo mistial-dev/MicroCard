@@ -205,7 +205,12 @@ fn initialize_card() -> (BoardCard, Keys) {
         led_init();
         led_color(LedColor::Blue);
     }
-    if watchdog.arm(10_000_000).is_err() {
+    let watchdog_window = if cfg!(feature = "crypto-profile-self-test") {
+        300_000_000
+    } else {
+        10_000_000
+    };
+    if watchdog.arm(watchdog_window).is_err() {
         halt_with_diagnostic(&mut watchdog, 0x01);
     }
     if start_hfxo().is_err() {
@@ -258,7 +263,7 @@ fn initialize_card() -> (BoardCard, Keys) {
     };
     let mut hardware = Hardware::new();
     if hardware.self_test().is_err() {
-        let stage = hardware.self_test_stage.min(0x0f);
+        let stage = hardware.self_test_stage.min(0x1f);
         halt_with_diagnostic(&mut watchdog, 0x40 | stage);
     }
     let storage_key = match keys.storage_key_with(&mut hardware) {

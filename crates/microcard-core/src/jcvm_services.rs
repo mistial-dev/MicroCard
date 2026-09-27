@@ -414,7 +414,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 
     fn supports_digest(&self, algorithm: u8) -> bool {
         algorithm == 1 && self.provider.supports_sha1()
-            || algorithm == 4
+            || algorithm == 4 && self.provider.supports_sha256()
             || algorithm == 7 && self.provider.supports_sha224()
             || algorithm == 5 && self.provider.supports_sha384()
             || algorithm == 6 && self.provider.supports_sha512()

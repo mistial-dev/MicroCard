@@ -5,6 +5,22 @@ use crate::cc310;
 use microcard_core::Error;
 use microcard_core::Result;
 
+#[cfg(feature = "crypto-profile-self-test")]
+#[no_mangle]
+#[used]
+static mut MICROCARD_PROFILE_TIMINGS_US: [u32; 8] = [0; 8];
+
+#[cfg(feature = "crypto-profile-self-test")]
+fn record_profile_time(index: usize, start: u32) {
+    let elapsed = crate::platform::now().wrapping_sub(start);
+    unsafe {
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(MICROCARD_PROFILE_TIMINGS_US).cast::<u32>().add(index),
+            elapsed,
+        );
+    }
+}
+
 impl Hardware {
     #[cfg(feature = "cc310-sha256")]
     pub(super) fn ensure_cc310(&mut self) -> Result<()> {
@@ -464,6 +480,87 @@ impl Hardware {
                     return Err(Error::Native);
                 }
             }
+            #[cfg(feature = "crypto-profile-self-test")]
+            {
+                self.self_test_stage = 16;
+                let p384_start = crate::platform::now();
+                let mut private = [0u8; 48];
+                let mut public = [0u8; 97];
+                let mut derived = [0u8; 97];
+                let mut shared = [0u8; 48];
+                let mut signature = [0u8; 96];
+                let hash = [0x42u8; 48];
+                let result = (|| -> Result<()> {
+                    let started = crate::platform::now();
+                    self.p384_generate_key_pair_with_entropy(&mut private, &mut public)?;
+                    record_profile_time(0, started);
+                    let started = crate::platform::now();
+                    self.p384_public_key_into(&private, &mut derived)?;
+                    if public != derived || !self.p384_public_key_valid(&public)? {
+                        return Err(Error::Native);
+                    }
+                    record_profile_time(1, started);
+                    self.self_test_stage = 17;
+                    let started = crate::platform::now();
+                    self.p384_ecdh_into(&private, &public, &mut shared)?;
+                    if shared.iter().all(|byte| *byte == 0) { return Err(Error::Native); }
+                    record_profile_time(2, started);
+                    let started = crate::platform::now();
+                    self.p384_sign_hash_with_entropy(&private, &hash, &mut signature)?;
+                    record_profile_time(3, started);
+                    let started = crate::platform::now();
+                    if !self.p384_verify_hash(&public, &hash, &signature)? { return Err(Error::Native); }
+                    signature[0] ^= 1;
+                    if self.p384_verify_hash(&public, &hash, &signature)? { return Err(Error::Native); }
+                    public[0] = 0;
+                    if self.p384_public_key_valid(&public)? { return Err(Error::Native); }
+                    shared.fill(0xa5);
+                    if self.p384_ecdh_into(&private, &public, &mut shared).is_ok()
+                        || shared.iter().any(|byte| *byte != 0) { return Err(Error::Native); }
+                    record_profile_time(4, started);
+                    Ok(())
+                })();
+                private.fill(0);
+                public.fill(0);
+                derived.fill(0);
+                shared.fill(0);
+                signature.fill(0);
+                record_profile_time(7, p384_start);
+                result?;
+
+                self.self_test_stage = 18;
+                let mut private = [0u8; 1400];
+                let mut public = [0u8; 300];
+                let mut signature = [0u8; 256];
+                let result = (|| -> Result<()> {
+                    for bits in [1024, 2048] {
+                        self.self_test_stage = if bits == 1024 { 18 } else { 19 };
+                        let started = crate::platform::now();
+                        let (private_len, public_len) =
+                            cc310::rsa_generate_key_pair(bits, &mut private, &mut public)
+                                .ok_or(Error::Native)?;
+                        record_profile_time(if bits == 1024 { 5 } else { 6 }, started);
+                        if private_len == 0 || public_len == 0 { return Err(Error::Native); }
+                        let signed = &mut signature[..bits / 8];
+                        if !cc310::rsa_pkcs1v15_sha256_sign(
+                            &private[..private_len], bits, &ABC_DIGEST, signed)
+                            || cc310::rsa_pkcs1v15_sha256_verify(
+                                &public[..public_len], bits, &ABC_DIGEST, signed) != 0 {
+                            return Err(Error::Native);
+                        }
+                        signed[0] ^= 1;
+                        if cc310::rsa_pkcs1v15_sha256_verify(
+                            &public[..public_len], bits, &ABC_DIGEST, signed) != 1 {
+                            return Err(Error::Native);
+                        }
+                    }
+                    Ok(())
+                })();
+                private.fill(0);
+                public.fill(0);
+                signature.fill(0);
+                result?;
+            }
         }
         self.self_test_stage = 0;
         Ok(())
@@ -471,6 +568,30 @@ impl Hardware {
 }
 
 impl microcard_core::crypto::CryptoProvider for Hardware {
+    fn supports_sha256(&self) -> bool {
+        cfg!(feature = "cc310-sha256")
+            || cfg!(feature = "software-crypto")
+            || cfg!(feature = "software-sha256")
+    }
+
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn supports_rsa_keygen(&self) -> bool {
+        true
+    }
+
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn rsa_generate_key_pair_with_entropy(
+        &mut self,
+        key_bits: usize,
+        private_der: &mut [u8],
+        public_der: &mut [u8],
+    ) -> Result<(usize, usize)> {
+        private_der.fill(0);
+        public_der.fill(0);
+        self.ensure_cc310()?;
+        cc310::rsa_generate_key_pair(key_bits, private_der, public_der).ok_or(Error::Native)
+    }
+
     #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
     fn supports_rsa_pkcs1v15_sha256(&self) -> bool {
         true

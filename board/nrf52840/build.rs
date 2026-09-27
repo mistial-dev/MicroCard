@@ -324,6 +324,7 @@ fn configure_cc310_psa(
         command.args(common);
         if source.starts_with(&sdk_nrf)
             || source.file_name().and_then(|name| name.to_str()) == Some("microcard_cc310_p256.c")
+            || source.file_name().and_then(|name| name.to_str()) == Some("microcard_cc310_rsa.c")
         {
             command
                 .arg("-I")
@@ -470,6 +471,7 @@ fn configure_cc310_psa(
         verify_stack_use(
             &object.with_extension("su"),
             &[
+                ("microcard_cc310_rsa_generate_key_pair", 256),
                 ("microcard_cc310_rsa_pkcs1v15_sha256_sign", 256),
                 ("microcard_cc310_rsa_pkcs1v15_sha256_verify", 256),
             ],
@@ -552,9 +554,13 @@ fn verify_cc310_dependencies(
     use std::collections::BTreeMap;
 
     let p256 = std::env::var_os("CARGO_FEATURE_CC310_P256").is_some();
+    let rsa = std::env::var_os("CARGO_FEATURE_CC310_RSA").is_some()
+        && std::env::var_os("CARGO_FEATURE_ENGINE_JCVM").is_some();
     let ccm = std::env::var_os("CARGO_FEATURE_CC310_CCM").is_some();
     let aes = std::env::var_os("CARGO_FEATURE_CC310_AES").is_some();
-    let (expected_files, expected_sha256) = if p256 && ccm {
+    let (expected_files, expected_sha256) = if rsa && p256 && ccm {
+        (51, "102d6ceeaa190c502624aa444d00548e8d9e8eeaab3efae82538d520ea508b46")
+    } else if p256 && ccm {
         (
             50,
             "d33cfb3faefbf2939cf7ca2ff32b9b4268bd2a94dbc5b8592813736f5a11c77f",
