@@ -43,6 +43,17 @@ extern "C" {
         hash: *const u8, signature: *const u8, signature_len: usize,
         scratch: *mut u32, scratch_words: usize,
     ) -> i32;
+    fn mc_tc_rsa_raw_public(
+        n: *const u8, n_len: usize, e: *const u8, e_len: usize,
+        input: *const u8, output: *mut u8, scratch: *mut u32,
+        scratch_words: usize,
+    ) -> i32;
+    fn mc_tc_rsa_raw_private(
+        n: *const u8, n_len: usize, e: *const u8, e_len: usize,
+        d: *const u8, d_len: usize, input: *const u8, output: *mut u8,
+        fill: Fill, random_context: *mut c_void, scratch: *mut u32,
+        scratch_words: usize,
+    ) -> i32;
 }
 
 /// Fixed-capacity RSA components. Only the first `bits / 8` bytes of `n` and
@@ -248,6 +259,46 @@ extern "C" fn fill(context: *mut c_void, output: *mut u8, len: usize) -> i32 {
     if (random.0)(bytes) { 0 } else { -1 }
 }
 
+/// Apply an already formatted RSA public representative without padding.
+/// Output is cleared on failure.
+pub fn raw_public_der(public_der: &[u8], bits: usize, input: &[u8],
+    output: &mut [u8]) -> Result<(), Error> {
+    output.fill(0);
+    if !matches!(bits, 1024 | 2048) || input.len() != bits / 8 || output.len() != bits / 8 {
+        return Err(Error::InvalidLength);
+    }
+    let (n, e) = public_parts(public_der).ok_or(Error::InvalidLength)?;
+    if n.len() != bits / 8 { return Err(Error::InvalidLength); }
+    let mut scratch = Scratch::new();
+    let status = unsafe { mc_tc_rsa_raw_public(n.as_ptr(), n.len(), e.as_ptr(), e.len(),
+        input.as_ptr(), output.as_mut_ptr(), scratch.0.as_mut_ptr(), WORKSPACE_WORDS) };
+    if status == 0 { Ok(()) } else {
+        output.fill(0);
+        Err(Error::OperationFailed)
+    }
+}
+
+/// Apply an already formatted RSA private representative with blinding.
+/// Output is cleared on failure.
+pub fn raw_private_der(private_der: &[u8], bits: usize, input: &[u8],
+    output: &mut [u8], random: &mut dyn FnMut(&mut [u8]) -> bool) -> Result<(), Error> {
+    output.fill(0);
+    if !matches!(bits, 1024 | 2048) || input.len() != bits / 8 || output.len() != bits / 8 {
+        return Err(Error::InvalidLength);
+    }
+    let (n, e, d, _, _) = private_parts(private_der).ok_or(Error::InvalidLength)?;
+    if n.len() != bits / 8 { return Err(Error::InvalidLength); }
+    let mut scratch = Scratch::new();
+    let mut source = Random(random);
+    let status = unsafe { mc_tc_rsa_raw_private(n.as_ptr(), n.len(), e.as_ptr(), e.len(),
+        d.as_ptr(), d.len(), input.as_ptr(), output.as_mut_ptr(), fill,
+        (&mut source as *mut Random<'_>).cast(), scratch.0.as_mut_ptr(), WORKSPACE_WORDS) };
+    if status == 0 { Ok(()) } else {
+        output.fill(0);
+        Err(Error::OperationFailed)
+    }
+}
+
 /// Sign a SHA-256 digest with an RSA-1024/2048 PKCS#1 private key.
 /// The RNG provides blinding and key-validation draws. Output is cleared on error.
 pub fn sign_pkcs1v15_sha256_der(
@@ -389,6 +440,25 @@ mod tests {
         assert_eq!(verify_pkcs1v15_sha256_der(
             include_bytes!("../testdata/rsa/public2048.der"), 2048, &HASH,
             include_bytes!("../testdata/rsa/signature2048.bin")), Ok(true));
+    }
+
+    #[test]
+    fn raw_rsa_der_bridge_round_trips_and_clears_failed_output() {
+        let private = include_bytes!("../testdata/rsa/private1024.der");
+        let public = include_bytes!("../testdata/rsa/public1024.der");
+        let mut input = [0u8; 128];
+        input[127] = 42;
+        let mut transformed = [0u8; 128];
+        let mut recovered = [0u8; 128];
+        let mut os_random = std::fs::File::open("/dev/urandom").unwrap();
+        let mut random = |bytes: &mut [u8]| os_random.read_exact(bytes).is_ok();
+        raw_private_der(private, 1024, &input, &mut transformed, &mut random).unwrap();
+        raw_public_der(public, 1024, &transformed, &mut recovered).unwrap();
+        assert_eq!(recovered, input);
+        recovered.fill(0xa5);
+        assert_eq!(raw_public_der(public, 1024, &input[..127], &mut recovered),
+            Err(Error::InvalidLength));
+        assert!(recovered.iter().all(|byte| *byte == 0));
     }
 
     #[test]

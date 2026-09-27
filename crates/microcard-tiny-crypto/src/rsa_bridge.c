@@ -102,3 +102,37 @@ int mc_tc_rsa_verify_sha256(const uint8_t* n, size_t n_len,
   if (status == TC_RSA_INVALID) return 1;
   return -1;
 }
+
+int mc_tc_rsa_raw_public(const uint8_t* n, size_t n_len,
+    const uint8_t* e, size_t e_len, const uint8_t* input,
+    uint8_t* output, TC_RSA_word* scratch, size_t scratch_words)
+{
+  TC_RSA_public_key key = {{n, n_len}, {e, e_len}};
+  TC_RSA_workspace workspace = {scratch, scratch_words};
+  TC_work_budget work = {MC_RSA_MAX_WORK};
+  TC_RSA_result status;
+  if ((n_len != 128 && n_len != 256) || !e || !input || !output || !scratch)
+    return -1;
+  status = TC_RSA_raw_public(&key, (TC_bytes){input, n_len}, &workspace,
+      (TC_buffer){output, n_len}, &work);
+  TC_secure_zero(scratch, scratch_words * sizeof *scratch);
+  return status == TC_RSA_OK ? 0 : -1;
+}
+
+int mc_tc_rsa_raw_private(const uint8_t* n, size_t n_len,
+    const uint8_t* e, size_t e_len, const uint8_t* d, size_t d_len,
+    const uint8_t* input, uint8_t* output, TC_random_fn fill,
+    void* random_context, TC_RSA_word* scratch, size_t scratch_words)
+{
+  TC_RSA_public_key key = {{n, n_len}, {e, e_len}};
+  TC_RSA_workspace workspace = {scratch, scratch_words};
+  TC_RSA_execution execution = {{fill, random_context}, 128, {MC_RSA_MAX_WORK}};
+  TC_RSA_result status;
+  if ((n_len != 128 && n_len != 256) || !e || !d || !input || !output ||
+      !fill || !scratch) return -1;
+  status = TC_RSA_raw_private(&key, (TC_bytes){d, d_len},
+      (TC_bytes){input, n_len}, &workspace, (TC_buffer){output, n_len},
+      &execution);
+  TC_secure_zero(scratch, scratch_words * sizeof *scratch);
+  return status == TC_RSA_OK ? 0 : -1;
+}
