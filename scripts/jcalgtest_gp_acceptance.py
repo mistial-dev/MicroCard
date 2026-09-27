@@ -7,6 +7,7 @@ import tempfile
 import time
 
 from device_cbor import decode
+from jcalgtest_acceptance import performance_command
 from jcvm_transport_acceptance import load_cap, lv
 from scp03_acceptance import Client, ROOT
 
@@ -30,6 +31,16 @@ def probe(client, timings=False):
     assert version == b"1.8.2_jc305\x90\x00", version.hex()
     digest = raw("digest factory", bytes.fromhex("B075150003040000"))
     assert digest[:2] == bytes.fromhex("1500") and digest[-2:] == b"\x90\x00", digest.hex()
+    for algorithm in (5, 6):
+        factory = raw(f"digest {algorithm} factory",
+                      bytes.fromhex("B075150003") + bytes([algorithm, 0, 0, 0]))
+        assert factory[:2] == bytes.fromhex("1500") and factory[-2:] == b"\x90\x00", factory.hex()
+        profile = (0x15, algorithm, 0, 0, 0, 16, 0)
+        for label, ins, method in (("prepare", 0x34, 2), ("update", 0x41, 2),
+                                   ("doFinal", 0x41, 6), ("reset", 0x41, 4)):
+            result = raw(f"digest {algorithm} {label}",
+                         bytes.fromhex(performance_command(ins, profile, method)))
+            assert result == b"\xaa\x90\x00", result.hex()
     for pin_type in (2, 3):
         result = raw(f"OwnerPIN type {pin_type}", bytes.fromhex("B075240003") + bytes([pin_type, 0, 0, 0]))
         assert result[:2] == bytes.fromhex("2400") and result[-2:] == b"\x90\x00", result.hex()

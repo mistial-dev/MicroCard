@@ -611,6 +611,7 @@ dependencies = [
  "hmac",
  "microcard-engine-jcvm",
  "microcard-memory",
+ "microcard-tiny-crypto",
  "p256",
  "serde",
  "sha1",
@@ -641,6 +642,7 @@ dependencies = [
  "heapless 0.9.3",
  "interchange",
  "microcard-core",
+ "microcard-tiny-crypto",
  "nrf-usbd",
  "nrf52840-hal",
  "nrf52840-pac",
@@ -648,6 +650,13 @@ dependencies = [
  "sha2",
  "usb-device",
  "usbd-ccid",
+]
+
+[[package]]
+name = "microcard-tiny-crypto"
+version = "0.1.0-wip"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

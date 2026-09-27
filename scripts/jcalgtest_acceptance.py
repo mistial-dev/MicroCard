@@ -26,7 +26,7 @@ FACTORIES = {
     "Cipher": (0x11, 29, {13, 14}),
     "Signature": (0x12, 49, {33}),
     "KeyAgreement": (0x13, 9, {3}),
-    "MessageDigest": (0x15, 11, {1, 4, 7}),
+    "MessageDigest": (0x15, 11, {1, 4, 5, 6, 7}),
     "RandomData": (0x16, 6, {1, 2}),
 }
 
@@ -47,6 +47,10 @@ PERFORMANCE = (
     ("SHA-256", 0x34, 0x41, (0x15, 4, 0, 0, 0, 16, 0),
      (("update", 2), ("doFinal", 6), ("reset", 4))),
     ("SHA-224", 0x34, 0x41, (0x15, 7, 0, 0, 0, 16, 0),
+     (("update", 2), ("doFinal", 6), ("reset", 4))),
+    ("SHA-384", 0x34, 0x41, (0x15, 5, 0, 0, 0, 16, 0),
+     (("update", 2), ("doFinal", 6), ("reset", 4))),
+    ("SHA-512", 0x34, 0x41, (0x15, 6, 0, 0, 0, 16, 0),
      (("update", 2), ("doFinal", 6), ("reset", 4))),
     ("AES-128 CBC", 0x31, 0x43, (0x11, 13, 0, 15, 128, 16, 1),
      (("doFinal", 7),)),

@@ -408,6 +408,42 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         cfg!(feature = "cc310-p256") || cfg!(feature = "software-sha256")
     }
 
+    #[cfg(feature = "engine-jcvm")]
+    fn supports_sha384(&self) -> bool { true }
+
+    #[cfg(feature = "engine-jcvm")]
+    fn sha384_stream(
+        &mut self,
+        state: &mut [u8; microcard_core::crypto::SHA256_STATE_BYTES],
+        input: &[u8],
+        output: Option<&mut [u8; 48]>,
+    ) -> Result<()> {
+        microcard_tiny_crypto::hash::stream(
+            microcard_tiny_crypto::hash::Algorithm::Sha384,
+            state,
+            input,
+            output.map(|bytes| &mut bytes[..]),
+        ).map_err(|_| Error::Native)
+    }
+
+    #[cfg(feature = "engine-jcvm")]
+    fn supports_sha512(&self) -> bool { true }
+
+    #[cfg(feature = "engine-jcvm")]
+    fn sha512_stream(
+        &mut self,
+        state: &mut [u8; microcard_core::crypto::SHA256_STATE_BYTES],
+        input: &[u8],
+        output: Option<&mut [u8; 64]>,
+    ) -> Result<()> {
+        microcard_tiny_crypto::hash::stream(
+            microcard_tiny_crypto::hash::Algorithm::Sha512,
+            state,
+            input,
+            output.map(|bytes| &mut bytes[..]),
+        ).map_err(|_| Error::Native)
+    }
+
     #[cfg(feature = "cc310-p256")]
     fn sha224_stream(
         &mut self,

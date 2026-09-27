@@ -307,6 +307,7 @@ dependencies = [
  "hmac",
  "microcard-engine-jcvm",
  "microcard-memory",
+ "microcard-tiny-crypto",
  "p256",
  "serde",
  "serde_json",

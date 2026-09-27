@@ -1267,13 +1267,14 @@ fn one_shot_digest_open_use_close_and_release_follow_temporary_contract() {
     let buffer = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
     let mut host = DigestHost;
     let mut call = |method, args: &[(bool, u16)], heap: &mut Heap, frame: &mut Frame| {
+        let mut budget = u32::MAX;
         for &(reference, value) in args {
             if reference { frame.push_reference(value).unwrap(); }
             else { frame.push_short(value as i16).unwrap(); }
         }
         security::call(ClassId::MessageDigest_OneShot, method,
             framework(ClassId::MessageDigest_OneShot, method, method == MethodId::open).method.signature,
-            heap, &mut host, frame, 1, &mut idle(), &mut u32::MAX, &[]).unwrap()
+            heap, &mut host, frame, 1, &mut idle(), &mut budget, &[]).unwrap()
     };
     for (algorithm, expected) in [(1, 20), (7, 28), (4, 32)] {
         assert!(matches!(call(MethodId::open, &[(false, algorithm)], &mut heap, &mut frame), Native::Returned));
@@ -1313,11 +1314,11 @@ fn one_shot_digest_open_use_close_and_release_follow_temporary_contract() {
     let reopened = frame.pop_reference().unwrap();
     assert_eq!(reopened, abandoned);
     assert_eq!(heap.used(), used, "a released slot should be reused across callbacks");
-    drop(call);
+    let mut budget = u32::MAX;
     frame.push_reference(reopened).unwrap();
     assert!(matches!(security::call(ClassId::MessageDigest_OneShot, MethodId::getLength,
         framework(ClassId::MessageDigest_OneShot, MethodId::getLength, false).method.signature,
-        &mut heap, &mut host, &mut frame, 2, &mut idle(), &mut u32::MAX, &[]), Err(Error::Firewall)));
+        &mut heap, &mut host, &mut frame, 2, &mut idle(), &mut budget, &[]), Err(Error::Firewall)));
 }
 
 #[test]

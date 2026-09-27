@@ -5,9 +5,10 @@ edition.workspace = true
 license.workspace = true
 [features]
 default = ["mc04", "software-crypto", "scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"]
-software-crypto = ["software-sha1", "software-sha256", "software-hmac", "software-aes", "software-p256"]
+software-crypto = ["software-sha1", "software-sha256", "software-sha384512", "software-hmac", "software-aes", "software-p256"]
 software-sha1 = ["dep:sha1"]
 software-sha256 = ["dep:sha2"]
+software-sha384512 = ["dep:microcard-tiny-crypto"]
 software-hmac = ["dep:hmac", "dep:sha2"]
 software-aes = ["dep:aes", "dep:cmac", "dep:ccm"]
 software-p256 = ["dep:p256"]
@@ -31,6 +32,7 @@ scp03-pseudo-random = []
 [dependencies]
 microcard-memory = { path = "../microcard-memory", optional = true }
 microcard-engine-jcvm = { path = "../microcard-engine-jcvm", optional = true }
+microcard-tiny-crypto = { path = "../microcard-tiny-crypto", optional = true }
 base64ct.workspace = true
 serde.workspace = true
 sha2 = { workspace = true, optional = true, features = ["compress"] }

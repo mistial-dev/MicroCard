@@ -64,8 +64,8 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
-The latest extended DK scan reports **59 supported** probes against the
-P71D321 reference's **288**. There are **229 missing supported** probes and
+The latest extended DK scan reports **66 supported** probes against the
+P71D321 reference's **288**. There are **222 missing supported** probes and
 **zero support claims outside the profile**. Both ISO 3309 checksum factories
 now work, and their operations pass focused host vectors and a DK smoke test.
 Both `OwnerPINBuilder` extended variants now
@@ -83,7 +83,7 @@ instead of passing as a partial result.
 | CAP loading | Host accepts unsigned LFDB under SCP03; CAP 2.1 structural checks | Complete supported CAP 2.2 type/dataflow verification |
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
-| API | 59 supported JCAlgTest probes; CRC16/CRC32 and SHA-1 operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
+| API | 66 supported JCAlgTest probes; CRC16/CRC32 and SHA-1/384/512 operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
 | GlobalPlatform | Host SCP03 unsigned OpenFIPS201 and JCAlgTest load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
@@ -611,7 +611,7 @@ individual section and probe names to `analysis.json`; implementations need
 generation, import, operation, failure, and reboot tests before reporting
 support.
 
-The next DK image adds SHA-1 through CC310 for Java Card `MessageDigest.ALG_SHA`.
+The previous DK image added SHA-1 through CC310 for Java Card `MessageDigest.ALG_SHA`.
 Its exact ELF SHA-256 is
 `3eac5122b3b56154a454f86742201cdc4ab86cb71482e0813478a845bcd65fbb`.
 The pinned upstream client completed another physical extended scan with
@@ -624,7 +624,22 @@ directory; CSV SHA-256 is
 Its 17,222 PC/SC APDUs had a 16 ms median, 17 ms p95, and 196 ms maximum.
 The focused JCAlgTest applet probe exercised SHA-1 `update`, `doFinal`, and
 `reset` on the DK before and after reboot. Host one-shot and streaming tests
-check the standard `abc` vector and provider failure clearing. This closes one
-factory gap, not the remaining SHA-384/512, signature, cipher, or key-generation
-work. The JCVM USB and dongle links grew by 312 text bytes each, to 243,048 and
-244,540 text bytes, with unchanged static RAM.
+check the standard `abc` vector and provider failure clearing. That closed one
+factory gap. The JCVM USB and dongle links grew by 312 text bytes each, to
+243,048 and 244,540 text bytes, with unchanged static RAM.
+
+The current DK image adds SHA-384/512 through pinned tiny-crypto-c source and
+the temporary `MessageDigest.OneShot` API. The exact flashed ELF SHA-256 is
+`e2dbffa20ec1bd42b9bc2adbcdb75826231cfbb25b98cffa6df2f35b384830ed`.
+The untouched physical CSV and log are in the ignored local
+`work/jcalgtest-sha512-dk/support/` directory; CSV SHA-256 is
+`469062e3b296ece066eb58fc467537622e795408a63c864a43dc21424fb899cc`.
+The upstream extended scan completed **8,607 probes, zero error rows, 66
+supported, 222 missing P71D321-positive, and zero outside-profile claims**.
+Its 17,222 PC/SC APDUs had a 15 ms median, 17 ms p95, and 193 ms maximum.
+The applet's SHA-384/512 `update`, `doFinal`, and `reset` probes passed on the
+DK both before and after debugger reset. Host FIPS vectors and the complete
+upstream scan passed. The JCVM USB and dongle links are 248,112 and 249,596
+text bytes, respectively, with unchanged static RAM. The new support claims
+still require broader negative and interrupted-operation qualification before
+release certification.

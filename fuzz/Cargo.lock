@@ -322,6 +322,7 @@ dependencies = [
  "cmac",
  "hmac",
  "microcard-memory",
+ "microcard-tiny-crypto",
  "p256",
  "serde",
  "sha1",
@@ -341,6 +342,13 @@ dependencies = [
 [[package]]
 name = "microcard-memory"
 version = "0.1.0-wip"
+
+[[package]]
+name = "microcard-tiny-crypto"
+version = "0.1.0-wip"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "p256"

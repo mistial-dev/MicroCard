@@ -6,7 +6,7 @@ mod streaming_sha1;
 #[cfg(any(feature = "software-sha1", feature = "software-sha256"))]
 mod streaming_hash;
 
-/// Opaque provider state, transient only; zero initializes a new SHA-256 operation.
+/// Opaque transient digest state; zero initializes a new operation.
 pub const SHA256_STATE_BYTES: usize = 256;
 
 use crate::{Error, Result};
@@ -102,6 +102,56 @@ pub trait CryptoProvider {
     fn sha224_into(&mut self, data: &[u8], output: &mut [u8; 28]) -> Result<()> {
         let mut state = [0; SHA256_STATE_BYTES];
         self.sha224_stream(&mut state, data, Some(output))
+    }
+
+    fn supports_sha384(&self) -> bool { cfg!(feature = "software-sha384512") }
+
+    fn sha384_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
+        mut output: Option<&mut [u8; 48]>) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        #[cfg(feature = "software-sha384512")]
+        {
+            microcard_tiny_crypto::hash::stream(
+                microcard_tiny_crypto::hash::Algorithm::Sha384, state, input,
+                output.map(|bytes| &mut bytes[..]),
+            ).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-sha384512"))]
+        {
+            let _ = input;
+            state.fill(0);
+            Err(Error::Native)
+        }
+    }
+
+    fn sha384_into(&mut self, data: &[u8], output: &mut [u8; 48]) -> Result<()> {
+        let mut state = [0; SHA256_STATE_BYTES];
+        self.sha384_stream(&mut state, data, Some(output))
+    }
+
+    fn supports_sha512(&self) -> bool { cfg!(feature = "software-sha384512") }
+
+    fn sha512_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
+        mut output: Option<&mut [u8; 64]>) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        #[cfg(feature = "software-sha384512")]
+        {
+            microcard_tiny_crypto::hash::stream(
+                microcard_tiny_crypto::hash::Algorithm::Sha512, state, input,
+                output.map(|bytes| &mut bytes[..]),
+            ).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-sha384512"))]
+        {
+            let _ = input;
+            state.fill(0);
+            Err(Error::Native)
+        }
+    }
+
+    fn sha512_into(&mut self, data: &[u8], output: &mut [u8; 64]) -> Result<()> {
+        let mut state = [0; SHA256_STATE_BYTES];
+        self.sha512_stream(&mut state, data, Some(output))
     }
 
     /// Update opaque transient state; Some(output) finalizes and clears the state.

@@ -221,6 +221,28 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         Ok(())
     }
 
+    fn sha384_stream(&mut self, state: &mut [u8; microcard_engine_jcvm::host::SHA256_STATE_BYTES],
+        input: &[u8], mut output: Option<&mut [u8; 48]>) -> Result<()> {
+        let result = self.provider.sha384_stream(state, input, output.as_deref_mut());
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
+    fn sha512_stream(&mut self, state: &mut [u8; microcard_engine_jcvm::host::SHA256_STATE_BYTES],
+        input: &[u8], mut output: Option<&mut [u8; 64]>) -> Result<()> {
+        let result = self.provider.sha512_stream(state, input, output.as_deref_mut());
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
     fn p256_sign_hash(&mut self, key: &[u8; 32], message: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
         Services::p256_sign_hash(self, key, message, output)
     }
@@ -255,6 +277,8 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         algorithm == 1 && self.provider.supports_sha1()
             || algorithm == 4
             || algorithm == 7 && self.provider.supports_sha224()
+            || algorithm == 5 && self.provider.supports_sha384()
+            || algorithm == 6 && self.provider.supports_sha512()
     }
     fn supports_random(&self, algorithm: u8) -> bool {
         matches!(algorithm, 1 | 2)
@@ -306,6 +330,10 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
                 output.get_mut(..32).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 32),
             7 => self.provider.sha224_into(message,
                 output.get_mut(..28).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 28),
+            5 => self.provider.sha384_into(message,
+                output.get_mut(..48).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 48),
+            6 => self.provider.sha512_into(message,
+                output.get_mut(..64).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 64),
             _ => unreachable!(),
         };
         if result.is_err() {
@@ -593,7 +621,7 @@ mod tests {
         assert_eq!(output[..32], [0x42; 32]);
         assert_eq!(output[32..], [0; 32]);
         assert_eq!(host.provider.calls, 1);
-        for (algorithm, length, error) in [(5, 64, Error::Unsupported), (4, 31, Error::Bounds)] {
+        for (algorithm, length, error) in [(2, 64, Error::Unsupported), (4, 31, Error::Bounds)] {
             output.fill(0xaa);
             assert_eq!(
                 host.digest(algorithm, b"message", &mut output[..length]),
