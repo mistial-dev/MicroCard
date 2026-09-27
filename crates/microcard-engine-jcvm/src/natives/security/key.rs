@@ -53,15 +53,16 @@ pub(super) fn call(
             let Some(name) = key_class(key_type) else {
                 return crypto_exception(heap, context, 3);
             };
-            if (matches!(key_type, 1..=3) && !matches!(length, 64 | 128 | 192))
-                || (matches!(key_type, 13..=15) && !matches!(length, 128 | 192 | 256))
+            if (matches!(key_type, 1..=3)
+                && (!cfg!(feature = "des-legacy") || !matches!(length, 64 | 128 | 192)))
+                || (matches!(key_type, 13..=15) && length != 128)
             {
                 return crypto_exception(heap, context, 3);
             }
             if matches!(key_type, 4..=6 | 22..=25)
                 && !matches!(
                     length,
-                    512 | 736 | 768 | 896 | 1024 | 1280 | 1536 | 1984 | 2048
+                    1024 | 2048
                 )
             {
                 return crypto_exception(heap, context, 3);

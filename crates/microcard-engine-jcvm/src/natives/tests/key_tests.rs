@@ -27,7 +27,8 @@ fn symmetric_keys_clear_material_and_initialization_with_their_lifetime() {
     let invoke = |class, method, heap: &mut Heap, frame: &mut Frame| {
         security::call(class, method, signature, heap, &mut crate::host::NoHost, frame, 1, &mut idle(), &mut { u32::MAX }, &[]).unwrap()
     };
-    for (class, first) in [(ClassId::DESKey, 1), (ClassId::AESKey, 13)] {
+    for (class, first) in [(ClassId::DESKey, 1), (ClassId::AESKey, 13)]
+        .into_iter().filter(|(class, _)| cfg!(feature = "des-legacy") || *class != ClassId::DESKey) {
         for lifetime in 0..3 {
             let (mut slab, mut words, mut tags) = setup(0);
             let mut heap = Heap::new(&mut slab).unwrap();
