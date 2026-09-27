@@ -322,6 +322,7 @@ name = "microcard-engine-jcvm"
 version = "0.1.0-wip"
 dependencies = [
  "microcard-memory",
+ "microcard-tiny-crypto",
  "sha2",
  "zeroize",
 ]
