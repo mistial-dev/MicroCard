@@ -111,6 +111,22 @@ from the repository root before building. For an explicit software reference, us
 The aggregate `cc310` feature rejects software-provider features. Partial replacement
 profiles remain available to measure SHA-256, P-256, then symmetric providers separately.
 
+JCVM firmware requires exactly one complete provider selection. From this directory:
+
+```sh
+cargo build --release --locked --features engine-jcvm,usb-ccid
+cargo build --release --locked --no-default-features --features engine-jcvm,cc310,usb-ccid
+cargo build --release --locked --no-default-features --features engine-jcvm,software-crypto,des-legacy,usb-ccid
+```
+
+The first command uses CC310, including RSA, with DES compatibility enabled. The
+second is the compact CC310 selection without DES; the third selects software
+primitives with the same DES selection. Omit `des-legacy` for a compact software
+build. RSA bridge code is linked only into JCVM images, so MC04 builds do not
+carry its self-test or allocator. The same Java Card factories require operation
+tests on each selected provider. A CC310 operation failure returns to the caller
+without a software retry. Use the separate `engine-mc04` feature for MC04 images.
+
 [BOARD_BUDGETS.json](BOARD_BUDGETS.json) records default hardware and explicit reference
 links with profile-specific flash/static-RAM ceilings. The gate checks interpreter and
 crypto-provider isolation. [Crypto provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)

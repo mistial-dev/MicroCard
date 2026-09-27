@@ -1,7 +1,7 @@
 use super::Hardware;
 #[cfg(feature = "cc310-sha256")]
 use crate::cc310;
-#[cfg(feature = "cc310-sha256")]
+#[cfg(any(feature = "cc310-sha256", feature = "engine-jcvm"))]
 use microcard_core::Error;
 use microcard_core::Result;
 
@@ -60,7 +60,6 @@ impl Hardware {
                 if digest != ABC_DIGEST || state.iter().any(|byte| *byte != 0) {
                     return Err(Error::Native);
                 }
-                self.self_test_stage = 15;
                 const SHA1_ABC: [u8; 20] = [
                     0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e, 0x25, 0x71, 0x78,
                     0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
@@ -411,6 +410,60 @@ impl Hardware {
                 signature.fill(0);
                 shared_secret.fill(0);
             }
+            #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+            {
+                self.self_test_stage = 15;
+                let mut private = *include_bytes!("../../testdata/rsa1024-private.der");
+                let mut public = *include_bytes!("../../testdata/rsa1024-public.der");
+                core::hint::black_box(&mut private);
+                core::hint::black_box(&mut public);
+                let mut signature = [0u8; 128];
+                let signed =
+                    cc310::rsa_pkcs1v15_sha256_sign(&private, 1024, &ABC_DIGEST, &mut signature);
+                let valid = signed
+                    && signature == *include_bytes!("../../testdata/rsa1024-abc.sig")
+                    && cc310::rsa_pkcs1v15_sha256_verify(&public, 1024, &ABC_DIGEST, &signature)
+                        == 0;
+                signature[0] ^= 1;
+                let rejects_tamper =
+                    cc310::rsa_pkcs1v15_sha256_verify(&public, 1024, &ABC_DIGEST, &signature) == 1;
+                private[0] ^= 1;
+                let mut failed_signature = [0xa5u8; 128];
+                let rejects_bad_key = !cc310::rsa_pkcs1v15_sha256_sign(
+                    &private,
+                    1024,
+                    &ABC_DIGEST,
+                    &mut failed_signature,
+                ) && failed_signature.iter().all(|byte| *byte == 0);
+                failed_signature.fill(0);
+                private.fill(0);
+                public.fill(0);
+                signature.fill(0);
+                if !valid || !rejects_tamper || !rejects_bad_key {
+                    return Err(Error::Native);
+                }
+
+                let mut private = *include_bytes!("../../testdata/rsa2048-private.der");
+                let mut public = *include_bytes!("../../testdata/rsa2048-public.der");
+                core::hint::black_box(&mut private);
+                core::hint::black_box(&mut public);
+                let mut signature = [0u8; 256];
+                let signed =
+                    cc310::rsa_pkcs1v15_sha256_sign(&private, 2048, &ABC_DIGEST, &mut signature);
+                let valid = signed
+                    && signature == *include_bytes!("../../testdata/rsa2048-abc.sig")
+                    && cc310::rsa_pkcs1v15_sha256_verify(&public, 2048, &ABC_DIGEST, &signature)
+                        == 0;
+                signature[0] ^= 1;
+                let rejects_tamper =
+                    cc310::rsa_pkcs1v15_sha256_verify(&public, 2048, &ABC_DIGEST, &signature) == 1;
+                private.fill(0);
+                public.fill(0);
+                signature.fill(0);
+                if !valid || !rejects_tamper {
+                    return Err(Error::Native);
+                }
+            }
         }
         self.self_test_stage = 0;
         Ok(())
@@ -418,6 +471,46 @@ impl Hardware {
 }
 
 impl microcard_core::crypto::CryptoProvider for Hardware {
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn supports_rsa_pkcs1v15_sha256(&self) -> bool {
+        true
+    }
+
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn rsa_pkcs1v15_sha256_sign_der(
+        &mut self,
+        private_der: &[u8],
+        key_bits: usize,
+        hash: &[u8; 32],
+        signature: &mut [u8],
+        _random: &mut dyn FnMut(&mut [u8]) -> bool,
+    ) -> Result<()> {
+        let ready = self.ensure_cc310();
+        microcard_core::crypto::clear_output_on_error(signature, ready)?;
+        let result = if cc310::rsa_pkcs1v15_sha256_sign(private_der, key_bits, hash, signature) {
+            Ok(())
+        } else {
+            Err(Error::Native)
+        };
+        microcard_core::crypto::clear_output_on_error(signature, result)
+    }
+
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn rsa_pkcs1v15_sha256_verify_der(
+        &mut self,
+        public_der: &[u8],
+        key_bits: usize,
+        hash: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<bool> {
+        self.ensure_cc310()?;
+        match cc310::rsa_pkcs1v15_sha256_verify(public_der, key_bits, hash, signature) {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(Error::Native),
+        }
+    }
+
     fn supports_sha1(&self) -> bool {
         cfg!(feature = "cc310-p256") || cfg!(feature = "software-sha1")
     }

@@ -4,12 +4,13 @@ version = "0.1.0-wip"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 [features]
-default = ["development-debug", "cc310"]
+default = ["development-debug", "cc310", "des-legacy"]
 engine-mc04 = ["microcard-core/mc04"]
-engine-jcvm = ["microcard-core/jcvm", "dep:microcard-tiny-crypto"]
+engine-jcvm = ["microcard-core/jcvm", "microcard-core/software-p384", "dep:microcard-tiny-crypto"]
+des-legacy = ["microcard-core/des-legacy"]
 development-debug = []
 latency-trace = ["development-debug", "microcard-core/latency-trace"]
-cc310 = ["cc310-sha256", "cc310-entropy", "cc310-cmac", "cc310-hmac", "cc310-aes", "cc310-cbc", "cc310-ctr", "cc310-ccm", "cc310-p256"]
+cc310 = ["cc310-sha256", "cc310-entropy", "cc310-cmac", "cc310-hmac", "cc310-aes", "cc310-cbc", "cc310-ctr", "cc310-ccm", "cc310-p256", "cc310-rsa"]
 software-crypto = ["microcard-core/software-crypto"]
 software-sha1 = ["microcard-core/software-sha1"]
 software-sha256 = ["microcard-core/software-sha256"]
@@ -37,6 +38,7 @@ cc310-cbc = ["cc310-aes"]
 cc310-ctr = ["cc310-aes"]
 cc310-ccm = ["cc310-aes"]
 cc310-p256 = ["cc310-entropy"]
+cc310-rsa = ["cc310-p256"]
 
 [dependencies]
 microcard-core = { path = "../../crates/microcard-core", default-features = false, features = ["scp03-rmac", "scp03-renc", "scp03-s16", "scp03-pseudo-random"] }

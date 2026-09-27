@@ -1,5 +1,58 @@
 use core::ffi::{c_char, c_void};
 
+#[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+const RSA_ALLOC_LIMIT: usize = 8192;
+
+#[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+#[no_mangle]
+unsafe extern "C" fn mbedtls_calloc(count: usize, size: usize) -> *mut c_void {
+    use alloc::alloc::alloc_zeroed;
+    use core::alloc::Layout;
+
+    let Some(bytes) = count.checked_mul(size) else {
+        return core::ptr::null_mut();
+    };
+    let bytes = bytes.max(1);
+    if bytes > RSA_ALLOC_LIMIT {
+        return core::ptr::null_mut();
+    }
+    let Some(total) = bytes.checked_add(8) else {
+        return core::ptr::null_mut();
+    };
+    let Ok(layout) = Layout::from_size_align(total, 8) else {
+        return core::ptr::null_mut();
+    };
+    let base = unsafe { alloc_zeroed(layout) };
+    if base.is_null() {
+        return core::ptr::null_mut();
+    }
+    unsafe { base.cast::<usize>().write(bytes) };
+    unsafe { base.add(8).cast() }
+}
+
+#[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+#[no_mangle]
+unsafe extern "C" fn mbedtls_free(pointer: *mut c_void) {
+    use alloc::alloc::dealloc;
+    use core::alloc::Layout;
+
+    if pointer.is_null() {
+        return;
+    }
+    let base = unsafe { pointer.cast::<u8>().sub(8) };
+    let bytes = unsafe { base.cast::<usize>().read() };
+    if bytes == 0 || bytes > RSA_ALLOC_LIMIT {
+        return;
+    }
+    let Ok(layout) = Layout::from_size_align(bytes + 8, 8) else {
+        return;
+    };
+    unsafe {
+        core::ptr::write_bytes(base, 0, bytes + 8);
+        dealloc(base, layout);
+    }
+}
+
 #[repr(C)]
 struct AbortApis {
     handle: *mut c_void,
@@ -185,6 +238,26 @@ unsafe extern "C" {
         peer_public_key_size: usize,
         secret: *mut u8,
         secret_size: usize,
+    ) -> i32;
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn microcard_cc310_rsa_pkcs1v15_sha256_sign(
+        private_der: *const u8,
+        private_der_size: usize,
+        key_bits: usize,
+        hash: *const u8,
+        hash_size: usize,
+        signature: *mut u8,
+        signature_size: usize,
+    ) -> i32;
+    #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+    fn microcard_cc310_rsa_pkcs1v15_sha256_verify(
+        public_der: *const u8,
+        public_der_size: usize,
+        key_bits: usize,
+        hash: *const u8,
+        hash_size: usize,
+        signature: *const u8,
+        signature_size: usize,
     ) -> i32;
 }
 
@@ -553,6 +626,51 @@ pub(super) fn p256_ecdh(
             peer_public_key.len(),
             output.as_mut_ptr(),
             output.len(),
+        )
+    }
+}
+
+#[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+pub(super) fn rsa_pkcs1v15_sha256_sign(
+    private_der: &[u8],
+    key_bits: usize,
+    hash: &[u8; 32],
+    signature: &mut [u8],
+) -> bool {
+    let status = unsafe {
+        microcard_cc310_rsa_pkcs1v15_sha256_sign(
+            private_der.as_ptr(),
+            private_der.len(),
+            key_bits,
+            hash.as_ptr(),
+            hash.len(),
+            signature.as_mut_ptr(),
+            signature.len(),
+        )
+    };
+    if status != 0 {
+        signature.fill(0);
+        return false;
+    }
+    true
+}
+
+#[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]
+pub(super) fn rsa_pkcs1v15_sha256_verify(
+    public_der: &[u8],
+    key_bits: usize,
+    hash: &[u8; 32],
+    signature: &[u8],
+) -> i32 {
+    unsafe {
+        microcard_cc310_rsa_pkcs1v15_sha256_verify(
+            public_der.as_ptr(),
+            public_der.len(),
+            key_bits,
+            hash.as_ptr(),
+            hash.len(),
+            signature.as_ptr(),
+            signature.len(),
         )
     }
 }

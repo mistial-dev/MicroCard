@@ -7,13 +7,37 @@ fn main() {
         "select exactly one firmware engine: engine-mc04 or engine-jcvm"
     );
     let full_hardware = std::env::var_os("CARGO_FEATURE_CC310").is_some();
-    let software_enabled = ["CRYPTO", "SHA1", "SHA256", "HMAC", "AES", "P256"]
-        .iter()
-        .any(|name| std::env::var_os(format!("CARGO_FEATURE_SOFTWARE_{name}")).is_some());
+    let full_software = std::env::var_os("CARGO_FEATURE_SOFTWARE_CRYPTO").is_some();
+    let software_enabled = [
+        "CRYPTO",
+        "SHA1",
+        "SHA256",
+        "SHA384512",
+        "HMAC",
+        "AES",
+        "P256",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(format!("CARGO_FEATURE_SOFTWARE_{name}")).is_some());
+    let hardware_enabled = [
+        "SHA256", "ENTROPY", "CMAC", "HMAC", "AES", "CBC", "CTR", "CCM", "P256", "RSA",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(format!("CARGO_FEATURE_CC310_{name}")).is_some());
     assert!(
         !full_hardware || !software_enabled,
         "cc310 excludes software providers; use --no-default-features for a software reference build"
     );
+    if jcvm {
+        assert!(
+            full_hardware != full_software,
+            "JCVM requires exactly one complete provider: cc310 or software-crypto"
+        );
+        assert!(
+            !full_software || !hardware_enabled,
+            "JCVM software-crypto excludes CC310 feature components"
+        );
+    }
     let dongle = std::env::var_os("CARGO_FEATURE_DONGLE_LAYOUT").is_some();
     let layout = match (dongle, jcvm) {
         (false, false) => "memory-dk.x",
@@ -323,6 +347,11 @@ fn configure_cc310_psa(
         if std::env::var_os("CARGO_FEATURE_CC310_P256").is_some() {
             command.arg("-DMICROCARD_CC310_P256=1");
         }
+        if std::env::var_os("CARGO_FEATURE_CC310_RSA").is_some()
+            && std::env::var_os("CARGO_FEATURE_ENGINE_JCVM").is_some()
+        {
+            command.arg("-DMICROCARD_CC310_RSA=1");
+        }
         let status = command
             .arg("-o")
             .arg(object)
@@ -403,10 +432,10 @@ fn configure_cc310_psa(
         verify_stack_use(
             &out.join("public_cc3xx_psa_asymmetric_signature.su"),
             &[
-                ("cc3xx_sign_hash", 48),
-                ("cc3xx_verify_hash", 40),
+                ("cc3xx_sign_hash", 64),
+                ("cc3xx_verify_hash", 56),
                 ("cc3xx_sign_message", 200),
-                ("cc3xx_verify_message", 40),
+                ("cc3xx_verify_message", 56),
             ],
         );
         verify_stack_use(
@@ -427,6 +456,22 @@ fn configure_cc310_psa(
                 ("microcard_cc310_hash_stream", 288),
                 ("microcard_cc310_sha256_stream", 32),
                 ("microcard_cc310_sha224_stream", 32),
+            ],
+        );
+        shims.push(shim);
+        objects.push(object);
+    }
+    if std::env::var_os("CARGO_FEATURE_CC310_RSA").is_some()
+        && std::env::var_os("CARGO_FEATURE_ENGINE_JCVM").is_some()
+    {
+        let shim = manifest.join("csrc/microcard_cc310_rsa.c");
+        let object = out.join("microcard_cc310_rsa.o");
+        dependencies.push(compile(&shim, &object));
+        verify_stack_use(
+            &object.with_extension("su"),
+            &[
+                ("microcard_cc310_rsa_pkcs1v15_sha256_sign", 256),
+                ("microcard_cc310_rsa_pkcs1v15_sha256_verify", 256),
             ],
         );
         shims.push(shim);
