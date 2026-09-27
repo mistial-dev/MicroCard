@@ -165,6 +165,26 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// PKCS#1 DER keys, SHA-256 digest, and an exact modulus-sized signature.
+    fn rsa_pkcs1v15_sha256_sign(&mut self, _private_der: &[u8], _key_bits: usize,
+        _hash: &[u8; 32], signature: &mut [u8]) -> Result<()> {
+        signature.fill(0);
+        Err(Error::Unsupported)
+    }
+
+    fn rsa_pkcs1v15_sha256_verify(&mut self, _public_der: &[u8], _key_bits: usize,
+        _hash: &[u8; 32], _signature: &[u8]) -> Result<bool> {
+        Err(Error::Unsupported)
+    }
+
+    /// Generate complete PKCS#1 DER keys and publish lengths only on success.
+    fn rsa_generate(&mut self, _key_bits: usize, private_der: &mut [u8],
+        public_der: &mut [u8]) -> Result<(usize, usize)> {
+        private_der.fill(0);
+        public_der.fill(0);
+        Err(Error::Unsupported)
+    }
+
     /// Fill a buffer with random bytes.
     fn random(&mut self, output: &mut [u8]) -> Result<()> {
         let _ = output;

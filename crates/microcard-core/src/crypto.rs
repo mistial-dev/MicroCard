@@ -479,6 +479,20 @@ pub trait CryptoProvider {
         { let _ = random; Err(Error::Native) }
     }
 
+    fn p384_generate_key_pair_with_entropy(&mut self, private_key: &mut [u8; 48],
+        public_key: &mut [u8; 97]) -> Result<()> where Self: crate::hal::Entropy {
+        private_key.fill(0);
+        public_key.fill(0);
+        #[cfg(feature = "software-p384")]
+        {
+            let mut draw = |bytes: &mut [u8]| self.fill_entropy(bytes).is_ok();
+            microcard_tiny_crypto::generate_key_pair(microcard_tiny_crypto::Curve::P384,
+                private_key, public_key, &mut draw).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-p384"))]
+        { Err(Error::Native) }
+    }
+
     fn p384_public_key_valid(&mut self, public_key: &[u8]) -> Result<bool> {
         #[cfg(feature = "software-p384")]
         { microcard_tiny_crypto::public_key_valid(microcard_tiny_crypto::Curve::P384,
@@ -518,6 +532,19 @@ pub trait CryptoProvider {
         { let _ = (private_key, hash, random); Err(Error::Native) }
     }
 
+    fn p384_sign_hash_with_entropy(&mut self, private_key: &[u8; 48], hash: &[u8; 48],
+        signature: &mut [u8; 96]) -> Result<()> where Self: crate::hal::Entropy {
+        signature.fill(0);
+        #[cfg(feature = "software-p384")]
+        {
+            let mut draw = |bytes: &mut [u8]| self.fill_entropy(bytes).is_ok();
+            microcard_tiny_crypto::sign_digest(microcard_tiny_crypto::Curve::P384,
+                private_key, hash, signature, &mut draw).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-p384"))]
+        { let _ = (private_key, hash); Err(Error::Native) }
+    }
+
     fn p384_verify_hash(&mut self, public_key: &[u8], hash: &[u8; 48], signature: &[u8]) -> Result<bool> {
         #[cfg(feature = "software-p384")]
         { microcard_tiny_crypto::verify_digest(microcard_tiny_crypto::Curve::P384,
@@ -528,6 +555,33 @@ pub trait CryptoProvider {
 
     fn supports_rsa_pkcs1v15_sha256(&self) -> bool { cfg!(feature = "software-rsa") }
 
+    /// Generate a complete PKCS#1 DER key pair using injected entropy.
+    /// Both outputs and lengths remain zero on failure.
+    fn rsa_generate_key_pair_with_entropy(&mut self, key_bits: usize,
+        private_der: &mut [u8], public_der: &mut [u8]) -> Result<(usize, usize)>
+    where Self: crate::hal::Entropy {
+        private_der.fill(0);
+        public_der.fill(0);
+        #[cfg(feature = "rsa-keygen")]
+        {
+            let mut pair = microcard_tiny_crypto::rsa::KeyPairComponents::new();
+            let mut draw = |bytes: &mut [u8]| self.fill_entropy(bytes).is_ok();
+            let result = (|| {
+                microcard_tiny_crypto::rsa::generate_key_pair(key_bits, &mut pair, &mut draw)
+                    .map_err(|_| Error::Native)?;
+                let private_len = pair.encode_private_der(key_bits, private_der)
+                    .map_err(|_| Error::Native)?;
+                let public_len = pair.encode_public_der(key_bits, public_der)
+                    .map_err(|_| Error::Native)?;
+                Ok((private_len, public_len))
+            })();
+            if result.is_err() { private_der.fill(0); public_der.fill(0); }
+            result
+        }
+        #[cfg(not(feature = "rsa-keygen"))]
+        { let _ = key_bits; Err(Error::Native) }
+    }
+
     fn rsa_pkcs1v15_sha256_sign_der(&mut self, private_der: &[u8], key_bits: usize,
         hash: &[u8; 32], signature: &mut [u8], random: &mut dyn FnMut(&mut [u8]) -> bool) -> Result<()> {
         signature.fill(0);
@@ -536,6 +590,19 @@ pub trait CryptoProvider {
             private_der, key_bits, hash, signature, random).map_err(|_| Error::Native) }
         #[cfg(not(feature = "software-rsa"))]
         { let _ = (private_der, key_bits, hash, random); Err(Error::Native) }
+    }
+
+    fn rsa_pkcs1v15_sha256_sign_with_entropy(&mut self, private_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &mut [u8]) -> Result<()> where Self: crate::hal::Entropy {
+        signature.fill(0);
+        #[cfg(feature = "software-rsa")]
+        {
+            let mut draw = |bytes: &mut [u8]| self.fill_entropy(bytes).is_ok();
+            microcard_tiny_crypto::rsa::sign_pkcs1v15_sha256_der(
+                private_der, key_bits, hash, signature, &mut draw).map_err(|_| Error::Native)
+        }
+        #[cfg(not(feature = "software-rsa"))]
+        { let _ = (private_der, key_bits, hash); Err(Error::Native) }
     }
 
     fn rsa_pkcs1v15_sha256_verify_der(&mut self, public_der: &[u8], key_bits: usize,

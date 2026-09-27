@@ -2,6 +2,61 @@
 
 #define MC_RSA_MAX_WORK 1000000u
 
+int mc_tc_rsa_keygen(size_t bits, uint8_t* n, uint8_t* e, uint8_t* d,
+    uint8_t* p, uint8_t* q, TC_random_fn fill, void* random_context,
+    TC_RSA_word* scratch, size_t scratch_words)
+{
+  TC_RSA_keygen_state state = {0};
+  TC_RSA_keygen_output output;
+  TC_RSA_workspace workspace = {scratch, scratch_words};
+  TC_RSA_keygen_limits limits = {5000u, 20000u};
+  TC_RSA_result status;
+  uint32_t total_work = 50000000u;
+  const size_t length = bits / 8u;
+  if ((bits != 1024 && bits != 2048) || !n || !e || !d || !p || !q ||
+      !fill || !scratch) return -1;
+  output.modulus = (TC_buffer){n, length};
+  output.exponent = (TC_buffer){e, 3};
+  output.d = (TC_buffer){d, length};
+  output.p = (TC_buffer){p, length / 2u};
+  output.q = (TC_buffer){q, length / 2u};
+  status = TC_RSA_keygen_init(&state, bits, &output, limits, &workspace);
+  while (status == TC_RSA_OK || status == TC_RSA_IN_PROGRESS) {
+    TC_work_budget work = {10000u};
+    if (total_work < work.remaining) { status = TC_RSA_LIMIT; break; }
+    status = TC_RSA_keygen_step(&state,
+        (TC_random_source){fill, random_context}, NULL, NULL, &work);
+    total_work -= 10000u - work.remaining;
+    if (status == TC_RSA_OK) break;
+  }
+  TC_RSA_keygen_clear(&state);
+  TC_secure_zero(scratch, scratch_words * sizeof *scratch);
+  return status == TC_RSA_OK ? 0 : -1;
+}
+
+int mc_tc_rsa_derive_crt(size_t bits, const uint8_t* n, const uint8_t* e,
+    const uint8_t* d, const uint8_t* p, const uint8_t* q,
+    uint8_t* dp, uint8_t* dq, uint8_t* qi,
+    TC_RSA_word* scratch, size_t scratch_words)
+{
+  const size_t length = bits / 8u;
+  TC_RSA_private_key key = {
+    {{n, length}, {e, 3}}, {d, length}, {p, length / 2u},
+    {q, length / 2u}, NULL
+  };
+  TC_RSA_crt_output output = {
+    {dp, length / 2u}, {dq, length / 2u}, {qi, length / 2u}
+  };
+  TC_RSA_workspace workspace = {scratch, scratch_words};
+  TC_work_budget work = {48u * (uint32_t)length + 3u};
+  TC_RSA_result status;
+  if ((bits != 1024 && bits != 2048) || !n || !e || !d || !p || !q ||
+      !dp || !dq || !qi || !scratch) return -1;
+  status = TC_RSA_derive_crt(&key, &output, &workspace, &work);
+  TC_secure_zero(scratch, scratch_words * sizeof *scratch);
+  return status == TC_RSA_OK ? 0 : -1;
+}
+
 int mc_tc_rsa_sign_sha256(const uint8_t* n, size_t n_len,
     const uint8_t* e, size_t e_len, const uint8_t* d, size_t d_len,
     const uint8_t* p, size_t p_len, const uint8_t* q, size_t q_len,

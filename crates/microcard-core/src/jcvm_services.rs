@@ -191,6 +191,43 @@ impl<P: CryptoProvider> Services<'_, P> {
         self.provider.p384_verify_hash(key, hash, &raw).map_err(|_| Error::Unauthorized)
     }
 
+    pub fn rsa_pkcs1v15_sha256_sign(&mut self, private_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &mut [u8]) -> Result<()>
+    where P: Entropy {
+        signature.fill(0);
+        if !matches!(key_bits, 1024 | 2048) || signature.len() != key_bits / 8 {
+            return Err(Error::Bounds);
+        }
+        self.provider.rsa_pkcs1v15_sha256_sign_with_entropy(private_der, key_bits, hash, signature)
+            .map_err(|_| {
+                signature.fill(0);
+                Error::Unauthorized
+            })
+    }
+
+    pub fn rsa_pkcs1v15_sha256_verify(&mut self, public_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
+        if !matches!(key_bits, 1024 | 2048) || signature.len() != key_bits / 8 {
+            return Ok(false);
+        }
+        self.provider.rsa_pkcs1v15_sha256_verify_der(public_der, key_bits, hash, signature)
+            .map_err(|_| Error::Unauthorized)
+    }
+
+    pub fn rsa_generate(&mut self, key_bits: usize, private_der: &mut [u8],
+        public_der: &mut [u8]) -> Result<(usize, usize)>
+    where P: Entropy {
+        private_der.fill(0);
+        public_der.fill(0);
+        if !matches!(key_bits, 1024 | 2048) { return Err(Error::Bounds); }
+        self.provider.rsa_generate_key_pair_with_entropy(key_bits, private_der, public_der)
+            .map_err(|_| {
+                private_der.fill(0);
+                public_der.fill(0);
+                Error::Unauthorized
+            })
+    }
+
 }
 
 impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
@@ -330,6 +367,19 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         Services::p384_verify_hash(self, key, hash, signature)
     }
 
+    fn rsa_pkcs1v15_sha256_sign(&mut self, private_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &mut [u8]) -> Result<()> {
+        Services::rsa_pkcs1v15_sha256_sign(self, private_der, key_bits, hash, signature)
+    }
+    fn rsa_pkcs1v15_sha256_verify(&mut self, public_der: &[u8], key_bits: usize,
+        hash: &[u8; 32], signature: &[u8]) -> Result<bool> {
+        Services::rsa_pkcs1v15_sha256_verify(self, public_der, key_bits, hash, signature)
+    }
+    fn rsa_generate(&mut self, key_bits: usize, private_der: &mut [u8],
+        public_der: &mut [u8]) -> Result<(usize, usize)> {
+        Services::rsa_generate(self, key_bits, private_der, public_der)
+    }
+
     fn p384_parameter(&self, id: u8) -> Option<&'static [u8]> {
         self.provider.supports_p384().then(|| ec_parameters::p384_parameter(id)).flatten()
     }
@@ -370,7 +420,8 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_cipher(&self, algorithm: u8) -> bool {
-        matches!(algorithm, 13 | 14 | 240) || cfg!(feature = "des-legacy") && matches!(algorithm, 1 | 5)
+        matches!(algorithm, 13 | 14 | 22..=27 | 240)
+            || cfg!(feature = "des-legacy") && matches!(algorithm, 1..=8)
     }
 
     fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
@@ -457,6 +508,50 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 #[cfg(all(test, feature = "software-crypto"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rsa_boundary_rejects_sizes_and_clears_failed_outputs() {
+        struct Failing;
+        impl CryptoProvider for Failing {
+            fn rsa_pkcs1v15_sha256_sign_with_entropy(&mut self, _: &[u8], _: usize,
+                _: &[u8; 32], signature: &mut [u8]) -> crate::Result<()>
+            where Self: Entropy {
+                signature.fill(0x42);
+                Err(crate::Error::Native)
+            }
+            fn rsa_generate_key_pair_with_entropy(&mut self, _: usize,
+                private_der: &mut [u8], public_der: &mut [u8]) -> crate::Result<(usize, usize)>
+            where Self: Entropy {
+                private_der.fill(0x42);
+                public_der.fill(0x42);
+                Err(crate::Error::Native)
+            }
+        }
+        impl Entropy for Failing {
+            fn fill_entropy(&mut self, _: &mut [u8]) -> crate::Result<()> {
+                Err(crate::Error::Native)
+            }
+        }
+        let mut provider = Failing;
+        let mut host = Services::new(&mut provider);
+        let mut signature = [0xaa; 128];
+        let hash = [0u8; 32];
+        assert_eq!(Host::rsa_pkcs1v15_sha256_sign(&mut host, &[], 1024,
+            &hash, &mut signature), Err(Error::Unauthorized));
+        assert_eq!(signature, [0; 128]);
+        signature.fill(0xaa);
+        assert_eq!(Host::rsa_pkcs1v15_sha256_sign(&mut host, &[], 1536,
+            &hash, &mut signature), Err(Error::Bounds));
+        assert_eq!(signature, [0; 128]);
+        assert_eq!(Host::rsa_pkcs1v15_sha256_verify(&mut host, &[], 1024,
+            &hash, &signature[..127]), Ok(false));
+        let mut private = [0xaa; 1200];
+        let mut public = [0xaa; 300];
+        assert_eq!(Host::rsa_generate(&mut host, 1024, &mut private, &mut public),
+            Err(Error::Unauthorized));
+        assert!(private.iter().all(|byte| *byte == 0));
+        assert!(public.iter().all(|byte| *byte == 0));
+    }
 
     #[test]
     fn digest_services_support_one_shot_streaming_and_clear_failures() {
