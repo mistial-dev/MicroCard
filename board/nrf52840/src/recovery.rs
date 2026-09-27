@@ -4,6 +4,9 @@ use nrf52840_pac as pac;
 #[cfg(feature = "usb-ccid")]
 use microcard_core::transport::ENTER_BOOTLOADER_APDU;
 
+#[cfg(feature = "usb-ccid")]
+pub(crate) const FAULT_RESET_APDU: [u8; 5] = [0x80, 0xf4, 0, 0, 0];
+
 #[cfg(feature = "dongle-layout")]
 const CLEAN_BOOT_MAGIC: u8 = 0xa5;
 

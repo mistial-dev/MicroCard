@@ -218,7 +218,7 @@ mod app {
             if let Some(request) = request {
                 WORK_PENDING.store(false, Ordering::Release);
                 let faulted = FAULTED.load(Ordering::Acquire);
-                let fault_reset = faulted && request.as_slice() == [0x80, 0xf4, 0, 0, 0];
+                let fault_reset = faulted && request.as_slice() == crate::recovery::FAULT_RESET_APDU;
                 #[cfg(feature = "dongle-layout")]
                 let fault_uf2 = faulted && crate::recovery::is_enter_uf2_command(&request);
                 let fault_control = fault_reset;

@@ -126,7 +126,14 @@ fn update(change: impl FnOnce(&mut Record)) {
 }
 
 pub(crate) fn boot(reset_reason: u32) {
-    let previous = unsafe { ptr::read_volatile(ptr::addr_of!(RETAINED)) }.valid();
+    // RESETREAS bit 2 is SREQ. Other sources can corrupt retained RAM; a
+    // checksum alone cannot make a stale record trustworthy after those resets.
+    let previous = reset_reason == (1 << 2)
+        && unsafe { ptr::read_volatile(ptr::addr_of!(RETAINED)) }.valid();
+    if !previous {
+        // Force update() to start from EMPTY, without trusting the old fields.
+        unsafe { ptr::write_volatile(ptr::addr_of_mut!(RETAINED).cast::<u32>(), 0) };
+    }
     update(|record| {
         record.reset_reason = reset_reason;
         record.retained_from_previous_boot = u32::from(previous);

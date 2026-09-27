@@ -143,6 +143,9 @@ RSA-1024/2048 generation, sign and verify during boot. It extends the watchdog t
 
 The opt-in `diagnostic-apdu` feature adds unauthenticated, read-only
 `80 F3 00 00 00` for a development board. It is absent from normal firmware.
+When the card is faulted, `80 F4 00 00 00` requests a software reset; CCID
+finishes sending `9000` before the reset. Neither command grants applet or
+administrator access in the faulted state.
 The response is version 1, 100 big-endian 32-bit words followed by `9000`:
 operation ID and phase; journal decision and full generation; page erases,
 programmed words, and elapsed microseconds; reset reason and last failure;
@@ -159,25 +162,25 @@ reader disconnect. A retained `.uninit` record survives soft reset when its
 checksum is valid; RAM corruption on other reset sources makes it unavailable.
 
 The compact DK JCVM link (`--no-default-features --features
-jcvm-hardware,usb-ccid`) measures 303,560 text bytes and 204,824 BSS bytes
-after this change, versus 303,656 and 204,844 in the prior budget record.
-Adding `diagnostic-apdu` measures 312,256 text bytes and 205,372 BSS bytes.
+jcvm-hardware,usb-ccid`) measures 303,696 text bytes and 204,824 BSS bytes
+after this change.
+Adding `diagnostic-apdu` measures 312,776 text bytes and 205,372 BSS bytes.
 These are link measurements, not device latency or flash-wear measurements.
 
 [BOARD_BUDGETS.json](BOARD_BUDGETS.json) records default hardware and explicit reference
 links with profile-specific flash/static-RAM ceilings. The gate checks interpreter and
 crypto-provider isolation. [Crypto provider measurements](CRYPTO_PROVIDER_MEASUREMENTS.json)
 record staged replacement and vendor archive contributions. Vendor dispatch still costs
-more flash than the reference implementation; physical validation remains outstanding.
+more flash than the reference implementation; operation-level physical validation remains open.
 The older [add-on experiment](NRF52840_CC310_PLATFORM_SPIKE.json) is historical evidence.
 Test-only measurement counters are absent from normal firmware. Build from the board directory
 so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
 These ceilings are regression alarms based on measured links. The JCVM standard
-USB image now measures 312,968 text bytes, 148 data bytes, and 204,844 BSS bytes.
-The compact CC310 image measures 303,656 text bytes, saving 9,312 bytes; the link
+USB image now measures 312,960 text bytes, 148 data bytes, and 204,844 BSS bytes.
+The compact CC310 image measures 303,696 text bytes, saving 9,264 bytes; the link
 map and symbol table contain no tiny-crypto-c DES implementation. The software
-reference with DES measures 278,032 text bytes, 0 data bytes, and 203,788 BSS
+reference with DES measures 277,864 text bytes, 0 data bytes, and 203,788 BSS
 bytes. The new JCVM ceilings leave roughly 1.7–2.1 KiB of text headroom. They
 account for CC310 RSA key generation and signatures, P-384 and SHA-384/512
 backfills, AES-CMAC, and optional DES modes and MACs. Standard USB static RAM

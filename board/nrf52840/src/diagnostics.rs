@@ -3,7 +3,7 @@ use microcard_core::hal::Watchdog;
 use nrf52840_pac as pac;
 
 use crate::platform::BoardWatchdog;
-#[cfg(feature = "dongle-layout")]
+#[cfg(any(feature = "dongle-layout", feature = "usb-ccid"))]
 use crate::platform::{feed, now};
 
 #[cfg(feature = "dongle-layout")]
@@ -149,32 +149,34 @@ pub(crate) fn halt_with_diagnostic(watchdog: &mut BoardWatchdog, _code: u8) -> !
                     }
                     if let Some(request) = responder.take_request() {
                         let mut response = heapless::Vec::new();
-                        let uf2_requested = crate::recovery::is_enter_uf2_command(&request);
+                        let uf2_requested = cfg!(feature = "dongle-layout")
+                            && crate::recovery::is_enter_uf2_command(&request);
+                        let reset_requested = request.as_slice() == crate::recovery::FAULT_RESET_APDU;
                         #[cfg(feature = "diagnostic-apdu")]
                         if let Some(diagnostic) = crate::diagnostic_apdu::response(&request) {
                             let _ = responder.respond(diagnostic);
                             class.check_for_app_response();
                             continue;
                         }
-                        let status = if uf2_requested {
+                        let status = if uf2_requested || reset_requested {
                             [0x90, 0x00]
                         } else {
                             [0x6f, _code]
                         };
                         let _ = response.extend_from_slice(&status);
-                        let _ = responder.respond(response);
-                        #[cfg(feature = "dongle-layout")]
-                        if uf2_requested {
-                            // The card cannot establish SCP03 in diagnostic mode. This exact
-                            // command only resets an already unusable development dongle into
-                            // its bootloader, and remains unavailable during normal operation.
-                            let deadline = now().wrapping_add(250_000);
-                            while now().wrapping_sub(deadline) >= 0x8000_0000 {
+                        let queued = responder.respond(response).is_ok();
+                        if queued && (reset_requested || uf2_requested) {
+                            // Let CCID finish the status packet before resetting the USB device.
+                            let deadline = now().wrapping_add(1_000_000);
+                            while !class.take_response_drained()
+                                && now().wrapping_sub(deadline) >= 0x8000_0000 {
                                 feed();
                                 let _ = device.poll(&mut [class]);
                                 class.check_for_app_response();
                             }
-                            crate::recovery::enter_uf2();
+                            if reset_requested { cortex_m::peripheral::SCB::sys_reset(); }
+                            #[cfg(feature = "dongle-layout")]
+                            if uf2_requested { crate::recovery::enter_uf2(); }
                         }
                     }
                     class.check_for_app_response();
