@@ -14,6 +14,7 @@ from jcalgtest_profile import pinned_result, read_result
 from jcvm_transport_acceptance import load_cap, lv
 from scp03_acceptance import Client, ROOT, SIM
 from device_cbor import decode
+from analyze_jcalgtest_performance import inspect_log
 
 
 MODES = (
@@ -54,6 +55,8 @@ def main():
                         help="JCAlgTest source at the pinned client commit")
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--mode", choices=MODES, default="ALG_SUPPORT_BASIC")
+    parser.add_argument("--diagnostics", action="store_true",
+                        help="Compile the host simulator with JCVM instruction diagnostics")
     args = parser.parse_args()
     source = args.source.resolve()
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
@@ -65,7 +68,10 @@ def main():
         parser.error(f"Output directory must be empty: {output}")
     subprocess.run(["python3", str(ROOT / "scripts/jcalgtest_client.py"),
                     "--source", str(source), "--build-only"], check=True, cwd=ROOT)
-    subprocess.run(["cargo", "build", "--locked", "-p", "microcard-sim"], check=True, cwd=ROOT)
+    build = ["cargo", "build", "--locked", "-p", "microcard-sim"]
+    if args.diagnostics:
+        build += ["--features", "microcard-engine-jcvm/diagnostics"]
+    subprocess.run(build, check=True, cwd=ROOT)
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="microcard-jcalgtest-host-") as temporary:
         temporary = pathlib.Path(temporary)
@@ -104,6 +110,9 @@ def main():
                     "UNKONWN_ERROR", "UNKNOWN_ERROR", "CARD_HAS_RETURN_VALUE_",
                     "TIMEOUT", "CRASH")):
                     failures.append(line)
+        logs = list(output.glob("ALGTEST_log_*.log"))
+        session_failures = (inspect_log(logs[0].read_text(errors="replace"))
+                            if len(logs) == 1 else ["missing or ambiguous APDU log"])
         metadata = {
             "mode": args.mode,
             "client_commit": revision,
@@ -113,9 +122,10 @@ def main():
             "csv_files": [path.name for path in csvs],
             "csv_lines": rows,
             "error_rows": len(failures),
+            "session_failures": len(session_failures),
         }
         (output / "host-run.json").write_text(json.dumps(metadata, indent=2) + "\n")
-        if result.returncode or not csvs or rows == 0 or failures:
+        if result.returncode or not csvs or rows == 0 or failures or session_failures:
             raise SystemExit(f"JCAlgTest run is incomplete or failed; see {output}")
         if args.mode == "ALG_SUPPORT_EXTENDED":
             comparison = compare_profile(csvs[0])
