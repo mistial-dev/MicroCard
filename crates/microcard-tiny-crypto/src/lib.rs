@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod hash;
+
 use core::ffi::c_void;
 
 const SCRATCH_BYTES: usize = 2048;
