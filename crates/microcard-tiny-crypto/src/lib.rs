@@ -1,5 +1,7 @@
 #![no_std]
 
+#[cfg(feature = "des-legacy")]
+pub mod des;
 pub mod hash;
 
 use core::ffi::c_void;
