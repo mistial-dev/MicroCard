@@ -15,6 +15,8 @@ SHA-1/224/256 use CC310 when proven. SHA-384/512 use tiny-crypto-c. Digest, init
 
 The scope excludes uncommon RSA sizes, other EC curves, PACE, SEED, ISO9796, and additional random-service aliases. A compact build excludes legacy DES/3DES rows, and its link map must show the implementation absent. The default build includes them. The provider candidate is a design selection, not hardware execution evidence; a CC310 failure must fail the operation without a software retry.
 
+The Java Card factory list is a **profile choice**, not a consequence of which chip runs the VM. The simulator uses the software provider. The DK selects the CC310 or software provider at build time; operations without a CC310 implementation use the same pinned tiny-crypto-c primitive in both builds. `des-legacy` is a separate default-on profile choice, so a compact build can omit DES without changing the hardware/software selection. A provider failure is reported to the applet and never triggers a hidden retry through the other provider. An algorithm enters the declared supported set only after the same operation cases pass against both selected providers, plus a DK reboot check for the hardware build.
+
 Regenerate and verify the committed result with:
 
 ```sh

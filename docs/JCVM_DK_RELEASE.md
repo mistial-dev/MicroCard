@@ -6,11 +6,12 @@ SCP03 administrator session. An applet author does not sign a MicroCard envelope
 Firmware update trust and administrator credentials remain separate requirements.
 MC04's signed-package format is unaffected.
 
-The compatibility target is Java Card Classic 3.0.5 and the **supported** entries
-in the published JCOP4 P71D321 JCAlgTest result. This target does not make
-MicroCard a P71D321 card. A factory may report support only when its key import,
-generation, operation, failure, and reboot behavior passes. Algorithms marked
-unsupported in that result are not implementation targets.
+The behavior target is Java Card Classic 3.0.5. Cryptography follows the
+[declared practical profile](JCVM_CRYPTO_PROFILE.md); the published JCOP4
+P71D321 JCAlgTest result is a comparison reference rather than a parity target.
+A factory may report support only when key import or generation, a real operation,
+failure behavior, and reboot behavior pass on the selected provider. Algorithms
+outside the practical profile are not implementation targets.
 
 Ordinary applet writes now remain in RAM until the idle maintenance task
 authenticates and publishes them, normally two seconds after the last response
