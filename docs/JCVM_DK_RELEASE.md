@@ -791,4 +791,29 @@ The same saved public key verified another on-card signature after the user
 cycled SW8. The diagnostic then reported `reset_reason=4` (`SREQ`), so that
 run proves key recovery after a restart but does not establish that target
 power was removed. This qualifies one CC310-backed P-256 signing path, not
-every P-256 factory or the pending cold-power and provider-failure cases.
+every P-256 factory or the pending provider-failure case.
+
+A later upstream extended JCAlgTest scan was interrupted when target power was
+cycled during the run. Its raw output is retained locally at
+`/private/tmp/microcard-jcalgtest-current-dk-20260927`; the client exited 1,
+and `scripts/analyze_jcalgtest_dk.py` classified its 8,242 probes as
+**incomplete**, with zero completed error rows. This is transport-interruption
+evidence, not an algorithm-support result. After the target was brought back,
+the diagnostic reported `reset_reason=0` and rejected the retained RAM record.
+The saved P-256 key produced another independently verified signature, the
+saved 337-byte PIV object read back byte-for-byte, and JCAlgTest selected.
+That proves recovery of these completed writes across this power event; it
+does not cover a power cut during a journal publication.
+
+An uninterrupted rerun on the same diagnostic image (ELF SHA-256
+`e6e88a9ed78a57613dd5ca39f86e08937ca9e6b9c47eed524914002a6adc889b`)
+completed the pinned upstream `ALG_SUPPORT_EXTENDED` scan. The untouched CSV,
+upstream log, client output, exit code, exact ELF, and analyzer result are in
+`/private/tmp/microcard-jcalgtest-current-complete-dk-20260927`. The analyzer
+accepted **8,607/8,607 probes with zero error rows**, **50 supported** in the
+compact build, no outside-profile support claims, and 238 P71D321-positive
+probes absent. Across 17,222 host PC/SC exchanges, latency was 18 ms median,
+19 ms p95, and 5,853 ms maximum. The untouched CSV SHA-256 is
+`38aa52ec42e94b2d0383c94b8a8a859d0d837ab8def838b8a6b91b4f570a6aff`.
+The installed JCAlgTest applet selected afterward. This is a factory-support
+and transport result; operation-level qualification remains separate.
