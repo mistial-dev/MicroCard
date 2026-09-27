@@ -111,7 +111,7 @@ def main():
         # the snapshot workspace, and deferred ordinary commits. Keep less
         # than 512 bytes of headroom;
         # flash partition bounds are checked separately by prepare_first_flash.py.
-        "jcvm_usb_ccid": 248_400, "jcvm_dongle": 249_900,
+        "jcvm_usb_ccid": 248_900, "jcvm_dongle": 250_300,
     }
     failures = []
     for name, result in variants.items():

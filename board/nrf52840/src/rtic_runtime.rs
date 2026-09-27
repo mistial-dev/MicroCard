@@ -29,6 +29,7 @@ mod app {
         endpoint: WorkerEndpoint,
         responder: usb_ccid::ApduResponder<'static>,
         maintenance_at: Option<u32>,
+        maintenance_by: Option<u32>,
         usb_parts: Option<(pac::CLOCK, pac::USBD, usb_ccid::ApduRequester<'static>)>,
         usb_stack: Option<(BoardUsbDevice, BoardCcidClass)>,
         usb_started: bool,
@@ -59,6 +60,7 @@ mod app {
                 endpoint: WorkerEndpoint(Endpoint::new(card, keys)),
                 responder,
                 maintenance_at: None,
+                maintenance_by: None,
                 usb_parts: Some((cx.device.CLOCK, cx.device.USBD, requester)),
                 usb_stack: None,
                 usb_started: false,
@@ -193,7 +195,7 @@ mod app {
         class.check_for_app_response();
     }
 
-    #[task(priority = 1, local = [endpoint, responder, maintenance_at])]
+    #[task(priority = 1, local = [endpoint, responder, maintenance_at, maintenance_by])]
     async fn worker(cx: worker::Context) {
         let endpoint = &mut cx.local.endpoint.0;
         let responder = cx.local.responder;
@@ -201,8 +203,13 @@ mod app {
             if RESET_PENDING.swap(false, Ordering::AcqRel) {
                 endpoint.reset();
                 *cx.local.maintenance_at = None;
+                *cx.local.maintenance_by = None;
             }
-            if let Some(request) = responder.take_request() {
+            // A continuous APDU stream must not keep ordinary writes in RAM forever.
+            let forced_maintenance = cx.local.maintenance_by
+                .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000);
+            let request = if forced_maintenance { None } else { responder.take_request() };
+            if let Some(request) = request {
                 WORK_PENDING.store(false, Ordering::Release);
                 #[cfg(feature = "latency-trace")]
                 {
@@ -244,7 +251,11 @@ mod app {
                 {
                     #[cfg(feature = "latency-trace")]
                     trace::record(trace::event::RESPONSE_QUEUED, 0);
-                    *cx.local.maintenance_at = Some(now().wrapping_add(2_000_000));
+                    let completed = now();
+                    *cx.local.maintenance_at = Some(completed.wrapping_add(2_000_000));
+                    if cx.local.maintenance_by.is_none() {
+                        *cx.local.maintenance_by = Some(completed.wrapping_add(60_000_000));
+                    }
                 }
                 cortex_m::peripheral::NVIC::pend(pac::Interrupt::USBD);
                 #[cfg(feature = "dongle-layout")]
@@ -257,6 +268,7 @@ mod app {
                 .local
                 .maintenance_at
                 .is_some_and(|deadline| now().wrapping_sub(deadline) < 0x8000_0000)
+                || forced_maintenance
             {
                 #[cfg(feature = "latency-trace")]
                 let started = now();
@@ -281,6 +293,7 @@ mod app {
                     cortex_m::peripheral::SCB::sys_reset();
                 }
                 *cx.local.maintenance_at = None;
+                *cx.local.maintenance_by = None;
                 continue;
             }
             break;

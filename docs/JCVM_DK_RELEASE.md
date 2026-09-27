@@ -14,7 +14,8 @@ unsupported in that result are not implementation targets.
 
 Ordinary applet writes now remain in RAM until the idle maintenance task
 authenticates and publishes them, normally two seconds after the last response
-in a burst. Several commands can share one flash record. A later command can
+in a burst and no later than 60 seconds into continuous traffic. Several commands
+can share one flash record. A later command can
 read those writes before publication, but an unexpected power cut or VM failure
 can lose them. Selecting a different applet flushes the old applet first. `OwnerPIN`
 checkpoints, explicit `JCSystem.commitTransaction()`, and administrator security
@@ -552,10 +553,10 @@ Moving idle maintenance to two seconds after the **last** response in a burst
 reduced the previous incomplete run's flash totals from 31 erases and 267,867
 programmed words to 8 and 16,006. The later complete run used 9 and 32,282;
 these runs differ in successful work, so they are not a controlled wear ratio.
-Continuous command traffic can keep ordinary writes in RAM until traffic
-pauses. The power-cut exposure remains intentional and unbounded in that case;
-PIN, explicit transaction, and administrator boundaries still publish before
-returning.
+Continuous command traffic now forces maintenance after 60 seconds rather than
+keeping ordinary writes in RAM indefinitely. The power-cut exposure remains
+intentional during that window; PIN, explicit transaction, and administrator
+boundaries still publish before returning.
 
 The upstream variable performance scan also completes on fresh DK media with
 firmware ELF SHA-256
@@ -628,7 +629,7 @@ check the standard `abc` vector and provider failure clearing. That closed one
 factory gap. The JCVM USB and dongle links grew by 312 text bytes each, to
 243,048 and 244,540 text bytes, with unchanged static RAM.
 
-The current DK image adds SHA-384/512 through pinned tiny-crypto-c source and
+The digest qualification image adds SHA-384/512 through pinned tiny-crypto-c source and
 the temporary `MessageDigest.OneShot` API. The exact flashed ELF SHA-256 is
 `e2dbffa20ec1bd42b9bc2adbcdb75826231cfbb25b98cffa6df2f35b384830ed`.
 The untouched physical CSV and log are in the ignored local
@@ -643,3 +644,16 @@ upstream scan passed. The JCVM USB and dongle links are 248,112 and 249,596
 text bytes, respectively, with unchanged static RAM. The new support claims
 still require broader negative and interrupted-operation qualification before
 release certification.
+
+The current DK image also bounds deferred ordinary-write maintenance to 60
+seconds of continuous APDUs. Its ELF SHA-256 is
+`3c98e833418e2d158d0084466cc2a0bc253e3ee2edd91609fb1d8186b43164cd`.
+The untouched upstream CSV and log are in ignored local
+`work/jcalgtest-flush-bound-dk/support/`; CSV SHA-256 is
+`af0b0fd7267d13d3560138e8719b961594e80b8b6e60adc52b383126758576aa`.
+All 8,607 physical probes completed with zero error rows and the same 66/222/0
+support map. Across 17,222 APDUs, host-observed median/p95 remained 15/17 ms;
+the maximum increased from 193 to 431 ms. After a debugger reset, the applet
+reselected and the focused SHA-384/512 operations passed again. The JCVM USB
+and dongle links use 248,616 and 249,988 text bytes; static RAM grew by 8 bytes
+for the deadline.
