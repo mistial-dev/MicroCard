@@ -65,6 +65,12 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// DES or two/three-key 3DES, complete blocks, with an optional CBC IV.
+    fn des_crypt(&mut self, _key: &[u8], _iv: Option<&[u8; 8]>, buffer: &mut [u8], _encrypt: bool) -> Result<()> {
+        buffer.fill(0);
+        Err(Error::Unsupported)
+    }
+
     /// P-256 domain fields: prime, A, B, uncompressed generator, and order.
     fn p256_parameter(&self, _id: u8) -> Option<&'static [u8]> { None }
 

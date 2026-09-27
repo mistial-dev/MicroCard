@@ -285,7 +285,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_cipher(&self, algorithm: u8) -> bool {
-        matches!(algorithm, 13 | 14 | 240) // AES-128 CBC/ECB/CTR, no padding
+        matches!(algorithm, 13 | 14 | 240) || cfg!(feature = "des-legacy") && matches!(algorithm, 1 | 5)
     }
 
     fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
@@ -315,6 +315,23 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
             return Err(Error::Unauthorized);
         }
         Ok(())
+    }
+
+    fn des_crypt(&mut self, key: &[u8], iv: Option<&[u8; 8]>, buffer: &mut [u8], encrypt: bool) -> Result<()> {
+        #[cfg(feature = "des-legacy")]
+        {
+            if microcard_tiny_crypto::des::crypt_in_place(key, iv, buffer, encrypt).is_err() {
+                buffer.fill(0);
+                return Err(Error::Unauthorized);
+            }
+            Ok(())
+        }
+        #[cfg(not(feature = "des-legacy"))]
+        {
+            let _ = (key, iv, encrypt);
+            buffer.fill(0);
+            Err(Error::Unsupported)
+        }
     }
 
     fn random(&mut self, output: &mut [u8]) -> Result<()> {

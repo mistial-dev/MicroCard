@@ -53,8 +53,11 @@ pub(crate) fn validate_saved_security(
         }
     }
     if class == ClassId::Cipher {
+        let kind = word(0);
+        let des = matches!(kind, 1 | 5);
+        let chained = matches!(kind, 1 | 13 | 240);
         let pending = word(5);
-        if !matches!(word(0), 13 | 14)
+        if !matches!(kind, 1 | 5 | 13 | 14 | 240)
             || pending == 0
             || word(3) > 1
             || (word(3) == 1 && (material == 0 || !matches!(word(4), 1 | 2)))
@@ -62,7 +65,7 @@ pub(crate) fn validate_saved_security(
             return Err(Error::Format);
         }
         let header = &saved_heap[pending as usize..pending as usize + heap::HEADER];
-        if u16::from_be_bytes([header[2], header[3]]) != if word(0) == 13 { 32 } else { 16 }
+        if u16::from_be_bytes([header[2], header[3]]) != if chained { 32 } else { 16 }
             || header[4] != heap::KIND_BYTE | (heap::CLEAR_ON_RESET << 4)
         {
             return Err(Error::Format);
@@ -70,11 +73,17 @@ pub(crate) fn validate_saved_security(
         if material != 0 {
             let start = material as usize;
             let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
-            if natives::api_class(key_class).map(|entry| entry.id) != Some(ClassId::AESKey)
+            let key_size = saved_heap.get(start + heap::HEADER + 2..start + heap::HEADER + 4);
+            let valid_key_size = if des {
+                matches!(key_size, Some(&[0, 64] | &[0, 128] | &[0, 192]))
+            } else {
+                key_size == Some(&[0, 128])
+            };
+            if natives::api_class(key_class).map(|entry| entry.id)
+                != Some(if des { ClassId::DESKey } else { ClassId::AESKey })
                 || saved_heap[start + 4] != heap::KIND_OBJECT
                 || u16::from_be_bytes([saved_heap[start + 2], saved_heap[start + 3]]) != 6
-                || saved_heap.get(start + heap::HEADER + 2..start + heap::HEADER + 4)
-                    != Some(&[0, 128])
+                || !valid_key_size
             {
                 return Err(Error::Type);
             }

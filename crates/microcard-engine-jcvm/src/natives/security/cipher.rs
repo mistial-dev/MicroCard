@@ -23,23 +23,27 @@ pub(super) fn call(
             let key = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             let kind = word_field(heap, this, KIND)?;
-            let chained = matches!(kind, 13 | 240);
+            let des = matches!(kind, 1 | 5);
+            let chained = matches!(kind, 1 | 13 | 240);
+            let iv_len = if des { 8 } else { 16 };
             let mut iv = Zeroizing::new([0u8; 16]);
             if let Some((array, offset, length)) = vector {
-                if !chained || length != 16 {
+                if !chained || length != iv_len {
                     return crypto_exception(heap, context, 1);
                 }
                 if offset < 0 {
                     return Err(Error::Bounds);
                 }
                 heap.check_access(array, context)?;
-                iv.copy_from_slice(heap.byte_slice(array, offset as usize, 16)?);
+                iv[..iv_len as usize].copy_from_slice(heap.byte_slice(array, offset as usize, iv_len as usize)?);
             }
             heap.check_access(key, context)?;
+            let key_class = if des { ClassId::DESKey } else { ClassId::AESKey };
+            let key_bits = word_field(heap, key, SIZE)?;
             if !matches!(mode, 1 | 2)
                 || super::super::api_class(heap.info(key)?.class).map(|entry| entry.id)
-                    != Some(ClassId::AESKey)
-                || word_field(heap, key, SIZE)? != 128
+                    != Some(key_class)
+                || if des { !matches!(key_bits, 64 | 128 | 192) } else { key_bits != 128 }
             {
                 return crypto_exception(heap, context, 1);
             }
@@ -87,13 +91,15 @@ pub(super) fn call(
             }
             let total = count + length as usize;
             let kind = word_field(heap, this, KIND)?;
+            let des = matches!(kind, 1 | 5);
+            let block_size = if des { 8 } else { 16 };
             let ctr = kind == 240;
             if method == MethodId::doFinal && !ctr
-                && (!total.is_multiple_of(16) || (total == 0 && prior[0] & 0x80 == 0))
+                && (!total.is_multiple_of(block_size) || (total == 0 && prior[0] & 0x80 == 0))
             {
                 return crypto_exception(heap, context, 5);
             }
-            let written = if ctr && method == MethodId::doFinal { total } else { total / 16 * 16 };
+            let written = if ctr && method == MethodId::doFinal { total } else { total / block_size * block_size };
             if written > i16::MAX as usize {
                 return Err(Error::Bounds);
             }
@@ -101,8 +107,9 @@ pub(super) fn call(
             let message = heap.byte_slice(input, offset as usize, length as usize)?;
             let material = heap.get_word(key, MATERIAL)?;
             let prefix = usize::from(symmetric_key_clear_event(word_field(heap, key, KIND)?) != 0);
-            let mut key_bytes = Zeroizing::new([0u8; 16]);
-            key_bytes.copy_from_slice(heap.byte_slice(material, prefix, 16)?);
+            let mut key_bytes = Zeroizing::new([0u8; 24]);
+            let key_len = if des { word_field(heap, key, SIZE)? as usize / 8 } else { 16 };
+            key_bytes[..key_len].copy_from_slice(heap.byte_slice(material, prefix, key_len)?);
             // Stage output only: input may overlap it at any offset. A provider failure
             // must publish neither partial ciphertext nor updated streaming state.
             *budget = budget.checked_sub(total as u32).ok_or(Error::Quota)?;
@@ -118,7 +125,7 @@ pub(super) fn call(
             for (at, output) in result.iter_mut().enumerate() {
                 *output = byte(at);
             }
-            let cbc = kind == 13;
+            let cbc = matches!(kind, 1 | 13);
             let encrypt = word_field(heap, this, COUNTER)? == 2;
             let mut next_iv = Zeroizing::new([0u8; 16]);
             if cbc {
@@ -127,11 +134,16 @@ pub(super) fn call(
                 *next_iv = *iv;
                 if written != 0 {
                     if !encrypt {
-                        next_iv.copy_from_slice(&result[written - 16..]);
+                        next_iv[..block_size].copy_from_slice(&result[written - block_size..]);
                     }
-                    host.aes128_cbc(&key_bytes, &iv, result, encrypt)?;
+                    if des {
+                        let des_iv: &[u8; 8] = iv[..8].try_into().map_err(|_| Error::Bounds)?;
+                        host.des_crypt(&key_bytes[..key_len], Some(des_iv), result, encrypt)?;
+                    } else {
+                        host.aes128_cbc((&key_bytes[..16]).try_into().map_err(|_| Error::Bounds)?, &iv, result, encrypt)?;
+                    }
                     if encrypt {
-                        next_iv.copy_from_slice(&result[written - 16..]);
+                        next_iv[..block_size].copy_from_slice(&result[written - block_size..]);
                     }
                 }
                 if method == MethodId::doFinal {
@@ -145,7 +157,7 @@ pub(super) fn call(
                     let blocks = written.div_ceil(16) as u128;
                     let next = u128::from_be_bytes(*counter)
                         .checked_add(blocks).ok_or(Error::Bounds)?;
-                    host.aes128_ctr(&key_bytes, &counter, result)?;
+                    host.aes128_ctr((&key_bytes[..16]).try_into().map_err(|_| Error::Bounds)?, &counter, result)?;
                     if method == MethodId::update {
                         *next_iv = next.to_be_bytes();
                     }
@@ -153,12 +165,13 @@ pub(super) fn call(
                 if method == MethodId::doFinal {
                     next_iv.fill(0);
                 }
+            } else if des {
+                if written != 0 { host.des_crypt(&key_bytes[..key_len], None, result, encrypt)?; }
             } else {
                 for block in result.chunks_exact_mut(16) {
                     host.aes128_block(
-                        &key_bytes,
-                        block.try_into().map_err(|_| Error::Bounds)?,
-                        encrypt,
+                        (&key_bytes[..16]).try_into().map_err(|_| Error::Bounds)?,
+                        block.try_into().map_err(|_| Error::Bounds)?, encrypt,
                     )?;
                 }
             }

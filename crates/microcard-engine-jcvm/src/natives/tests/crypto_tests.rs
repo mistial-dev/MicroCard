@@ -189,6 +189,58 @@ fn ctr_buffers_partial_updates_and_keeps_failed_output_private() {
 }
 
 #[test]
+fn des_cipher_uses_eight_byte_blocks_and_des_key_sizes() {
+    struct DesHost { ivs: alloc::vec::Vec<Option<[u8; 8]>> }
+    impl crate::host::Host for DesHost {
+        fn supports_cipher(&self, id: u8) -> bool { matches!(id, 1 | 5) }
+        fn des_crypt(&mut self, key: &[u8], iv: Option<&[u8; 8]>, buffer: &mut [u8], _: bool) -> Result<()> {
+            assert_eq!(key, &[0x11; 16]);
+            self.ivs.push(iv.copied());
+            for byte in buffer { *byte ^= 0xaa; }
+            Ok(())
+        }
+    }
+    for (algorithm, chained) in [(1, true), (5, false)] {
+        let (mut slab, mut words, mut tags) = setup(0);
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+        let mut host = DesHost { ivs: vec![] };
+        let key = new_native(&mut heap, ClassId::DESKey, security::STATE_WORDS, 1).unwrap();
+        heap.put_word(key, 0, 3).unwrap();
+        heap.put_word(key, 1, 128).unwrap();
+        let data = heap.new_array(heap::KIND_BYTE, 48, 1).unwrap();
+        heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x11);
+        invoke_security(ClassId::DESKey, MethodId::setKey,
+            &[(true,key),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        invoke_security(ClassId::Cipher, MethodId::getInstance,
+            &[(false,algorithm),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+        let cipher = frame.pop_reference().unwrap();
+        let init = if chained {
+            heap.byte_slice_mut(data, 0, 8).unwrap().fill(0x19);
+            vec![(true,cipher),(true,key),(false,2),(true,data),(false,0),(false,8)]
+        } else {
+            vec![(true,cipher),(true,key),(false,2)]
+        };
+        invoke_security(ClassId::Cipher, MethodId::init,
+            &init, &mut heap, &mut frame, &mut host).unwrap();
+        for (at, byte) in heap.byte_slice_mut(data, 0, 48).unwrap().iter_mut().enumerate() { *byte = at as u8; }
+        for (offset, length, written) in [(0,3,0),(3,13,16)] {
+            invoke_security(ClassId::Cipher, MethodId::update,
+                &[(true,cipher),(true,data),(false,offset),(false,length),(true,data),(false,24)],
+                &mut heap, &mut frame, &mut host).unwrap();
+            assert_eq!(frame.pop_short().unwrap(), written);
+        }
+        assert_eq!(heap.byte_slice(data, 24, 16).unwrap(),
+            &(0u8..16).map(|byte| byte ^ 0xaa).collect::<alloc::vec::Vec<_>>());
+        assert_eq!(host.ivs, [if chained { Some([0x19;8]) } else { None }]);
+        invoke_security(ClassId::Cipher, MethodId::doFinal,
+            &[(true,cipher),(true,data),(false,0),(false,0),(true,data),(false,0)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), 0);
+    }
+}
+
+#[test]
 fn digest_borrows_overlapping_input_and_publishes_only_complete_results() {
     struct DigestHost { input: usize, calls: usize, result: Result<usize> }
     impl crate::host::Host for DigestHost {

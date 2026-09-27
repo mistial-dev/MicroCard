@@ -21,7 +21,7 @@ pub(super) fn get_instance(
             // setSeed uses the same platform SHA-256 boundary as the rest of the
             // card, so a random holder is complete only when both services exist.
             ClassId::RandomData => host.supports_random(id) && host.supports_digest(4),
-            ClassId::Cipher => matches!(id, 13 | 14 | 240) && host.supports_cipher(id),
+            ClassId::Cipher => matches!(id, 1 | 5 | 13 | 14 | 240) && host.supports_cipher(id),
             ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
             ClassId::Signature => matches!(id, 18 | 33) && host.supports_signature(id),
             _ => false,
@@ -33,7 +33,7 @@ pub(super) fn get_instance(
         heap.put_word_unconditional(exception, super::super::REASON_FIELD, 3)?; // NO_SUCH_ALGORITHM
         return Ok(Native::Threw(exception));
     }
-    let pending_bytes = (class == ClassId::Cipher).then_some(if matches!(algorithm, 13 | -16 | 240) { 32 } else { 16 });
+    let pending_bytes = (class == ClassId::Cipher).then_some(if matches!(algorithm, 1 | 13 | -16 | 240) { 32 } else { 16 });
     let random_state = (class == ClassId::RandomData).then_some(random::RANDOM_STATE_BYTES);
     let checksum_state = (class == ClassId::Checksum).then_some(4);
     let extra = pending_bytes.or(random_state).or(checksum_state);

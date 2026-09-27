@@ -9,6 +9,7 @@ software-crypto = ["software-sha1", "software-sha256", "software-sha384512", "so
 software-sha1 = ["dep:sha1"]
 software-sha256 = ["dep:sha2"]
 software-sha384512 = ["dep:microcard-tiny-crypto"]
+des-legacy = ["dep:microcard-tiny-crypto", "microcard-tiny-crypto/des-legacy"]
 software-hmac = ["dep:hmac", "dep:sha2"]
 software-aes = ["dep:aes", "dep:cmac", "dep:ccm"]
 software-p256 = ["dep:p256"]
