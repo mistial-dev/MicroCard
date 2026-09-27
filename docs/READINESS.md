@@ -240,34 +240,14 @@ The P71D321 profile reports object deletion support. JCVM now logs a deletion
 request in authenticated heap version 3 and compacts unreachable objects before
 the next `process()` callback. Host tests cover inherited fields, native handles,
 cycles, transaction abort, and reboot-visible requests. Version 2 media is
-rejected without erasure. A normal, non-traced DK image at `52ed5b4` then
-completed the pinned upstream extended support scan: **8,607 probes, zero
-error rows**, 23 ms median and 24 ms p95 host PC/SC latency, and a 5.28 s
-maximum for renewal. Applet selection passed after reset. The card reported
-55 supported probes; **233 P71D321-supported probes were missing at that revision**. The
-registry used 911 of 1,024 one-time commit and nonce words, so a repeated full
-scan needs counter epoch renewal or a fresh development provision. MJ05 compact
-append records subsequently completed the same physical scan with **76/1,024**
-registry words used, 21 ms median and 23 ms p95 host latency, and a 5.28 s
-renewal maximum. MJ04 media is intentionally incompatible. The exact ELFs, raw
-outputs, and commands are recorded in [the DK results](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk).
-MJ07 then completed the same full scan with **zero error rows**, **20 ms
-median**, **21 ms p95**, and **1,460 ms maximum** host PC/SC latency. The
-registry remained at **4/1,024** commit and nonce words and the heap security
-anchor remained at **1/1,024**; 42 additional heap snapshot nonces were used.
-Selection and factories passed after reset. [The DK evidence](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk)
-records the exact firmware, untouched upstream outputs, and a flash-endurance
-estimate. A write-heavy applet still needs a lifetime budget or higher-endurance
-storage before an always-on production claim.
-The physical performance modes and allocator-pressure qualification are still
-open; P71D321 compatibility cannot yet be claimed.
-
-The 2026-09-26 DK image adds ISO 3309 CRC16 and CRC32. A complete upstream
-extended scan reports **57 supported of 288 P71D321-positive probes**, with
-**231 missing**, zero error rows, and no reader loss. Both operations also pass
-a focused physical smoke after reset, while independent checksum vectors run
-host-side. The [raw result and firmware hash](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk)
-remain the evidence for this narrower claim.
+rejected without erasure. The DK has completed multiple full upstream JCAlgTest scans. The latest verified
+image reports **68 of 288 P71D321-positive probes supported**, **220 missing**,
+zero outside-profile claims, and no reader loss across 8,607 probes. The
+installed applet and focused cryptographic operations still work after reset.
+[The DK result](JCVM_DK_RELEASE.md#jcalgtest-latency-on-the-dk) holds the exact
+firmware hash, untouched CSV and log, performance history, and flash-wear
+measurements. These factory results do not establish P71D321 compatibility;
+each claimed algorithm still needs operation, failure, and reboot qualification.
 
 Further physical acceptance must prove the personalized OpenFIPS201 NIST workflow on
 Makerdiary and cover both engine builds, CC310 independent vectors and

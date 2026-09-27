@@ -65,8 +65,8 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
-The latest extended DK scan reports **66 supported** probes against the
-P71D321 reference's **288**. There are **222 missing supported** probes and
+The latest extended DK scan reports **68 supported** probes against the
+P71D321 reference's **288**. There are **220 missing supported** probes and
 **zero support claims outside the profile**. Both ISO 3309 checksum factories
 now work, and their operations pass focused host vectors and a DK smoke test.
 Both `OwnerPINBuilder` extended variants now
@@ -84,7 +84,7 @@ instead of passing as a partial result.
 | CAP loading | Host accepts unsigned LFDB under SCP03; CAP 2.1 structural checks | Complete supported CAP 2.2 type/dataflow verification |
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
-| API | 66 supported JCAlgTest probes; CRC16/CRC32 and SHA-1/384/512 operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
+| API | 68 supported JCAlgTest probes; CRC16/CRC32, SHA-1/384/512, and AES-128 CBC-MAC operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
 | GlobalPlatform | Host SCP03 unsigned OpenFIPS201 and JCAlgTest load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
@@ -657,3 +657,32 @@ the maximum increased from 193 to 431 ms. After a debugger reset, the applet
 reselected and the focused SHA-384/512 operations passed again. The JCVM USB
 and dongle links use 248,616 and 249,988 text bytes; static RAM grew by 8 bytes
 for the deadline.
+
+The recovery-ownership cleanup image has ELF SHA-256
+`07b596e61adcac08e1681cc46537f0086d3a8d396f566383e0b626efac63c15f`.
+J-Link programmed and verified its 253,952-byte flash range without erasing
+applet storage. The existing JCAlgTest applet selected without reinstalling.
+The focused AES-128 CBC-MAC, digest, and checksum operations passed before
+and after debugger reset, and again after the full scan and reset.
+
+The pinned upstream client completed **8,607/8,607** extended probes with
+**zero error rows and no reader loss**: 68 supported, 220 P71D321-positive
+gaps, and zero outside-profile claims. Its 17,222 host PC/SC APDUs had a
+13.5 ms median, 17 ms p95, and 529 ms maximum. The untouched CSV, upstream
+log, transcript, exact ELF, and analyzer report are preserved locally under
+`artifacts/physical/microcard-jcalgtest-recovery-cleanup-dk-20260926/`;
+the CSV SHA-256 is
+`0ee59e58d28b224cd293d9db58ba87c78f3120a33e4f83b57f8bece79f33e05d`.
+The JCVM USB link is 253,000 text, 148 data, and 204,844 BSS bytes.
+The previous clean image used 248,616 text bytes and the same static RAM.
+This is a feature and structure change, not evidence of a device latency
+improvement. Runtime flash-operation counts and heap high-water were not
+captured by this normal image; earlier diagnostic counts belong to different
+ELFs and must not be attributed to this scan.
+
+The final local checkpoint, host PIV vectors, and NIST transport check passed.
+The full NIST contact suite was not rerun at this revision because the
+separately installed Test Runner 5.0.1 JAR is absent from the configured
+upstream checkout. A simulator-only timing sample measured 12.56 ms for
+cold startup plus SELECT and 2.73 ms median, 2.91 ms p95 for 100 warm
+GET DATA commands. Those host numbers are separate from PC/SC device latency.
