@@ -159,7 +159,7 @@ int32_t microcard_cc310_p256_ecdh(const uint8_t *private_key,
 
 // The pinned driver's clone is a 240-byte copy, with no address fixups.
 _Static_assert(sizeof(cc3xx_hash_operation_t) == 240u, "CC310 hash context changed");
-static int32_t microcard_cc310_sha2_stream(uint8_t *state, size_t state_size,
+static int32_t microcard_cc310_hash_stream(uint8_t *state, size_t state_size,
     const uint8_t *input, size_t input_size, uint8_t *output,
     psa_algorithm_t algorithm, size_t digest_size)
 {
@@ -201,13 +201,20 @@ static int32_t microcard_cc310_sha2_stream(uint8_t *state, size_t state_size,
 int32_t microcard_cc310_sha256_stream(uint8_t *state, size_t state_size,
     const uint8_t *input, size_t input_size, uint8_t *output)
 {
-    return microcard_cc310_sha2_stream(state, state_size, input, input_size,
+    return microcard_cc310_hash_stream(state, state_size, input, input_size,
         output, PSA_ALG_SHA_256, 32u);
 }
 
 int32_t microcard_cc310_sha224_stream(uint8_t *state, size_t state_size,
     const uint8_t *input, size_t input_size, uint8_t *output)
 {
-    return microcard_cc310_sha2_stream(state, state_size, input, input_size,
+    return microcard_cc310_hash_stream(state, state_size, input, input_size,
         output, PSA_ALG_SHA_224, 28u);
+}
+
+int32_t microcard_cc310_sha1_stream(uint8_t *state, size_t state_size,
+    const uint8_t *input, size_t input_size, uint8_t *output)
+{
+    return microcard_cc310_hash_stream(state, state_size, input, input_size,
+        output, PSA_ALG_SHA_1, 20u);
 }

@@ -107,10 +107,10 @@ def main():
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
         "dongle": 244_000, "jcvm_development_debug": 122_000,
-        # Measured with CRC16/CRC32, SHA-224, the snapshot workspace, and
+        # Measured with CRC16/CRC32, SHA-1/SHA-224, the snapshot workspace, and
         # deferred ordinary commits. Keep less than 512 bytes of headroom;
         # flash partition bounds are checked separately by prepare_first_flash.py.
-        "jcvm_usb_ccid": 243_000, "jcvm_dongle": 244_350,
+        "jcvm_usb_ccid": 243_200, "jcvm_dongle": 244_700,
     }
     failures = []
     for name, result in variants.items():

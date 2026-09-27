@@ -1,6 +1,10 @@
 //! Primitives from RustCrypto; SCP03 v1.1.2 §§4.1.4–4.1.5.
 #[cfg(feature = "software-sha256")]
 mod streaming_sha256;
+#[cfg(feature = "software-sha1")]
+mod streaming_sha1;
+#[cfg(any(feature = "software-sha1", feature = "software-sha256"))]
+mod streaming_hash;
 
 /// Opaque provider state, transient only; zero initializes a new SHA-256 operation.
 pub const SHA256_STATE_BYTES: usize = 256;
@@ -60,6 +64,26 @@ macro_rules! software_method {
 /// errors must not expose a partial result and must leave it all-zero.
 /// The same rule applies to every variable-size output buffer below.
 pub trait CryptoProvider {
+    fn supports_sha1(&self) -> bool { cfg!(feature = "software-sha1") }
+
+    fn sha1_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],
+        mut output: Option<&mut [u8; 20]>) -> Result<()> {
+        if let Some(output) = output.as_mut() { output.fill(0); }
+        #[cfg(feature = "software-sha1")]
+        { streaming_sha1::run(state, input, output) }
+        #[cfg(not(feature = "software-sha1"))]
+        {
+            let _ = input;
+            state.fill(0);
+            Err(Error::Native)
+        }
+    }
+
+    fn sha1_into(&mut self, data: &[u8], output: &mut [u8; 20]) -> Result<()> {
+        let mut state = [0; SHA256_STATE_BYTES];
+        self.sha1_stream(&mut state, data, Some(output))
+    }
+
     fn supports_sha224(&self) -> bool { cfg!(feature = "software-sha256") }
 
     fn sha224_stream(&mut self, state: &mut [u8; SHA256_STATE_BYTES], input: &[u8],

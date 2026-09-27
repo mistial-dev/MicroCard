@@ -7,7 +7,7 @@ fn main() {
         "select exactly one firmware engine: engine-mc04 or engine-jcvm"
     );
     let full_hardware = std::env::var_os("CARGO_FEATURE_CC310").is_some();
-    let software_enabled = ["CRYPTO", "SHA256", "HMAC", "AES", "P256"]
+    let software_enabled = ["CRYPTO", "SHA1", "SHA256", "HMAC", "AES", "P256"]
         .iter()
         .any(|name| std::env::var_os(format!("CARGO_FEATURE_SOFTWARE_{name}")).is_some());
     assert!(
@@ -423,7 +423,7 @@ fn configure_cc310_psa(
                 ("microcard_cc310_p256_sign_hash", 80),
                 ("microcard_cc310_p256_verify_hash", 80),
                 ("microcard_cc310_p256_ecdh", 88),
-                ("microcard_cc310_sha2_stream", 288),
+                ("microcard_cc310_hash_stream", 288),
                 ("microcard_cc310_sha256_stream", 32),
                 ("microcard_cc310_sha224_stream", 32),
             ],

@@ -210,6 +210,17 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
         Ok(())
     }
 
+    fn sha1_stream(&mut self, state: &mut [u8; microcard_engine_jcvm::host::SHA256_STATE_BYTES],
+        input: &[u8], mut output: Option<&mut [u8; 20]>) -> Result<()> {
+        let result = self.provider.sha1_stream(state, input, output.as_deref_mut());
+        if result.is_err() {
+            state.fill(0);
+            if let Some(output) = output { output.fill(0); }
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
     fn p256_sign_hash(&mut self, key: &[u8; 32], message: &[u8; 32], output: &mut [u8; 72]) -> Result<usize> {
         Services::p256_sign_hash(self, key, message, output)
     }
@@ -241,7 +252,9 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_digest(&self, algorithm: u8) -> bool {
-        algorithm == 4 || algorithm == 7 && self.provider.supports_sha224()
+        algorithm == 1 && self.provider.supports_sha1()
+            || algorithm == 4
+            || algorithm == 7 && self.provider.supports_sha224()
     }
     fn supports_random(&self, algorithm: u8) -> bool {
         matches!(algorithm, 1 | 2)
@@ -287,6 +300,8 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
             return Err(Error::Unsupported);
         }
         let result = match algorithm {
+            1 => self.provider.sha1_into(message,
+                output.get_mut(..20).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 20),
             4 => self.provider.sha256_into(message,
                 output.get_mut(..32).ok_or(Error::Bounds)?.try_into().unwrap()).map(|()| 32),
             7 => self.provider.sha224_into(message,
@@ -306,9 +321,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sha224_service_supports_one_shot_streaming_and_clears_failures() {
+    fn digest_services_support_one_shot_streaming_and_clear_failures() {
         let mut provider = Provider::default();
         let mut host = Services::new(&mut provider);
+        assert!(Host::supports_digest(&host, 1));
+        let mut sha1 = [0xaa; 20];
+        assert_eq!(Host::digest(&mut host, 1, b"abc", &mut sha1), Ok(20));
+        assert_eq!(sha1, [
+            0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a,
+            0xba, 0x3e, 0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c,
+            0x9c, 0xd0, 0xd8, 0x9d,
+        ]);
+        let mut sha1_state = [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES];
+        Host::sha1_stream(&mut host, &mut sha1_state, b"a", None).unwrap();
+        Host::sha1_stream(&mut host, &mut sha1_state, b"bc", Some(&mut sha1)).unwrap();
+        assert_eq!(sha1_state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
+        assert_eq!(sha1, [
+            0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a,
+            0xba, 0x3e, 0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c,
+            0x9c, 0xd0, 0xd8, 0x9d,
+        ]);
         assert!(Host::supports_digest(&host, 7));
         let mut output = [0xaa; 28];
         assert_eq!(Host::digest(&mut host, 7, b"abc", &mut output), Ok(28));
@@ -327,6 +359,13 @@ mod tests {
 
         struct Failing;
         impl CryptoProvider for Failing {
+            fn supports_sha1(&self) -> bool { true }
+            fn sha1_stream(&mut self, state: &mut [u8; crate::crypto::SHA256_STATE_BYTES],
+                _input: &[u8], output: Option<&mut [u8; 20]>) -> crate::Result<()> {
+                state.fill(0x42);
+                if let Some(output) = output { output.fill(0x42); }
+                Err(crate::Error::Native)
+            }
             fn supports_sha224(&self) -> bool { true }
             fn sha224_stream(&mut self, state: &mut [u8; crate::crypto::SHA256_STATE_BYTES],
                 _input: &[u8], output: Option<&mut [u8; 28]>) -> crate::Result<()> {
@@ -350,6 +389,11 @@ mod tests {
         output.fill(0xaa);
         assert_eq!(Host::digest(&mut host, 7, b"x", &mut output), Err(Error::Unauthorized));
         assert_eq!(output, [0; 28]);
+        sha1_state.fill(0xaa);
+        sha1.fill(0xaa);
+        assert_eq!(Host::sha1_stream(&mut host, &mut sha1_state, b"x", Some(&mut sha1)), Err(Error::Unauthorized));
+        assert_eq!(sha1_state, [0; microcard_engine_jcvm::host::SHA256_STATE_BYTES]);
+        assert_eq!(sha1, [0; 20]);
     }
 
     #[derive(Default)]
