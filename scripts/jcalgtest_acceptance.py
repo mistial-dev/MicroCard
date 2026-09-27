@@ -22,9 +22,11 @@ GET_VERSION = "b0e100000100"
 # byte is the algorithm selector. These bounds are the complete contiguous
 # constant ranges in JCAlgTest's Java Card 3.0.5 source. The second response
 # byte is zero for supported or CryptoException.NO_SUCH_ALGORITHM (three).
+# This quick host check uses the standard DES-enabled software profile. The
+# physical scan supplies the separate provider and reboot evidence.
 FACTORIES = {
-    "Cipher": (0x11, 29, {13, 14}),
-    "Signature": (0x12, 49, {18, 33}),
+    "Cipher": (0x11, 29, {*range(1, 9), 13, 14, *range(22, 28)}),
+    "Signature": (0x12, 49, {*range(2, 9), 18, 19, 20, 33, 34, 40, 47, 48}),
     "KeyAgreement": (0x13, 9, {3}),
     "MessageDigest": (0x15, 11, {1, 4, 5, 6, 7}),
     "RandomData": (0x16, 6, {1, 2}),
