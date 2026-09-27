@@ -115,17 +115,23 @@ JCVM firmware requires exactly one complete provider selection. From this direct
 
 ```sh
 cargo build --release --locked --features engine-jcvm,usb-ccid
-cargo build --release --locked --no-default-features --features engine-jcvm,cc310,usb-ccid
-cargo build --release --locked --no-default-features --features engine-jcvm,software-crypto,des-legacy,usb-ccid
+cargo build --release --locked --no-default-features --features jcvm-hardware,usb-ccid
+cargo build --release --locked --no-default-features --features jcvm-software,des-legacy,usb-ccid
 ```
 
-The first command uses CC310, including RSA, with DES compatibility enabled. The
-second is the compact CC310 selection without DES; the third selects software
-primitives with the same DES selection. Omit `des-legacy` for a compact software
-build. RSA bridge code is linked only into JCVM images, so MC04 builds do not
-carry its self-test or allocator. The same Java Card factories require operation
-tests on each selected provider. A CC310 operation failure returns to the caller
-without a software retry. Use the separate `engine-mc04` feature for MC04 images.
+The first command uses the default CC310 provider, including hardware RSA key
+generation and DES compatibility. The second selects CC310 explicitly and omits
+DES; the third selects the software provider with DES. Add or omit `des-legacy`
+independently of the provider. `jcvm-hardware` and `jcvm-software` are exclusive;
+the build rejects both or neither. P-384 and SHA-384/512 use tiny-crypto-c in the
+JCVM board profile because the pinned CC310 driver does not provide those selected
+operations. A CC310 operation failure returns without a software retry. RSA bridge
+code is linked only into JCVM images, so MC04 carries neither it nor its allocator.
+Use the separate `engine-mc04` feature for MC04 images.
+
+The opt-in `crypto-profile-self-test` feature exercises P-384 operations and CC310
+RSA-1024/2048 generation, sign and verify during boot. It extends the watchdog to
+300 seconds for that diagnostic image only; ordinary firmware keeps 10 seconds.
 
 [BOARD_BUDGETS.json](BOARD_BUDGETS.json) records default hardware and explicit reference
 links with profile-specific flash/static-RAM ceilings. The gate checks interpreter and
@@ -136,10 +142,15 @@ The older [add-on experiment](NRF52840_CC310_PLATFORM_SPIKE.json) is historical 
 Test-only measurement counters are absent from firmware. Build from the board directory
 so Cargo applies `.cargo/config.toml`; `--manifest-path` from the root does not apply it.
 
-These ceilings are regression alarms based on measured links. The current JCVM
-USB and dongle profiles have about 0.8–1 KiB of flash headroom; static-RAM
-headroom is about 2 KiB. The JCVM limits were revised after adding checks that
-keep unchanged PIN and card-state calls from anchoring ordinary applet writes.
+These ceilings are regression alarms based on measured links. The JCVM standard
+USB image now measures 312,944 text bytes, 148 data bytes, and 204,844 BSS bytes.
+The compact CC310 image measures 303,704 text bytes, saving 9,240 bytes; the link
+map and symbol table contain no tiny-crypto-c DES implementation. The software
+reference with DES measures 278,008 text bytes, 0 data bytes, and 203,788 BSS
+bytes. The new JCVM ceilings leave roughly 1.7–2.1 KiB of text headroom. They
+account for CC310 RSA key generation and signatures, P-384 and SHA-384/512
+backfills, AES-CMAC, and optional DES modes and MACs. Standard USB static RAM
+usage is 204,992 bytes, leaving 57,152 bytes before stacks and other runtime use.
 They are not the physical firmware partition size. The linker scripts set
 the actual DK and dongle code, staging, image, heap, and journal regions. The
 earlier USB ceilings were below their own recorded measurements, so the gate could

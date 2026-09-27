@@ -3,6 +3,7 @@
 import argparse
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -62,6 +63,16 @@ def artifact(name, arguments, engine="mc04", hardware=True):
     # Different profiles must never overwrite the ELF between linking and inspection.
     binary, link_map, result = measure(arguments, engine, BOARD / "target" / "profiles" / name)
     inspect_link(binary, link_map, hardware)
+    if name in {"jcvm-dk-usb", "jcvm-dk-usb-compact"}:
+        symbols = subprocess.run(["arm-none-eabi-nm", "-C", str(binary)],
+            check=True, capture_output=True, text=True).stdout
+        des_symbols = re.search(r"\b(?:mc_tc_des_|tc_des_|TC_DES_)", symbols)
+        des_objects = re.search(r"libmicrocard_tiny_crypto[^\n]*-des(?:_bridge)?\.o",
+                                link_map.read_text())
+        if name == "jcvm-dk-usb-compact" and (des_symbols or des_objects):
+            raise SystemExit("compact JCVM link retains tiny-crypto-c DES code")
+        if name == "jcvm-dk-usb" and (not des_symbols or not des_objects):
+            raise SystemExit("standard JCVM link lost expected DES code")
     if hardware:
         tree = subprocess.run(["cargo", "tree", "--locked", "--edges", "normal", "--prefix", "none",
             "--features", f"engine-{engine}", *arguments], cwd=BOARD,
@@ -90,6 +101,14 @@ def main():
         cwd=BOARD, capture_output=True, text=True)
     if result.returncode == 0 or "cc310 excludes software providers" not in result.stderr:
         raise SystemExit("board failed to reject mixed hardware/reference providers")
+    for features, expected in [
+        ("engine-jcvm", "JCVM requires exactly one complete provider"),
+        ("jcvm-hardware,jcvm-software", "cc310 excludes software providers"),
+    ]:
+        result = subprocess.run(["cargo", "check", "--locked", "--no-default-features",
+            "--features", features], cwd=BOARD, capture_output=True, text=True)
+        if result.returncode == 0 or expected not in result.stderr:
+            raise SystemExit(f"board accepted invalid JCVM provider selection: {features}")
     variants = {
         "software_reference": artifact("mc04-reference", ["--no-default-features", "--features", "software-crypto"], hardware=False),
         "hardware_release": artifact("mc04-release", ["--no-default-features", "--features", "cc310"]),
@@ -98,6 +117,11 @@ def main():
         "dongle": artifact("mc04-dongle", ["--features", "dongle"]),
         "jcvm_development_debug": artifact("jcvm-dk", [], "jcvm"),
         "jcvm_usb_ccid": artifact("jcvm-dk-usb", ["--features", "usb-ccid"], "jcvm"),
+        "jcvm_usb_ccid_compact": artifact("jcvm-dk-usb-compact",
+            ["--no-default-features", "--features", "jcvm-hardware,usb-ccid"], "jcvm"),
+        "jcvm_usb_ccid_software": artifact("jcvm-dk-usb-software",
+            ["--no-default-features", "--features", "jcvm-software,des-legacy,usb-ccid"],
+            "jcvm", hardware=False),
         "jcvm_dongle": artifact("jcvm-dongle", ["--features", "dongle"], "jcvm"),
     }
     # Measured links plus bounded headroom. RTIC keeps USB and endpoint task
@@ -106,18 +130,19 @@ def main():
     text_limits = {
         "software_reference": 110_000, "hardware_release": 145_000,
         "development_debug": 145_000, "usb_ccid": 241_000,
-        "dongle": 244_000, "jcvm_development_debug": 122_000,
-        # Measured with CRC16/CRC32, SHA-1/224/384/512, OneShot digests,
-        # AES-128 CBC-MAC, the snapshot workspace, and deferred ordinary
-        # commits. Keep less than 512 bytes of headroom;
-        # flash partition bounds are checked separately by prepare_first_flash.py.
-        "jcvm_usb_ccid": 253_300, "jcvm_dongle": 254_700,
+        "dongle": 244_000, "jcvm_development_debug": 141_000,
+        # Measured after CC310 RSA key generation/signatures, P-384 and SHA-384/512
+        # backfills, AES-CMAC, and DES compatibility. Each JCVM ceiling keeps
+        # roughly 2 KiB of regression headroom; linker regions are checked separately.
+        "jcvm_usb_ccid": 315_000, "jcvm_usb_ccid_compact": 305_500,
+        "jcvm_usb_ccid_software": 280_000, "jcvm_dongle": 316_500,
     }
     failures = []
     for name, result in variants.items():
-        usb_profile = name in {"usb_ccid", "dongle", "jcvm_usb_ccid", "jcvm_dongle"}
+        usb_profile = name in {"usb_ccid", "dongle", "jcvm_usb_ccid", "jcvm_usb_ccid_compact",
+                               "jcvm_usb_ccid_software", "jcvm_dongle"}
         result["ceilings"] = {"text_bytes": text_limits[name],
-            "data_bytes": 0 if name == "software_reference" else 160,
+            "data_bytes": 0 if name in {"software_reference", "jcvm_usb_ccid_software"} else 160,
             "bss_bytes": 207_000 if usb_profile else 199_000}
         for field, ceiling in result["ceilings"].items():
             if result[field] > ceiling:
