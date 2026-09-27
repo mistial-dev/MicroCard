@@ -2,7 +2,9 @@
 use super::*;
 use crate::host::SHA256_STATE_BYTES;
 
-pub(super) const PRIVATE_BYTES: usize = 1202;
+// The selected CC310 bridge requires 1250 caller-owned DER bytes even when
+// the encoded key is shorter; two additional bytes hold the stored length.
+pub(super) const PRIVATE_BYTES: usize = 1252;
 const PUBLIC_MAX: usize = 300;
 
 fn der_item<'a>(bytes: &'a [u8], offset: &mut usize, tag: u8) -> Option<&'a [u8]> {
