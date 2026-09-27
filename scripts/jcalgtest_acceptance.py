@@ -24,7 +24,7 @@ GET_VERSION = "b0e100000100"
 # byte is zero for supported or CryptoException.NO_SUCH_ALGORITHM (three).
 FACTORIES = {
     "Cipher": (0x11, 29, {13, 14}),
-    "Signature": (0x12, 49, {33}),
+    "Signature": (0x12, 49, {18, 33}),
     "KeyAgreement": (0x13, 9, {3}),
     "MessageDigest": (0x15, 11, {1, 4, 5, 6, 7}),
     "RandomData": (0x16, 6, {1, 2}),

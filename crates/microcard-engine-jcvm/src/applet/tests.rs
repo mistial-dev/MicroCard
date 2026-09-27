@@ -672,7 +672,7 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
         ),
         Err(Error::IncompatibleState)
     ));
-    for case in 0..32 {
+        for case in 0..33 {
         let mut invalid = saved_heap.clone();
         let root = match case {
             0 => instance + 2, // A field is not an object handle.
@@ -797,10 +797,15 @@ fn an_applet_installs_registers_selects_and_answers_a_command() {
                 invalid[0] = 4;
                 instance
             } // Unknown header version.
-            31 => {
-                invalid[predecrement_flag as usize + 4] &= 0x0f;
-                instance
-            }
+                31 => {
+                    invalid[predecrement_flag as usize + 4] &= 0x0f;
+                    instance
+                }
+                32 => {
+                    invalid[mac as usize + heap::HEADER + 10..mac as usize + heap::HEADER + 12]
+                        .copy_from_slice(&hash_state.to_be_bytes());
+                    instance
+                }
             _ => {
                 let at = typed_references as usize + heap::HEADER;
                 invalid[at..at + 2].copy_from_slice(&explicit_exception.to_be_bytes());
