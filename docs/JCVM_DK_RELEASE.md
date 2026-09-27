@@ -694,3 +694,23 @@ The report and logs are in `work/p256-identity-contact-20260926/`.
 A simulator-only timing sample measured 12.56 ms for
 cold startup plus SELECT and 2.73 ms median, 2.91 ms p95 for 100 warm
 GET DATA commands. Those host numbers are separate from PC/SC device latency.
+
+On 2026-09-27, the RTIC response-drained maintenance image completed the
+pinned upstream extended support scan on the DK: **8,607/8,607 probes, zero
+error rows, and no reader loss**. The compact hardware profile omits optional
+DES/3DES compatibility, so it reports **50 supported** probes, 238 fewer than
+P71D321, with no outside-profile claims. The 17,222 host PC/SC APDUs measured
+18 ms median, 20 ms p95, and 5,454 ms maximum. That maximum is host-observed
+latency, not a measured device-only flash time. The installed applet still
+selected after debugger reset. The diagnostic record then showed no latched
+failure and no idle flash write after the last measured APDU.
+
+The exact flashed ELF SHA-256 is
+`a0e638dde018e4a67e0d655159ade0a9e6029ae51e6e37cc3dd39544e0553d73`.
+The untouched CSV SHA-256 is
+`5b6f1d0812f59fb8b565e99403711b742996a6481da70825c0b0027497de0240`.
+The raw CSV, upstream log, analyzer output, exact ELF, and reproduction command
+are preserved locally under
+`artifacts/physical/microcard-jcalgtest-rtic-durability-dk-20260927/`.
+This scan establishes transport continuity and factory classifications. It
+does not establish operation-level support for each reported algorithm.

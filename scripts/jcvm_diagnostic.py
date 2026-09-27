@@ -70,8 +70,10 @@ def query(reader: str, classes: pathlib.Path, wait_seconds: float = 10) -> dict:
                 check=True,
             )
             response = bytes.fromhex(result.stdout.strip().splitlines()[-1])
-        except (subprocess.SubprocessError, IndexError):
+        except (subprocess.SubprocessError, IndexError) as error:
             if time.monotonic() >= deadline:
+                if isinstance(error, subprocess.CalledProcessError):
+                    raise RuntimeError(error.stderr.strip() or "PC/SC diagnostic query failed") from error
                 raise
             time.sleep(0.5)
             continue
