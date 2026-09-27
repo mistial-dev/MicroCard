@@ -13,7 +13,7 @@ generation, operation, failure, and reboot behavior passes. Algorithms marked
 unsupported in that result are not implementation targets.
 
 Ordinary applet writes now remain in RAM until the idle maintenance task
-authenticates and publishes them, normally two seconds after the first response
+authenticates and publishes them, normally two seconds after the last response
 in a burst. Several commands can share one flash record. A later command can
 read those writes before publication, but an unexpected power cut or VM failure
 can lose them. Selecting a different applet flushes the old applet first. `OwnerPIN`
@@ -506,7 +506,7 @@ returned a quota error before publication, and the reader stayed available.
 The native crypto factory now reports a catchable
 `SystemException.NO_RESOURCE`; on the same near-full DK media, JCAlgTest
 returned its `F205` exception result while the reader stayed available.
-A fresh installation and complete upstream performance run are still needed.
+A fresh installation and complete upstream performance run followed.
 
 For the full scan, pass `ALG_SUPPORT_EXTENDED` to
 `scripts/jcalgtest_client.py` with the pinned client checkout and an empty
@@ -527,3 +527,32 @@ failure, the measured JCVM links are **242,696 text / 204,836 BSS bytes** for
 DK USB and **244,044 text / 204,852 BSS bytes** for the dongle. The updated
 text ceilings leave 304 and 306 bytes of headroom. These are link sizes, not
 measured flash endurance or power-cut durability.
+
+The pinned upstream static performance scan now completes on the DK with
+firmware ELF SHA-256
+`89202803793daa196b318435c2a00eb7a70d33e8bf029ad94744bc61dcff2d52`.
+Its untouched CSV and log are in the ignored local
+`artifacts/physical/microcard-jcalgtest-static-byte-dk-20260926/static/`
+directory. The analyzer reports **1,900 completed method rows**, 64 measured,
+1,824 unsupported algorithms, 12 illegal values, and no unmeasured rows,
+negative timings, transport errors, or lost sessions. The PC/SC transcript has
+2,545 APDUs, 19 ms median, 64 ms p95, and 35.255 s maximum. The maximum is
+JCAlgTest's Java software-AES test, 50 blocks per command at 704.63 ms per
+block. The diagnostic trace recorded 9 erases, 32,282 programmed words, 47
+CCID time extensions, and no JCVM session error. Applet selection and its
+probe passed again after a debugger reset.
+
+Earlier scans failed at the software-AES preparation command with `6982` and
+then `6A82`. The VM treated a byte static field as two image bytes. JCAlgTest
+accesses one at the last byte of its static image, so the VM raised a bounds
+error and discarded selection. Byte statics now use one image byte, with
+sign extension on read, as Java Card specifies. The performance analyzer also
+checks the raw APDU log so a lost session cannot appear as merely unmeasured.
+Moving idle maintenance to two seconds after the **last** response in a burst
+reduced the previous incomplete run's flash totals from 31 erases and 267,867
+programmed words to 8 and 16,006. The later complete run used 9 and 32,282;
+these runs differ in successful work, so they are not a controlled wear ratio.
+Continuous command traffic can keep ordinary writes in RAM until traffic
+pauses. The power-cut exposure remains intentional and unbounded in that case;
+PIN, explicit transaction, and administrator boundaries still publish before
+returning. Variable, ECC, and fingerprint performance modes remain unverified.
