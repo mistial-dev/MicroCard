@@ -145,3 +145,46 @@ pub(crate) fn validate_saved_security(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn p384_recovery_checks_key_material_length_and_pair_sizes() {
+        let mut slab = [0; 512];
+        let mut heap = Heap::new(&mut slab).unwrap();
+        let public = new_native(&mut heap, ClassId::ECPublicKey, STATE_WORDS, 1).unwrap();
+        let private = new_native(&mut heap, ClassId::ECPrivateKey, STATE_WORDS, 1).unwrap();
+        for (key, kind, length) in [(public, 11, 98), (private, 12, 49)] {
+            let material = heap.new_array(heap::KIND_BYTE, length, 1).unwrap();
+            heap.put_word(key, KIND, kind).unwrap();
+            heap.put_word(key, SIZE, 384).unwrap();
+            heap.put_word(key, MATERIAL, material).unwrap();
+        }
+        let pair = new_native(&mut heap, ClassId::KeyPair, STATE_WORDS, 1).unwrap();
+        heap.put_word(pair, KIND, 5).unwrap();
+        heap.put_word(pair, SIZE, 384).unwrap();
+        heap.put_word(pair, MATERIAL, public).unwrap();
+        heap.put_word(pair, PENDING, private).unwrap();
+        let image = heap.image().to_vec();
+        for (class, reference) in [(ClassId::ECPublicKey, public),
+            (ClassId::ECPrivateKey, private), (ClassId::KeyPair, pair)] {
+            let start = reference as usize + heap::HEADER;
+            validate_saved_security(class, &image[start..start + STATE_WORDS as usize * 2], &image).unwrap();
+        }
+        let mut wrong_length = image.clone();
+        let material = heap.get_word(private, MATERIAL).unwrap() as usize;
+        wrong_length[material + 3] = 48;
+        let key_start = private as usize + heap::HEADER;
+        assert_eq!(validate_saved_security(ClassId::ECPrivateKey,
+            &wrong_length[key_start..key_start + STATE_WORDS as usize * 2], &wrong_length),
+            Err(Error::Format));
+        let mut wrong_size = image.clone();
+        wrong_size[private as usize + heap::HEADER + SIZE * 2] = 1;
+        wrong_size[private as usize + heap::HEADER + SIZE * 2 + 1] = 0;
+        let start = pair as usize + heap::HEADER;
+        assert_eq!(validate_saved_security(ClassId::KeyPair,
+            &wrong_size[start..start + STATE_WORDS as usize * 2], &wrong_size), Err(Error::Type));
+    }
+}
