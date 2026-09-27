@@ -76,7 +76,12 @@ mod app {
         timer.events_compare[0].write(|w| w);
         feed();
         cortex_m::peripheral::NVIC::pend(pac::Interrupt::USBD);
-        if WORK_PENDING.load(Ordering::Acquire) {
+        // Retry a handoff if the worker was exiting when the USB task spawned it.
+        // The tick does not schedule maintenance on its own.
+        if WORK_PENDING.load(Ordering::Acquire)
+            || IDLE_MAINTENANCE.load(Ordering::Acquire)
+            || RESET_PENDING.load(Ordering::Acquire)
+        {
             let _ = worker::spawn();
         }
         #[cfg(feature = "dongle-layout")]

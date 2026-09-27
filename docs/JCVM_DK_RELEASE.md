@@ -725,3 +725,12 @@ then programmed zero words and erased zero pages. The applet selected after
 debugger reset. This is one timing sample, not an RSA operation or endurance
 qualification; no improvement claim follows from comparing it with another
 random key-generation run.
+
+With that diagnostic image, an individually switched USB hub disconnected
+the DK target port while leaving J-Link powered. After reconnect, the CCID
+reader re-enumerated and the physical JCAlgTest select-only acceptance passed
+without a manual reset or applet reinstall. This covers an idle USB disconnect
+and reconnect; interruption during an APDU and a true target power cut remain
+separate physical checks. The RTIC worker is requested by the final CCID
+response-drained event. Its periodic tick only retries a request that could
+have raced with the worker's exit; it does not initiate timed maintenance.
