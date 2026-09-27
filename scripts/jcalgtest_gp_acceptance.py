@@ -33,6 +33,10 @@ def probe(client, timings=False):
     for pin_type in (2, 3):
         result = raw(f"OwnerPIN type {pin_type}", bytes.fromhex("B075240003") + bytes([pin_type, 0, 0, 0]))
         assert result[:2] == bytes.fromhex("2400") and result[-2:] == b"\x90\x00", result.hex()
+    # The software AES schedule reads a byte static at the last image offset.
+    software_aes = raw("software AES prepare", bytes.fromhex(
+        "B0C00000160016FFFFFFFFFFFFFFFF00020010FFFFFFFF0032000100"))
+    assert software_aes == b"\xaa\x90\x00", software_aes.hex()
 
 
 def deletion_timings(client, repeats):

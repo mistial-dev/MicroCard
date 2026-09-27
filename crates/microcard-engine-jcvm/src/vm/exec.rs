@@ -1277,14 +1277,13 @@ fn put_field_value(
 
 fn write_static(machine: &mut Machine<'_, '_, '_, impl Host>, at: usize, kind: u8, value: i32) -> Result<()> {
     if kind == KIND_REF { check_reference_store(machine, value as Reference)?; }
-    let width = if kind == 3 { 4 } else { 2 };
+    let width = match kind { KIND_BYTE => 1, 3 => 4, _ => 2 };
     let bytes = machine.statics.get_mut(at..at + width).ok_or(Error::Bounds)?;
     let encoded = value.to_be_bytes();
     let short = (value as i16).to_be_bytes();
-    let signed_byte = (value as i8 as i16).to_be_bytes();
+    let byte = [value as u8];
     let replacement: &[u8] = match kind {
-        // A byte field keeps only the low byte, so reading it back sign extends.
-        KIND_BYTE => &signed_byte,
+        KIND_BYTE => &byte,
         KIND_REF | KIND_SHORT => &short,
         _ => &encoded,
     };
@@ -1295,14 +1294,14 @@ fn write_static(machine: &mut Machine<'_, '_, '_, impl Host>, at: usize, kind: u
 }
 
 fn read_static(machine: &mut Machine<'_, '_, '_, impl Host>, frame: &mut Frame, at: usize, kind: u8) -> Result<()> {
-    let width = if kind == 3 { 4 } else { 2 };
+    let width = match kind { KIND_BYTE => 1, 3 => 4, _ => 2 };
     let bytes = machine
         .statics
         .get(at..at + width)
         .ok_or(Error::Bounds)?;
     match kind {
         KIND_REF => frame.push_reference(u16::from_be_bytes([bytes[0], bytes[1]])),
-        KIND_BYTE => frame.push_short(bytes[1] as i8 as i16),
+        KIND_BYTE => frame.push_short(bytes[0] as i8 as i16),
         KIND_SHORT => frame.push_short(i16::from_be_bytes([bytes[0], bytes[1]])),
         _ => frame.push_int(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
     }

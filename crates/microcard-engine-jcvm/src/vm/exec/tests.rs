@@ -664,6 +664,24 @@ fn a_static_field_round_trips_through_the_image() {
 }
 
 #[test]
+fn a_byte_static_field_uses_one_image_byte() {
+    use crate::cap::CONSTANT_STATIC_FIELDREF;
+    let package = Package {
+        static_bytes: 3,
+        constants: vec![[CONSTANT_STATIC_FIELDREF, 0x00, 0x00, 0x02]],
+        code: vec![
+            op::BSPUSH, 0xff, 0x80, 0x00, 0x00,
+            0x7c, 0x00, 0x00, op::SRETURN,
+        ],
+        max_stack: 2,
+        nargs: 0,
+        max_locals: 0,
+        ..Package::default()
+    };
+    assert_eq!(execute_package(&package).unwrap(), Outcome::Short(-1));
+}
+
+#[test]
 fn a_static_call_runs_the_callee_and_brings_its_answer_back() {
     use crate::cap::CONSTANT_STATIC_METHODREF;
     let mut package = Package {
