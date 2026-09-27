@@ -1,7 +1,7 @@
 use super::*;
 
 /// Bytes a digest algorithm produces, JCRE §5.4.
-pub fn digest_length(algorithm: u8) -> Result<usize> {
+fn digest_length(algorithm: u8) -> Result<usize> {
     Ok(match algorithm {
         1 | 3 => 20,
         2 => 16,

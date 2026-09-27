@@ -18,7 +18,6 @@ mod checksum;
 mod cipher;
 mod digest;
 mod factory;
-pub use digest::digest_length;
 pub(crate) use digest::release_one_shot_digests;
 mod ec;
 mod key;
