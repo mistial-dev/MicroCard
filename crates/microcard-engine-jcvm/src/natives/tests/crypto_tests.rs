@@ -131,6 +131,64 @@ fn cbc_tracks_ciphertext_iv_and_resets_after_final_or_reset() {
 }
 
 #[test]
+fn ctr_buffers_partial_updates_and_keeps_failed_output_private() {
+    struct CtrHost { counters: alloc::vec::Vec<[u8; 16]>, fail: bool }
+    impl crate::host::Host for CtrHost {
+        fn supports_cipher(&self, algorithm: u8) -> bool { algorithm == 240 }
+        fn aes128_ctr(&mut self, key: &[u8; 16], counter: &[u8; 16], buffer: &mut [u8]) -> Result<()> {
+            assert_eq!(key, &[0x11; 16]);
+            self.counters.push(*counter);
+            for byte in buffer.iter_mut() { *byte ^= 0xaa; }
+            if self.fail { Err(Error::Unauthorized) } else { Ok(()) }
+        }
+    }
+    let (mut slab, mut words, mut tags) = setup(0);
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let mut host = CtrHost { counters: vec![], fail: false };
+    let key = new_native(&mut heap, ClassId::AESKey, security::STATE_WORDS, 1).unwrap();
+    heap.put_word(key, 0, 15).unwrap();
+    heap.put_word(key, 1, 128).unwrap();
+    let data = heap.new_array(heap::KIND_BYTE, 64, 1).unwrap();
+    heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x11);
+    invoke_security(ClassId::AESKey, MethodId::setKey,
+        &[(true,key),(true,data),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+    heap.byte_slice_mut(data, 0, 16).unwrap().fill(0x19);
+    invoke_security(ClassId::Cipher, MethodId::getInstance,
+        &[(false,0xfff0),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+    let cipher = frame.pop_reference().unwrap();
+    invoke_security(ClassId::Cipher, MethodId::init,
+        &[(true,cipher),(true,key),(false,2),(true,data),(false,0),(false,16)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    for (at, byte) in heap.byte_slice_mut(data, 0, 64).unwrap().iter_mut().enumerate() { *byte = at as u8; }
+    for (offset, length, written) in [(0,5,0),(5,27,32)] {
+        invoke_security(ClassId::Cipher, MethodId::update,
+            &[(true,cipher),(true,data),(false,offset),(false,length),(true,data),(false,8)],
+            &mut heap, &mut frame, &mut host).unwrap();
+        assert_eq!(frame.pop_short().unwrap(), written);
+    }
+    assert_eq!(host.counters, [[0x19; 16]]);
+    assert_eq!(heap.byte_slice(data, 8, 32).unwrap(),
+        &(0u8..32).map(|byte| byte ^ 0xaa).collect::<alloc::vec::Vec<_>>());
+    invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,data),(false,40),(false,7),(true,data),(false,0)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 7);
+    let next = (u128::from_be_bytes([0x19; 16]) + 2).to_be_bytes();
+    assert_eq!(host.counters, [[0x19; 16], next]);
+    assert_eq!(heap.byte_slice(heap.get_word(cipher, 5).unwrap(), 0, 32).unwrap(), &[0; 32]);
+
+    let before = heap.byte_slice(data, 0, 64).unwrap().to_vec();
+    let pending = heap.byte_slice(heap.get_word(cipher, 5).unwrap(), 0, 32).unwrap().to_vec();
+    host.fail = true;
+    assert!(invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,data),(false,0),(false,7),(true,data),(false,8)],
+        &mut heap, &mut frame, &mut host).is_err());
+    assert_eq!(heap.byte_slice(data, 0, 64).unwrap(), before);
+    assert_eq!(heap.byte_slice(heap.get_word(cipher, 5).unwrap(), 0, 32).unwrap(), pending);
+}
+
+#[test]
 fn digest_borrows_overlapping_input_and_publishes_only_complete_results() {
     struct DigestHost { input: usize, calls: usize, result: Result<usize> }
     impl crate::host::Host for DigestHost {

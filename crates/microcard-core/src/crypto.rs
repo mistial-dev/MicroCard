@@ -273,6 +273,28 @@ pub trait CryptoProvider {
         }
     );
 
+    /// AES-128 CTR with a big-endian counter. The board overrides this with CC310.
+    fn aes_ctr_in_place(&mut self, key: &[u8; 16], counter: &[u8; 16], buffer: &mut [u8]) -> Result<()> {
+        let mut value = u128::from_be_bytes(*counter);
+        let blocks = buffer.len().div_ceil(16);
+        if blocks > 0 && value.checked_add((blocks - 1) as u128).is_none() {
+            buffer.zeroize();
+            return Err(Error::Bounds);
+        }
+        let result = (|| {
+            for chunk in buffer.chunks_mut(16) {
+                let mut mask = Zeroizing::new(value.to_be_bytes());
+                self.aes128_encrypt_block_in_place(key, &mut mask)?;
+                for (byte, pad) in chunk.iter_mut().zip(mask.iter()) {
+                    *byte ^= *pad;
+                }
+                value = value.wrapping_add(1);
+            }
+            Ok(())
+        })();
+        clear_output_on_error(buffer, result)
+    }
+
     software_method!(
         "software-aes",
         fn aes_cbc_encrypt(
@@ -956,6 +978,32 @@ mod p256_tests {
             ccm_decrypt(&ccm_key, &nonce, &[], &encrypted).unwrap(),
             payload
         );
+    }
+
+    #[cfg(feature = "software-crypto")]
+    #[test]
+    fn aes_ctr_provider_matches_sp800_38a_and_clears_failed_output() {
+        let key: [u8; 16] = hex("2b7e151628aed2a6abf7158809cf4f3c").try_into().unwrap();
+        let counter: [u8; 16] = hex("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff").try_into().unwrap();
+        let mut message = hex("6bc1bee22e409f96e93d7e117393172a\
+            ae2d8a571e03ac9c9eb76fac45af8e51\
+            30c81c46a35ce411e5fbc1191a0a52ef\
+            f69f2445df4f9b17ad2b417be66c3710");
+        SoftwareCrypto.aes_ctr_in_place(&key, &counter, &mut message).unwrap();
+        assert_eq!(message, hex("874d6191b620e3261bef6864990db6ce\
+            9806f66b7970fdff8617187bb9fffdff\
+            5ae4df3edbd5d35e5b4f09020db03eab\
+            1e031dda2fbe03d1792170a0f3009cee"));
+
+        struct Failed;
+        impl CryptoProvider for Failed {
+            fn aes128_encrypt_block_in_place(&mut self, _key: &[u8; 16], block: &mut [u8; 16]) -> Result<()> {
+                block.fill(0xa5);
+                Err(Error::Native)
+            }
+        }
+        assert_eq!(Failed.aes_ctr_in_place(&key, &counter, &mut message), Err(Error::Native));
+        assert!(message.iter().all(|byte| *byte == 0));
     }
 
     #[test]

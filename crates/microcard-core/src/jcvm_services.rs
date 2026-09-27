@@ -285,7 +285,7 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
     }
 
     fn supports_cipher(&self, algorithm: u8) -> bool {
-        matches!(algorithm, 13 | 14) // AES-128 CBC/ECB, no padding
+        matches!(algorithm, 13 | 14 | 240) // AES-128 CBC/ECB/CTR, no padding
     }
 
     fn aes128_block(&mut self, key: &[u8; 16], block: &mut [u8; 16], encrypt: bool) -> Result<()> {
@@ -303,6 +303,14 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 
     fn aes128_cbc(&mut self, key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8], encrypt: bool) -> Result<()> {
         if self.provider.aes_cbc_in_place(key, iv, buffer, encrypt).is_err() {
+            buffer.fill(0);
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
+    fn aes128_ctr(&mut self, key: &[u8; 16], counter: &[u8; 16], buffer: &mut [u8]) -> Result<()> {
+        if self.provider.aes_ctr_in_place(key, counter, buffer).is_err() {
             buffer.fill(0);
             return Err(Error::Unauthorized);
         }

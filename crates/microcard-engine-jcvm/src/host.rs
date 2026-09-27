@@ -59,6 +59,12 @@ pub trait Host {
         Err(Error::Unsupported)
     }
 
+    /// AES-128 CTR with a big-endian 128-bit counter; failure clears the output.
+    fn aes128_ctr(&mut self, _key: &[u8; 16], _counter: &[u8; 16], buffer: &mut [u8]) -> Result<()> {
+        buffer.fill(0);
+        Err(Error::Unsupported)
+    }
+
     /// P-256 domain fields: prime, A, B, uncompressed generator, and order.
     fn p256_parameter(&self, _id: u8) -> Option<&'static [u8]> { None }
 

@@ -22,10 +22,11 @@ pub(super) fn call(
             let mode = frame.pop_short()?;
             let key = frame.pop_reference()?;
             let this = frame.pop_reference()?;
-            let cbc = word_field(heap, this, KIND)? == 13;
+            let kind = word_field(heap, this, KIND)?;
+            let chained = matches!(kind, 13 | 240);
             let mut iv = Zeroizing::new([0u8; 16]);
             if let Some((array, offset, length)) = vector {
-                if !cbc || length != 16 {
+                if !chained || length != 16 {
                     return crypto_exception(heap, context, 1);
                 }
                 if offset < 0 {
@@ -46,10 +47,10 @@ pub(super) fn call(
                 return crypto_exception(heap, context, 2);
             }
             let pending = heap.get_word(this, PENDING)?;
-            heap.byte_slice(pending, 0, if cbc { 32 } else { 16 })?;
+            heap.byte_slice(pending, 0, if chained { 32 } else { 16 })?;
             heap.prepare_payload_writes(&[(this, MATERIAL * 2, (COUNTER + 1 - MATERIAL) * 2)])?;
             heap.byte_slice_mut(pending, 0, 16)?.fill(0);
-            if cbc {
+            if chained {
                 heap.byte_slice_mut(pending, 16, 16)?
                     .copy_from_slice(&iv[..]);
             }
@@ -85,12 +86,14 @@ pub(super) fn call(
                 return Err(Error::Format);
             }
             let total = count + length as usize;
-            if method == MethodId::doFinal
+            let kind = word_field(heap, this, KIND)?;
+            let ctr = kind == 240;
+            if method == MethodId::doFinal && !ctr
                 && (!total.is_multiple_of(16) || (total == 0 && prior[0] & 0x80 == 0))
             {
                 return crypto_exception(heap, context, 5);
             }
-            let written = total / 16 * 16;
+            let written = if ctr && method == MethodId::doFinal { total } else { total / 16 * 16 };
             if written > i16::MAX as usize {
                 return Err(Error::Bounds);
             }
@@ -115,7 +118,7 @@ pub(super) fn call(
             for (at, output) in result.iter_mut().enumerate() {
                 *output = byte(at);
             }
-            let cbc = word_field(heap, this, KIND)? == 13;
+            let cbc = kind == 13;
             let encrypt = word_field(heap, this, COUNTER)? == 2;
             let mut next_iv = Zeroizing::new([0u8; 16]);
             if cbc {
@@ -129,6 +132,22 @@ pub(super) fn call(
                     host.aes128_cbc(&key_bytes, &iv, result, encrypt)?;
                     if encrypt {
                         next_iv.copy_from_slice(&result[written - 16..]);
+                    }
+                }
+                if method == MethodId::doFinal {
+                    next_iv.fill(0);
+                }
+            } else if ctr {
+                let mut counter = Zeroizing::new([0u8; 16]);
+                counter.copy_from_slice(heap.byte_slice(pending, 16, 16)?);
+                *next_iv = *counter;
+                if written != 0 {
+                    let blocks = written.div_ceil(16) as u128;
+                    let next = u128::from_be_bytes(*counter)
+                        .checked_add(blocks).ok_or(Error::Bounds)?;
+                    host.aes128_ctr(&key_bytes, &counter, result)?;
+                    if method == MethodId::update {
+                        *next_iv = next.to_be_bytes();
                     }
                 }
                 if method == MethodId::doFinal {
@@ -155,7 +174,7 @@ pub(super) fn call(
                 .copy_from_slice(result);
             heap.byte_slice_mut(pending, 0, 16)?
                 .copy_from_slice(&tail[..]);
-            if cbc {
+            if cbc || ctr {
                 heap.byte_slice_mut(pending, 16, 16)?
                     .copy_from_slice(&next_iv[..]);
             }
