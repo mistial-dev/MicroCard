@@ -117,6 +117,15 @@ unsafe extern "C" {
         buffer_size: usize,
         encrypt: i32,
     ) -> i32;
+    #[cfg(feature = "cc310-ctr")]
+    fn microcard_cc310_aes128_ctr_in_place(
+        key: *const u8,
+        key_size: usize,
+        iv: *const u8,
+        iv_size: usize,
+        buffer: *mut u8,
+        buffer_size: usize,
+    ) -> i32;
     #[cfg(feature = "cc310-ccm")]
     fn microcard_cc310_aes128_ccm_encrypt(
         key: *const u8,
@@ -351,6 +360,28 @@ pub(super) fn aes128_cbc_in_place(
             buffer.as_mut_ptr(),
             buffer.len(),
             i32::from(encrypt),
+        )
+    };
+    if status != 0 {
+        buffer.fill(0);
+        return false;
+    }
+    true
+}
+
+#[cfg(feature = "cc310-ctr")]
+pub(super) fn aes128_ctr_in_place(key: &[u8; 16], iv: &[u8; 16], buffer: &mut [u8]) -> bool {
+    if buffer.is_empty() {
+        return true;
+    }
+    let status = unsafe {
+        microcard_cc310_aes128_ctr_in_place(
+            key.as_ptr(),
+            key.len(),
+            iv.as_ptr(),
+            iv.len(),
+            buffer.as_mut_ptr(),
+            buffer.len(),
         )
     };
     if status != 0 {

@@ -365,6 +365,7 @@ fn configure_cc310_psa(
             &[
                 ("microcard_cc310_aes128_encrypt_block", 88),
                 ("microcard_cc310_aes128_cbc_in_place", 384),
+                ("microcard_cc310_aes128_ctr_in_place", 384),
                 ("microcard_cc310_aes128_ccm", 112),
                 ("microcard_cc310_aes128_ccm_encrypt", 40),
                 ("microcard_cc310_aes128_ccm_decrypt", 40),

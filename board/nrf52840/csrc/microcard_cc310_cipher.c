@@ -120,6 +120,57 @@ int32_t microcard_cc310_aes128_cbc_in_place(const uint8_t *key,
     return status;
 }
 
+int32_t microcard_cc310_aes128_ctr_in_place(const uint8_t *key,
+                                             size_t key_size,
+                                             const uint8_t *iv,
+                                             size_t iv_size,
+                                             uint8_t *buffer,
+                                             size_t buffer_size)
+{
+    if (key == NULL || key_size != MICROCARD_AES_BLOCK_BYTES ||
+        iv == NULL || iv_size != MICROCARD_AES_BLOCK_BYTES ||
+        buffer == NULL || buffer_size == 0u) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attributes, 128u);
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attributes, PSA_ALG_CTR);
+
+    psa_cipher_operation_t operation = psa_cipher_operation_init();
+    psa_status_t status = psa_driver_wrapper_cipher_encrypt_setup(
+        &operation, &attributes, key, key_size, PSA_ALG_CTR);
+    if (status == PSA_SUCCESS) {
+        status = psa_driver_wrapper_cipher_set_iv(&operation, iv, iv_size);
+    }
+
+    size_t written = 0u;
+    if (status == PSA_SUCCESS) {
+        status = psa_driver_wrapper_cipher_update(
+            &operation, buffer, buffer_size, buffer, buffer_size, &written);
+    }
+    if (status == PSA_SUCCESS && written > buffer_size) {
+        status = PSA_ERROR_CORRUPTION_DETECTED;
+    }
+    size_t tail = 0u;
+    if (status == PSA_SUCCESS) {
+        status = psa_driver_wrapper_cipher_finish(
+            &operation, buffer + written, buffer_size - written, &tail);
+    }
+    if (status == PSA_SUCCESS &&
+        (written > buffer_size || tail != buffer_size - written)) {
+        status = PSA_ERROR_CORRUPTION_DETECTED;
+    }
+    (void)psa_driver_wrapper_cipher_abort(&operation);
+    microcard_wipe(&operation, sizeof(operation));
+    if (status != PSA_SUCCESS) {
+        microcard_wipe(buffer, buffer_size);
+    }
+    return status;
+}
+
 static int32_t microcard_cc310_aes128_ccm(const uint8_t *key,
                                            size_t key_size,
                                            const uint8_t *nonce,

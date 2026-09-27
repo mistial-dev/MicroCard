@@ -1,9 +1,9 @@
 use super::Hardware;
-use microcard_core::Result;
-#[cfg(feature = "cc310-sha256")]
-use microcard_core::Error;
 #[cfg(feature = "cc310-sha256")]
 use crate::cc310;
+#[cfg(feature = "cc310-sha256")]
+use microcard_core::Error;
+use microcard_core::Result;
 
 impl Hardware {
     #[cfg(feature = "cc310-sha256")]
@@ -60,6 +60,32 @@ impl Hardware {
                 if digest != ABC_DIGEST || state.iter().any(|byte| *byte != 0) {
                     return Err(Error::Native);
                 }
+                self.self_test_stage = 15;
+                const SHA1_ABC: [u8; 20] = [
+                    0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e, 0x25, 0x71, 0x78,
+                    0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+                ];
+                const SHA224_ABC: [u8; 28] = [
+                    0x23, 0x09, 0x7d, 0x22, 0x34, 0x05, 0xd8, 0x22, 0x86, 0x42, 0xa4, 0x77, 0xbd,
+                    0xa2, 0x55, 0xb3, 0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7, 0xe3, 0x6c,
+                    0x9d, 0xa7,
+                ];
+                let mut sha1 = [0; 20];
+                self.sha1_stream(&mut state, &FLASH_INPUT[..1], None)?;
+                self.sha1_stream(&mut state, &ram_input[1..], Some(&mut sha1))?;
+                if sha1 != SHA1_ABC || state.iter().any(|byte| *byte != 0) {
+                    sha1.fill(0);
+                    return Err(Error::Native);
+                }
+                sha1.fill(0);
+                let mut sha224 = [0; 28];
+                self.sha224_stream(&mut state, &FLASH_INPUT[..1], None)?;
+                self.sha224_stream(&mut state, &ram_input[1..], Some(&mut sha224))?;
+                if sha224 != SHA224_ABC || state.iter().any(|byte| *byte != 0) {
+                    sha224.fill(0);
+                    return Err(Error::Native);
+                }
+                sha224.fill(0);
             }
             #[cfg(feature = "cc310-entropy")]
             {
@@ -234,6 +260,41 @@ impl Hardware {
                 }
                 plaintext.fill(0);
             }
+            #[cfg(feature = "cc310-ctr")]
+            {
+                self.self_test_stage = 14;
+                const KEY: [u8; 16] = [
+                    0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09,
+                    0xcf, 0x4f, 0x3c,
+                ];
+                const COUNTER: [u8; 16] = [
+                    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc,
+                    0xfd, 0xfe, 0xff,
+                ];
+                const PLAINTEXT: [u8; 33] = [
+                    0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73,
+                    0x93, 0x17, 0x2a, 0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7,
+                    0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51, 0x30,
+                ];
+                const CIPHERTEXT: [u8; 33] = [
+                    0x87, 0x4d, 0x61, 0x91, 0xb6, 0x20, 0xe3, 0x26, 0x1b, 0xef, 0x68, 0x64, 0x99,
+                    0x0d, 0xb6, 0xce, 0x98, 0x06, 0xf6, 0x6b, 0x79, 0x70, 0xfd, 0xff, 0x86, 0x17,
+                    0x18, 0x7b, 0xb9, 0xff, 0xfd, 0xff, 0x5a,
+                ];
+                let mut buffer = PLAINTEXT;
+                core::hint::black_box(&mut buffer);
+                self.aes_ctr_in_place(&KEY, &COUNTER, &mut buffer)?;
+                if buffer != CIPHERTEXT {
+                    buffer.fill(0);
+                    return Err(Error::Native);
+                }
+                self.aes_ctr_in_place(&KEY, &COUNTER, &mut buffer)?;
+                if buffer != PLAINTEXT {
+                    buffer.fill(0);
+                    return Err(Error::Native);
+                }
+                buffer.fill(0);
+            }
             #[cfg(feature = "cc310-ccm")]
             {
                 self.self_test_stage = 10;
@@ -368,20 +429,34 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         input: &[u8],
         mut output: Option<&mut [u8; 20]>,
     ) -> Result<()> {
-        if let Some(output) = output.as_mut() { output.fill(0); }
+        if let Some(output) = output.as_mut() {
+            output.fill(0);
+        }
         let result = (|| {
             self.ensure_cc310()?;
-            let pointer = output.as_mut()
+            let pointer = output
+                .as_mut()
                 .map_or(core::ptr::null_mut(), |value| value.as_mut_ptr());
             let status = unsafe {
                 cc310::microcard_cc310_sha1_stream(
-                    state.as_mut_ptr(), state.len(), input.as_ptr(), input.len(), pointer)
+                    state.as_mut_ptr(),
+                    state.len(),
+                    input.as_ptr(),
+                    input.len(),
+                    pointer,
+                )
             };
-            if status == 0 { Ok(()) } else { Err(Error::Native) }
+            if status == 0 {
+                Ok(())
+            } else {
+                Err(Error::Native)
+            }
         })();
         if result.is_err() {
             state.fill(0);
-            if let Some(output) = output { output.fill(0); }
+            if let Some(output) = output {
+                output.fill(0);
+            }
         }
         result
     }
@@ -391,7 +466,9 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
     }
 
     #[cfg(feature = "engine-jcvm")]
-    fn supports_sha384(&self) -> bool { true }
+    fn supports_sha384(&self) -> bool {
+        true
+    }
 
     #[cfg(feature = "engine-jcvm")]
     fn sha384_stream(
@@ -405,11 +482,14 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
             state,
             input,
             output.map(|bytes| &mut bytes[..]),
-        ).map_err(|_| Error::Native)
+        )
+        .map_err(|_| Error::Native)
     }
 
     #[cfg(feature = "engine-jcvm")]
-    fn supports_sha512(&self) -> bool { true }
+    fn supports_sha512(&self) -> bool {
+        true
+    }
 
     #[cfg(feature = "engine-jcvm")]
     fn sha512_stream(
@@ -423,7 +503,8 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
             state,
             input,
             output.map(|bytes| &mut bytes[..]),
-        ).map_err(|_| Error::Native)
+        )
+        .map_err(|_| Error::Native)
     }
 
     #[cfg(feature = "cc310-p256")]
@@ -433,20 +514,34 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         input: &[u8],
         mut output: Option<&mut [u8; 28]>,
     ) -> Result<()> {
-        if let Some(output) = output.as_mut() { output.fill(0); }
+        if let Some(output) = output.as_mut() {
+            output.fill(0);
+        }
         let result = (|| {
             self.ensure_cc310()?;
-            let pointer = output.as_mut()
+            let pointer = output
+                .as_mut()
                 .map_or(core::ptr::null_mut(), |value| value.as_mut_ptr());
             let status = unsafe {
                 cc310::microcard_cc310_sha224_stream(
-                    state.as_mut_ptr(), state.len(), input.as_ptr(), input.len(), pointer)
+                    state.as_mut_ptr(),
+                    state.len(),
+                    input.as_ptr(),
+                    input.len(),
+                    pointer,
+                )
             };
-            if status == 0 { Ok(()) } else { Err(Error::Native) }
+            if status == 0 {
+                Ok(())
+            } else {
+                Err(Error::Native)
+            }
         })();
         if result.is_err() {
             state.fill(0);
-            if let Some(output) = output { output.fill(0); }
+            if let Some(output) = output {
+                output.fill(0);
+            }
         }
         result
     }
@@ -555,6 +650,23 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
             return Err(Error::Bounds);
         }
         let result = if cc310::aes128_cbc_in_place(key, iv, buffer, encrypt) {
+            Ok(())
+        } else {
+            Err(Error::Native)
+        };
+        microcard_core::crypto::clear_output_on_error(buffer, result)
+    }
+
+    #[cfg(feature = "cc310-ctr")]
+    fn aes_ctr_in_place(
+        &mut self,
+        key: &[u8; 16],
+        counter: &[u8; 16],
+        buffer: &mut [u8],
+    ) -> Result<()> {
+        let ready = self.ensure_cc310();
+        microcard_core::crypto::clear_output_on_error(buffer, ready)?;
+        let result = if cc310::aes128_ctr_in_place(key, counter, buffer) {
             Ok(())
         } else {
             Err(Error::Native)
