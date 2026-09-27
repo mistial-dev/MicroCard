@@ -4,6 +4,10 @@ Ordinary MC04 commands do not open a transaction. Persistent writes use the dire
 command path and become durable at its safe completion boundary. They do not receive
 rollback or multi-resource atomicity merely because a lifecycle or public method made
 them.
+Recoverable application errors such as checked arithmetic overflow or a stale key
+handle end an ordinary command at a safe boundary: earlier valid writes commit
+before the error status is returned. Cancellation, instruction-budget exhaustion,
+provider failure, and storage failure do not publish unfinished ordinary writes.
 
 Code that needs rollback explicitly uses the local `System.Transactions` profile:
 

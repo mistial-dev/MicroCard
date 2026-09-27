@@ -280,12 +280,14 @@ def main():
   c.command(0xa4,bytes.fromhex('F04D430011'));assert c.command(0x10)==tag
   c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x02')==b'\x00';c.command(0x10,b'\x00');assert c.command(0x10,b'\x02')==b'\x01';assert c.command(0x10,b'\x01')==b'blo';c.close()
   c=Client(keys,td/'state');c.connect();c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x01')==b'blo';c.command(0x10,b'\x03');assert c.command(0x10,b'\x02')==b'\x00'
-  c.command(0x10,b'\x04',status=0x6982) # failed invocation must roll back its byte-record write
-  c.connect();c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x05')==b'\x00'
+  c.command(0x10,b'\x04',status=0x6f00) # ordinary writes before a managed overflow remain durable
+  c.connect();c.command(0xa4,bytes.fromhex('F04D430012'));assert c.command(0x10,b'\x05')==b'\x01','ordinary write before exception was lost'
   c.command(0xa4,bytes.fromhex('F04D430010'));assert c.command(0x10,b'\x00')==tag
-  c.command(0x10,b'\x04',status=0x6982) # stale handle faults and rolls back delete/generate
-  c.connect();c.command(0xa4,bytes.fromhex('F04D430010'));assert c.command(0x10,b'\x00')==tag
+  c.command(0x10,b'\x04',status=0x6982) # stale handle faults after ordinary key replacement
+  c.close()
+  c=Client(keys,td/'state');c.connect();c.command(0xa4,bytes.fromhex('F04D430010'))
+  replacement=c.command(0x10,b'\x00');assert len(replacement)==32 and replacement!=tag
   c.command(0xe4,b'keys');new=c.command(0xe0,b'keys');assert new!=inc;c.close()
- print('PASS: persistent keys and byte records, independent HMAC/CMAC oracle, CBC/CCM, sharing, reboot, transaction rollback and deletion')
+ print('PASS: persistent keys and byte records, independent HMAC/CMAC oracle, CBC/CCM, sharing, reboot, ordinary exception durability and deletion')
  print('PASS: independent SCP03 levels, encrypted signed upload, retry, install, counter, reboot, replay, MAC failure and deletion')
 if __name__=='__main__': main()

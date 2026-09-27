@@ -321,6 +321,10 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
                         domain_registry_aid,
                         transaction_snapshot.take().ok_or(Error::Storage)?,
                     )?;
+                } else if ordinary_managed_exception(&error) {
+                    // A managed exception is a completed command boundary. Earlier
+                    // writes remain ordinary application state.
+                    self.commit_ordinary_application(domain_registry_aid, next, persistent_dirty)?;
                 } else {
                     self.restore_application(domain_registry_aid, next)?;
                     if persistent_dirty {
@@ -391,6 +395,11 @@ impl<F: Flash + crate::image_store::ImageFlash, P: Platform, S: PackageStaging> 
         }
         Ok((out, metrics))
     }
+}
+
+fn ordinary_managed_exception(error: &Error) -> bool {
+    matches!(error, Error::Arithmetic | Error::Bounds | Error::Missing
+        | Error::Unauthorized | Error::Quota)
 }
 #[cfg(test)]
 pub(super) fn run_context(

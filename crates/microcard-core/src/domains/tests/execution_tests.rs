@@ -270,7 +270,7 @@ fn representative_simulator_runtime_peaks_stay_within_budget() {
 }
 
 #[test]
-fn native_failure_and_fuel_exhaustion_roll_back_all_writes() {
+fn managed_missing_key_keeps_ordinary_write_but_fuel_exhaustion_discards_it() {
     let mut card = card();
     let incarnation = create(&mut card, "atomic");
     load(
@@ -282,7 +282,7 @@ fn native_failure_and_fuel_exhaustion_roll_back_all_writes() {
     card.manage(command(0xec, &management_names_wire("atomic", "F04D430011").unwrap()))
         .unwrap();
     assert_eq!(card.invoke("F04D430011", &[]), Err(Error::Missing));
-    assert!(!card.state.domains["atomic"].store.contains_key(&10));
+    assert!(card.state.domains["atomic"].store.contains_key(&10));
 
     card.manage(command(0xec, &management_names_wire("atomic", "F04D430013").unwrap()))
         .unwrap();
@@ -290,7 +290,7 @@ fn native_failure_and_fuel_exhaustion_roll_back_all_writes() {
     assert!(!card.state.domains["atomic"].store.contains_key(&30));
 
     let reopened = Mc04Engine::open(card.into_flash(), TestPlatform(10), STORAGE_KEY).unwrap();
-    assert!(!reopened.state.domains["atomic"].store.contains_key(&10));
+    assert!(reopened.state.domains["atomic"].store.contains_key(&10));
     assert!(!reopened.state.domains["atomic"].store.contains_key(&30));
 }
 
