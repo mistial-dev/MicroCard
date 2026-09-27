@@ -21,8 +21,8 @@ For a matching default-on DES profile, build the simulator normally and select o
 
 ```sh
 cargo build --locked -p microcard-sim
-cargo build --release --locked --manifest-path board/nrf52840/Cargo.toml --features engine-jcvm,usb-ccid
-cargo build --release --locked --manifest-path board/nrf52840/Cargo.toml --no-default-features --features engine-jcvm,software-crypto,des-legacy,usb-ccid
+cargo build --release --locked --manifest-path board/nrf52840/Cargo.toml --features jcvm-hardware,usb-ccid
+cargo build --release --locked --manifest-path board/nrf52840/Cargo.toml --no-default-features --features jcvm-software,des-legacy,usb-ccid
 ```
 
 The second command selects CC310 and the third is a software-reference DK image. The hardware selection must exclude software implementations for primitives it claims to accelerate; hardware failure is terminal for that operation. The simulator's host entropy and the DK's CC310 entropy remain distinct from deterministic test fixtures. Run the same applet operation cases against both providers; compare factory availability, outputs, Java Card errors, and state after reset. A successful cross-link or factory probe alone does not prove provider parity.
