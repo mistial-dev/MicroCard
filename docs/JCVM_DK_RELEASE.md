@@ -730,7 +730,22 @@ With that diagnostic image, an individually switched USB hub disconnected
 the DK target port while leaving J-Link powered. After reconnect, the CCID
 reader re-enumerated and the physical JCAlgTest select-only acceptance passed
 without a manual reset or applet reinstall. This covers an idle USB disconnect
-and reconnect; interruption during an APDU and a true target power cut remain
-separate physical checks. The RTIC worker is requested by the final CCID
+and reconnect. The RTIC worker is requested by the final CCID
 response-drained event. Its periodic tick only retries a request that could
 have raced with the worker's exit; it does not initiate timed maintenance.
+
+The same hub disconnected target USB immediately after the JCAlgTest RSA-2048
+prepare response, while the generate APDU was in flight. The PC/SC relay
+returned `SCARD_E_NOT_TRANSACTED`, not `9000`. After reconnect, the installed
+applet selected and the focused acceptance probes passed without reinstalling
+it. This establishes USB interruption and recovery, not target power loss:
+J-Link could still read target RAM while only target USB was off.
+
+After a separate user-operated DK power cycle, the diagnostic record reported
+reset reason `0` and `retained_from_previous_boot=false`. The installed
+JCAlgTest applet again selected and passed its focused probes without a new
+load or install. The diagnostic APDU reported a heap-journal generation after
+selection, with no recovery error. This confirms that the installed applet
+remained usable, but it does not compare a known persistent field before and
+after the power cycle. A persistent-value round trip and a deliberate cut
+during journal publication remain required to qualify physical recovery.
