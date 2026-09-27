@@ -22,7 +22,7 @@ pub(super) fn get_instance(
             // card, so a random holder is complete only when both services exist.
             ClassId::RandomData => host.supports_random(id) && host.supports_digest(4),
             ClassId::Cipher => {
-                (matches!(id, 13 | 14 | 22..=27 | 240)
+                (matches!(id, 12..=14 | 22..=27 | 240)
                     || cfg!(feature = "des-legacy") && matches!(id, 1..=8))
                     && host.supports_cipher(id)
             }

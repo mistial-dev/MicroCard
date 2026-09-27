@@ -5,7 +5,7 @@ use crate::host::SHA256_STATE_BYTES;
 // The selected CC310 bridge requires 1250 caller-owned DER bytes even when
 // the encoded key is shorter; two additional bytes hold the stored length.
 pub(super) const PRIVATE_BYTES: usize = 1252;
-const PUBLIC_MAX: usize = 300;
+pub(super) const PUBLIC_MAX: usize = 300;
 
 fn der_item<'a>(bytes: &'a [u8], offset: &mut usize, tag: u8) -> Option<&'a [u8]> {
     if *bytes.get(*offset)? != tag { return None; }
@@ -76,7 +76,7 @@ pub(super) fn private_public_parts(der: &[u8]) -> Option<(&[u8], &[u8])> {
     (offset == body.len()).then_some((n, e))
 }
 
-fn stored_private<'a>(heap: &'a Heap, key: u16) -> Result<&'a [u8]> {
+pub(super) fn stored_private<'a>(heap: &'a Heap, key: u16) -> Result<&'a [u8]> {
     let material = heap.get_word(key, MATERIAL)?;
     let storage = heap.byte_slice(material, 0, PRIVATE_BYTES)?;
     let length = u16::from_be_bytes([storage[0], storage[1]]) as usize;
@@ -95,7 +95,7 @@ fn put_length(output: &mut [u8], at: &mut usize, length: usize) {
     }
 }
 
-fn encode_public(modulus: &[u8], output: &mut [u8; PUBLIC_MAX]) -> Result<usize> {
+pub(super) fn encode_public(modulus: &[u8], output: &mut [u8; PUBLIC_MAX]) -> Result<usize> {
     if !matches!(modulus.len(), 128 | 256) { return Err(Error::Format); }
     let n_length = modulus.len() + 1;
     let n_header = if n_length < 256 { 2 } else { 3 };
@@ -111,7 +111,7 @@ fn encode_public(modulus: &[u8], output: &mut [u8; PUBLIC_MAX]) -> Result<usize>
     Ok(at)
 }
 
-fn public_modulus<'a>(heap: &'a Heap, key: u16) -> Result<&'a [u8]> {
+pub(super) fn public_modulus<'a>(heap: &'a Heap, key: u16) -> Result<&'a [u8]> {
     let bits = word_field(heap, key, SIZE)? as usize;
     let material = heap.get_word(key, MATERIAL)?;
     heap.byte_slice(material, 0, bits / 8)

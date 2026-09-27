@@ -25,7 +25,7 @@ GET_VERSION = "b0e100000100"
 # This quick host check uses the standard DES-enabled software profile. The
 # physical scan supplies the separate provider and reboot evidence.
 FACTORIES = {
-    "Cipher": (0x11, 29, {*range(1, 9), 13, 14, *range(22, 28)}),
+    "Cipher": (0x11, 29, {*range(1, 9), 12, 13, 14, *range(22, 28)}),
     "Signature": (0x12, 49, {*range(2, 9), 18, 19, 20, 33, 34, 40, 47, 48, 49}),
     "KeyAgreement": (0x13, 9, {3}),
     "MessageDigest": (0x15, 11, {1, 4, 5, 6, 7}),
@@ -64,6 +64,8 @@ PERFORMANCE = (
     ("SHA-512", 0x34, 0x41, (0x15, 6, 0, 0, 0, 16, 0),
      (("update", 2), ("doFinal", 6), ("reset", 4))),
     ("AES-128 CBC", 0x31, 0x43, (0x11, 13, 0, 15, 128, 16, 1),
+     (("doFinal", 7),)),
+    ("RSA-1024 raw private", 0x31, 0x43, (0x11, 12, 2, 6, 1024, 128, 1),
      (("doFinal", 7),)),
     ("ECDSA P-256", 0x32, 0x49, (0x12, 33, 5, 12, 256, 32, 0),
      (("verify", 7),)),

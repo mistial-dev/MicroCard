@@ -27,6 +27,7 @@ pub(crate) use key::symmetric_key_clear_event;
 mod pin;
 mod random;
 mod rsa;
+mod rsa_cipher;
 mod saved_state;
 mod secure_channel;
 mod signature;

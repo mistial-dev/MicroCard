@@ -101,6 +101,74 @@ fn aes_padding_modes_stream_and_round_trip_with_overlap() {
     }
 }
 
+#[test]
+fn rsa_nopad_streams_one_representative_and_keeps_failed_output_private() {
+    struct RawHost { fail: bool, calls: usize }
+    impl crate::host::Host for RawHost {
+        fn supports_cipher(&self, algorithm: u8) -> bool { algorithm == 12 }
+        fn rsa_raw_private(&mut self, _: &[u8], bits: usize,
+            input: &[u8], output: &mut [u8]) -> Result<()> {
+            assert_eq!(bits, 1024);
+            assert_eq!(input.len(), 128);
+            self.calls += 1;
+            output.copy_from_slice(input);
+            output[0] ^= 0x5a;
+            if self.fail { Err(Error::Unauthorized) } else { Ok(()) }
+        }
+    }
+    let mut slab = vec![0; 4096];
+    let mut words = vec![0; 16];
+    let mut tags = vec![0; 8];
+    let mut heap = Heap::new(&mut slab).unwrap();
+    let mut frame = Frame::new(&mut words, &mut tags, 0, 8).unwrap();
+    let mut host = RawHost { fail: false, calls: 0 };
+    let key = new_native(&mut heap, ClassId::RSAPrivateCrtKey, security::STATE_WORDS, 1).unwrap();
+    heap.put_word(key, 0, 6).unwrap();
+    heap.put_word(key, 1, 1024).unwrap();
+    let der = include_bytes!("../../../../microcard-tiny-crypto/testdata/rsa/private1024.der");
+    let material = heap.new_array(heap::KIND_BYTE, 1252, 1).unwrap();
+    let stored = heap.byte_slice_mut(material, 0, 1252).unwrap();
+    stored[..2].copy_from_slice(&(der.len() as u16).to_be_bytes());
+    stored[2..2 + der.len()].copy_from_slice(der);
+    heap.put_word(key, 2, material).unwrap();
+    heap.put_word(key, 3, 1).unwrap();
+    invoke_security(ClassId::Cipher, MethodId::getInstance,
+        &[(false,12),(false,0)], &mut heap, &mut frame, &mut host).unwrap();
+    let cipher = frame.pop_reference().unwrap();
+    invoke_security(ClassId::Cipher, MethodId::init,
+        &[(true,cipher),(true,key),(false,2)], &mut heap, &mut frame, &mut host).unwrap();
+    let input = heap.new_array(heap::KIND_BYTE, 128, 1).unwrap();
+    let output = heap.new_array(heap::KIND_BYTE, 128, 1).unwrap();
+    heap.byte_slice_mut(input, 127, 1).unwrap()[0] = 42;
+    heap.byte_slice_mut(output, 0, 128).unwrap().fill(0x55);
+    invoke_security(ClassId::Cipher, MethodId::update,
+        &[(true,cipher),(true,input),(false,0),(false,32),(true,output),(false,0)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 0);
+    invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,input),(false,32),(false,96),(true,output),(false,0)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    assert_eq!(frame.pop_short().unwrap(), 128);
+    assert_eq!(heap.byte_slice(output, 0, 1).unwrap(), &[0x5a]);
+    assert_eq!(heap.byte_slice(output, 127, 1).unwrap(), &[42]);
+    assert_eq!(host.calls, 1);
+    let pending = heap.get_word(cipher, 5).unwrap();
+    assert!(heap.byte_slice(pending, 0, 258).unwrap().iter().all(|byte| *byte == 0));
+    host.fail = true;
+    let before = heap.byte_slice(output, 0, 128).unwrap().to_vec();
+    assert!(invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,input),(false,0),(false,128),(true,output),(false,0)],
+        &mut heap, &mut frame, &mut host).is_err());
+    assert_eq!(heap.byte_slice(output, 0, 128).unwrap(), before);
+    heap.byte_slice_mut(input, 0, 128).unwrap().fill(0xff);
+    let result = invoke_security(ClassId::Cipher, MethodId::doFinal,
+        &[(true,cipher),(true,input),(false,0),(false,128),(true,output),(false,0)],
+        &mut heap, &mut frame, &mut host).unwrap();
+    let Native::Threw(exception) = result else { panic!("modulus accepted as input"); };
+    assert_eq!(heap.get_word(exception, REASON_FIELD).unwrap(), 5);
+    assert_eq!(host.calls, 2);
+}
+
 #[cfg(feature = "des-legacy")]
 #[test]
 fn des_padding_modes_stream_and_round_trip_with_overlap() {

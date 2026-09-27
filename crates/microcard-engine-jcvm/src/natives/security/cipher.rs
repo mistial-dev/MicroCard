@@ -14,6 +14,7 @@ pub(super) fn padding(kind: u16) -> u8 {
 }
 
 pub(super) fn state_bytes(kind: u16) -> usize {
+    if kind == 12 { return 258; }
     let head = if padding(kind) == 0 { 16 } else { 17 };
     head + if is_chained(kind) { 16 } else { 0 }
 }
@@ -41,6 +42,10 @@ pub(super) fn call(
             let key = frame.pop_reference()?;
             let this = frame.pop_reference()?;
             let kind = word_field(heap, this, KIND)?;
+            if kind == 12 {
+                return super::rsa_cipher::init(heap, host, this, key, mode,
+                    vector.is_some(), context);
+            }
             let des = is_des(kind);
             let chained = is_chained(kind);
             let head = state_bytes(kind) - if chained { 16 } else { 0 };
@@ -88,6 +93,11 @@ pub(super) fn call(
             let offset = frame.pop_short()?;
             let input = frame.pop_reference()?;
             let this = frame.pop_reference()?;
+            if word_field(heap, this, KIND)? == 12 {
+                return super::rsa_cipher::process(method, heap, host, frame,
+                    super::rsa_cipher::Request { this, input, offset, length, output, out_offset },
+                    context, budget);
+            }
             if word_field(heap, this, READY)? == 0 {
                 return crypto_exception(heap, context, 4);
             }
