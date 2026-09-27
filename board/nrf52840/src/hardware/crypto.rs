@@ -589,7 +589,12 @@ impl microcard_core::crypto::CryptoProvider for Hardware {
         private_der.fill(0);
         public_der.fill(0);
         self.ensure_cc310()?;
-        cc310::rsa_generate_key_pair(key_bits, private_der, public_der).ok_or(Error::Native)
+        #[cfg(feature = "diagnostic-apdu")]
+        let started = crate::platform::now();
+        let generated = cc310::rsa_generate_key_pair(key_bits, private_der, public_der);
+        #[cfg(feature = "diagnostic-apdu")]
+        crate::diagnostic_apdu::rsa_generate_us(crate::platform::now().wrapping_sub(started));
+        generated.ok_or(Error::Native)
     }
 
     #[cfg(all(feature = "cc310-rsa", feature = "engine-jcvm"))]

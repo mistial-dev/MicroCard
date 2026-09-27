@@ -919,3 +919,22 @@ time but does not separate those two costs; journal work was a small fraction
 of this APDU. JCAlgTest does not expose the resulting key
 or independently verify an RSA signature in this probe; RSA signing, import,
 failure behavior, and reboot use remain unqualified.
+
+An opt-in diagnostic revision (`80 F3`, record version 2) times the actual
+CC310 PSA RSA generation call without changing the Java Card response. Its
+verified DK ELF SHA-256 is
+`0ac534729b66c50e36829b885da460f698af10ea786582281a1e8b1d6c5a58cc`.
+With the same RSA-2048 probe after a debugger reset, the APDU took **8,092.42
+ms** from the host. The device measured **7,411,149 µs** inside CC310,
+**7,426,369 µs** for the full Java execution phase, and **660,052 µs** for
+publication before replying. Thus the provider accounted for about **99.8%**
+of Java execution in this sample. RSA key generation has variable prime-search
+time; the two observed host samples are not a latency distribution. The
+diagnostic showed no storage failure and no work in the following maintenance
+pass. Separate Java PC/SC processes intermittently failed to discover the
+reader afterward, while the USB hub still reported the target connected and
+a subsequent diagnostic APDU succeeded without a target reset. That host-side
+discovery issue needs its own controlled reproduction; it cannot be assigned
+to the RSA operation from these observations. Six successive PC/SC relay
+connect-and-disconnect attempts then succeeded, and the previously saved PIV
+P-256 key still signed a challenge verified off-card.

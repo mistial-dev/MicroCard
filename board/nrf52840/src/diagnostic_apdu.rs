@@ -3,7 +3,7 @@ use core::{ptr, sync::atomic::{AtomicU32, Ordering}};
 use microcard_core::Error;
 
 const MAGIC: u32 = 0x4d43_4447;
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 pub(crate) const COMMAND: [u8; 5] = [0x80, 0xf3, 0, 0, 0];
 pub(crate) const APDU: u32 = 1;
 pub(crate) const MAINTENANCE: u32 = 2;
@@ -53,6 +53,7 @@ struct Record {
     last_maintenance_publication_count: u32,
     last_maintenance_publications: [[u32; 6]; 4],
     retained_from_previous_boot: u32,
+    last_rsa_generate_us: u32,
 }
 
 impl Record {
@@ -70,7 +71,7 @@ impl Record {
         last_apdu_publication_count: 0, last_apdu_publications: [[0; 6]; 4],
         last_maintenance_publication_count: 0,
         last_maintenance_publications: [[0; 6]; 4],
-        retained_from_previous_boot: 0,
+        retained_from_previous_boot: 0, last_rsa_generate_us: 0,
     };
 
     fn checksum(&self) -> u32 {
@@ -91,7 +92,7 @@ impl Record {
             .chain(self.last_apdu_publications.into_iter().flatten())
             .chain([self.last_maintenance_publication_count])
             .chain(self.last_maintenance_publications.into_iter().flatten())
-            .chain([self.retained_from_previous_boot]) {
+            .chain([self.retained_from_previous_boot, self.last_rsa_generate_us]) {
             value = value.rotate_left(5) ^ word.wrapping_mul(0x9e37_79b1);
         }
         value
@@ -218,6 +219,10 @@ pub(crate) fn programmed_word() {
     PROGRAMMED_WORDS.fetch_add(1, Ordering::Relaxed);
 }
 
+pub(crate) fn rsa_generate_us(elapsed: u32) {
+    update(|record| record.last_rsa_generate_us = elapsed);
+}
+
 pub(crate) fn finish(error: Option<Error>) {
     let at = crate::platform::now();
     update(|record| {
@@ -282,7 +287,7 @@ pub(crate) fn response(command: &[u8])
         .chain(record.last_apdu_publications.into_iter().flatten())
         .chain([record.last_maintenance_publication_count])
         .chain(record.last_maintenance_publications.into_iter().flatten())
-        .chain([record.retained_from_previous_boot]) {
+        .chain([record.retained_from_previous_boot, record.last_rsa_generate_us]) {
         result.extend_from_slice(&word.to_be_bytes()).ok()?;
     }
     result.extend_from_slice(&[0x90, 0x00]).ok()?;

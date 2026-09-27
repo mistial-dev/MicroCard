@@ -11,7 +11,7 @@ import time
 from scp03_acceptance import ROOT
 
 COMMAND = "80f3000000"
-WORDS = 100
+WORDS = 101
 FIELDS = (
     "version", "attempt", "scope", "phase", "decision", "generation_hi",
     "generation_lo", "erased_pages", "programmed_words", "elapsed_us",
@@ -34,7 +34,7 @@ def decode(response: bytes) -> dict:
     if len(response) != WORDS * 4 + 2 or response[-2:] != b"\x90\x00":
         raise ValueError(f"unexpected diagnostic response: {response.hex()}")
     words = struct.unpack(f">{WORDS}I", response[:-2])
-    if words[0] != 1:
+    if words[0] != 2:
         raise ValueError(f"unsupported diagnostic version {words[0]}")
     data = dict(zip(FIELDS, words[:15]))
     data["maintenance_recovered"] = data["error"] == 10
@@ -64,6 +64,7 @@ def decode(response: bytes) -> dict:
         ]
         data[name] = summary
     data["retained_from_previous_boot"] = bool(words[99])
+    data["last_rsa_generate_us"] = words[100]
     return data
 
 

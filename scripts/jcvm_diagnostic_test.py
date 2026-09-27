@@ -7,7 +7,7 @@ from jcvm_diagnostic import WORDS, decode
 class DiagnosticWireTest(unittest.TestCase):
     def test_decodes_full_generation_and_separate_apdu_maintenance_counts(self):
         words = list(range(WORDS))
-        words[0] = 1
+        words[0] = 2
         words[5:7] = [0x12345678, 0x9abcdef0]
         words[49] = 2
         words[50:56] = [0x303, 1, 17, 2, 100, 400000]
@@ -15,6 +15,7 @@ class DiagnosticWireTest(unittest.TestCase):
         words[74] = 0
         words[11] = 10
         words[14] = 3
+        words[100] = 1234567
         data = decode(struct.pack(f">{WORDS}I", *words) + b"\x90\x00")
         self.assertTrue(data["maintenance_recovered"])
         self.assertEqual(data["last_failure_category"], "quota")
@@ -24,6 +25,7 @@ class DiagnosticWireTest(unittest.TestCase):
         self.assertEqual(data["last_apdu"]["publication_count"], 2)
         self.assertEqual([entry["erased_pages"] for entry in data["last_apdu"]["publications"]], [2, 1])
         self.assertTrue(data["last_apdu"]["publications"][1]["incomplete"])
+        self.assertEqual(data["last_rsa_generate_us"], 1234567)
 
 
 if __name__ == "__main__":
