@@ -554,6 +554,7 @@ pub trait CryptoProvider {
     }
 
     fn supports_rsa_pkcs1v15_sha256(&self) -> bool { cfg!(feature = "software-rsa") }
+    fn supports_rsa_keygen(&self) -> bool { cfg!(feature = "rsa-keygen") }
 
     /// Generate a complete PKCS#1 DER key pair using injected entropy.
     /// Both outputs and lengths remain zero on failure.

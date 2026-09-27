@@ -28,7 +28,7 @@ pub(super) fn get_instance(
             }
             ClassId::KeyAgreement => id == 3 && host.supports_agreement(id),
             ClassId::Signature => {
-                (matches!(id, 18 | 33 | 34) && host.supports_signature(id))
+                (matches!(id, 18 | 33 | 34 | 40) && host.supports_signature(id))
                     || (cfg!(feature = "des-legacy") && matches!(id, 2..=8 | 19 | 20 | 47 | 48))
             }
             _ => false,

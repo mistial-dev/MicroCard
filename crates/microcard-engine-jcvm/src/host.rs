@@ -46,6 +46,7 @@ pub trait Host {
     fn supports_cipher(&self, _algorithm: u8) -> bool { false }
     fn supports_agreement(&self, _algorithm: u8) -> bool { false }
     fn supports_signature(&self, _algorithm: u8) -> bool { false }
+    fn supports_rsa_keygen(&self) -> bool { false }
 
     /// Transform one AES-128 block; failed operations clear the entire block.
     fn aes128_block(&mut self, _key: &[u8; 16], block: &mut [u8; 16], _encrypt: bool) -> Result<()> {

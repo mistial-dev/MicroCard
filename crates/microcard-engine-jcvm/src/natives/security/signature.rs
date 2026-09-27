@@ -558,6 +558,9 @@ pub(super) fn call(
         }
         return aes_mac_call(method, signature, heap, host, frame, context, budget);
     }
+    if word_field(heap, receiver, KIND)? == 40 {
+        return rsa::signature_call(method, signature, heap, host, frame, context, budget);
+    }
     let algorithm = word_field(heap, receiver, KIND)?;
     if !matches!(algorithm, 33 | 34) { return Ok(None); }
     let wide = algorithm == 34;
@@ -765,7 +768,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
             false
         }
     };
-    if (!matches!(algorithm, 18 | 33 | 34) && !des_algorithm)
+    if (!matches!(algorithm, 18 | 33 | 34 | 40) && !des_algorithm)
         || word(3) > 1
         || (word(3) == 1 && (material == 0 || pending == 0 || !matches!(word(4), 1 | 2)))
     {
@@ -779,7 +782,7 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         let des_state_bytes = 0;
         let expected_length = if algorithm == 18 {
             34
-        } else if matches!(algorithm, 33 | 34) {
+        } else if matches!(algorithm, 33 | 34 | 40) {
             crate::host::SHA256_STATE_BYTES
         } else {
             des_state_bytes
@@ -795,6 +798,8 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
         let expected = if algorithm == 18 {
             ClassId::AESKey
+        } else if algorithm == 40 {
+            if word(4) == 1 { ClassId::RSAPrivateCrtKey } else { ClassId::RSAPublicKey }
         } else if !matches!(algorithm, 33 | 34) {
             ClassId::DESKey
         } else if word(4) == 1 {
@@ -816,12 +821,13 @@ pub(super) fn validate_saved_signature(payload: &[u8], saved_heap: &[u8]) -> Res
         } else {
             false
         };
-        let invalid_ec_size = if matches!(algorithm, 33 | 34) {
+        let invalid_ec_size = if matches!(algorithm, 33 | 34 | 40) {
             let bits = u16::from_be_bytes([
                 saved_heap[start + heap::HEADER + SIZE * 2],
                 saved_heap[start + heap::HEADER + SIZE * 2 + 1],
             ]);
-            bits != if algorithm == 34 { 384 } else { 256 }
+            if algorithm == 40 { !matches!(bits, 1024 | 2048) }
+            else { bits != if algorithm == 34 { 384 } else { 256 } }
         } else { false };
         if super::super::api_class(key_class).map(|entry| entry.id) != Some(expected)
             || saved_heap[start + 4] != heap::KIND_OBJECT

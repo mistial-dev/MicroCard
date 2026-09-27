@@ -345,8 +345,12 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 
     fn supports_agreement(&self, algorithm: u8) -> bool { algorithm == 3 }
     fn supports_signature(&self, algorithm: u8) -> bool {
-        matches!(algorithm, 18 | 33) || algorithm == 34 && self.provider.supports_p384() && self.provider.supports_sha384()
+        matches!(algorithm, 18 | 33)
+            || algorithm == 34 && self.provider.supports_p384() && self.provider.supports_sha384()
+            || algorithm == 40 && self.provider.supports_rsa_pkcs1v15_sha256()
+                && self.provider.supports_rsa_keygen() && self.supports_digest(4)
     }
+    fn supports_rsa_keygen(&self) -> bool { self.provider.supports_rsa_keygen() }
     fn p256_generate(&mut self, private: &mut [u8; 32], public: &mut [u8; 65]) -> Result<()> {
         Services::p256_generate(self, private, public)
     }
@@ -508,6 +512,43 @@ impl<P: CryptoProvider + Entropy> Host for Services<'_, P> {
 #[cfg(all(test, feature = "software-crypto"))]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "slow software RSA key generation and signing gate"]
+    fn software_rsa_factory_generates_signs_and_verifies() {
+        extern crate std;
+        use std::io::Read;
+        struct SoftwareRsa(std::fs::File);
+        impl CryptoProvider for SoftwareRsa {
+            fn sha256_stream(&mut self, state: &mut [u8; crate::crypto::SHA256_STATE_BYTES],
+                input: &[u8], output: Option<&mut [u8; 32]>) -> crate::Result<()> {
+                crate::crypto::SoftwareCrypto.sha256_stream(state, input, output)
+            }
+        }
+        impl Entropy for SoftwareRsa {
+            fn fill_entropy(&mut self, output: &mut [u8]) -> crate::Result<()> {
+                self.0.read_exact(output).map_err(|_| crate::Error::Native)
+            }
+        }
+        let mut provider = SoftwareRsa(std::fs::File::open("/dev/urandom").unwrap());
+        let mut host = Services::new(&mut provider);
+        assert!(Host::supports_signature(&host, 40));
+        assert!(Host::supports_rsa_keygen(&host));
+        let mut private = [0u8; 1200];
+        let mut public = [0u8; 300];
+        let (private_len, public_len) = Host::rsa_generate(&mut host, 1024,
+            &mut private, &mut public).unwrap();
+        let mut signature = [0u8; 128];
+        let mut digest = [0u8; 32];
+        Host::digest(&mut host, 4, b"microcard RSA boundary", &mut digest).unwrap();
+        Host::rsa_pkcs1v15_sha256_sign(&mut host, &private[..private_len],
+            1024, &digest, &mut signature).unwrap();
+        assert_eq!(Host::rsa_pkcs1v15_sha256_verify(&mut host,
+            &public[..public_len], 1024, &digest, &signature), Ok(true));
+        signature[0] ^= 1;
+        assert_eq!(Host::rsa_pkcs1v15_sha256_verify(&mut host,
+            &public[..public_len], 1024, &digest, &signature), Ok(false));
+    }
 
     #[test]
     fn rsa_boundary_rejects_sizes_and_clears_failed_outputs() {

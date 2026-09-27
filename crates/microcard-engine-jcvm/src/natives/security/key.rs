@@ -27,6 +27,9 @@ pub(crate) fn symmetric_key_clear_event(kind: u16) -> u8 {
 }
 
 pub(super) fn key_initialized(heap: &Heap, key: u16) -> Result<bool> {
+    if matches!(word_field(heap, key, KIND)?, 4..=6 | 22..=25) {
+        return rsa::initialized(heap, key);
+    }
     if ec::key_kind(word_field(heap, key, KIND)?) {
         return ec::initialized(heap, key);
     }
@@ -59,11 +62,11 @@ pub(super) fn call(
             {
                 return crypto_exception(heap, context, 3);
             }
-            if matches!(key_type, 4..=6 | 22..=25)
-                && !matches!(
-                    length,
-                    1024 | 2048
-                )
+            if matches!(key_type, 5 | 6 | 22..=25) {
+                return crypto_exception(heap, context, 3);
+            }
+            if key_type == 4
+                && (!matches!(length, 1024 | 2048) || _encryption != 0)
             {
                 return crypto_exception(heap, context, 3);
             }

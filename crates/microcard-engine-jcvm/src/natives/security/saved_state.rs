@@ -20,12 +20,15 @@ pub(crate) fn validate_saved_security(
     }
     if class == ClassId::KeyPair {
         let private = word(5);
-        if word(0) != 5 || !matches!(word(1), 256 | 384) || material == 0 || private == 0 {
+        let rsa = word(0) == 2;
+        if !(rsa && matches!(word(1), 1024 | 2048)
+            || word(0) == 5 && matches!(word(1), 256 | 384))
+            || material == 0 || private == 0 {
             return Err(Error::Format);
         }
         for (reference, expected) in [
-            (material, ClassId::ECPublicKey),
-            (private, ClassId::ECPrivateKey),
+            (material, if rsa { ClassId::RSAPublicKey } else { ClassId::ECPublicKey }),
+            (private, if rsa { ClassId::RSAPrivateCrtKey } else { ClassId::ECPrivateKey }),
         ] {
             let start = reference as usize;
             let key_class = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
@@ -105,6 +108,8 @@ pub(crate) fn validate_saved_security(
         pin::validate_saved(class, payload, saved_heap)?;
     }
     let ec = matches!(class, ClassId::ECPublicKey | ClassId::ECPrivateKey);
+    let rsa = matches!(class, ClassId::RSAPublicKey | ClassId::RSAPrivateKey
+        | ClassId::RSAPrivateCrtKey);
     if ec
         && (!natives::ec_key_kind(word(0))
             || !matches!(word(1), 256 | 384)
@@ -119,7 +124,28 @@ pub(crate) fn validate_saved_security(
         if header[4] & 0x0f != heap::KIND_BYTE {
             return Err(Error::Type);
         }
-        if ec {
+        if rsa {
+            if !matches!(word(1), 1024 | 2048) || header[4] != heap::KIND_BYTE {
+                return Err(Error::Format);
+            }
+            let expected = if class == ClassId::RSAPublicKey { word(1) / 8 }
+                else { rsa::PRIVATE_BYTES as u16 };
+            if length != expected { return Err(Error::Format); }
+            if class == ClassId::RSAPrivateCrtKey {
+                let start = material as usize + heap::HEADER;
+                let der_length = u16::from_be_bytes([saved_heap[start], saved_heap[start + 1]]);
+                if word(3) == 1 && (der_length == 0 || der_length as usize > rsa::PRIVATE_BYTES - 2) {
+                    return Err(Error::Format);
+                }
+                if word(3) == 1 {
+                    let der = &saved_heap[start + 2..start + 2 + der_length as usize];
+                    let (n, e) = rsa::private_public_parts(der).ok_or(Error::Format)?;
+                    if n.len() != word(1) as usize / 8 || e != [1, 0, 1] {
+                        return Err(Error::Format);
+                    }
+                }
+            }
+        } else if ec {
             let event = natives::ec_key_clear_event(word(0));
             let expected = match (word(0) == 11, word(1) == 384) {
                 (true, false) => 66, (true, true) => 98,
@@ -140,6 +166,38 @@ pub(crate) fn validate_saved_security(
             }
             if length <= prefix || length > 64 + prefix {
                 return Err(Error::Bounds);
+            }
+        }
+    }
+    if rsa {
+        let kind = word(0);
+        let valid = if class == ClassId::RSAPublicKey {
+            kind == 4 && word(3) <= 3 && (word(3) & 1 == 0 || material != 0)
+                && (word(3) & 2 == 0 || word(5) != 0)
+        } else if class == ClassId::RSAPrivateCrtKey {
+            kind == 6 && word(3) <= 1 && (word(3) == 0 || material != 0)
+                || matches!(kind, 24 | 25) && word(3) == 0 && material == 0
+        } else {
+            matches!(kind, 5 | 22 | 23) && word(3) == 0 && material == 0
+        };
+        if !valid || !matches!(word(1), 1024 | 2048) { return Err(Error::Format); }
+        if class == ClassId::RSAPublicKey && word(5) != 0 {
+            let start = word(5) as usize;
+            let header = &saved_heap[start..start + heap::HEADER];
+            if header[4] != heap::KIND_BYTE
+                || u16::from_be_bytes([header[2], header[3]]) != 3 {
+                return Err(Error::Format);
+            }
+            if word(3) & 2 != 0
+                && saved_heap[start + heap::HEADER..start + heap::HEADER + 3] != [1, 0, 1] {
+                return Err(Error::Format);
+            }
+        }
+        if class == ClassId::RSAPublicKey && word(3) & 1 != 0 {
+            let start = material as usize + heap::HEADER;
+            let bytes = &saved_heap[start..start + word(1) as usize / 8];
+            if bytes[0] & 0x80 == 0 || bytes[bytes.len() - 1] & 1 == 0 {
+                return Err(Error::Format);
             }
         }
     }

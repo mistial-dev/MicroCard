@@ -6,6 +6,9 @@ use super::*;
 pub(super) fn call(method: MethodId, signature: Signature, heap: &mut Heap,
     host: &mut dyn crate::host::Host, frame: &mut Frame, context: heap::Context,
     budget: &mut u32) -> Result<Native> {
+    if let Some(result) = rsa::key_pair_call(method, signature, heap, host, frame, context, budget)? {
+        return Ok(result);
+    }
     if method == MethodId::Constructor {
         let (this, public, private) = if signature.key_pair_references() {
             let private = frame.pop_reference()?;

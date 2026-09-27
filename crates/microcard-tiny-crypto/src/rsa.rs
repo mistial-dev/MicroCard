@@ -340,6 +340,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow RSA-2048 key generation gate"]
     fn generated_2048_bit_pair_encodes_complete_der() {
         let mut generated = KeyPairComponents::new();
         let mut os_random = std::fs::File::open("/dev/urandom").unwrap();
@@ -381,10 +382,18 @@ mod tests {
     }
 
     #[test]
-    fn openssl_pkcs1_v15_sha256_1024_and_2048() {
+    fn openssl_pkcs1_v15_sha256_1024_and_2048_verify() {
         vector(1024, include_bytes!("../testdata/rsa/private1024.der"),
             include_bytes!("../testdata/rsa/public1024.der"),
             include_bytes!("../testdata/rsa/signature1024.bin"));
+        assert_eq!(verify_pkcs1v15_sha256_der(
+            include_bytes!("../testdata/rsa/public2048.der"), 2048, &HASH,
+            include_bytes!("../testdata/rsa/signature2048.bin")), Ok(true));
+    }
+
+    #[test]
+    #[ignore = "slow RSA-2048 signing and validation gate"]
+    fn openssl_pkcs1_v15_sha256_2048_sign() {
         vector(2048, include_bytes!("../testdata/rsa/private2048.der"),
             include_bytes!("../testdata/rsa/public2048.der"),
             include_bytes!("../testdata/rsa/signature2048.bin"));

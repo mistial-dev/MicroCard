@@ -26,6 +26,7 @@ use key::key_initialized;
 pub(crate) use key::symmetric_key_clear_event;
 mod pin;
 mod random;
+mod rsa;
 mod saved_state;
 mod secure_channel;
 mod signature;
@@ -318,6 +319,9 @@ pub fn call(
         }
     }
     if let Some(result) = ec::call(class, method, heap, host, frame, context)? {
+        return Ok(result);
+    }
+    if let Some(result) = rsa::key_call(class, method, heap, frame, context)? {
         return Ok(result);
     }
     if class == ClassId::KeyAgreement {
