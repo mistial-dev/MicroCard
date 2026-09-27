@@ -66,8 +66,8 @@ raise a catchable Java Card exception and the applet remains selected. It does
 not imply P71D321 support; the supported entries still require real operations,
 failure, and reboot checks on the DK.
 
-The latest extended DK scan reports **68 supported** probes against the
-P71D321 reference's **288**. There are **220 missing supported** probes and
+The standard DES-enabled DK scan reported **68 supported** probes against the
+P71D321 reference's **288**. There were **220 missing supported** probes and
 **zero support claims outside the profile**. Both ISO 3309 checksum factories
 now work, and their operations pass focused host vectors and a DK smoke test.
 Both `OwnerPINBuilder` extended variants now
@@ -85,7 +85,7 @@ instead of passing as a partial result.
 | CAP loading | Host accepts unsigned LFDB under SCP03; CAP 2.1 structural checks | Complete supported CAP 2.2 type/dataflow verification |
 | VM | OpenFIPS201 and JCAlgTest execute host-side | Type/dataflow verification and every admitted opcode; no verifier bypass |
 | Runtime | Basic-channel lifecycle and two distinct heaps | Logical channels, shareable interfaces, firewall, reset, transactions, and object lifetime tests |
-| API | 68 supported JCAlgTest probes; CRC16/CRC32, SHA-1/384/512, and AES-128 CBC-MAC operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
+| API | Standard DES build: 68 supported JCAlgTest factories. Later compact diagnostic build: 50. Focused CRC16/CRC32, SHA-1/384/512, and AES-128 CBC-MAC operations tested | Complete declared 3.0.5 method behavior and real operations for every claimed algorithm |
 | GlobalPlatform | Host SCP03 unsigned OpenFIPS201 and JCAlgTest load/install/select; earlier physical signed OpenFIPS201 selection | Unsigned load, install/delete, interruption and recovery on DK |
 | USB and storage | MakerDiary CCID smoke at an earlier revision | DK PC/SC, abort/disconnect, controlled interruption, endurance and measured latency |
 
@@ -904,3 +904,18 @@ the 17,222 host PC/SC exchanges had 18 ms median, 19 ms p95, and 5,143 ms
 maximum. Raw CSV, log, exact ELF, client exit code, and analyzer result are
 retained locally under `artifacts/physical/microcard-renewal-dk-20260927/`.
 Operation-level crypto tests remain separate from this factory scan.
+
+On the same revised diagnostic ELF, the installed JCAlgTest applet completed
+one RSA-2048 `KeyPair.genKeyPair()` probe through PC/SC. Reproduce it with
+`python3 scripts/jcalgtest_gp_acceptance.py --reader 'MicroCard MicroCard virtual smart card' --management-key .keys/first-test-management.key --select-only --keypair-generation rsa2048`.
+Preparation took **25.46 ms** and generation took **16,686.40 ms** from the
+host; both returned `AA9000`. The device trace attributed **16,216,643 µs**
+to Java execution and **463,681 µs** to the single authenticated publication.
+That publication erased **4 pages** and programmed **2,436 words**. The next
+idle maintenance pass erased and programmed nothing, and the retained failure
+category remained `none`. This firmware routes RSA generation through the
+CC310 PSA driver. The trace isolates the combined Java execution and provider
+time but does not separate those two costs; journal work was a small fraction
+of this APDU. JCAlgTest does not expose the resulting key
+or independently verify an RSA signature in this probe; RSA signing, import,
+failure behavior, and reboot use remain unqualified.
