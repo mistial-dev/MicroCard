@@ -29,6 +29,8 @@ pub struct Endpoint<C: CardEngine> {
     session: Option<Session>,
     status_cursor: Option<StatusCursor>,
     bootloader_requested: bool,
+    #[cfg(feature = "diagnostic-apdu")]
+    last_error: Option<Error>,
 }
 impl<C: CardEngine> Endpoint<C> {
     pub fn new(card: C, keys: Keys) -> Self {
@@ -38,6 +40,8 @@ impl<C: CardEngine> Endpoint<C> {
             session: None,
             status_cursor: None,
             bootloader_requested: false,
+            #[cfg(feature = "diagnostic-apdu")]
+            last_error: None,
         }
     }
 
@@ -61,10 +65,17 @@ impl<C: CardEngine> Endpoint<C> {
         should_cancel: &mut dyn FnMut() -> bool,
     ) -> Result<()> {
         let result = self.card.maintenance_with_cancel(should_cancel);
-        if result.is_err() {
+        #[cfg(feature = "diagnostic-apdu")]
+        if let Err(error) = &result { self.last_error = Some(error.clone()); }
+        if result.is_err() || self.card.take_security_reset() {
             self.reset();
         }
         result
+    }
+
+    #[cfg(feature = "diagnostic-apdu")]
+    pub fn take_last_error(&mut self) -> Option<Error> {
+        self.last_error.take()
     }
 
     pub fn into_card(mut self) -> C {
@@ -92,14 +103,18 @@ impl<C: CardEngine> Endpoint<C> {
             requested
         });
         if cancelled {
+            #[cfg(feature = "diagnostic-apdu")]
+            { self.last_error = Some(Error::Cancelled); }
             self.reset();
             return fixed_response_or_empty(&[0x69, 0x82]);
         }
         match result {
             Ok(r) => r,
-            Err(_) => {
+            Err(error) => {
+                #[cfg(feature = "diagnostic-apdu")]
+                { self.last_error = Some(error.clone()); }
                 self.reset();
-                fixed_response_or_empty(&[0x69, 0x82])
+                fixed_response_or_empty(&terminal_status(&error).to_be_bytes())
             }
         }
     }
@@ -349,6 +364,15 @@ impl<C: CardEngine> Endpoint<C> {
     }
 }
 
+fn terminal_status(error: &Error) -> u16 {
+    match error {
+        Error::Storage | Error::IncompatibleState => 0x6581,
+        Error::Quota => 0x6a84,
+        Error::Native | Error::Stack | Error::Arithmetic | Error::Budget => 0x6f00,
+        _ => 0x6982,
+    }
+}
+
 fn globalplatform_management_status(error: &Error) -> u16 {
     match error {
         Error::Unauthorized | Error::KeyMismatch | Error::Signature => 0x6982,
@@ -356,6 +380,24 @@ fn globalplatform_management_status(error: &Error) -> u16 {
         Error::Quota => 0x6a84,
         Error::Format | Error::Bounds | Error::Unsupported => 0x6a80,
         _ => 0x6985,
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_failures_keep_security_storage_and_vm_distinct() {
+        for (error, expected) in [
+            (Error::Unauthorized, 0x6982),
+            (Error::Authentication, 0x6982),
+            (Error::Storage, 0x6581),
+            (Error::Quota, 0x6a84),
+            (Error::Native, 0x6f00),
+        ] {
+            assert_eq!(terminal_status(&error), expected);
+        }
     }
 }
 

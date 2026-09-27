@@ -15,6 +15,8 @@ use crate::{
     Error, Result,
 };
 use alloc::vec::Vec;
+#[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
+unsafe extern "C" { fn microcard_diagnostic_maintenance_recovered(); }
 
 pub struct Storage<F: Flash, I: ImageFlash, H: HeapBanks> {
     pub registry: Store<F>,
@@ -186,8 +188,9 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             return Ok(());
         }
         if self.upload.is_some() { return Ok(()); }
-        session.flush_ordinary(&mut self.provider)?;
-        if session.append_capacity()? > 0 && session.remaining_commits()? > 1 {
+        if remaining > 1 && !session.compaction_adds_capacity()? {
+            // A full snapshot would occupy the next slot just as completely.
+            // Large future APDUs may still snapshot directly when they finish.
             return Ok(());
         }
         session.release_idle_memory()?;
@@ -208,9 +211,27 @@ impl<B: JcvmBackend> JcvmEngine<B> {
 
     fn maintain_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
-        // Any maintenance error drops the old journal handle before returning.
-        session.flush_ordinary(&mut self.provider)?;
-        self.maintain_epoch_if_needed(aid, &mut session, cancel)?;
+        // Every completed APDU is already durable. Maintenance only prepares
+        // capacity for future commands.
+        if let Err(error) = self.maintain_epoch_if_needed(aid, &mut session, cancel) {
+            // An interrupted idle write can poison the in-memory journal handle.
+            // Resume only after both the heap journal and registry authenticate
+            // the same installed identity. Volatile selection and SCP03 authority
+            // are discarded because a recovered applet has reset semantics.
+            let recovered = session.recover(&mut self.provider).is_ok()
+                && session.installed() == Ok(true)
+                && self.storage.registry.state().ok().and_then(|state| state.instances()
+                    .find(|instance| instance.aid == aid)
+                    .map(|instance| instance.identity)) == Some(session.installation_identity());
+            self.retained.clear();
+            self.reset_requested = true;
+            if recovered {
+                #[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
+                unsafe { microcard_diagnostic_maintenance_recovered(); }
+                return Ok(());
+            }
+            return Err(error);
+        }
         self.selected = Some((aid, session));
         Ok(())
     }
@@ -218,6 +239,9 @@ impl<B: JcvmBackend> JcvmEngine<B> {
     fn prepare_selected(&mut self, cancel: &mut dyn FnMut() -> bool) -> Result<()> {
         let Some((aid, mut session)) = self.selected.take() else { return Ok(()); };
         let result = self.maintain_epoch_if_needed(aid, &mut session, cancel);
+        let result = result.and_then(|()| {
+            if session.remaining_commits()? == 0 { Err(Error::Quota) } else { Ok(()) }
+        });
         self.selected = Some((aid, session));
         result
     }
@@ -303,6 +327,7 @@ impl<B: JcvmBackend> JcvmEngine<B> {
             self.retained.remove(index);
         }
         self.maintain_epoch_if_needed(aid, &mut session, cancel)?;
+        if session.remaining_commits()? == 0 { return Err(Error::Quota); }
         let response = session.process(&command, true, &mut self.provider, cancel)?;
         let selected = session.selected()?;
         self.selected = Some((aid, session));

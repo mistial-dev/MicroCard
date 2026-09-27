@@ -22,6 +22,7 @@ jcvm = ["dep:microcard-engine-jcvm"]
 fuzzing = []
 hal-conformance = []
 latency-trace = []
+diagnostic-apdu = []
 # Explicit host-only runner for raw applet corpora; managed sessions stay durable.
 volatile-jcvm-host = []
 # Optional SCP03 capabilities. The advertised i parameter and the accepted security

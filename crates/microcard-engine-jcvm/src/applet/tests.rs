@@ -223,7 +223,6 @@ fn deletion_runs_at_the_command_boundary_and_a_durable_request_survives_reboot()
             .sw,
         SW_SUCCESS
     );
-    card.flush_ordinary(&mut host).unwrap();
     assert_eq!(host.snapshots.len(), 1);
     assert!(card.heap_used < before + heap::HEADER + 16);
     assert_eq!(
@@ -250,7 +249,6 @@ fn deletion_runs_at_the_command_boundary_and_a_durable_request_survives_reboot()
             .sw,
         SW_SUCCESS
     );
-    restored.flush_ordinary(&mut host).unwrap();
     assert!(restored.heap_used < before);
     assert_eq!(host.snapshots.len(), 2);
     assert_eq!(host.snapshots[1].0[0], 3);
@@ -1258,22 +1256,17 @@ fn explicit_transactions_and_ordinary_writes_follow_callback_boundaries() {
             polls += 1;
             ending.ends_with("cancel") && polls == 100
         });
-        if ending == "commit-fail" {
+        if ending == "commit-fail" || ending == "plain-store-fail" {
             assert_eq!(result, Err(Error::Storage), "{ending}");
         } else if ending.ends_with("cancel") {
             assert_eq!(result, Err(Error::Cancelled));
         } else {
             let expected_sw = match ending {
-                "commit" | "abort" | "full-caught" | "plain-store-fail" => SW_SUCCESS,
+                "commit" | "abort" | "full-caught" => SW_SUCCESS,
                 "plain-throw" => 0x6a80,
                 _ => SW_UNKNOWN,
             };
             assert_eq!(result.unwrap().sw, expected_sw, "{ending}");
-        }
-        if ending == "plain-store-fail" {
-            assert_eq!(card.flush_ordinary(&mut host), Err(Error::Storage));
-        } else if !ending.ends_with("cancel") && ending != "commit-fail" {
-            card.flush_ordinary(&mut host).unwrap();
         }
         let expected: u16 = if ending.starts_with("plain-")
             || ending.starts_with("commit") && ending != "commit-fail"

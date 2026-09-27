@@ -442,6 +442,17 @@ impl<F: Flash> Journal<F> {
         Ok(capacity.min(append::MAX_PAYLOAD))
     }
 
+    /// Estimate append room after a full snapshot of this payload in the idle slot.
+    /// This avoids rotating slots when the same snapshot would still leave no room.
+    #[cfg(feature = "jcvm")]
+    pub(crate) fn append_capacity_after_snapshot(&self, payload_length: usize) -> Result<usize> {
+        let record_end = payload_length.checked_add(RECORD_OVERHEAD)
+            .ok_or(Error::Quota)?.next_multiple_of(4);
+        let available = self.flash.slot_size().saturating_sub(TAIL_BYTES)
+            .saturating_sub(record_end);
+        Ok(available.saturating_sub(append::MIN_FRAME_BYTES).min(append::MAX_PAYLOAD))
+    }
+
     /// Conservative count of maximum-sized append records left in this epoch.
     #[cfg(any(test, feature = "jcvm"))]
     pub fn remaining_append_frames(&self) -> Result<usize> {

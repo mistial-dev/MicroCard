@@ -1,7 +1,10 @@
 //! One installed applet with durable command boundaries.
 use super::*;
+
 use crate::{hal::Entropy, image_store::CodeImage, jcvm_services::{CheckpointRequest, Services}};
 use microcard_engine_jcvm::applet::Response;
+#[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
+unsafe extern "C" { fn microcard_diagnostic_phase(kind: u32); }
 
 pub struct Session<F: Flash, I: CodeImage = Vec<u8>> {
     store: Store<F>,
@@ -78,6 +81,10 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         self.store.journal.remaining_commits()
     }
 
+    pub(crate) fn installation_identity(&self) -> [u8; 16] {
+        self.store.installation
+    }
+
     pub(crate) fn append_capacity(&self) -> Result<usize> {
         self.installed()?;
         match self.store.journal.append_capacity() {
@@ -87,20 +94,13 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         }
     }
 
-    pub(crate) fn flush_ordinary(&mut self,
-        provider: &mut (impl CryptoProvider + Entropy)) -> Result<()> {
-        if !self.installed()? { return Ok(()); }
-        let result = {
-            let mut checkpoint = |request: CheckpointRequest<'_>, provider: &mut _| match request {
-                CheckpointRequest::Capacity(count) => self.store.ensure_checkpoint_capacity(count),
-                CheckpointRequest::Commit(view, reason) => self.store.commit_view(view, reason, provider),
-            };
-            let mut services = Services::new(provider).with_checkpoint(&mut checkpoint);
-            self.card.as_mut().ok_or(Error::Missing)?
-                .flush_ordinary(&mut services)
-                .map_err(|error| services.take_persistence_error().unwrap_or_else(|| engine_error(error)))
-        };
-        self.finish_apdu(result, provider)
+    pub(crate) fn compaction_adds_capacity(&self) -> Result<bool> {
+        self.installed()?;
+        let view = self.card.as_ref().ok_or(Error::Missing)?
+            .persistent_view().map_err(engine_error)?;
+        let (instance, statics) = view.metadata();
+        let length = super::snapshot_size(u64::from(instance), view.heap_bytes(), statics.len())?;
+        Ok(self.store.journal.append_capacity_after_snapshot(length)? > 0)
     }
 
     pub(crate) fn compact_idle(&mut self, provider: &mut impl CryptoProvider) -> Result<()> {
@@ -323,6 +323,8 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
                 Some(level) => Services::verified(provider, command.get(..protected_length).ok_or(Error::Format)?, level),
                 None => Services::new(provider),
             }.with_checkpoint(&mut checkpoint);
+            #[cfg(all(feature = "diagnostic-apdu", target_arch = "arm"))]
+            unsafe { microcard_diagnostic_phase(2); }
             let result = self.card.as_mut().unwrap()
                 .process_with_cancel(&file, &mut services, command, selecting, cancel)
                 .map_err(|error| {
@@ -368,7 +370,9 @@ impl<F: Flash, I: CodeImage> Session<F, I> {
         result: Result<T>,
         provider: &mut impl CryptoProvider,
     ) -> Result<T> {
-        if result.is_err() { self.recover(provider)?; }
+        if result.is_err() {
+            self.recover(provider)?;
+        }
         result
     }
 
@@ -484,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_object_definition_flushes_once_and_cancel_does_not_publish() {
+    fn ordinary_object_definition_commits_before_reply_and_cancel_does_not_publish() {
         let mut last_poll = None;
         for failure in [None, Some(false), Some(true)] {
             let mut provider = Provider::default();
@@ -503,16 +507,11 @@ mod tests {
             match failure {
                 None => {
                     assert_eq!(result.unwrap().sw, 0x9000);
-                    assert_eq!(provider.encryptions.get(), before, "ordinary APDU does not write flash");
-                    session.flush_ordinary(&mut provider).unwrap();
-                    assert_eq!(provider.encryptions.get(), before + 1, "idle flush publishes once");
+                    assert_eq!(provider.encryptions.get(), before + 1, "successful APDU publishes once");
                     last_poll = Some(polls);
                 }
                 Some(false) => assert_eq!(result, Err(Error::Cancelled)),
-                Some(true) => {
-                    assert_eq!(result.unwrap().sw, 0x9000);
-                    assert_eq!(session.flush_ordinary(&mut provider), Err(Error::Storage));
-                }
+                Some(true) => assert_eq!(result, Err(Error::Storage)),
             }
             let sizes = session.sizes;
             let image = session.image.clone();
@@ -537,16 +536,12 @@ mod tests {
             session.process(&select, true, &mut provider, &mut || false).unwrap();
             let define = DEFINE_CERTIFICATE;
             assert_eq!(session.process_command(&define, false, Some(3), &mut provider, &mut || false).unwrap().sw, 0x9000);
-            session.flush_ordinary(&mut provider).unwrap();
             let write = [0x04, 0xdb, 0x3f, 0xff, 0x0c, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x53, 0x05, 0x70, 0x01, 0x61, 0xfe, 0x00];
             let read = [0x00, 0xcb, 0x3f, 0xff, 0x05, 0x5c, 0x03, 0x5f, 0xc1, 0x0a, 0x00];
             let previous = session.process(&read, false, &mut provider, &mut || false).unwrap();
             session.store.journal.flash_mut().fail_after = Some(cut);
             let result = session.process_command(&write, false, Some(3), &mut provider, &mut || false)
-                .and_then(|response| {
-                    assert_eq!(response.sw, 0x9000);
-                    session.flush_ordinary(&mut provider)
-                });
+                .map(|response| assert_eq!(response.sw, 0x9000));
             let remaining = session.store.journal.flash_mut().fail_after.unwrap();
             if cut == usize::MAX {
                 let mutations = cut - remaining;
